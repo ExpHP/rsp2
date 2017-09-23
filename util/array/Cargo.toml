@@ -1,0 +1,11 @@
+[package]
+authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
+name = "sp2-array-utils"
+version = "0.1.0"
+
+[dependencies]
+nodrop = "0.1.9"
+num-traits = "0.1.40"
+
+[dependencies.sp2-assert-close]
+path = "../assert-close"
