@@ -94,8 +94,6 @@ mod operations {
     }
 }
 
-
-
 /// Error type returned where a matrix was degenerate.
 pub struct DegenerateMatrix;
 
