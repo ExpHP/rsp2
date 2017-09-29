@@ -264,7 +264,7 @@ pub struct Lammps {
 
 impl Lammps {
 	pub fn new_carbon(lattice: &[[f64; 3]; 3], carts: &[[f64; 3]]) -> Result<Lammps, Error> {
-		let lmp = ::LammpsOwner::new(&["lammps"])?;
+		let lmp = ::LammpsOwner::new(&["lammps", "-screen", "none"])?;
 		let me = Lammps{ ptr: std::cell::RefCell::new(lmp) };
 
 		me.ptr.borrow_mut().commands(&[
