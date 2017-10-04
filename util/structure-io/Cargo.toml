@@ -1,9 +1,11 @@
 [package]
-name = "sp2-assert-close"
-version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
+name = "sp2-structure-io"
+version = "0.1.0"
 
 [lib]
 path = "lib.rs"
 
 [dependencies]
+itertools = "0.6"
+sp2-structure = { path = "../structure" }

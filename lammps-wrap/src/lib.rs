@@ -277,7 +277,7 @@ impl Lammps {
         	"atom_modify sort 0 0.0",       // don't reorder atoms during simulation
 			"boundary p p p",               // (p)eriodic, (f)ixed, (s)hrinkwrap
 		])?;
-		
+
 		let xx = lattice[0][0];
 		assert_eq!(0f64, lattice[0][1], "non-triangular lattices not yet supported");
 		assert_eq!(0f64, lattice[0][2], "non-triangular lattices not yet supported");
@@ -335,7 +335,7 @@ impl Lammps {
 			let mut grad = unsafe { self.ptr.borrow_mut().gather_atoms_f("f", 3) };
 			for x in &mut grad { *x *= -1.0 };
 			grad
-		};	
+		};
 		Ok((value, grad.nest().to_vec()))
 	}
 }
@@ -396,19 +396,12 @@ mod tests {
 			0.0, 0.0, 0.0,
 			2./3., 1./3., 0.0
 		];
-		let (((xx,yy,zz),(xy,xz,yz)), fracs) = ::structure_tools::diagonal_supercell((7,7,1), ((xx,yy,zz), (xy,xz,yz)), &fracs);
+		let (((xx,yy,zz),(xy,xz,yz)), fracs) = ::structure_tools::supercell_diagonal((7,7,1), ((xx,yy,zz), (xy,xz,yz)), &fracs);
 		let carts = ::structure_tools::cartesian(((xx,yy,zz),(xy,xz,yz)), &fracs);
 
 		let lattice = [[xx, 0., 0.], [xy, yy, 0.], [xz, yz, zz]];
 		super::Lammps::new_carbon(&lattice, carts.nest())
 	}
 
-	#[test]
-	fn lel() {
-		//let mut lmp = ::Lammps::new(&["lammps", "-screen", "none"]).unwrap();
-		let mut lmp = lammps();
-        setup_lammps(&mut lmp);
-		let force = unsafe { lmp.gather_atoms_f("f", 3) };
-		assert!(true, "{:?}", force);
-	}
+
 }

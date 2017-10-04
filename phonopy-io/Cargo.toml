@@ -1,5 +1,5 @@
 [package]
-name = "sp2-assert-close"
+name = "sp2-phonopy-io"
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 
@@ -7,3 +7,7 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 path = "lib.rs"
 
 [dependencies]
+serde = "1"
+serde_derive = "1"
+serde_yaml = "0.7"
+sp2-structure = { path = "../util/structure" }

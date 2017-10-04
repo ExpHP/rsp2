@@ -132,7 +132,7 @@ struct Settings {
     output_level: i32,
     improve_iteration_limit: i32,
     iteration_limit: i32,
-    
+
 }
 
 fn metropolis<P, D, F>(
@@ -152,7 +152,7 @@ where F: FnMut(Option<&P>, &P) -> ValueOrDelta,
 
     callbacks.visit(&position_cur, value_cur, true);
 
-    if (settings.output_level > 1) {
+    if settings.output_level > 1 {
         unimplemented!();
     }
 
@@ -170,8 +170,8 @@ where F: FnMut(Option<&P>, &P) -> ValueOrDelta,
 
         callbacks.visit(&position_cur, value_new, successful);
         callbacks.applied(&position_cur, &mutation, (value_cur, delta, value_new));
-        if (successful) {
-            if (settings.output_level > 1) {
+        if successful {
+            if settings.output_level > 1 {
                 unimplemented!();
             }
 

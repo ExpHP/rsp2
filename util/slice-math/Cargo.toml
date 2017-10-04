@@ -1,5 +1,5 @@
 [package]
-name = "sp2-assert-close"
+name = "sp2-slice-math"
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 

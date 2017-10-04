@@ -10,8 +10,10 @@ lammps-sys = { path = "lammps-sys" }
 lammps-wrap = { path = "lammps-wrap" }
 sp2-minimize = { path = "minimize" }
 sp2-assert-close = { path = "util/assert-close" }
+sp2-structure = { path = "util/structure" }
 sp2-structure-io = { path = "util/structure-io" }
 sp2-slice-math = { path = "util/slice-math" }
+sp2-phonopy-io = { path = "phonopy-io" }
 
 [dev-dependencies]
 rand = "0.3"

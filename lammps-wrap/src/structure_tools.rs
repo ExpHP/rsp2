@@ -29,7 +29,7 @@ pub fn encode_lattice(matrix: [[f64; 3]; 3]) -> Lattice
     )
 }
 
-pub fn diagonal_supercell(supercell: (i64, i64, i64), lattice: Lattice, fracs: &[f64]) -> (Lattice, Vec<f64>) {
+pub fn supercell_diagonal(supercell: (i64, i64, i64), lattice: Lattice, fracs: &[f64]) -> (Lattice, Vec<f64>) {
     assert_eq!(fracs.len() % 3, 0);
     let ((xx,yy,zz), (xy,xz,yz)) = lattice;
     let (sx, sy, sz) = (supercell.0 as f64, supercell.1 as f64, supercell.2 as f64);
