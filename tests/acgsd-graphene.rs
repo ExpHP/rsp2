@@ -1,10 +1,11 @@
-extern crate rand;
-extern crate lammps_wrap;
+extern crate sp2_lammps_wrap;
 extern crate sp2_minimize;
 extern crate sp2_array_utils;
 extern crate sp2_structure;
 extern crate sp2_structure_io;
 extern crate sp2_slice_math;
+
+extern crate rand;
 extern crate env_logger;
 #[macro_use] extern crate serde_json;
 
@@ -73,7 +74,7 @@ fn perturbed_graphene() {
         coords
     };
 
-    let mut lmp = lammps_wrap::Lammps::new_carbon(
+    let mut lmp = sp2_lammps_wrap::Lammps::new_carbon(
         &superstructure.lattice().matrix(),
         &input,
     ).unwrap();
@@ -84,7 +85,7 @@ fn perturbed_graphene() {
         move |pos: &[f64]| {
             let pos = pos.nest();
             let (value, grad) = lmp.compute(pos)?;
-            Ok::<_, lammps_wrap::Error>((value, grad.flat().to_vec()))
+            Ok::<_, sp2_lammps_wrap::Error>((value, grad.flat().to_vec()))
         },
     ).unwrap().position;
     let mut input = input;

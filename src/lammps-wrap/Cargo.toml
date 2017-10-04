@@ -1,6 +1,6 @@
 [package]
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
-name = "lammps-wrap"
+name = "sp2-lammps-wrap"
 version = "0.1.0"
 
 [dependencies]

@@ -1,10 +1,11 @@
-extern crate rand;
-extern crate lammps_wrap;
+extern crate sp2_lammps_wrap;
 extern crate sp2_minimize;
 extern crate sp2_array_utils;
 extern crate sp2_structure;
 extern crate sp2_structure_io;
 extern crate sp2_slice_math;
+
+extern crate rand;
 extern crate env_logger;
 #[macro_use] extern crate serde_json;
 
@@ -71,14 +72,14 @@ fn _main() -> Result<(), Panic> {
             let (supercell, sc_token) = supercell::diagonal((6,6,1), original);
 
             // FIXME confusing for Lammps::new_carbon to take initial position
-            let mut lmp = lammps_wrap::Lammps::new_carbon(&supercell.lattice().matrix(), &supercell.to_carts())?;
+            let mut lmp = sp2_lammps_wrap::Lammps::new_carbon(&supercell.lattice().matrix(), &supercell.to_carts())?;
             let relaxed_flat = ::sp2_minimize::acgsd(
                 &from_value(json!({"stop-condition": {"grad-rms": 1e-8}}))?,
                 &supercell.to_carts().flat(),
                 move |pos: &[f64]| {
                     let pos = pos.nest();
                     let (value, grad) = lmp.compute(pos)?;
-                    Ok::<_, lammps_wrap::Error>((value, grad.flat().to_vec()))
+                    Ok::<_, sp2_lammps_wrap::Error>((value, grad.flat().to_vec()))
                 },
             )?.position;
 
