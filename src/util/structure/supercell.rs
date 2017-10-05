@@ -1,8 +1,7 @@
 use super::{Structure, Lattice, Coords};
 
 use ::ordered_float::NotNaN;
-use ::sp2_array_utils::dot;
-use ::sp2_array_utils::functional::try_vec_from_fn;
+use ::sp2_array_utils::{dot, try_vec_from_fn, MatrixInverseExt};
 
 pub fn diagonal<M>(dims: (u32,u32,u32), structure: Structure<M>)
 -> (Structure<M>, SupercellToken)
@@ -116,7 +115,7 @@ impl SupercellToken {
 
         let out_carts = {
             let neg_offsets = {
-                use ::sp2_array_utils::slice::prelude::*;
+                use ::sp2_slice_of_array::prelude::*;
                 let mut v = sc_lattice_vecs(periods, &primitive_lattice);
                 for x in v.flat_mut() {
                     *x *= -1.0;

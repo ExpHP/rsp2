@@ -1,5 +1,4 @@
-use ::sp2_array_utils::dot;
-use ::sp2_array_utils::math::prelude::*;
+use ::sp2_array_utils::{dot, MatrixInverseExt};
 use ::std::ops::Mul;
 
 /// A 3x3 matrix with a precomputed inverse.

@@ -2,6 +2,8 @@
  * This file is provided under the terms of the MIT License.
  */
 
+// FIXME: file is unused
+
 //! # A note on conventions
 //!
 //! There are two independent dimensions by which we describe the layout

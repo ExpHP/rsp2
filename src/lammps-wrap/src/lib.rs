@@ -3,7 +3,7 @@
 
 #![allow(unused_unsafe)]
 
-extern crate sp2_array_utils;
+extern crate sp2_slice_of_array;
 extern crate lammps_sys;
 extern crate ndarray;
 #[macro_use] extern crate log;
@@ -15,7 +15,7 @@ pub mod metropolis; // HACK only here to compile-test
 
 use ::std::os::raw::{c_void, c_int, c_char, c_double};
 use ::std::ffi::{CString, CStr, NulError};
-use ::sp2_array_utils::slice::prelude::*;
+use ::sp2_slice_of_array::prelude::*;
 
 #[derive(Debug,Copy,Clone,PartialEq,Eq,PartialOrd,Ord,Hash)]
 #[allow(unused)]
@@ -385,7 +385,7 @@ mod memory {
 
 #[cfg(test)]
 mod tests {
-	use sp2_array_utils::slice::prelude::*;
+	use sp2_slice_of_array::prelude::*;
 
 	fn lammps() -> Result<super::Lammps, super::Error> {
 		let a = 2.46;

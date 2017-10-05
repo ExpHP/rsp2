@@ -16,5 +16,5 @@ tempdir = "0.3"
 sp2-structure = { path = "../util/structure" }
 sp2-structure-io = { path = "../util/structure-io" }
 sp2-kets = { path = "../util/kets" }
-sp2-array-utils = { path = "../util/array" }
+sp2-slice-of-array = { path = "../util/slice-of-array" }
 sp2-byte-tools-plus-float = { path = "../util/byte-tools-plus-float" }

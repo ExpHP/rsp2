@@ -11,29 +11,37 @@
 //! of contiguous, `T`-aligned streams of `T` data.  For instance,
 //! to view a `[[i32; 6]; 5]` as a `&[[[i32; 3]; 2]; 5]`,
 //! one could write `x.flat().flat().nest().nest().to_array()`.
-//! 
+//! Type inference generally works quite well, and as long as the
+//! final shape is unambiguous there is no need to annotate types
+//! in the middle of the method chain.
+//!
 //! In cases where type inference is unable to determine the target
-//! array size, one can use the turbofish: e.g .`x.nest::<[_; 3]>()`.
+//! array size, one can use a turbofish: e.g .`x.nest::<[_; 3]>()`.
 //!
-//! Zero-cost conversions in owned data (e.g. between `Vec<T>`
-//! and `Vec<[T;n]>`) are not provided, and are probably impossible
-//! in consideration of e.g. custom allocators.
-//!
-//! Recommended usage is to import from the `prelude` module.
-//!
-//! # Examples
 //! ```
-//! use ::sp2_array_utils::prelude::*;
+//! use ::sp2_slice_of_array::prelude::*;
 //! let vec = vec![[2i32, 2, 2], [7, 7, 7], [4, 4, 4], [1, 1, 1]];
 //! assert_eq!(vec.flat(), &[2, 2, 2, 7, 7, 7, 4, 4, 4, 1, 1, 1]);
 //!
-//! // note: this requires a size annotation due to polymorphism in PartialEq,
-//! // but often it can be omitted
+//! // note: this requires an annotation only due to polymorphism in PartialEq
 //! let slc = vec.nest::<[_; 2]>();
 //! assert_eq!(slc, &[[[2i32, 2, 2], [7, 7, 7]], [[ 4, 4, 4], [1, 1, 1]]]);
 //! ```
-
-use ::traits::IsArray;
+//!
+//! Zero-cost conversions in owned data (e.g. between `Vec<T>`
+//! and `Vec<[T;n]>`) are not provided, and are probably impossible
+//! in consideration of e.g. custom allocators. If you need to
+//! convert between such types, you can use these traits in tandem
+//! with `<[T]>::to_vec` to perform a copy:
+//!
+//! ```
+//! use ::sp2_slice_of_array::prelude::*;
+//! let vec = vec![[2i32, 2, 2], [7, 7, 7]];
+//!
+//! // copying into a Vec<i32>
+//! let flattened = vec.flat().to_vec();
+//! assert_eq!(flattened, vec![2i32, 2, 2, 7, 7, 7]);
+//! ```
 
 pub mod prelude {
     pub use super::SliceFlatExt;
@@ -43,6 +51,8 @@ pub mod prelude {
 
 /// Marker trait used in bounds of `Slice{Flat,Nest,Array}Ext`.
 ///
+/// This marks the array types approved for use with `slice_of_array`.
+///
 /// It is deliberately not implemented for arrays of size 0,
 /// because said traits are otherwise perfect isomorphisms for
 /// the inputs that they don't fail on;
@@ -51,11 +61,19 @@ pub mod prelude {
 ///
 /// Unsafe because unsafe code relies on a number of properties of
 /// arrays for any type that implements this trait.
-pub unsafe trait IsSliceomorphic: IsArray { }
+pub unsafe trait IsSliceomorphic: Sized {
+    type Element;
+    fn array_len() -> usize;
+}
 
 macro_rules! impl_approved_array {
     ($($n:tt)+) => {$(
-        unsafe impl<T> IsSliceomorphic for [T; $n] { }
+        unsafe impl<T> IsSliceomorphic for [T; $n] {
+            type Element = T;
+
+            #[inline(always)]
+            fn array_len() -> usize { $n }
+        }
     )+};
 }
 
@@ -64,11 +82,18 @@ impl_approved_array!{
     17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32
 }
 
-// (this should optimize down to a no-op)
-fn validate_equal_alignment_assumption<A,B>() {
+// Validate some known assumptions of IsSliceomorphic "at runtime,"
+//  in a manner which should get optimized into thin air.
+fn validate_some_assumptions<V: IsSliceomorphic>() {
+    use ::std::mem::{align_of, size_of};
+
     assert_eq!(
-        ::std::mem::align_of::<A>(),
-        ::std::mem::align_of::<B>());
+        align_of::<V::Element>(),
+        align_of::<V>());
+
+    assert_eq!(
+        V::array_len() * size_of::<V::Element>(),
+        size_of::<V>());
 }
 
 /// Trait for viewing a slice of arrays as a flat slice, without copying.
@@ -107,7 +132,7 @@ impl<V: IsSliceomorphic> SliceFlatExt<V::Element> for [V] {
         // - pointer must be valid for given size
         // - lifetimes are unchecked
         unsafe {
-            validate_equal_alignment_assumption::<V, V::Element>();
+            validate_some_assumptions::<V>();
             ::std::slice::from_raw_parts(
                 self.as_ptr() as *const _,
                 self.len() * V::array_len(),
@@ -123,7 +148,7 @@ impl<V: IsSliceomorphic> SliceFlatExt<V::Element> for [V] {
         // - lifetimes are unchecked
         // - aliasing guarantees of &mut are unchecked
         unsafe {
-            validate_equal_alignment_assumption::<V, V::Element>();
+            validate_some_assumptions::<V>();
             ::std::slice::from_raw_parts_mut(
                 self.as_mut_ptr() as *mut _,
                 self.len() * V::array_len(),
@@ -134,7 +159,7 @@ impl<V: IsSliceomorphic> SliceFlatExt<V::Element> for [V] {
 
 impl<T> SliceNestExt<T> for [T] {
     fn nest<V: IsSliceomorphic<Element=T>>(&self) -> &[V] {
-        validate_equal_alignment_assumption::<V, T>();
+        validate_some_assumptions::<V>();
         assert_eq!(0, self.len() % V::array_len(),
             "cannot view slice of length {} as &[[_; {}]]",
             self.len(), V::array_len());
@@ -151,7 +176,7 @@ impl<T> SliceNestExt<T> for [T] {
     }
 
     fn nest_mut<V: IsSliceomorphic<Element=T>>(&mut self) -> &mut [V] {
-        validate_equal_alignment_assumption::<V, T>();
+        validate_some_assumptions::<V>();
         assert_eq!(0, self.len() % V::array_len(),
             "cannot view slice of length {} as &mut [[_; {}]]",
             self.len(), V::array_len());
@@ -200,7 +225,7 @@ mod tests {
         // Checks that chaining nest().nest() or nest().as_array()
         // can be done without explicit annotations on the first method call.
         let mut v = vec![(); 9];
-        
+
         { let _: &[[(); 3]; 3] = v.nest().as_array(); }
         { let _: &[[[(); 3]; 3]] = v.nest().nest(); }
         { let _: &mut [[(); 3]; 3] = v.nest_mut().as_mut_array(); }

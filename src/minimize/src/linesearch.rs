@@ -578,8 +578,7 @@ fn quadratic_min(low: Bound, high: Bound) -> f64
 /// using only slope.  Requires three points.
 fn cubic_min_from_slope(bounds: [Bound; 3]) -> f64
 {
-    use ::sp2_array_utils::{mat_from_fn, dot, vec_from_fn};
-    use ::sp2_array_utils::math::prelude::*;
+    use ::sp2_array_utils::{mat_from_fn, dot, vec_from_fn, MatrixInverseExt};
     // Find quadratic coefficients of slope
     // [ 1  x1  x1*x1 ] [ c0 ]    [ m1 ]
     // [ 1  x2  x2*x2 ] [ c1 ] == [ m2 ]

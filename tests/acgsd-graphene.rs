@@ -1,6 +1,7 @@
 extern crate sp2_lammps_wrap;
 extern crate sp2_minimize;
 extern crate sp2_array_utils;
+extern crate sp2_slice_of_array;
 extern crate sp2_structure;
 extern crate sp2_structure_io;
 extern crate sp2_slice_math;
@@ -12,7 +13,7 @@ extern crate env_logger;
 use ::rand::random;
 use ::serde_json::from_value;
 use ::sp2_array_utils::vec_from_fn;
-use ::sp2_array_utils::slice::prelude::*;
+use ::sp2_slice_of_array::prelude::*;
 use ::sp2_slice_math::{v,vnorm};
 
 fn init_logger() {

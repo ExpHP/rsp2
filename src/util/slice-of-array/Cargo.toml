@@ -1,13 +1,9 @@
 [package]
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
-name = "sp2-array-utils"
+name = "sp2-slice-of-array"
 version = "0.1.0"
 
 [lib]
 path = "lib.rs"
 
 [dependencies]
-num-traits = "0.1.40"
-
-[dependencies.sp2-assert-close]
-path = "../assert-close"

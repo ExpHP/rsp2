@@ -1,7 +1,7 @@
 extern crate sp2_kets;
 extern crate sp2_structure;
 extern crate sp2_structure_io;
-extern crate sp2_array_utils;
+extern crate sp2_slice_of_array;
 extern crate sp2_byte_tools_plus_float as byte_tools;
 
 #[macro_use] extern crate error_chain;
@@ -222,7 +222,7 @@ mod cmd {
     ) -> Result<Vec<Vec<[f64; 3]>>>
     where P: AsRef<Path>,
     {
-        use ::sp2_array_utils::slice::prelude::*;
+        use ::sp2_slice_of_array::prelude::*;
 
         let disp_dir = disp_dir.as_ref();
 

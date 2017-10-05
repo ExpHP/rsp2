@@ -1,8 +1,9 @@
 extern crate sp2_lammps_wrap;
 extern crate sp2_minimize;
-extern crate sp2_array_utils;
 extern crate sp2_structure;
 extern crate sp2_structure_io;
+extern crate sp2_array_utils;
+extern crate sp2_slice_of_array;
 extern crate sp2_slice_math;
 
 extern crate rand;
@@ -12,7 +13,7 @@ extern crate env_logger;
 use ::rand::random;
 use ::serde_json::from_value;
 use ::sp2_array_utils::vec_from_fn;
-use ::sp2_array_utils::slice::prelude::*;
+use ::sp2_slice_of_array::prelude::*;
 use ::sp2_slice_math::{v,vnorm};
 
 fn init_logger() {
@@ -69,7 +70,7 @@ fn _main() -> Result<(), Panic> {
         let original = poscar::load_carbon(File::open(format!("./examples/data/{}.vasp", name))?)?;
 
         let relaxed = {
-            let (supercell, sc_token) = supercell::diagonal((6,6,1), original);
+            let (supercell, sc_token) = supercell::diagonal((4,4,1), original);
 
             // FIXME confusing for Lammps::new_carbon to take initial position
             let mut lmp = sp2_lammps_wrap::Lammps::new_carbon(&supercell.lattice().matrix(), &supercell.to_carts())?;

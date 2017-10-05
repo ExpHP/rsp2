@@ -7,4 +7,4 @@ version = "0.1.0"
 log = "0.3"
 ndarray = "0.10.6"
 lammps-sys = { path = "../lammps-sys" }
-sp2-array-utils = { path = "../util/array" }
+sp2-slice-of-array = { path = "../util/slice-of-array" }
