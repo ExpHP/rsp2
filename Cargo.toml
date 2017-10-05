@@ -14,6 +14,8 @@ sp2-structure-io = { path = "src/util/structure-io" }
 sp2-slice-math   = { path = "src/util/slice-math" }
 sp2-minimize     = { path = "src/minimize" }
 sp2-phonopy-io   = { path = "src/phonopy-io" }
+sp2-byte-tools-plus-float = { path = "src/util/byte-tools-plus-float" }
+sp2-kets         = { path = "src/util/kets" }
 
 [dev-dependencies]
 rand = "0.3"

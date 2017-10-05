@@ -1,0 +1,10 @@
+[package]
+authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
+name = "sp2-byte-tools-plus-float"
+version = "0.1.0"
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+byte-tools = "0.2.0"

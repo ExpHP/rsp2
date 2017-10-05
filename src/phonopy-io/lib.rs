@@ -1,40 +1,40 @@
+extern crate sp2_kets;
 extern crate sp2_structure;
+extern crate sp2_structure_io;
+extern crate sp2_array_utils;
+extern crate sp2_byte_tools_plus_float as byte_tools;
 
+#[macro_use] extern crate error_chain;
+#[macro_use] extern crate nom;
 #[macro_use] extern crate serde_derive;
 extern crate serde_yaml;
+extern crate tempdir;
 
 pub type IoError = ::std::io::Error;
 pub type YamlError = ::serde_yaml::Error;
+pub type Shareable = Send + Sync + 'static;
 
-use ::std::any::Any; // ew
-use ::std::fmt::Debug;
+mod npy;
 
-#[derive(Debug)]
-pub enum Error {
-    IoError(IoError),
-    ComputeError(Box<Any + Send>),
-    YamlError(YamlError),
+error_chain!{
+    foreign_links {
+        Io(::std::io::Error);
+        Yaml(::serde_yaml::Error);
+    }
 
-    #[doc(hidden)]
-    NoTotalMatchPlease,
+    errors {
+        PhonopyExitCode(code: u32) {
+            description("phonopy exited unsuccessfully"),
+            display("phonopy exited unsuccessfully ({})", code),
+        }
+    }
 }
 
-impl From<IoError> for Error {
-    fn from(e: IoError) -> Self { Error::IoError(e) }
-}
-
-impl From<YamlError> for Error {
-    fn from(e: YamlError) -> Self { Error::YamlError(e) }
-}
-
-// newtype for coherent From instances
-struct ComputeError<E>(E);
-impl<E: Send + 'static> From<ComputeError<E>> for Error {
-    fn from(e: ComputeError<E>) -> Self { Error::ComputeError(Box::new(e.0)) }
-}
-
+pub(crate) type Displacements = Vec<(usize, [f64; 3])>;
+pub(crate) use disp_yaml::DispYaml;
 mod disp_yaml {
     use ::Error;
+    use ::Displacements;
 
     use ::std::io::prelude::*;
     use ::sp2_structure::Structure;
@@ -65,7 +65,7 @@ mod disp_yaml {
     /// A parsed disp.yaml
     pub struct DispYaml {
         pub structure: Structure<Meta>,
-        pub displacements: Vec<(usize, [f64; 3])>
+        pub displacements: Displacements,
     }
 
     /// Atomic metadata from disp.yaml
@@ -74,7 +74,7 @@ mod disp_yaml {
         pub mass: f64,
     }
 
-    pub fn read_disp_yaml<R: Read>(r: R) -> Result<DispYaml, Error>
+    pub fn read<R: Read>(r: R) -> Result<DispYaml, Error>
     {
         use ::sp2_structure::{Coords, Lattice};
         use self::cereal::{Point, Displacement, DispYaml as RawDispYaml};
@@ -83,7 +83,8 @@ mod disp_yaml {
 
         let (carts, meta) =
             points.into_iter()
-            .map(|Point { symbol, coordinates, mass }| (coordinates, Meta { symbol, mass }))
+            .map(|Point { symbol, coordinates, mass }|
+                (coordinates, Meta { symbol, mass }))
             .unzip();
 
         let structure = Structure::new(Lattice::new(lattice), Coords::Carts(carts), meta);
@@ -99,7 +100,7 @@ mod disp_yaml {
 }
 
 mod force_constants {
-    use ::{Error, ComputeError};
+    use ::Result;
 
     use ::std::io::prelude::*;
     use ::sp2_structure::{Structure, Coords};
@@ -107,25 +108,26 @@ mod force_constants {
     /// Write a FORCE_CONSTANTS file.
     ///
     /// Adapted from code by Colin Daniels.
-    pub fn write_from_fn<M, E: Send + 'static, W, F>(
+    pub fn write_from_fn<M, W, V>(
         mut w: W,
         mut structure: Structure<M>,
         displacements: &[(usize, [f64; 3])],
-        mut compute: F,
-    ) -> Result<(), Error>
+        mut forces: &[V],
+    ) -> Result<()>
     where
         W: Write,
-        F: FnMut(&Structure<M>) -> Result<Vec<[f64; 3]>, E>,
+        V: ::std::borrow::Borrow<[[f64; 3]]>,
     {
-        writeln!(&mut w, "{}", structure.num_atoms())?;
-        writeln!(&mut w, "{}", displacements.len())?;
-        writeln!(&mut w, "")?;
+        assert_eq!(forces.len(), displacements.len());
+        writeln!(w, "{}", structure.num_atoms())?;
+        writeln!(w, "{}", displacements.len())?;
+        writeln!(w, "")?;
 
         let orig_coords = structure.to_carts();
 
-        for &(atom, disp) in displacements {
-            writeln!(&mut w, "{}", atom + 1)?; // NOTE: phonopy indexes atoms from 1
-            writeln!(&mut w, "{:e} {:e} {:e}", disp[0], disp[1], disp[2])?;
+        for (&(atom, disp), force) in displacements.iter().zip(forces) {
+            writeln!(w, "{}", atom + 1)?; // NOTE: phonopy indexes atoms from 1
+            writeln!(w, "{:e} {:e} {:e}", disp[0], disp[1], disp[2])?;
 
             let mut coords = orig_coords.clone();
             for k in 0..3 {
@@ -133,16 +135,126 @@ mod force_constants {
             }
 
             structure.set_coords(Coords::Carts(coords));
-            let force = compute(&structure).map_err(ComputeError)?;
 
-            assert_eq!(force.len(), structure.num_atoms());
-            for row in force {
-                writeln!(&mut w, "{:e} {:e} {:e}", row[0], row[1], row[2])?;
+            assert_eq!(force.borrow().len(), structure.num_atoms());
+            for row in force.borrow() {
+                writeln!(w, "{:e} {:e} {:e}", row[0], row[1], row[2])?;
             }
 
             // blank line for easier reading
-            writeln!(&mut w, "")?;
+            writeln!(w, "")?;
         }
         Ok(())
+    }
+}
+
+mod cmd {
+    use ::Result;
+    use ::Displacements;
+    use ::DispYaml;
+
+    use ::sp2_structure::CoordStructure;
+
+    use ::tempdir::TempDir;
+    use ::std::process::Command;
+    use ::std::io::prelude::*;
+    use ::std::fs;
+    use ::std::fs::File;
+    use ::std::path::Path;
+    use ::std::collections::HashMap;
+
+    fn write_conf<W>(mut w: W, conf: &HashMap<String, String>) -> Result<()>
+    where W: Write,
+    {
+        for (key, val) in conf {
+            ensure!(key.bytes().all(|c| c != b'='), "'=' in conf key");
+            writeln!(w, "{} = {}", key, val)?
+        }
+        Ok(())
+    }
+
+    fn phonopy_displacements_carbon(
+        conf: &HashMap<String, String>,
+        structure: CoordStructure,
+    ) -> Result<(Displacements, TempDir)>
+    {
+        use ::sp2_structure_io::poscar;
+
+        let tmp = TempDir::new("sp2-rs")?;
+        let displacements = {
+
+            let tmp = tmp.path();
+
+            write_conf(
+                File::create(tmp.join("phonopy.conf"))?,
+                &conf,
+            )?;
+
+            poscar::dump_carbon(
+                File::create(tmp.join("POSCAR"))?,
+                "blah",
+                &structure,
+            )?;
+
+            if let Some(code) =
+                Command::new("phonopy")
+                .arg("--displacement")
+                .arg("phonopy.conf")
+                .current_dir(&tmp)
+                .status()?.code()
+            {
+                bail!("Phonopy exited with code {}", code);
+            }
+
+            let DispYaml {
+                displacements, ..
+            } = ::disp_yaml::read(File::open(tmp.join("disp.yaml"))?)?;
+
+            displacements
+        };
+
+        Ok((displacements, tmp))
+    }
+
+    fn phonopy_eigenvectors<P>(
+        conf: &HashMap<String, String>,
+        disp_dir: &P,
+    ) -> Result<Vec<Vec<[f64; 3]>>>
+    where P: AsRef<Path>,
+    {
+        use ::sp2_array_utils::slice::prelude::*;
+
+        let disp_dir = disp_dir.as_ref();
+
+        let tmp = TempDir::new("sp2-rs")?;
+        let tmp = tmp.path();
+
+        let mut conf = conf.clone();
+        conf.insert("BAND".to_string(), "0 0 0 1 0 0".to_string());
+        conf.insert("BAND_POINTS".to_string(), "2".to_string());
+        write_conf(File::create(tmp.join("phonopy.conf"))?, &conf)?;
+
+        fs::copy(disp_dir.join("POSCAR"), tmp.join("POSCAR"))?;
+
+        if let Some(code) =
+            Command::new("phonopy")
+            .env("NPY_EIGENVECTOR_HACK", "1")
+            .arg("--eigenvectors")
+            .arg("phonopy.conf")
+            .current_dir(&tmp)
+            .status()?.code()
+        {
+            bail!("Phonopy exited with code {}", code);
+        }
+
+        let bases = ::npy::read(File::open("eigenvector.npy")?)?;
+        let basis = bases.into_iter().next().unwrap();
+        let out = basis.iter().map(|ev| Ok(
+            ev.iter().map(|c| {
+                ensure!(c.imag == 0.0, "non-real eigenvector");
+                Ok(c.real)
+            }).collect::<Result<Vec<_>>>()?.nest().to_vec()
+        )).collect::<Result<_>>();
+        out
     }
 }

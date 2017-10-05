@@ -7,7 +7,14 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 path = "lib.rs"
 
 [dependencies]
+error-chain = "0.11"
+nom = "3"
 serde = "1"
 serde_derive = "1"
 serde_yaml = "0.7"
+tempdir = "0.3"
 sp2-structure = { path = "../util/structure" }
+sp2-structure-io = { path = "../util/structure-io" }
+sp2-kets = { path = "../util/kets" }
+sp2-array-utils = { path = "../util/array" }
+sp2-byte-tools-plus-float = { path = "../util/byte-tools-plus-float" }
