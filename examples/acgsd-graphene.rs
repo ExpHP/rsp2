@@ -66,7 +66,7 @@ fn _main() -> Result<(), Panic> {
     for name in names {
         let name = &name;
 
-        let original = poscar::load_carbon(File::open(format!("./{}.vasp", name))?)?;
+        let original = poscar::load_carbon(File::open(format!("./examples/data/{}.vasp", name))?)?;
 
         let relaxed = {
             let (supercell, sc_token) = supercell::diagonal((6,6,1), original);
@@ -88,7 +88,7 @@ fn _main() -> Result<(), Panic> {
         };
 
         poscar::dump_carbon(
-            File::create(format!("./out-super-{}.vasp", name))?,
+            File::create(format!("./out-{}.vasp", name))?,
             name,
             &relaxed,
         )?;
