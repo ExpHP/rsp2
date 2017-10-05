@@ -80,6 +80,7 @@ pub mod lossless {
 
     pub use self::ket::Ket;
     pub use self::ket::KetRef;
+    pub use self::ket::AsKetRef;
     pub mod ket {
         use ::complex::lossless::Rect;
         pub type IntoIter = Box<Iterator<Item=Rect>>;
@@ -214,6 +215,7 @@ pub mod compact {
 
     pub use self::ket::Ket;
     pub use self::ket::KetRef;
+    pub use self::ket::AsKetRef;
     pub mod ket {
         use ::complex::compact::{Rect, Polar, PhaseTable};
         pub type IntoIter = Box<Iterator<Item=Polar>>;
