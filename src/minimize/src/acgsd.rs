@@ -145,7 +145,6 @@ impl<E> Failure<E> {
     }
 }
 
-
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone)]
 pub struct Output {
@@ -288,8 +287,8 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
             let grad_mag = vnorm(&saved.gradient);
             print!(" i: {:>6}", iterations);
             print!("  v: {:18.14}", saved.value);
-            print!(" dv: {:13.7e}", d_value);
-            print!("  g: {:13.7e}", grad_mag);
+            print!(" dv: {:>14.7e}", d_value);
+            print!("  g: {:>13.7e}", grad_mag);
 
             let cosines = {
                 let mut s = String::new();
@@ -419,35 +418,30 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
         //  the displacement returned will naturally be zero.
         // FIXME type annotation is only due to dumb conversions
         //       performed where map_err would be more robust
-        let next_alpha = ::new_linesearch::linesearch
-            ::<::linesearch::Error<E>, _>
-            (
-            &Default::default(),
-            saved.alpha,
-            {
-                let mut cache = ::std::collections::HashMap::new();
-                let direction = &direction;
-                let compute_in_dir = &mut compute_in_dir;
-                let ls_point = &mut ls_point;
-                let ls_alpha = &mut ls_alpha;
-                let last = &last;
-                move |alpha| {
-                    let key = ::ordered_float::NotNaN::new(alpha).unwrap();
-                    // can't use entry api due to Result
-                    if !cache.contains_key(&key) {
-                        let point = compute_in_dir(alpha, direction)
-                            .map_err(::linesearch::Error::ComputeError)?; // HACK
-                        let slope = vdot(&point.gradient, direction);
+        type LsErr<EE> = ::linesearch::Error<EE>;
+        let next_alpha = {
+            // (FIXME: we memoize the compute function because the linesearch
+            //         is currently a bit messy and sometimes asks for a point
+            //         more than once.  These are really issues with the linesearch,
+            //         and ought not to be the caller's concern)
+            let mut memoized: Box<FnMut(f64) -> Result<(f64, f64), LsErr<E>>>
+                = ::util::cache::hash_memoize_result_by_key(
+                    |&alpha| ::ordered_float::NotNaN::new(alpha).unwrap(),
+                    |alpha| {
+                        let point = compute_in_dir(alpha, &direction)
+                            // HACK (error from other ls module)
+                            .map_err(::linesearch::Error::ComputeError)?;
+                        let slope = vdot(&point.gradient, &direction);
 
                         // update cache, checking values to predict which
                         //  point linesearch will prefer to use.
                         // (future additions to linesearch may make this less reliable)
                         if point.value < ls_point.value {
-                            *ls_alpha = alpha;
-                            *ls_point = point.clone();
+                            ls_alpha = alpha;
+                            ls_point = point.clone();
                         }
 
-                        if let Some(Last { ls_failed: true, .. }) = *last {
+                        if let Some(Last { ls_failed: true, .. }) = last {
                             if settings.has_verbosity(1) {
                                 print!("LS: a: {:.14e}", alpha);
                                 print!("\tv: {:14e}", point.value);
@@ -455,12 +449,16 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
                                 println!("");
                             }
                         }
-                        cache.insert(key, (point.value, slope));
-                    }
-                    Ok(cache[&key])
-                }
-            }
-        )?;
+                        Ok((point.value, slope))
+                    },
+                );
+
+            ::new_linesearch::linesearch::<LsErr<E>, _>(
+                &Default::default(),
+                saved.alpha,
+                |x| memoized(x),
+            )?
+        }; // let next_alpha = { ... }
         let next_point = match next_alpha {
             a if a == ls_alpha => ls_point, // extraneous computation avoided!
             a => compute_in_dir(a, &direction)?,

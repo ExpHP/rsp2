@@ -132,8 +132,6 @@ impl SupercellToken {
 
                 image_carts.clear();
                 image_carts.extend(carts.drain(new_len..));
-                eprintln!("{:?}", image_carts);
-                eprintln!("{:?}", neg_offsets);
 
                 ::util::translate_mut_n3_n3(&mut image_carts, &neg_offsets);
 

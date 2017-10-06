@@ -1,3 +1,5 @@
+// HERE BE DRAGONS
+
 extern crate sp2_lammps_wrap;
 extern crate sp2_minimize;
 extern crate sp2_structure;
@@ -62,7 +64,7 @@ fn _main() -> Result<(), Panic> {
     use ::sp2_array_utils::prelude::*;
     use ::sp2_structure_io::{xyz, poscar};
     use ::sp2_structure::{supercell, Coords, CoordStructure};
-    use ::sp2_slice_math::{v, V};
+    use ::sp2_slice_math::{v, V, vdot};
     use ::sp2_lammps_wrap::Lammps;
     use ::std::fs::File;
     init_logger();
@@ -83,9 +85,13 @@ fn _main() -> Result<(), Panic> {
 
         // FIXME confusing for Lammps::new_carbon to take initial position
         let mut lmp = Lammps::new_carbon(&supercell.lattice().matrix(), &supercell.to_carts())?;
-        println!("NUM ATOM {}", supercell.num_atoms());
         let relaxed_flat = ::sp2_minimize::acgsd(
-            &from_value(json!({"stop-condition": {"grad-rms": 1e-8}}))?,
+            &from_value(json!({
+                "stop-condition": {"any": [
+                    {"grad-rms": 1e-8},
+                    {"iterations": 150},
+                ]},
+            }))?,
             &supercell.to_carts().flat(),
             move |pos: &[f64]| {
                 let pos = pos.nest();
@@ -95,7 +101,7 @@ fn _main() -> Result<(), Panic> {
         )?.position;
 
         let supercell = supercell.with_coords(Coords::Carts(relaxed_flat.nest().to_vec()));
-        Ok(sc_token.deconstruct(1e-10, supercell)?)
+        Ok(sc_token.deconstruct(1e-5, supercell)?)
     };
 
     let diagonalize = |structure| -> Result<_, Panic> {
@@ -127,25 +133,95 @@ fn _main() -> Result<(), Panic> {
         Ok((eval, evec))
     };
 
+    let minimize_evec = |structure: CoordStructure, evec: &[[f64; 3]]| -> Result<CoordStructure, Panic> {
+        let (structure, sc_token) = supercell::diagonal((sc_size_relax, sc_size_relax, 1), structure);
+        let mut lmp = Lammps::new_carbon(&structure.lattice().matrix(), &structure.to_carts())?;
+
+         // FIXME shouldn't need linesearch::Error, I can't remember why we even use it
+        type LsResult<T> = Result<T, ::sp2_lammps_wrap::Error>;
+        // type LsResult<T> = Result<T, ::sp2_minimize::linesearch::Error<::sp2_lammps_wrap::Error>>;
+
+        let mut compute_at_flat = |pos: &[f64]| -> LsResult<(f64, Vec<f64>)> {
+            let (value, grad) = lmp.compute(pos.nest())?;
+            Ok((value, grad.flat().to_vec()))
+        };
+
+        // Repeatedly perform "acceptible linesearch" in an attempt
+        //  to simulate complete linesearch.
+        let mut from_structure = structure;
+        let mut prev_alpha = 1e-4;
+        'refine: for _ in 0..8 {
+            let direction = evec;
+            let from_pos = from_structure.to_carts();
+            //let alpha = { // scope closure that borrows
+                let mut ls_compute = |alpha| -> LsResult<(f64, f64)> {
+                    let V(pos): V<Vec<_>> = v(from_pos.flat()) + alpha * v(direction.flat());
+                    let (value, gradient) = compute_at_flat(&pos)?;
+                    let slope = vdot(&gradient, direction.flat());
+                    Ok((value, slope))
+                };
+
+                {
+                    let b = ls_compute(0.0)?;
+                    eprintln!("LS From: val {:e}  slope {:e}", b.0, b.1);
+                }
+                let alpha = ::sp2_minimize::linesearch(&Default::default(), prev_alpha, ls_compute)?;
+            //}; // let alpha = { ... };
+
+            if alpha == 0.0 {
+                break 'refine;
+            }
+
+            let V(pos) = v(from_pos.flat()) + alpha * v(direction.flat());
+            from_structure.set_coords(Coords::Carts(pos.nest().to_vec()));
+            prev_alpha = alpha;
+        }
+
+        Ok(sc_token.deconstruct(1e-5, structure)?)
+    };
+
     for name in names {
         let name = &name;
 
         let original = poscar::load_carbon(File::open(format!("./examples/data/{}.vasp", name))?)?;
 
-        loop {
-            let relaxed = relax(original)?;
-            let (eval, evec) = diagonalize(relaxed)?;
-            for x in eval {
-                eprintln!("{:?}", x);
+        let mut iter_count = 0;
+        let mut from_structure = original;
+        let (structure, eval, evec) = loop {
+            let structure = relax(from_structure)?;
+            let (eval, evec) = diagonalize(structure.clone())?;
+
+            println!("============================");
+            println!("Finished relaxation # {}", iter_count + 1);
+            println!("Eigenvalues: (cm-1)");
+            for &x in &eval {
+                println!(" - {:?}", x);
             }
-            break; // XXX
-        }
-        // poscar::dump_carbon(
-        //     File::create(format!("./out-{}.vasp", name))?,
-        //     name,
-        //     &finished,
-        // )?;
-    }
+
+            if eval[0] > -1e-3 {
+                println!("============================");
+                break (structure, eval, evec);
+            }
+            println!();
+            println!("!! Unsatisfied with frequency:  {:e}", eval[0]);
+            println!("!! Optimizing along this band!");
+            println!();
+
+            let structure = minimize_evec(structure, &evec[0])?;
+
+            from_structure = structure;
+
+            println!("============================");
+
+            iter_count += 1;
+        }; // (structure, eval, evec)
+
+        poscar::dump_carbon(
+            File::create(format!("./out-{}.vasp", name))?,
+            name,
+            &structure,
+        )?;
+    };
 
     Ok(())
 }

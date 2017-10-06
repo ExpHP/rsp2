@@ -116,12 +116,37 @@ pub fn linesearch<E, F>(
 ) -> Result<f64, E>
 where F: FnMut(f64) -> Result<(f64, f64), E>,
 {
-    let mut compute = |alpha| {
+    let compute = |alpha| {
         let (value, slope) = compute(alpha)?;
         Ok(Bound { alpha, value, slope })
     };
 
-    let initial = compute(0.0)?;
+    // I highly doubt that statically known function will help optimize
+    // linesearches very much, and boxing helps us handle negative slope.
+    let mut compute: Box<FnMut(f64) -> Result<Bound, E>> = Box::new(compute);
+    let mut initial = compute(0.0)?;
+
+    if initial.slope > 0.0 {
+        debug!("Positive initial slope, turning around. (slope = {:e})", initial.slope);
+        compute = Box::new(move |alpha| {
+            compute(-alpha).map(|bound| Bound {
+                // make alpha positive again
+                alpha: { assert_eq!(bound.alpha, -alpha); alpha },
+                value: bound.value,
+                // slope reflects sign of dx
+                slope: -bound.slope,
+            })
+        });
+
+        assert_eq!(initial.alpha, 0.0);
+        initial = Bound {
+            alpha: 0.0,
+            value: initial.value,
+            slope: -initial.slope,
+        }
+    }
+
+    let initial = initial; // un-mut
 
     // HACK: dumb edge case for zero slope;
     // allowing this through would make it even trickier to find an initial
@@ -136,11 +161,15 @@ where F: FnMut(f64) -> Result<(f64, f64), E>,
         return Ok(initial.alpha);
     }
 
-
     Hager {
         params: params.clone(),
         initial,
-    }.linesearch(initial_alpha, compute).map(|x| x.alpha)
+    }.linesearch(
+        initial_alpha,
+        // FIXME change other methods to accept Box since their current
+        //  signatures are misleading and force us to do eta expansion here
+        |x| compute(x),
+    ).map(|x| x.alpha)
 }
 
 // NOTE: Not one of these methods mutates self.
@@ -192,6 +221,8 @@ impl Hager {
             // Wrap the compute function with things we want to do on
             // every computed point (including the successful return).
             let mut slow_exit = 2; // HACK
+            let mut slow_non_exits = 0; // HACK AW GEEZE
+            let slow_non_exit_limit = -14; // HACK WOW SO HACK
             let mut compute = {
                 let mut computations = 0;
                 move |alpha, how: How| {
@@ -200,9 +231,11 @@ impl Hager {
                     // Legitimate errors are now `Err(Err(e))`.
                     let bound = compute(alpha).map_err(Err)?;
                     if how == How::Hack_IsLsState {
-                        if slow_exit > 0 {
-                            slow_exit -= 1;
-                        }
+                        if slow_exit > 0 {                //              HACK HACK
+                            slow_exit -= 1;               //           HACK HACK
+                        } else {                          //          HACKHACK    HACK   HACK   HACK
+                            slow_non_exits -= 1;          //           HACK HACK
+                        }                                 //              HACK HACK
                     } else {
                         trace!("LS: i: {:>2} ({})  a: {:<23e}  s: {:<23e}  v: {:<23}",
                             computations, how.as_str(), alpha, bound.slope, bound.value);
@@ -210,6 +243,13 @@ impl Hager {
 
                     if self.should_accept(bound) && (slow_exit < 0 || slow_exit == 0 && how == How::Hack_IsLsState) {
                         // NOTE: this returns from the entire algorithm
+                        return Err(Ok(bound));
+                    }
+
+                    // HACK iteration limit because the slow exit strategy can get indefinitely
+                    //      stuck with a small interval that keeps guessing one of the bounds
+                    //      (it goes DS1 -> BSC -> DS1 -> BSC -> DS1 -> ...)
+                    if slow_non_exits < slow_non_exit_limit && how == How::Hack_IsLsState {
                         return Err(Ok(bound));
                     }
 
@@ -285,7 +325,7 @@ impl Hager {
         // except that we have no `hi` ready to be returned in the case of (U2).
         // Take care of this case straight away.
         while cur.strictly_downhill() && self.reasonable_value(cur) {
-            assert!(lo.alpha < cur.alpha);
+            assert!(lo.alpha < cur.alpha, "lo.alpha < cur.alpha failed:  {:e} vs {:e}", lo.alpha, cur.alpha);
             assert!(lo.strictly_downhill());
             assert!(self.reasonable_value(lo));
 
@@ -327,7 +367,8 @@ impl Hager {
         let (lo, hi) = input;
 
         if !(lo.alpha < guess.alpha && guess.alpha < hi.alpha) {
-            debug!("update_interval: Exit by strange guess (U0)");
+            debug!("update_interval: Exit by strange guess (U0),  ({:e}, {:e}) vs {:e}",
+                lo.alpha, hi.alpha, guess.alpha);
             return Ok((lo, hi));
         }
 
@@ -579,5 +620,6 @@ mod tests {
         // it should be able to find at least one point better than those we gave it
         assert!(poly.evaluate(out) < poly.evaluate(0.125));
     }
-}
 
+    // FIXME test turning around on initially positive slope
+}
