@@ -21,7 +21,7 @@ where
         w,
         title,
         structure,
-        &vec!["S"; structure.num_atoms()],
+        &vec!["C"; structure.num_atoms()],
     )
 }
 

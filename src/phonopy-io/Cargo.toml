@@ -12,7 +12,7 @@ nom = "3"
 serde = "1"
 serde_derive = "1"
 serde_yaml = "0.7"
-tempdir = "0.3"
+sp2-tempdir = { path = "../util/tempdir" }
 sp2-structure = { path = "../util/structure" }
 sp2-structure-io = { path = "../util/structure-io" }
 sp2-kets = { path = "../util/kets" }

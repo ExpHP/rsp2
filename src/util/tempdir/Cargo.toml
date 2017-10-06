@@ -1,0 +1,10 @@
+[package]
+name = "sp2-tempdir"
+version = "0.1.0"
+authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+tempdir = "0.3"

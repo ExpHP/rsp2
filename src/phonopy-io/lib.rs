@@ -8,7 +8,7 @@ extern crate sp2_byte_tools_plus_float as byte_tools;
 #[macro_use] extern crate nom;
 #[macro_use] extern crate serde_derive;
 extern crate serde_yaml;
-extern crate tempdir;
+extern crate sp2_tempdir as tempdir;
 
 pub type IoError = ::std::io::Error;
 pub type YamlError = ::serde_yaml::Error;
@@ -32,7 +32,7 @@ error_chain!{
 
 pub(crate) type Displacements = Vec<(usize, [f64; 3])>;
 pub(crate) use disp_yaml::DispYaml;
-mod disp_yaml {
+pub mod disp_yaml {
     use ::Error;
     use ::Displacements;
 
@@ -87,7 +87,7 @@ mod disp_yaml {
                 (coordinates, Meta { symbol, mass }))
             .unzip();
 
-        let structure = Structure::new(Lattice::new(lattice), Coords::Carts(carts), meta);
+        let structure = Structure::new(Lattice::new(lattice), Coords::Fracs(carts), meta);
 
         let displacements =
             displacements.into_iter()
@@ -99,42 +99,78 @@ mod disp_yaml {
     }
 }
 
-mod force_constants {
+pub mod force_sets {
+    // Adapted from code by Colin Daniels.
+
     use ::Result;
+    use ::std::result::Result as StdResult;
 
     use ::std::io::prelude::*;
     use ::sp2_structure::{Structure, Coords};
 
-    /// Write a FORCE_CONSTANTS file.
-    ///
-    /// Adapted from code by Colin Daniels.
-    pub fn write_from_fn<M, W, V>(
-        mut w: W,
+    /// Given a function that computes gradient, automates the process
+    /// of producing displaced structures and calling the function.
+    pub fn compute_from_grad<M, E, F>(
+        structure: Structure<M>,
+        displacements: &[(usize, [f64; 3])],
+        mut compute_grad: F,
+    ) -> StdResult<Vec<Vec<[f64; 3]>>, E>
+    where F: FnMut(&Structure<M>) -> StdResult<Vec<[f64; 3]>, E>,
+    {
+        use sp2_slice_of_array::prelude::*;
+
+        self::compute(structure, displacements, |s| {
+            let mut force = compute_grad(s)?;
+            for x in force.flat_mut() {
+                *x *= -1.0;
+            }
+            Ok(force)
+        })
+    }
+
+    /// Given a function that computes forces, automates the process
+    /// of producing displaced structures and calling the function.
+    pub fn compute<M, E, F>(
         mut structure: Structure<M>,
         displacements: &[(usize, [f64; 3])],
-        mut forces: &[V],
+        mut compute: F,
+    ) -> StdResult<Vec<Vec<[f64; 3]>>, E>
+    where F: FnMut(&Structure<M>) -> StdResult<Vec<[f64; 3]>, E>,
+    {
+        let orig_coords = structure.to_carts();
+
+        displacements.iter().map(|&(atom, disp)| {
+            let mut coords = orig_coords.clone();
+            for k in 0..3 {
+                coords[atom][k] += disp[k];
+            }
+            structure.set_coords(Coords::Carts(coords));
+
+            let force = compute(&structure)?;
+            assert_eq!(force.len(), structure.num_atoms());
+            Ok(force)
+        }).collect()
+    }
+
+    /// Write a FORCE_SETS file.
+    pub fn write<M, W, V>(
+        mut w: W,
+        structure: &Structure<M>, // only used for natoms  _/o\_
+        displacements: &[(usize, [f64; 3])],
+        force_sets: &[V],
     ) -> Result<()>
     where
         W: Write,
         V: ::std::borrow::Borrow<[[f64; 3]]>,
     {
-        assert_eq!(forces.len(), displacements.len());
+        assert_eq!(force_sets.len(), displacements.len());
         writeln!(w, "{}", structure.num_atoms())?;
         writeln!(w, "{}", displacements.len())?;
         writeln!(w, "")?;
 
-        let orig_coords = structure.to_carts();
-
-        for (&(atom, disp), force) in displacements.iter().zip(forces) {
+        for (&(atom, disp), force) in displacements.iter().zip(force_sets) {
             writeln!(w, "{}", atom + 1)?; // NOTE: phonopy indexes atoms from 1
             writeln!(w, "{:e} {:e} {:e}", disp[0], disp[1], disp[2])?;
-
-            let mut coords = orig_coords.clone();
-            for k in 0..3 {
-                coords[atom][k] += disp[k];
-            }
-
-            structure.set_coords(Coords::Carts(coords));
 
             assert_eq!(force.borrow().len(), structure.num_atoms());
             for row in force.borrow() {
@@ -148,7 +184,7 @@ mod force_constants {
     }
 }
 
-mod cmd {
+pub mod cmd {
     use ::Result;
     use ::Displacements;
     use ::DispYaml;
@@ -173,15 +209,15 @@ mod cmd {
         Ok(())
     }
 
-    fn phonopy_displacements_carbon(
+    pub fn phonopy_displacements_carbon(
         conf: &HashMap<String, String>,
         structure: CoordStructure,
-    ) -> Result<(Displacements, TempDir)>
+    ) -> Result<(CoordStructure, Displacements, TempDir)>
     {
         use ::sp2_structure_io::poscar;
 
         let tmp = TempDir::new("sp2-rs")?;
-        let displacements = {
+        let (displacements, superstructure) = {
 
             let tmp = tmp.path();
 
@@ -196,30 +232,34 @@ mod cmd {
                 &structure,
             )?;
 
-            if let Some(code) =
+            let code =
                 Command::new("phonopy")
                 .arg("--displacement")
                 .arg("phonopy.conf")
                 .current_dir(&tmp)
-                .status()?.code()
-            {
-                bail!("Phonopy exited with code {}", code);
+                .status()?.code();
+            match code {
+                // FIXME this could be something we care about like sigint
+                None => bail!("Phonopy exited with signal"),
+                Some(0) => {},
+                Some(c) => bail!("Phonopy exited with code {}", c),
             }
 
             let DispYaml {
-                displacements, ..
+                displacements, structure: superstructure
             } = ::disp_yaml::read(File::open(tmp.join("disp.yaml"))?)?;
 
-            displacements
+            (displacements, superstructure)
         };
 
-        Ok((displacements, tmp))
+        Ok((superstructure.map_metadata(|_| ()), displacements, tmp))
     }
 
-    fn phonopy_eigenvectors<P>(
+    pub fn phonopy_gamma_eigensystem<P>(
         conf: &HashMap<String, String>,
+        force_sets: Vec<Vec<[f64; 3]>>,
         disp_dir: &P,
-    ) -> Result<Vec<Vec<[f64; 3]>>>
+    ) -> Result<(Vec<f64>, Vec<Vec<[f64; 3]>>)>
     where P: AsRef<Path>,
     {
         use ::sp2_slice_of_array::prelude::*;
@@ -236,25 +276,56 @@ mod cmd {
 
         fs::copy(disp_dir.join("POSCAR"), tmp.join("POSCAR"))?;
 
-        if let Some(code) =
+        let DispYaml {
+            displacements, structure: superstructure,
+        } = ::disp_yaml::read(File::open(disp_dir.join("disp.yaml"))?)?;
+
+        ::force_sets::write(
+            File::create(tmp.join("FORCE_SETS"))?,
+            &superstructure,
+            &displacements,
+            &force_sets,
+        )?;
+
+        let code =
             Command::new("phonopy")
-            .env("NPY_EIGENVECTOR_HACK", "1")
+            .env("EIGENVECTOR_NPY_HACK", "1")
             .arg("--eigenvectors")
             .arg("phonopy.conf")
             .current_dir(&tmp)
-            .status()?.code()
-        {
-            bail!("Phonopy exited with code {}", code);
+            .status()?.code();
+        match code {
+            // FIXME this could be something we care about like sigint
+            None => bail!("Phonopy exited with signal"),
+            Some(0) => {},
+            Some(c) => bail!("Phonopy exited with code {}", c),
         }
 
-        let bases = ::npy::read(File::open("eigenvector.npy")?)?;
+        let bases = ::npy::read_eigenvector_npy(File::open(tmp.join("eigenvector.npy"))?)?;
+        let freqs = ::npy::read_eigenvalue_npy(File::open(tmp.join("eigenvalue.npy"))?)?;
+
+        for (i, basis) in bases.iter().enumerate() {
+            use ::std::io::prelude::*;
+            let mut f = File::create(format!("wowee-{}", i))?;
+            for v in basis.iter() {
+                for x in v.iter() {
+                    writeln!(f, "{:>20e}  +  j {:>20e}", x.real, x.imag)?;
+                }
+                writeln!(f, "")?;
+            }
+        }
+
+        // eigensystem at first kpoint (gamma)
         let basis = bases.into_iter().next().unwrap();
-        let out = basis.iter().map(|ev| Ok(
+        let freqs = freqs.into_iter().next().unwrap();
+
+        let evecs = basis.iter().map(|ev| Ok(
             ev.iter().map(|c| {
+                // gamma kets are real
                 ensure!(c.imag == 0.0, "non-real eigenvector");
                 Ok(c.real)
             }).collect::<Result<Vec<_>>>()?.nest().to_vec()
-        )).collect::<Result<_>>();
-        out
+        )).collect::<Result<_>>()?;
+        Ok((freqs, evecs))
     }
 }

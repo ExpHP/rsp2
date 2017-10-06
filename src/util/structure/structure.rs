@@ -31,6 +31,14 @@ impl<M> Structure<M> {
     pub fn num_atoms(&self) -> usize { self.coords.len() }
     pub fn lattice(&self) -> &Lattice { &self.lattice }
     pub fn metadata(&self) -> &[M] { &self.meta }
+
+    pub fn map_metadata<M2, F>(self, mut f: F) -> Structure<M2>
+    where F: FnMut(M) -> M2
+    {
+        let Structure { lattice, coords, meta } = self;
+        let meta = meta.into_iter().map(f).collect();
+        Structure { lattice, coords, meta }
+    }
 }
 
 // to/as/mut for coords

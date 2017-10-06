@@ -44,7 +44,6 @@ fn remove_mean_shift(a: &mut [[f64; 3]], b: &[[f64; 3]]) {
 
 //#[test]
 fn perturbed_graphene() {
-    use ::sp2_structure_io::{xyz, poscar};
     use ::sp2_structure::{CoordStructure, Lattice, Coords, supercell};
     init_logger();
 
