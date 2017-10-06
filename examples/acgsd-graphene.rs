@@ -135,6 +135,7 @@ fn _main() -> Result<(), Panic> {
 
     let minimize_evec = |structure: CoordStructure, evec: &[[f64; 3]]| -> Result<CoordStructure, Panic> {
         let (structure, sc_token) = supercell::diagonal((sc_size_relax, sc_size_relax, 1), structure);
+        let evec = sc_token.replicate(evec);
         let mut lmp = Lammps::new_carbon(&structure.lattice().matrix(), &structure.to_carts())?;
 
          // FIXME shouldn't need linesearch::Error, I can't remember why we even use it
@@ -151,7 +152,7 @@ fn _main() -> Result<(), Panic> {
         let mut from_structure = structure;
         let mut prev_alpha = 1e-4;
         'refine: for _ in 0..8 {
-            let direction = evec;
+            let direction = &evec;
             let from_pos = from_structure.to_carts();
             //let alpha = { // scope closure that borrows
                 let mut ls_compute = |alpha| -> LsResult<(f64, f64)> {
@@ -177,7 +178,7 @@ fn _main() -> Result<(), Panic> {
             prev_alpha = alpha;
         }
 
-        Ok(sc_token.deconstruct(1e-5, structure)?)
+        Ok(sc_token.deconstruct(1e-5, from_structure)?)
     };
 
     for name in names {

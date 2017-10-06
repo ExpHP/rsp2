@@ -71,6 +71,23 @@ pub struct SupercellToken {
 
 pub type OwnedMetas<'a,T> = ::std::vec::Drain<'a,T>;
 impl SupercellToken {
+    pub fn num_cells(&self) -> usize {
+        (self.periods[0] * self.periods[1] * self.periods[2]) as usize
+    }
+
+    /// Takes data for each atom of the primitive cell and expands it to the
+    /// size of the supercell.
+    pub fn replicate<M>(&self, vec: &[M]) -> Vec<M>
+    where M: Clone
+    {
+        let mut out = Vec::with_capacity(vec.len() * self.num_cells());
+        for m in vec {
+            let new_len = out.len() + self.num_cells();
+            out.resize(new_len, m.clone());
+        }
+        out
+    }
+
     /// Recover a primitive cell by averaging positions from a supercell.
     ///
     /// Uses metadata from the first image of each atom.
