@@ -142,9 +142,10 @@ pub mod lossless {
                     .sqnorm()
             }
 
-            pub fn iter(&self) -> Iter<'a> { Box::new(
-                self.imag.iter().zip(self.real).map(|(&real, &imag)| Rect { real, imag })
-            ) }
+            pub fn iter(&self) -> Iter<'a> {
+                let &KetRef { real, imag } = self;
+                Box::new(real.iter().zip(imag).map(|(&real, &imag)| Rect { real, imag }))
+            }
         }
     }
 }
