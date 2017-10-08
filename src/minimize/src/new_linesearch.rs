@@ -43,8 +43,8 @@ pub struct Params {
     sigma: f64,   // curvature coefficient
     epsilon: f64, // estimate of relative error in value
     theta: f64,   // bisection point for step U3
-    gamma: f64,   // ???
-    eta: f64,     // ???
+    gamma: f64,   // minimal interval size reduction per complete loop
+    eta: f64,     // (parameter of CG, not linesearch)
     sanic: f64,   // interval width growth factor during expansion search
 }
 
@@ -90,6 +90,7 @@ enum How {
     DoubleSecant1,
     DoubleSecant2,
     PlainBisect,
+    #[allow(bad_style)]
     Hack_IsLsState, // FIXME
 }
 
@@ -168,7 +169,7 @@ where F: FnMut(f64) -> Result<(f64, f64), E>,
         initial_alpha,
         // FIXME change other methods to accept Box since their current
         //  signatures are misleading and force us to do eta expansion here
-        |x| compute(x),
+        &mut *compute,
     ).map(|x| x.alpha)
 }
 
@@ -180,12 +181,11 @@ impl Hager {
     ///
     /// # Citation:
     /// Hager 2004, p. 184
-    fn linesearch<E, F>(
+    fn linesearch<E>(
         &self,
         start_alpha: f64,
-        mut compute: F,
+        compute: &mut FnMut(f64) -> Result<Bound, E>,
     ) -> Result<Bound, E>
-    where F: FnMut(f64) -> Result<Bound, E>,
     {
         // We do a nasty trick with control flow here.
         //
@@ -284,7 +284,7 @@ impl Hager {
 
         // Get the actual result that we tucked away in `Err`.
         let result = result.err().expect("buggg");
-        if let Ok(Bound { value, slope, .. }) = result {
+        if let Ok(Bound { slope, .. }) = result {
             // FIXME
             trace!("                                    exit slope: {:<23e}", slope);
         }
@@ -304,12 +304,11 @@ impl Hager {
     }
 
     /// This locates an initial interval that satisfies the opposite slope condition.
-    fn seek_initial_interval<E, F>(
+    fn seek_initial_interval<E>(
         &self,
         start_alpha: f64,
-        mut compute: F,
+        compute: &mut FnMut(f64, How) -> ShortCircuitResult<Bound, Bound, E>,
     ) -> ShortCircuitResult<Interval, Bound, E>
-    where F: FnMut(f64, How) -> ShortCircuitResult<Bound, Bound, E>,
     {
         // Hager (2004) provides no strategy for this.
         // Or rather, it says that we can sample phi(alpha) for
@@ -343,7 +342,7 @@ impl Hager {
         let out = match (cur.strictly_downhill(), self.reasonable_value(cur)) {
             (false, _) => (lo, cur),
             (true, true) => unreachable!(), // taken care of by above loop
-            (true, false) => self.funky_loop_in_u3((lo, cur), &mut compute)?,
+            (true, false) => self.funky_loop_in_u3((lo, cur), &mut *compute)?,
         };
         self.validate_opposite_slope(out);
         Ok(out)
@@ -355,13 +354,12 @@ impl Hager {
     ///
     /// # Citation:
     /// Hager 2004, p. 182
-    fn update_interval<E, F>(
+    fn update_interval<E>(
         &self,
         input: Interval, // Current boundaries, written as 'a' and 'b' in the paper.
         guess: Bound, // Guess for next bound, written as 'c' in the paper
-        mut compute: F,
+        compute: &mut FnMut(f64, How) -> Result<Bound, E>,
     ) -> Result<Interval, E>
-    where F: FnMut(f64, How) -> Result<Bound, E>,
     {
         self.validate_opposite_slope(input);
         let (lo, hi) = input;
@@ -378,7 +376,7 @@ impl Hager {
             (false, _) => (lo, guess),     // condition (U1), p. 182
 
             // tough case; bisect until we have a good interval again.
-            (true, false) => self.funky_loop_in_u3((lo, guess), &mut compute)?,
+            (true, false) => self.funky_loop_in_u3((lo, guess), &mut *compute)?,
         };
 
         let is_improper_subset = |a: Interval, b: Interval|
@@ -395,12 +393,11 @@ impl Hager {
     /// has a greater value (suggesting that the function follows some sort
     /// of rotated 'S' shape), and returns an interval satisfying the opposite
     /// slope condition.
-    fn funky_loop_in_u3<E, F>(
+    fn funky_loop_in_u3<E>(
         &self,
         (mut lo, mut hi): Interval,
-        mut compute: F,
+        compute: &mut FnMut(f64, How) -> Result<Bound, E>,
     ) -> Result<Interval, E>
-    where F: FnMut(f64, How) -> Result<Bound, E>,
     {
         debug!("update_interval: Beginning same-slope bisection strategy.");
 
@@ -432,12 +429,11 @@ impl Hager {
 
     /// # Citation:
     /// Hager 2004, p. 184
-    fn double_secant_strategy<E, F>(
+    fn double_secant_strategy<E>(
         &self,
         (lo, hi): Interval,
-        mut compute: F,
+        compute: &mut FnMut(f64, How) -> Result<Bound, E>,
     ) -> Result<Interval, E>
-    where F: FnMut(f64, How) -> Result<Bound, E>,
     {
         self.validate_opposite_slope((lo, hi));
 
@@ -450,7 +446,7 @@ impl Hager {
         };
 
         let first = compute(secant(lo, hi), How::DoubleSecant1)?;
-        let (new_lo, new_hi) = self.update_interval((lo, hi), first, &mut compute)?;
+        let (new_lo, new_hi) = self.update_interval((lo, hi), first, &mut *compute)?;
         self.validate_opposite_slope((new_lo, new_hi));
 
         // Checks if either of the "easy cases" in update_interval were met.
@@ -482,7 +478,7 @@ impl Hager {
             //       but most should still trigger another assertion elsewhere.
             if second_alpha.is_finite() {
                 let second = compute(second_alpha, How::DoubleSecant2)?;
-                return self.update_interval((new_lo, new_hi), second, &mut compute);
+                return self.update_interval((new_lo, new_hi), second, &mut *compute);
             }
         }
         // skip the second `update_interval`
@@ -512,7 +508,7 @@ impl Hager {
     /// # Citation:
     /// Hager 2004, p. 181
     fn approx_wolfe_conditions(&self, bound: Bound) -> bool {
-        let Bound { alpha, value, slope } = bound;
+        let Bound { slope, .. } = bound;
         let Bound { slope: zero_slope, .. } = self.initial;
         let Params { delta, sigma, .. } = self.params;
         assert!(zero_slope < 0.0);

@@ -17,9 +17,10 @@ sp2-minimize     = { path = "src/minimize" }
 sp2-phonopy-io   = { path = "src/phonopy-io" }
 sp2-byte-tools-plus-float = { path = "src/util/byte-tools-plus-float" }
 sp2-kets         = { path = "src/util/kets" }
-sp2-tempdir     = { path = "src/util/tempdir" }
+sp2-tempdir      = { path = "src/util/tempdir" }
 
-[dev-dependencies]
+# FIXME these should be dev-dependencies
+#       but aren't due to rust-lang-nursery/rls#169
 rand = "0.3"
 serde_json = "1.0"
 env_logger = "0.4"

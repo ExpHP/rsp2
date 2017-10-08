@@ -6,7 +6,7 @@
 // get ugly fast.
  
 #[derive(Debug,Copy,Clone,PartialEq,PartialOrd)]
-pub struct BadNorm(f64);
+pub struct BadNorm(pub f64);
 
 /// Implements element-wise operations.
 ///

@@ -37,6 +37,129 @@ pub(crate) struct Objectives {
     pub iterations: u32,
 }
 
+/* ****************************************
+
+# Hagar CG_DESCENT formulas
+
+## As written (pages 170-171)
+
+$$
+% To the person reading this source code:
+% No, there isn't anywhere you should look in particular to find
+% a rendered copy of this, and I have not included a complete prelude.
+% Just go find a live MathJAX renderer (here's one: http://www.hostmath.com/)
+\newcommand{\vec}[1]{\mathbf{#1}}
+\newcommand{\norm}[1]{\left\Vert#1\right\Vert}
+\newcommand{\paren}[1]{\left(#1\right)}
+\newcommand{\braced}[1]{\left\{#1\right\}}
+\newcommand{\a}[1]{\alpha_{#1}}
+\newcommand{\x}[1]{\vec x_{#1}}
+\newcommand{\g}[1]{\vec g_{#1}}
+\newcommand{\d}[1]{\vec d_{#1}}
+\newcommand{\gdiff}[1]{\Delta\g{#1}}
+\newcommand{\betaN}[1]{\beta^N_{#1}}
+\newcommand{\betaNp}[1]{\beta'^N_{#1}}
+\newcommand{\betaNbar}[1]{\overline{\beta}{}_{#1}^N}
+\newcommand{\T}{^\intercal}
+\newcommand{\minTwo}[2]{\min\!\paren{#1,\, #2}}
+\newcommand{\maxTwo}[2]{\max\!\paren{#1,\, #2}}
+\newcommand{\dhat}[1]{\boldsymbol{\hat{\mathbf{d}}}_{#1}}
+\DeclareMathOperator{\normalize}{normalize}
+
+\begin{align}
+\x{k+1} &= \x{k} + \alpha_k \d{k} \\
+\gdiff{k} &= \g{k+1} - \g{k} \\
+\d{0} &= - \g{0} \\
+\d{k+1} &= - \g{k+1} + \maxTwo{\betaN{k}}{\eta_k} \d{k}  \\
+\betaN{k} &=
+    \frac{1}{\d{k}\T\gdiff{k}}
+    \paren{
+        \gdiff{k} - 2\d{k} \frac{\norm{\gdiff{k}}^2}{\d{k}\T \gdiff{k}}
+    }\T \g{k+1} \\
+\eta_k &= \frac{-1}{\norm{\d{k}} \minTwo{\eta}{\norm{\g{k}}}}
+\end{align}
+$$
+
+$alpha_k$ is the step size (which has no formula, but is found
+according to linesearch and must satisfy certain conditions)
+and $\mathbf{g}_k$ is the gradient at $\mathbf{x}_k$.
+
+The quantities above are numbered so that in each case, the first
+value has index zero.  This is not very useful for us, so we
+renumber them such that the value with index k is always computed
+during the kth iteration. To allow "fencepost quantities" such as
+position, gradient and value to start at index 0, the iterations
+are numbered starting from 1.
+
+\begin{align}
+           &&     \x{0} & ~\text{given.} \\
+(k \ge 1). &&     \x{k} &= \x{k-1} + \alpha_k \d{k} \\
+(k \ge 1). && \gdiff{k} &= \g{k} - \g{k-1} \\
+           &&     \d{1} &= - \g{0} \\
+(k \ge 2). &&     \d{k} &= - \g{k-1} + \maxTwo{\betaN{k}}{\eta_k} \d{k-1}  \\
+(k \ge 2). && \betaN{k} &=
+    \frac{1}{\d{k-1}\T\gdiff{k-1}}
+    \paren{
+        \gdiff{k-1} - 2\d{k-1} \frac{\norm{\gdiff{k-1}}^2}{\d{k-1}\T \gdiff{k-1}}
+    }\T \g{k-1} \\
+
+(k \ge 2). &&    \eta_k &= \frac{-1}{\norm{\d{k-1}} \minTwo{\eta}{\norm{\g{k-2}}}}
+\end{align}
+
+Now we see that $\eta_k$ actually depends on the gradient from two
+positions ago, i.e. at the *beginning* of the previous iteration.
+Sneaky!
+
+Things get even simpler if we normalize our direction vector $\mathbf d_k$.
+We perform the following substitutions:
+
+* \( \mathbf{d}_k \to d_k \hat{\mathbf{d}}_k \)
+* \( \alpha_k \to d_k^{-1} \alpha'_k \)
+* \( \beta^N_k \to  d_k \beta'^N_k \)
+* \( \eta_k \to  d_k \eta'_k \)
+
+We end up with
+
+\begin{align}
+           &&      \x{0} & ~\text{given.} \\
+(k \ge 1). &&      \x{k} &= \x{k-1} + \alpha'_k \dhat{k} \\
+(k \ge 1). &&  \gdiff{k} &= \g{k} - \g{k-1} \\
+           &&      \dhat{1} &= \normalize\paren{ - \g{0} }\\
+(k \ge 2). &&      \dhat{k} &= \normalize\paren{ - \g{k-1} + \maxTwo{\betaNp{k}}{\eta'_k} \dhat{k-1}}  \\
+(k \ge 2). && \betaNp{k} &=
+    \frac{1}{\dhat{k-1}\T\gdiff{k-1}}
+    \paren{
+        \gdiff{k-1} - 2\dhat{k-1} \frac{\norm{\gdiff{k-1}}^2}{\dhat{k-1}\T \gdiff{k-1}}
+    }\T \g{k-1} \\
+
+(k \ge 2). &&    \eta'_k &= \frac{-1}{\minTwo{\eta}{\norm{\g{k-2}}}}
+\end{align}
+
+Ultimately, the only observable impact of this substitution outside the
+simpler formulas is that the relative scale of $\alpha_k/\alpha_{k-1}$ changes
+to include scale factors that were previously reflected in the direction vector;
+this can impact the quality of a starting guess for $\alpha$.
+
+However, the decision to normalize direction was, in fact, originally motivated
+by existing code that used $\alpha_{k-1} \cdot \norm{\d{k-1}} / \norm{\d{k}}$ as
+its starting guess for $\alpha{k}$!  Under our revised scheme, the initial guess
+for $\alpha'_k$ becomes simply $\alpha'_{k-1}$, and therefore the would-be norm
+of the direction vector prior to normalization truly is of no concern to us.
+
+...one more thing.  You can normalize $\Delta \mathbf g$ as well.
+You get
+
+$$
+\betaNp{k} &=
+    \paren{\frac
+        {c_k\dghat{k-1} - 2 \dhat{k-1}}
+        {c_k^2}
+    }\T\g{k-1},
+    \qquad c_k = \dhat{k-1}\T \dghat{k-1}.\\
+$$
+
+*/
+
 pub use self::stop_condition::Rpn as StopCondition;
 pub use self::stop_condition::Cereal as StopConditionSettings;
 pub mod stop_condition {
@@ -90,6 +213,53 @@ pub mod stop_condition {
     }
 }
 
+pub mod hager_beta {
+
+    pub struct Input<'a, 'b, 'c> {
+        pub eta: f64,
+        pub last_direction: &'a [f64],
+        pub last_d_gradient: &'b [f64],
+        pub from_gradient: &'c [f64],
+    }
+
+    pub fn compute(input: Input) -> f64 {
+        use sp2_slice_math::{v, V, vnormalize, vnorm, vdot, BadNorm};
+
+        let Input {
+            eta, last_direction, last_d_gradient, from_gradient
+        } = input;
+
+        let V(last_from_gradient) = v(from_gradient) - v(last_d_gradient);
+
+        // In a notation more evocative of the mathematical form.
+        // (note: _km corresponds to k-1, _kmm corresponds to k-2)
+        let d_km = last_direction;
+        let V(dg_km_hat) = match vnormalize(last_d_gradient) {
+            Ok(x) => x,
+            // Zero or infinite norm.
+            // I don't think this branch will ever be entered;
+            // a successful linesearch guarantees that the gradient has changed,
+            // and this method is not called on linesearch failure.
+            Err(BadNorm(norm)) => {
+                // Satisfying the wolfe conditions
+                warn!("`d_gradient` bad norm: {}! Doing steepest descent.", norm);
+                return 0.0;
+            },
+        };
+        let dg_km_hat = &dg_km_hat[..];
+        let g_km = from_gradient;
+        let g_kmm = &last_from_gradient[..];
+
+        let eta_k = -1.0 / eta.min(vnorm(g_kmm));
+
+        let c_k = vdot(d_km, dg_km_hat);
+        let V(beta_bra) = c_k * v(dg_km_hat) - 2.0 * v(d_km);
+        let beta_k = vdot(&beta_bra, g_km) / (c_k * c_k);
+
+        beta_k.max(eta_k)
+    }
+}
+
 pub trait DiffFn<E>: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E> { }
 impl<E, F> DiffFn<E> for F
 where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E> { }
@@ -114,8 +284,8 @@ use linesearch::Error as LsError;
 impl<E> From<LsError<E>> for Failure<E> {
     fn from(e: LsError<E>) -> Self { Failure::from_error(match e {
         LsError::ComputeError(e) => Error::ComputeError(e),
-        LsError::Generic(s) => Error::Generic(s),
-        LsError::NoImprovement => Error::Generic("linesearch failure".to_string()),
+        LsError::Generic(s) => Error::string(&s),
+        LsError::NoImprovement => Error::string("linesearch failure"),
         LsError::Uphill => panic!("bug! (acgsd tried to linesearch uphill!)"),
         LsError::NonFiniteAlpha => panic!("unused code path; tested elsewhere")
     })}
@@ -166,7 +336,6 @@ pub fn acgsd<E, F: DiffFn<E>>(
 ) -> Result<Output, Failure<E>>
 where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
 {
-    use ::util::cache::MinCacheBy;
     let stop_condition = self::stop_condition::Rpn::from_cereal(&settings.stop_condition);
 
     let mut compute_point = |position: &[f64]| {
@@ -206,7 +375,7 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
 
     #[derive(Debug,Clone)]
     struct Last {
-        direction: Vec<f64>,   // direction searched (normalized)
+        direction: Vec<f64>, // direction searched (normalized)
 
         // NOTE: These next three are all zero when linesearch has failed.
         //       This can be a problem for d_value in particular.
@@ -370,18 +539,38 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
             // Consider the direction  'beta * dx - g'
             if let &Some(Last{
                 ls_failed: false,
-                ref d_position,
-                ref d_gradient,
+                direction: ref last_direction,
+                d_gradient: ref last_d_gradient,
+                d_position: ref last_d_position,
                 ..
             }) = &last
             {
-                let beta = calc_beta_acgsd(&saved.gradient, d_position, d_gradient);
+                let use_hager_beta = true; // FIXME settings
+                let eta = 0.01; // FIXME settings
 
-                let V(direction) = beta * v(d_position) - v(&saved.gradient);
+                if use_hager_beta {
+                    use self::hager_beta::Input;
 
-                // use this direction unless it is almost directly uphill
-                if !should_revert_acgsd(&saved.gradient, &direction) {
+                    let from_gradient = &saved.gradient[..];
+
+                    let beta = hager_beta::compute(Input {
+                        eta: eta,
+                        last_direction,
+                        last_d_gradient,
+                        from_gradient,
+                    });
+                    let V(direction): V<Vec<f64>> = beta * v(last_direction) - v(from_gradient);
                     break 'use_dir direction;
+
+                } else {
+                    let beta = calc_beta_acgsd(&saved.gradient, last_d_position, last_d_gradient);
+
+                    let V(direction) = beta * v(last_d_position) - v(&saved.gradient);
+
+                    // use this direction unless it is almost directly uphill
+                    if !should_revert_acgsd(&saved.gradient, &direction) {
+                        break 'use_dir direction;
+                    }
                 }
             }
 
@@ -466,7 +655,7 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
 
         // if the linesearch failed, note it and try
         //  again next iteration with steepest descent
-        let ls_failed = (next_alpha == 0.0);
+        let ls_failed = next_alpha == 0.0;
         if ls_failed {
             if let Some(Last { ls_failed: true, .. }) = last {
                 return fatal("linesearch failure (second)", saved.alpha, saved.to_point());
