@@ -76,7 +76,7 @@ where F: FnMut(f64) -> Result<(f64, f64), E>,
     // running minimum, initialize with the information from alpha = 0
     let mut min_point = (value, 0.0);
 
-    for iteration in 0..settings.iteration_limit {
+    for _ in 0..settings.iteration_limit {
         // check for errors in alpha
         if !alpha.is_finite() {
             return Ok(min_point.1)
@@ -106,13 +106,7 @@ where F: FnMut(f64) -> Result<(f64, f64), E>,
             high = Bound {alpha, value, slope};
         }
 
-        // get the new alpha
-        let minimum = cubic_min(low, high);
-        if minimum.is_normal() {
-            alpha = minimum;
-        } else {
-            alpha = quadratic_min(low, high);
-        }
+        alpha = guess_min(low, high);
     }
 
     // return the alpha that gave us the lowest value
