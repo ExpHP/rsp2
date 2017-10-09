@@ -17,6 +17,7 @@ sp2-minimize     = { path = "src/minimize" }
 sp2-phonopy-io   = { path = "src/phonopy-io" }
 sp2-byte-tools-plus-float = { path = "src/util/byte-tools-plus-float" }
 sp2-kets         = { path = "src/util/kets" }
+sp2-util-macros  = { path = "src/util/macros" }
 sp2-tempdir      = { path = "src/util/tempdir" }
 
 # FIXME these should be dev-dependencies

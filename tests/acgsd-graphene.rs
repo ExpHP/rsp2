@@ -5,13 +5,13 @@ extern crate sp2_slice_of_array;
 extern crate sp2_structure;
 extern crate sp2_structure_io;
 extern crate sp2_slice_math;
+#[macro_use] extern crate sp2_util_macros;
 
 extern crate rand;
 extern crate env_logger;
 #[macro_use] extern crate serde_json;
 
 use ::rand::random;
-use ::serde_json::from_value;
 use ::sp2_array_utils::vec_from_fn;
 use ::sp2_slice_of_array::prelude::*;
 use ::sp2_slice_math::{v,vnorm};
@@ -80,7 +80,7 @@ fn perturbed_graphene() {
     ).unwrap();
 
     let mut relaxed = ::sp2_minimize::acgsd(
-        &from_value(json!({"stop-condition": {"grad-rms": 1e-5}})).unwrap(),
+        &from_json!({"stop-condition": {"grad-rms": 1e-5}}),
         input.flat(),
         move |pos: &[f64]| {
             let pos = pos.nest();

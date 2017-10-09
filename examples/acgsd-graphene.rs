@@ -9,6 +9,7 @@ extern crate sp2_array_utils;
 extern crate sp2_slice_of_array;
 extern crate sp2_slice_math;
 extern crate sp2_tempdir;
+#[macro_use] extern crate sp2_util_macros;
 
 extern crate rand;
 extern crate env_logger;
@@ -16,12 +17,7 @@ extern crate env_logger;
 
 const THZ_TO_WAVENUMBER: f64 = 33.35641;
 
-macro_rules! collect {
-    ($($e:tt)*) => { vec![$($e)*].into_iter().collect() };
-}
-
 use ::rand::random;
-use ::serde_json::from_value;
 use ::sp2_array_utils::vec_from_fn;
 use ::sp2_slice_of_array::prelude::*;
 use ::sp2_slice_math::{v,vnorm};
@@ -86,12 +82,12 @@ fn _main() -> Result<(), Panic> {
         // FIXME confusing for Lammps::new_carbon to take initial position
         let mut lmp = Lammps::new_carbon(&supercell.lattice().matrix(), &supercell.to_carts())?;
         let relaxed_flat = ::sp2_minimize::acgsd(
-            &from_value(json!({
+            &from_json!({
                 "stop-condition": {"any": [
                     {"grad-rms": 1e-8},
                     {"iterations": 150},
                 ]},
-            }))?,
+            }),
             &supercell.to_carts().flat(),
             move |pos: &[f64]| {
                 let pos = pos.nest();
