@@ -4,9 +4,9 @@
 //! some old code that I had written for solving HNF matrices.
 //! It is shamelessly optimized beyond reason.
 //!
-//! It is all brute-force and does not use that trick I proved
-//! earlier involving the generalized Chinese Remainder Theorem,
-//! probably because it is too complicated.
+//! It is all brute-force and does not use that trick
+//! involving the generalized Chinese Remainder Theorem.
+//! (TODO: where on earth did I write about that)
 //!
 //! # Why keep it?
 //!

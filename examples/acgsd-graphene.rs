@@ -69,8 +69,8 @@ fn _main() -> Result<(), Panic> {
     let sc_size_phonopy = 4;
 
     let mut names = vec![
+        String::from("shift-03"),
         String::from("aba-007-a"),
-        String::from("shift-01"),
     ];
     for i in 0..7 {
         names.push(format!("shift-0{}", i));
@@ -87,6 +87,8 @@ fn _main() -> Result<(), Panic> {
                     {"grad-rms": 1e-8},
                     {"iterations": 150},
                 ]},
+                "alpha-guess-max": 1e-1,
+                "alpha-guess-first": 1e-2,
             }),
             &supercell.to_carts().flat(),
             move |pos: &[f64]| {
@@ -102,6 +104,7 @@ fn _main() -> Result<(), Panic> {
 
     let diagonalize = |structure| -> Result<_, Panic> {
         let conf = collect![
+            (format!("DISPLACEMENT_DISTANCE"), format!("1e-3")),
             (format!("DIM"), format!("{0} {0} 1", sc_size_phonopy)),
             (format!("HDF5"), format!(".TRUE.")),
         ];
@@ -130,51 +133,32 @@ fn _main() -> Result<(), Panic> {
     };
 
     let minimize_evec = |structure: CoordStructure, evec: &[[f64; 3]]| -> Result<CoordStructure, Panic> {
+        type LmpError = ::sp2_lammps_wrap::Error;
+
         let (structure, sc_token) = supercell::diagonal((sc_size_relax, sc_size_relax, 1), structure);
         let evec = sc_token.replicate(evec);
         let mut lmp = Lammps::new_carbon(&structure.lattice().matrix(), &structure.to_carts())?;
 
-         // FIXME shouldn't need linesearch::Error, I can't remember why we even use it
-        type LsResult<T> = Result<T, ::sp2_lammps_wrap::Error>;
-        // type LsResult<T> = Result<T, ::sp2_minimize::linesearch::Error<::sp2_lammps_wrap::Error>>;
-
-        let mut compute_at_flat = |pos: &[f64]| -> LsResult<(f64, Vec<f64>)> {
+        let mut compute_at_flat = |pos: &[f64]| -> Result<(f64, Vec<f64>), LmpError> {
             let (value, grad) = lmp.compute(pos.nest())?;
             Ok((value, grad.flat().to_vec()))
         };
 
         // Repeatedly perform "acceptible linesearch" in an attempt
         //  to simulate complete linesearch.
-        let mut from_structure = structure;
-        let mut prev_alpha = 1e-4;
-        'refine: for _ in 0..8 {
-            let direction = &evec;
-            let from_pos = from_structure.to_carts();
-            //let alpha = { // scope closure that borrows
-                let mut ls_compute = |alpha| -> LsResult<(f64, f64)> {
-                    let V(pos): V<Vec<_>> = v(from_pos.flat()) + alpha * v(direction.flat());
-                    let (value, gradient) = compute_at_flat(&pos)?;
-                    let slope = vdot(&gradient, direction.flat());
-                    Ok((value, slope))
-                };
-
-                {
-                    let b = ls_compute(0.0)?;
-                    eprintln!("LS From: val {:e}  slope {:e}", b.0, b.1);
-                }
-                let alpha = ::sp2_minimize::linesearch(&Default::default(), prev_alpha, ls_compute)?;
-            //}; // let alpha = { ... };
-
-            if alpha == 0.0 {
-                break 'refine;
-            }
-
+        let from_structure = structure;
+        let direction = &evec[..];
+        let from_pos = from_structure.to_carts();
+        let alpha = ::sp2_minimize::exact_ls::<LmpError, _>(0.0, 1e-4, |alpha| {
             let V(pos) = v(from_pos.flat()) + alpha * v(direction.flat());
-            from_structure.set_coords(Coords::Carts(pos.nest().to_vec()));
-            prev_alpha = alpha;
-        }
+            let (_, gradient) = compute_at_flat(&pos[..])?;
+            let slope = vdot(&gradient[..], direction.flat());
+            Ok(::sp2_minimize::exact_ls::Slope(slope))
+        })??.alpha;
+        let V(pos) = v(from_pos.flat()) + alpha * v(direction.flat());
+        let structure = from_structure.with_coords(Coords::Carts(pos.nest().to_vec()));
 
-        Ok(sc_token.deconstruct(1e-5, from_structure)?)
+        Ok(sc_token.deconstruct(1e-5, structure)?)
     };
 
     for name in names {
@@ -212,6 +196,13 @@ fn _main() -> Result<(), Panic> {
 
             iter_count += 1;
         }; // (structure, eval, evec)
+
+        {
+            let mut f = File::create(format!("./evs-{}", name))?;
+            for &x in &eval {
+                writeln!(f, "{:?}", x)?;
+            }
+        }
 
         poscar::dump_carbon(
             File::create(format!("./out-{}.vasp", name))?,

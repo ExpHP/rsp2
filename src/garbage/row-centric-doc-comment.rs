@@ -12,7 +12,6 @@
 //! around the next time I feel the need to document this somewhere.
 
 
-
 //! # A note on conventions
 //!
 //! There are two independent dimensions by which we describe the layout

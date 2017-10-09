@@ -26,6 +26,9 @@ pub mod settings {
         #[serde()] pub(super) stop_condition: StopCondition,
         #[serde(default)] pub(super) beta: Beta,
         #[serde(default)] pub(super) linesearch: Linesearch,
+        #[serde(default="defaults::alpha_guess_first")]
+        pub(super) alpha_guess_first: f64,
+        #[serde(default)] pub(super) alpha_guess_max: Option<f64>,
     }
 
     #[derive(Serialize, Deserialize)]
@@ -90,13 +93,14 @@ pub mod settings {
     // Default functions, since literals aren't supported (serde gh #368)
     mod defaults {
         #![allow(non_snake_case)]
+        pub(crate) fn alpha_guess_first() -> f64 { 1.0 }
         pub(crate) fn beta__acgsd__downhill_min() -> f64 { 1e-3 }
         pub(crate) fn beta__hager__eta() -> f64 { 1e-2 }
     }
 }
 
 impl Settings {
-    pub fn has_verbosity(&self, level: i32) -> bool { true } // FIXME
+    pub fn has_verbosity(&self, _level: i32) -> bool { true } // FIXME
 }
 
 /* ****************************************
@@ -710,6 +714,12 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
                     },
                 );
 
+            // NOTE: Under our scheme where direction is normalized,
+            //       the previous alpha itself is a suitable guess.
+            let guess_alpha =
+                saved.alpha
+                .min(settings.alpha_guess_max.unwrap_or(::std::f64::INFINITY));
+
             match settings.linesearch {
                 settings::Linesearch::Acgsd(ref settings) => {
                     match ::linesearch::linesearch(
@@ -764,7 +774,9 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
         if past_directions.len() > 4 {
             past_directions.pop_back();
         };
+
         last_last = Some(Last { direction, d_value, d_position, d_gradient, ls_failed });
+
         last_saved = match ls_failed {
             true => saved.clone(),
             false => {

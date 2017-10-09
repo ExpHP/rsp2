@@ -25,4 +25,6 @@ pub(crate) mod linesearch;
 pub(crate) mod hager_ls;
 pub use ::acgsd::acgsd;
 pub use ::hager_ls::linesearch;
+pub mod exact_ls;
+pub use ::exact_ls::linesearch as exact_ls;
 pub(crate) mod reporting;
