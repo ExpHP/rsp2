@@ -34,25 +34,25 @@ macro_rules! cartesian {
 /// implementation detail, go away
 macro_rules! cartesian__ {
 
-	(@product::next([$($token:tt)+] $($rest:tt)*) -> $cb:tt)
+    (@product::next([$($token:tt)+] $($rest:tt)*) -> $cb:tt)
     => { cartesian__!{ @product::unpack([$($token)+] $($rest)*) -> $cb } };
     // base case; direct product of no arguments
-	(@product::next() -> ($mac:ident!($($args:tt)*)))
+    (@product::next() -> ($mac:ident!($($args:tt)*)))
     => {$mac!{$($args)*}};
 
-	// Each direct product in the invocation incurs a fixed number of recursions
+    // Each direct product in the invocation incurs a fixed number of recursions
     //  as we replicate the macro.  First, we must smash anything we want to replicate
     //  into a single tt that can be matched without repetitions.  Do this to `rest`.
-	(@product::unpack([$($token:tt)*] $($rest:tt)*) -> $cb:tt)
+    (@product::unpack([$($token:tt)*] $($rest:tt)*) -> $cb:tt)
     => {cartesian__!{ @product::unpack_2([$($token)*] [$($rest)*]) -> $cb }};
 
-	// Replicate macro for each token.
-	(@product::unpack_2([$($token:tt)*] $rest:tt) -> $cb:tt)
+    // Replicate macro for each token.
+    (@product::unpack_2([$($token:tt)*] $rest:tt) -> $cb:tt)
     => { $( cartesian__!{ @product::unpack_3($token $rest) -> $cb } )* };
 
-	// Expand the unparsed arguments back to normal;
+    // Expand the unparsed arguments back to normal;
     // add the token into the macro call
-	(@product::unpack_3($token:tt [$($rest:tt)*]) -> ($mac:ident!($($args:tt)*)))
+    (@product::unpack_3($token:tt [$($rest:tt)*]) -> ($mac:ident!($($args:tt)*)))
     => {cartesian__!{ @product::next($($rest)*) -> ($mac!($($args)*$token)) }};
 }
 
