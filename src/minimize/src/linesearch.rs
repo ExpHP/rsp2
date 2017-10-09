@@ -1,27 +1,28 @@
 use ::either::{Either, Left, Right};
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 #[derive(Serialize, Deserialize)]
+#[serde(rename_all="kebab-case")]
 pub struct Settings {
+    #[serde(default = "defaults::iteration_limit")]
     pub iteration_limit: u32,
-    pub no_force_tol: f64,
-    pub weak_force_tol: f64,
-    pub armijo_threshold: f64,
-    pub curvature_threshold: f64,
+    #[serde(default = "defaults::armijo_coeff")]
+    pub armijo_coeff: f64,
+    #[serde(default = "defaults::curvature_coeff")]
+    pub curvature_coeff: f64,
+}
+
+mod defaults {
+    pub fn iteration_limit() -> u32 { 8 }
+    pub fn armijo_coeff() -> f64 { 1e-4 }
+    pub fn curvature_coeff() -> f64 { 1e-1 }
 }
 
 impl Settings { pub fn new() -> Settings { Default::default() } }
-impl Default for Settings {
-    fn default() -> Settings {
-        Settings {
-            iteration_limit: 8,
-            no_force_tol: 0.0,
-            weak_force_tol: 0.0,
-            armijo_threshold: 1e-4,
-            curvature_threshold: 1e-1,
-        }
-    }
-}
+impl Default for Settings { fn default() -> Settings { from_json!({}) } }
+#[test] fn test_settings_default() { Settings::default(); }
+
+impl Settings { pub fn validate(&self) { /* TODO */ } }
 
 /// Holds information about linesearch boundaries
 #[derive(Debug, Copy, Clone)]
@@ -63,23 +64,23 @@ where F: FnMut(f64) -> Result<(f64, f64), E>,
 
     // Right hand side quantities for the wolfe condition linesearch.
     // - sufficient decrease
-    let armijo = settings.armijo_threshold * slope.abs();
+    let armijo = settings.armijo_coeff * slope.abs();
     // - the curvature condition
-    let curvature = settings.curvature_threshold * slope.abs();
+    let curvature = settings.curvature_coeff * slope.abs();
 
     // lower and upper bounds for minimum finding
     // (hard lower bound, soft upper bound)
-    let mut low = Bound {alpha: 0.0, value, slope};
-    let mut high = Bound {alpha: 0.0, value: 0.0, slope: 0.0};
+    let mut low = Bound { alpha: 0.0, value, slope };
+    let mut high = Bound { alpha: 0.0, value: 0.0, slope: 0.0 };
 
     // running minimum, initialize with the information from alpha = 0
     let mut min_point = (value, 0.0);
 
-    for iteration in 0..settings.iteration_limit
-    {
+    for iteration in 0..settings.iteration_limit {
         // check for errors in alpha
-        if !alpha.is_finite()
-            {return Ok(min_point.1)};
+        if !alpha.is_finite() {
+            return Ok(min_point.1)
+        };
 
         // update value and slope
         let tup = compute(alpha)?;
@@ -87,7 +88,7 @@ where F: FnMut(f64) -> Result<(f64, f64), E>,
         slope = tup.1;
 
         // check the wolfe conditions
-        if value <= initial_value - alpha * armijo {    // armijo
+        if value <= initial_value - alpha * armijo { // armijo
             if slope.abs() <= curvature { // curvature
                 return Ok(alpha);
             }
@@ -99,8 +100,7 @@ where F: FnMut(f64) -> Result<(f64, f64), E>,
         }
 
         // update the bounding interval for the minimum
-        if value < low.value && slope < 0.0 && alpha < high.alpha
-        {
+        if value < low.value && slope < 0.0 && alpha < high.alpha {
             low = Bound {alpha, value, slope};
         } else {
             high = Bound {alpha, value, slope};

@@ -10,7 +10,6 @@ use ::std::collections::VecDeque;
 
 use ::either::{Either, Left, Right};
 
-pub use self::settings::Beta as BetaSettings;
 pub use self::settings::Settings;
 pub mod settings {
     //! Please do not manually construct anything in here.
@@ -52,7 +51,7 @@ pub mod settings {
     #[derive(Debug, Clone, PartialEq)]
     #[serde(rename_all="kebab-case")]
     pub enum Linesearch {
-        Acgsd{},
+        Acgsd(::linesearch::Settings),
         Hager(::hager_ls::Settings),
     }
 
@@ -72,7 +71,7 @@ pub mod settings {
     impl Linesearch {
         pub fn validate(&self) {
             match *self {
-                Linesearch::Acgsd{} => {},
+                Linesearch::Acgsd(ref settings) => settings.validate(),
                 Linesearch::Hager(ref settings) => settings.validate(),
             }
         }
@@ -623,7 +622,7 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
                 // FIXME messy garbage, these two methods are probably far more
                 //       similar than the current code makes them appear
                 match settings.beta {
-                    BetaSettings::Hager { eta } => {
+                    settings::Beta::Hager { eta } => {
                         use self::hager_beta::Input;
 
                         let beta = hager_beta::compute(Input {
@@ -633,7 +632,7 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
                         break 'use_dir direction;
                     },
 
-                    BetaSettings::Acgsd { downhill_min } => {
+                    settings::Beta::Acgsd { downhill_min } => {
                         let beta = calc_beta_acgsd(&saved.gradient, last_d_position, last_d_gradient);
 
                         let V(direction) = beta * v(last_d_position) - v(&saved.gradient);
@@ -711,11 +710,27 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
                     },
                 );
 
-            ::hager_ls::linesearch(
-                &Default::default(),
-                saved.alpha,
-                &mut *memoized,
-            )?
+            match settings.linesearch {
+                settings::Linesearch::Acgsd(ref settings) => {
+                    match ::linesearch::linesearch(
+                        settings,
+                        saved.alpha,
+                        &mut *memoized,
+                    ) {
+                        Ok(x) => x,
+                        Err(Left(e)) => Err(Error::from(e))?,
+                        Err(Right(e)) => Err(e)?,
+                    }
+                },
+                settings::Linesearch::Hager(ref settings) => {
+                    ::hager_ls::linesearch(
+                        settings,
+                        saved.alpha,
+                        &mut *memoized,
+                    )?
+                },
+            }
+
         }; // let next_alpha = { ... }
         let next_point = match next_alpha {
             a if a == ls_alpha => ls_point, // extraneous computation avoided!
