@@ -1,5 +1,11 @@
-
-
+//! # What is this?
+//!
+//! The C++ metropolis code converted to Rust.
+//!
+//! # Why keep it?
+//!
+//! In case I ever recall why I felt so inclined to write
+//! it in the first place.
 
 struct SmallCache<A, R, F> {
     max_len: usize,

@@ -1,3 +1,20 @@
+//! # What is this?
+//!
+//! Code that I recovered from the dark and smelly depths of
+//! some old code that I had written for solving HNF matrices.
+//! It is shamelessly optimized beyond reason.
+//!
+//! It is all brute-force and does not use that trick I proved
+//! earlier involving the generalized Chinese Remainder Theorem,
+//! probably because it is too complicated.
+//!
+//! # Why keep it?
+//!
+//! It is known to work and serves as a good starting point if
+//! I want to add arbitrary supercell matrices in the future.
+//!
+//! ...uh...too bad it doesn't do 3D yet. >_>
+
 mod vec {
     use ::std::fmt;
 

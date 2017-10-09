@@ -141,7 +141,7 @@ mod parse_eigenvector_npy {
 
 // FIXME shameful copypasta
 // the only tangible difference is that:
-//   * eigenvector.npy is shape (l, m, n, n)
+//   * eigenvector.npy is shape (l, m, n, n, 2)
 //   * eigenvalue.npy  is shape (l, m, n)
 mod parse_eigenvalue_npy {
     use ::nom::*;

@@ -8,11 +8,6 @@ extern crate lammps_sys;
 extern crate ndarray;
 #[macro_use] extern crate log;
 
-pub mod structure_tools;
-//pub mod algo;
-
-pub mod metropolis; // HACK only here to compile-test
-
 use ::std::os::raw::{c_void, c_int, c_char, c_double};
 use ::std::ffi::{CString, CStr, NulError};
 use ::sp2_slice_of_array::prelude::*;
@@ -385,23 +380,6 @@ mod memory {
 
 #[cfg(test)]
 mod tests {
-    use sp2_slice_of_array::prelude::*;
-
-    fn lammps() -> Result<super::Lammps, super::Error> {
-        let a = 2.46;
-        let (xx,  _,  _) = (a, 0.0, 0.0);
-        let (xy, yy,  _) = (-a/2.0, a*0.5*3f64.sqrt(), 0.0);
-        let (xz, yz, zz) = (0.0, 0.0, 10.0);
-        let fracs = vec![
-            0.0, 0.0, 0.0,
-            2./3., 1./3., 0.0
-        ];
-        let (((xx,yy,zz),(xy,xz,yz)), fracs) = ::structure_tools::supercell_diagonal((7,7,1), ((xx,yy,zz), (xy,xz,yz)), &fracs);
-        let carts = ::structure_tools::cartesian(((xx,yy,zz),(xy,xz,yz)), &fracs);
-
-        let lattice = [[xx, 0., 0.], [xy, yy, 0.], [xz, yz, zz]];
-        super::Lammps::new_carbon(&lattice, carts.nest())
-    }
-
-
+    // NOTE: this is now mostly tested indirectly
+    //       through the other crates that use it.
 }
