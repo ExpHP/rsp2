@@ -1,3 +1,4 @@
+// HERE BE DRAGONS
 
 use ::sp2_slice_math::{vnorm, vdot, V, v, vnormalize};
 use ::stop_condition::prelude::*;
@@ -7,34 +8,96 @@ use ::ordered_float::NotNaN;
 use ::std::fmt::Write;
 use ::std::collections::VecDeque;
 
-#[derive(Serialize, Deserialize)]
-#[derive(Debug, Clone, PartialEq)]
-pub struct Settings {
-    #[serde(rename = "stop-condition")]
-    stop_condition: StopConditionSettings,
+use ::either::{Either, Left, Right};
+
+pub use self::settings::Beta as BetaSettings;
+pub use self::settings::Settings;
+pub mod settings {
+    //! Please do not manually construct anything in here.
+    //! None of this is future-safe.
+    //!
+    //! Deserialize from a JSON literal instead.
+
+    pub use super::stop_condition::Cereal as StopCondition;
+
+    #[derive(Serialize, Deserialize)]
+    #[derive(Debug, Clone, PartialEq)]
+    #[serde(rename_all="kebab-case")]
+    pub struct Settings {
+        #[serde()] pub(super) stop_condition: StopCondition,
+        #[serde(default)] pub(super) beta: Beta,
+        #[serde(default)] pub(super) linesearch: Linesearch,
+    }
+
+    #[derive(Serialize, Deserialize)]
+    #[derive(Debug, Clone, PartialEq)]
+    #[serde(rename_all="kebab-case")]
+    pub enum Beta {
+        Acgsd {
+            /// The direction searched will always point at least this much downhill.
+            #[serde(default="defaults::beta__acgsd__downhill_min")]
+            downhill_min: f64,
+        },
+
+        Hager {
+            // NOTE: This seems to play a role similar to Acgsd.downhill_min
+            //        but it isn't *quite* the same...
+            /// This... I'm not sure what this does.
+            #[serde(default="defaults::beta__hager__eta")]
+            eta: f64,
+        },
+    }
+
+    #[derive(Serialize, Deserialize)]
+    #[derive(Debug, Clone, PartialEq)]
+    #[serde(rename_all="kebab-case")]
+    pub enum Linesearch {
+        Acgsd{},
+        Hager(::hager_ls::Settings),
+    }
+
+    impl Beta {
+        pub fn validate(&self) {
+            match *self {
+                Beta::Acgsd { downhill_min } => {
+                    assert!(0.0 < downhill_min && downhill_min <= 1.0);
+                },
+                Beta::Hager { eta } => {
+                    assert!(0.0 < eta);
+                },
+            }
+        }
+    }
+
+    impl Linesearch {
+        pub fn validate(&self) {
+            match *self {
+                Linesearch::Acgsd{} => {},
+                Linesearch::Hager(ref settings) => settings.validate(),
+            }
+        }
+    }
+
+    impl Default for Beta {
+        fn default() -> Self { from_json!({"hager": {}}) }
+    }
+    #[test] fn test_beta_default() { Beta::default(); }
+
+    impl Default for Linesearch {
+        fn default() -> Self { from_json!({"hager": {}}) }
+    }
+    #[test] fn test_linesearch_default() { Linesearch::default(); }
+
+    // Default functions, since literals aren't supported (serde gh #368)
+    mod defaults {
+        #![allow(non_snake_case)]
+        pub(crate) fn beta__acgsd__downhill_min() -> f64 { 1e-3 }
+        pub(crate) fn beta__hager__eta() -> f64 { 1e-2 }
+    }
 }
 
 impl Settings {
     pub fn has_verbosity(&self, level: i32) -> bool { true } // FIXME
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Objectives {
-    /// Signed change in potential over the previous iteration.
-    /// (`None` before the first iteration)
-    pub delta_value: Option<f64>,
-    /// Max atomic force for the current structure.
-    pub grad_max: f64,
-    /// Norm of force for the current structure.
-    /// (This scales with sqrt(N), which makes it pretty useless actually.
-    ///  we should fix that...)
-    pub grad_norm: f64,
-    /// Norm of force, rescaled as an intensive property.
-    pub grad_rms: f64,
-    /// The iteration that is about to occur.
-    /// This index is 1-based since we're counting the fence segments,
-    ///  not the fenceposts.
-    pub iterations: u32,
 }
 
 /* ****************************************
@@ -161,10 +224,30 @@ $$
 */
 
 pub use self::stop_condition::Rpn as StopCondition;
-pub use self::stop_condition::Cereal as StopConditionSettings;
+
+pub(crate) use self::stop_condition::Objectives;
+
 pub mod stop_condition {
     use ::stop_condition::prelude::*;
-    use super::Objectives;
+
+    #[derive(Debug, Clone, PartialEq)]
+    pub(crate) struct Objectives {
+        /// Signed change in potential over the previous iteration.
+        /// (`None` before the first iteration)
+        pub delta_value: Option<f64>,
+        /// Max atomic force for the current structure.
+        pub grad_max: f64,
+        /// Norm of force for the current structure.
+        /// (This scales with sqrt(N), which makes it pretty useless actually.
+        ///  we should fix that...)
+        pub grad_norm: f64,
+        /// Norm of force, rescaled as an intensive property.
+        pub grad_rms: f64,
+        /// The iteration that is about to occur.
+        /// This index is 1-based since we're counting the fence segments,
+        ///  not the fenceposts.
+        pub iterations: u32,
+    }
 
     #[derive(Serialize, Deserialize)]
     #[derive(Debug, Copy, Clone, PartialEq)]
@@ -264,55 +347,44 @@ pub trait DiffFn<E>: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E> { }
 impl<E, F> DiffFn<E> for F
 where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E> { }
 
-#[derive(Serialize, Deserialize)]
-#[derive(Debug, Clone)]
-pub enum Error<E> {
-    /// General variant for unrecoverable errors that are not worth panicking on,
-    /// and that are probably not worth matching on the caller.
-    Generic(String),
-    /// The potential produced an error.
-    ComputeError(E),
-}
-impl<E> Error<E> {
-    fn string(s: &str) -> Error<E> { Error::Generic(s.to_string()) }
-}
-impl<E> From<E> for Failure<E> {
-    fn from(e: E) -> Self { Failure::from_error(Error::ComputeError(e)) }
+/// `linesearch` error type
+error_chain! {
+    types {
+        Error, ErrorKind, ResultExt, CgResult;
+    }
+    links {
+        LsError(::linesearch::Error, ::linesearch::ErrorKind);
+    }
+    errors { }
 }
 
-use linesearch::Error as LsError;
-impl<E> From<LsError<E>> for Failure<E> {
-    fn from(e: LsError<E>) -> Self { Failure::from_error(match e {
-        LsError::ComputeError(e) => Error::ComputeError(e),
-        LsError::Generic(s) => Error::string(&s),
-        LsError::NoImprovement => Error::string("linesearch failure"),
-        LsError::Uphill => panic!("bug! (acgsd tried to linesearch uphill!)"),
-        LsError::NonFiniteAlpha => panic!("unused code path; tested elsewhere")
-    })}
+struct ComputeError<E>(E);
+impl<E> From<Error> for Failure<E> {
+    fn from(e: Error) -> Self {
+        Failure {
+            best_position: None,
+            error: Left(e),
+        }
+    }
+}
+impl<E> From<ComputeError<E>> for Failure<E> {
+    fn from(ComputeError(e): ComputeError<E>) -> Self {
+        Failure {
+            best_position: None,
+            error: Right(e),
+        }
+    }
 }
 
 /// An error type extended with some additional data.
-#[derive(Serialize, Deserialize)]
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Failure<E> {
     /// The best position found prior to the failure, for those who feel exceptionally lucky.
     ///
     /// Might not always be available due to corners cut in error branches
     /// inside the acgsd implementation.
     pub best_position: Option<Vec<f64>>,
-    pub error: Error<E>,
-}
-
-impl<E> Failure<E> {
-    // Used by `?` in acgsd
-    fn from_error(e: Error<E>) -> Self {
-        Failure {
-            // Best we can do at this high level.  To recover best positions
-            // in more cases, we'll need to replace a lot of `?` with explicit returns.
-            best_position: None,
-            error: e,
-        }
-    }
+    pub error: Either<Error, E>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -328,6 +400,47 @@ pub struct Output {
     __no_full_destructure: (),
 }
 
+// These *could* be declared inside acgsd()
+// but I think the function is quite long enough.
+pub(crate) mod internal_types {
+
+    #[derive(Debug, Clone)]
+    pub(crate) struct Point {
+        pub(crate) position: Vec<f64>,
+        pub(crate) gradient: Vec<f64>,
+        pub(crate) value: f64,
+    }
+
+    #[derive(Debug, Clone)]
+    pub(crate) struct Saved {
+        pub(crate) alpha: f64,
+        pub(crate) position: Vec<f64>,
+        pub(crate) gradient: Vec<f64>,
+        pub(crate) value: f64,
+    }
+
+    impl Saved {
+        pub(crate) fn into_point(self) -> Point {
+            let Saved { position, gradient, value, .. } = self;
+            Point { position, gradient, value }
+        }
+        pub(crate) fn to_point(&self) -> Point { self.clone().into_point() }
+    }
+
+    #[derive(Debug, Clone)]
+    pub(crate) struct Last {
+        pub(crate) direction: Vec<f64>, // direction searched (normalized)
+
+        // NOTE: These next three are all zero when linesearch has failed.
+        //       This can be a problem for d_value in particular.
+        pub(crate) d_value: f64,          // change in value
+        pub(crate) d_position: Vec<f64>,  // change in position
+        pub(crate) d_gradient: Vec<f64>,  // change in gradient
+
+        pub(crate) ls_failed: bool,       // linesearch failed?
+    }
+}
+
 #[inline(never)]
 pub fn acgsd<E, F: DiffFn<E>>(
     settings: &Settings,
@@ -336,55 +449,15 @@ pub fn acgsd<E, F: DiffFn<E>>(
 ) -> Result<Output, Failure<E>>
 where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
 {
+    use self::internal_types::{Point, Saved, Last};
+
     let stop_condition = self::stop_condition::Rpn::from_cereal(&settings.stop_condition);
 
     let mut compute_point = |position: &[f64]| {
         let position = position.to_vec();
-        let (value, gradient) = compute(&position)?;
-        // FIXME type annotation is only due to dumb conversions
-        //       performed where map_err would be more robust
-        Ok::<_,E>(Point {position, value, gradient})
+        let (value, gradient) = compute(&position).map_err(ComputeError)?;
+        Ok(Point {position, value, gradient})
     };
-
-// /////////////////////////////////////////////////////////////////////////////
-// Types                                                                      //
-// /////////////////////////////////////////////////////////////////////////////
-
-    #[derive(Debug,Clone)]
-    struct Point {
-        position: Vec<f64>,
-        gradient: Vec<f64>,
-        value: f64,
-    };
-
-    #[derive(Debug,Clone)]
-    struct Saved {
-        alpha: f64,
-        position: Vec<f64>,
-        gradient: Vec<f64>,
-        value: f64,
-    };
-
-    impl Saved {
-        pub fn into_point(self) -> Point {
-            let Saved { position, gradient, value, .. } = self;
-            Point { position, gradient, value }
-        }
-        pub fn to_point(&self) -> Point { self.clone().into_point() }
-    }
-
-    #[derive(Debug,Clone)]
-    struct Last {
-        direction: Vec<f64>, // direction searched (normalized)
-
-        // NOTE: These next three are all zero when linesearch has failed.
-        //       This can be a problem for d_value in particular.
-        d_value: f64,          // change in value
-        d_position: Vec<f64>,  // change in position
-        d_gradient: Vec<f64>,  // change in gradient
-
-        ls_failed: bool,       // linesearch failed?
-    }
 
 // /////////////////////////////////////////////////////////////////////////////
 // Loop start                                                                 //
@@ -545,32 +618,31 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
                 ..
             }) = &last
             {
-                let use_hager_beta = true; // FIXME settings
-                let eta = 0.01; // FIXME settings
+                let from_gradient = &saved.gradient[..];
 
-                if use_hager_beta {
-                    use self::hager_beta::Input;
+                // FIXME messy garbage, these two methods are probably far more
+                //       similar than the current code makes them appear
+                match settings.beta {
+                    BetaSettings::Hager { eta } => {
+                        use self::hager_beta::Input;
 
-                    let from_gradient = &saved.gradient[..];
-
-                    let beta = hager_beta::compute(Input {
-                        eta: eta,
-                        last_direction,
-                        last_d_gradient,
-                        from_gradient,
-                    });
-                    let V(direction): V<Vec<f64>> = beta * v(last_direction) - v(from_gradient);
-                    break 'use_dir direction;
-
-                } else {
-                    let beta = calc_beta_acgsd(&saved.gradient, last_d_position, last_d_gradient);
-
-                    let V(direction) = beta * v(last_d_position) - v(&saved.gradient);
-
-                    // use this direction unless it is almost directly uphill
-                    if !should_revert_acgsd(&saved.gradient, &direction) {
+                        let beta = hager_beta::compute(Input {
+                            eta, last_direction, last_d_gradient, from_gradient,
+                        });
+                        let V(direction): V<Vec<f64>> = beta * v(last_direction) - v(from_gradient);
                         break 'use_dir direction;
-                    }
+                    },
+
+                    BetaSettings::Acgsd { downhill_min } => {
+                        let beta = calc_beta_acgsd(&saved.gradient, last_d_position, last_d_gradient);
+
+                        let V(direction) = beta * v(last_d_position) - v(&saved.gradient);
+
+                        // use this direction as long as it is downhill enough
+                        if vdot(from_gradient, &direction) <= -downhill_min * vnorm(from_gradient) * vnorm(&direction) {
+                            break 'use_dir direction;
+                        }
+                    },
                 }
             }
 
@@ -607,19 +679,16 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
         //  the displacement returned will naturally be zero.
         // FIXME type annotation is only due to dumb conversions
         //       performed where map_err would be more robust
-        type LsErr<EE> = ::linesearch::Error<EE>;
         let next_alpha = {
             // (FIXME: we memoize the compute function because the linesearch
             //         is currently a bit messy and sometimes asks for a point
             //         more than once.  These are really issues with the linesearch,
             //         and ought not to be the caller's concern)
-            let mut memoized: Box<FnMut(f64) -> Result<(f64, f64), LsErr<E>>>
+            let mut memoized: Box<FnMut(f64) -> Result<(f64, f64), ComputeError<E>>>
                 = ::util::cache::hash_memoize_result_by_key(
                     |&alpha| ::ordered_float::NotNaN::new(alpha).unwrap(),
                     |alpha| {
-                        let point = compute_in_dir(alpha, &direction)
-                            // HACK (error from other ls module)
-                            .map_err(::linesearch::Error::ComputeError)?;
+                        let point = compute_in_dir(alpha, &direction)?;
                         let slope = vdot(&point.gradient, &direction);
 
                         // update cache, checking values to predict which
@@ -642,10 +711,10 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
                     },
                 );
 
-            ::new_linesearch::linesearch::<LsErr<E>, _>(
+            ::hager_ls::linesearch(
                 &Default::default(),
                 saved.alpha,
-                |x| memoized(x),
+                &mut *memoized,
             )?
         }; // let next_alpha = { ... }
         let next_point = match next_alpha {
@@ -659,21 +728,6 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
         if ls_failed {
             if let Some(Last { ls_failed: true, .. }) = last {
                 return fatal("linesearch failure (second)", saved.alpha, saved.to_point());
-                // return fatal(
-                //     "linesearch failure (second)", saved.alpha, saved.point(),
-                //     [&](ostream &out) {
-                //         let test_dir = saved.gradient;
-                //         vnormalize(test_dir);
-
-                //         double numerical = util::central_difference<9, double>(
-                //             [&](double a) {
-                //                 return compute_in_dir(a, test_dir).value;
-                //             }, 0.0, 1e-3);
-
-                //         out << "Numerical gradient: "
-                //             << setprecision(14) << numerical << endl;
-                //     }
-                // );
             } else {
                 warning(
                     "Linesearch failure, switching to steepest descent",
@@ -723,13 +777,6 @@ fn max_norm(v: &[f64]) -> f64 {
     let mut acc = 0f64;
     for x in v { acc = acc.max(x.abs()); }
     acc
-}
-
-/// whether the search should revert to steepest descent (ACGSD)
-fn should_revert_acgsd(gradient: &[f64], direction: &[f64]) -> bool {
-    // Continue as long as the search direction is at least slightly downhill.
-    // Otherwise, revert.
-    vdot(gradient, direction) > -1e-3 * vnorm(gradient) * vnorm(direction)
 }
 
 #[cfg(test)]
@@ -896,7 +943,7 @@ mod tests {
 
     #[test]
     fn lj() {
-        use ::sp2_slice_math::{v,V};
+        use ::sp2_slice_math::{v, V};
         use ::test_functions::n_dee::{HyperLennardJones, OnceDifferentiable, Sum};
         use ::util::random as urand;
         let d = 10;
