@@ -19,13 +19,16 @@ sp2-byte-tools-plus-float = { path = "src/util/byte-tools-plus-float" }
 sp2-kets         = { path = "src/util/kets" }
 sp2-util-macros  = { path = "src/util/macros" }
 sp2-tempdir      = { path = "src/util/tempdir" }
-sp2-linalg       = { path = "src/util/linalg" }
+sp2-linalg       = { path = "src/util/linalg" } # FIXME  broken
+sp2-tasks        = { path = "src/tasks" }
 
 # FIXME these should be dev-dependencies
 #       but aren't due to rust-lang-nursery/rls#169
 rand = "0.3"
 log = "0.3"
-serde_json = "1.0"
+serde_json = "1"
+serde_yaml = "0.7"
 env_logger = "0.4"
+clap = "2"
 
 [workspace]

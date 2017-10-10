@@ -1,0 +1,10 @@
+supercell-relax: [6, 6, 1]
+supercell-phonopy: [6, 6, 1]
+displacement-distance: 1e-3
+neg-frequency-threshold: 1e-3
+cg:
+  stop-condition: any:
+    - grad-rms: 1e-8
+    - iterations: 150
+  alpha-guess-max: 1e-1
+  alpha-guess-first: 1e-2
