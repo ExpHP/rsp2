@@ -265,7 +265,7 @@ pub struct Lammps {
 impl Lammps {
 
     pub fn new_carbon(structure: CoordStructure) -> Result<Lammps, Error> {
-        let lattice = structure.lattice().matrix();
+        let lattice = *structure.lattice().matrix();
         let carts = structure.to_carts();
 
         let lmp = ::LammpsOwner::new(&["lammps", "-screen", "none"])?;

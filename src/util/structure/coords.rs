@@ -81,7 +81,7 @@ mod tests {
         use ::Coords::{Fracs, Carts};
 
         // a matrix not equal to its transpose
-        let lattice = Lattice::new([
+        let lattice = Lattice::new(&[
             [0.0, 1.0, 0.0],
             [0.0, 0.0, 1.0],
             [1.0, 0.0, 0.0],

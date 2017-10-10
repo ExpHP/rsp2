@@ -1,11 +1,12 @@
 use ::sp2_array_utils::{dot, MatrixInverseExt};
 use ::std::ops::Mul;
+use ::std::rc::Rc;
 
 /// A 3x3 matrix with a precomputed inverse.
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 pub struct Lattice {
-    matrix: Box<[[f64; 3]; 3]>,
-    inverse: Box<[[f64; 3]; 3]>,
+    matrix: Rc<[[f64; 3]; 3]>,
+    inverse: Rc<[[f64; 3]; 3]>,
 }
 
 // Manual impl that doesn't compare the inverse.
@@ -23,24 +24,27 @@ impl Lattice {
     //      make `inverse_matrix` and `inverted` return Results
     //  * have new() return Result, with `inverse` strictly computed as it is now
     /// Create a lattice from a matrix where the rows are lattice vectors.
-    pub fn new(matrix: [[f64; 3]; 3]) -> Self {
-        let inverse = Box::new(matrix.inverse());
-        let matrix = Box::new(matrix);
+    pub fn new(matrix: &[[f64; 3]; 3]) -> Self {
+        let inverse = Rc::new(matrix.inverse());
+        let matrix = Rc::new(*matrix);
         Self { matrix, inverse }
     }
 
     /// Invert the lattice.
-    pub fn inverted(self) -> Self {
+    pub fn inverted(&self) -> Self {
+        // FIXME: *strictly speaking* this violates the invariant that 'inverse'
+        //        is uniquely determined by 'matrix', which our PartialEq
+        //        relies on.
         Self {
-            matrix: self.inverse,
-            inverse: self.matrix,
+            matrix: self.inverse.clone(),
+            inverse: self.matrix.clone(),
         }
     }
 
     /// Matrix where lattice vectors are rows.
-    pub fn matrix(&self) -> [[f64; 3]; 3] { *self.matrix }
+    pub fn matrix(&self) -> &[[f64; 3]; 3] { &self.matrix }
     /// Inverse of the matrix where lattice vectors are rows.
-    pub fn inverse_matrix(&self) -> [[f64; 3]; 3] { *self.inverse }
+    pub fn inverse_matrix(&self) -> &[[f64; 3]; 3] { &self.inverse }
 }
 
 /// Helper constructors
@@ -61,7 +65,7 @@ impl Lattice {
     pub fn cubic(a: f64) -> Self { Self::orthorhombic(a, a, a) }
 
     /// An orthorhombic lattice ((a, b, c), (90, 90, 90))
-    pub fn orthorhombic(a: f64, b: f64, c: f64) -> Self { Self::new([[a, 0., 0.], [0., b, 0.], [0., 0., c]]) }
+    pub fn orthorhombic(a: f64, b: f64, c: f64) -> Self { Self::new(&[[a, 0., 0.], [0., b, 0.], [0., 0., c]]) }
 }
 
 /// Defaults to the identity matrix.
@@ -77,21 +81,21 @@ impl<'a, 'b> Mul<&'b Lattice> for &'a Lattice {
     fn mul(self, other: &'b Lattice) -> Lattice {
         // Let the inverse be computed from scratch,
         // for sustained accuracy after many products
-        self * &other.matrix()
+        self * other.matrix()
     }
 }
 
 impl<'a, 'b> Mul<&'b [[f64; 3]; 3]> for &'a Lattice {
     type Output = Lattice;
     fn mul(self, other: &'b [[f64; 3]; 3]) -> Lattice {
-        Lattice::new(dot(&self.matrix(), other))
+        Lattice::new(&dot(self.matrix(), other))
     }
 }
 
 impl<'a, 'b> Mul<&'b Lattice> for &'a [[f64; 3]; 3] {
     type Output = Lattice;
     fn mul(self, other: &'b Lattice) -> Lattice {
-        Lattice::new(dot(self, &other.matrix()))
+        Lattice::new(&dot(self, other.matrix()))
     }
 }
 

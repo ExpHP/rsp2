@@ -60,7 +60,7 @@ fn perturbed_graphene() {
     let a = 2.46;
     let r3 = 3f64.sqrt();
     let unit_structure = CoordStructure::new_coords(
-        Lattice::new([
+        Lattice::new(&[
             [     a,      0.0,  0.0],
             [-0.5*a, 0.5*r3*a,  0.0],
             [   0.0,      0.0, 10.0],

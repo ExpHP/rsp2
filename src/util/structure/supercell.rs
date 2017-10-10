@@ -128,7 +128,7 @@ impl SupercellToken {
         };
         let num_atoms = coords.len() / num_sc;
 
-        let primitive_lattice = &integer_lattice.inverse_matrix() * &lattice;
+        let primitive_lattice = integer_lattice.inverse_matrix() * &lattice;
 
         let out_carts = {
             let neg_offsets = {
@@ -205,9 +205,8 @@ fn sc_indices(periods: [u32; 3]) -> Vec<[u32; 3]> {
 
 // supercell image offsets in the library's preferred order
 fn sc_lattice_vecs(periods: [u32; 3], lattice: &Lattice) -> Vec<[f64; 3]> {
-    let matrix = lattice.matrix();
     sc_indices(periods).into_iter()
-        .map(|idx| dot(&[idx[0] as f64, idx[1] as f64, idx[2] as f64], &matrix))
+        .map(|idx| dot(&[idx[0] as f64, idx[1] as f64, idx[2] as f64], lattice.matrix()))
         .collect()
 }
 
@@ -254,7 +253,7 @@ mod tests {
             [ 0.0,  0.5, 0.5], // cart: [ 0.0, +1.0, +1.0]
         ]);
 
-        let original = Structure::new_coords(Lattice::new(lattice), coords);
+        let original = Structure::new_coords(Lattice::new(&lattice), coords);
         let (supercell, sc_token) = ::supercell::diagonal((4, 2, 2), original.clone());
         let deconstructed = sc_token.deconstruct(1e-10, supercell.clone()).unwrap();
 

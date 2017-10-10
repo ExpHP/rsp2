@@ -87,7 +87,7 @@ pub mod disp_yaml {
                 (coordinates, Meta { symbol, mass }))
             .unzip();
 
-        let structure = Structure::new(Lattice::new(lattice), Coords::Fracs(carts), meta);
+        let structure = Structure::new(Lattice::new(&lattice), Coords::Fracs(carts), meta);
 
         let displacements =
             displacements.into_iter()

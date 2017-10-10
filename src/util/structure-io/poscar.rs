@@ -92,7 +92,7 @@ pub fn load_carbon<R>(f: R) -> io::Result<CoordStructure>
     }
 
     // lattice
-    let mut lattice = [[0f64; 3]; 3];
+    let lattice = &mut [[0f64; 3]; 3];
     {
         let lattice_lines = lines.by_ref().take(3).collect::<Vec<_>>();
         for (i, line) in lattice_lines.into_iter().enumerate() {
