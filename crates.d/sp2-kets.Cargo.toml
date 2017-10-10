@@ -1,0 +1,12 @@
+[package]
+name = "sp2-kets"
+version = "0.1.0"
+authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+!!lazy_static
+!!serde
+!!serde_derive

@@ -1,0 +1,21 @@
+[package]
+name = "sp2-phonopy-io"
+version = "0.1.0"
+authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+!!error-chain
+!!nom
+!!serde
+!!serde-derive
+!!serde-yaml
+
+!!sp2-tempdir
+!!sp2-structure
+!!sp2-structure-io
+!!sp2-kets
+!!sp2-slice-of-array
+!!sp2-byte-tools-plus-float

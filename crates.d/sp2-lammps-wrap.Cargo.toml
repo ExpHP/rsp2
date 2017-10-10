@@ -1,0 +1,14 @@
+[package]
+name = "sp2-lammps-wrap"
+version = "0.1.0"
+authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+!!log
+!!ndarray
+!!lammps-sys
+!!sp2-slice-of-array
+!!sp2-structure

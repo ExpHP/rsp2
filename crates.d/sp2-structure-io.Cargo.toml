@@ -1,0 +1,12 @@
+[package]
+name = "sp2-structure-io"
+version = "0.1.0"
+authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+!!itertools
+
+!!sp2-structure

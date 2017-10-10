@@ -1,0 +1,13 @@
+[package]
+name = "sp2-structure"
+version = "0.1.0"
+authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+!!ordered-float
+
+!!sp2-array-utils
+!!sp2-slice-of-array

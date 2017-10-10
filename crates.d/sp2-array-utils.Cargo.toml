@@ -1,0 +1,12 @@
+[package]
+name = "sp2-array-utils"
+version = "0.1.0"
+authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+!!num-traits
+
+!!sp2-assert-close

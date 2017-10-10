@@ -1,0 +1,24 @@
+[package]
+name = "sp2-minimize"
+version = "0.1.0"
+authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
+
+[dependencies]
+!!itertools
+!!log
+!!ordered-float
+!!rand
+!!serde
+!!serde_derive
+!!serde_json
+!!either
+
+!!sp2-array-utils
+!!sp2-assert-close
+!!sp2-slice-math
+!!sp2-util-macros
+
+!!error-chain
+
+# FIXME make this dev-dependencies once rust-lang-nursery/rls#169 is fixed
+!!env_logger

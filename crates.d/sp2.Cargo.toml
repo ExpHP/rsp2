@@ -1,0 +1,21 @@
+[package]
+name = "sp2"
+version = "0.1.0"
+authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
+
+[dependencies]
+
+# Workspace members
+!!WORKSPACE-MEMBERS-AS-PATH-DEPS
+
+# Deps of examples/ and tests/.
+# Some of these could be dev-dependencies, however currently
+#  none of them are due to rust-lang-nursery/rls#169
+!!rand
+!!serde_json
+!!serde_yaml
+!!log
+!!env_logger
+!!clap
+
+[workspace]

@@ -1,0 +1,72 @@
+# Master config file for crates in this workspace.
+#
+# This is a homegrown solution (I'm sorry) to a number of
+# annoying problems with using workspaces. Cargo.toml files
+# in this workspace are generated from source files that
+# contain lines like this:
+#
+#     !!sp2-assert-close
+#     !!itertools
+#
+# When you run the following command in the worspace root:
+#
+#     ./crates gen
+#
+# Cargo.toml files are created with those lines expanded to e.g.
+#
+#     sp2-assert-close = { path = "../../util/assert-close" }
+#     itertools = "0.7"
+#
+# based on metadata in this file.
+
+#--------------------------------------------
+# Specification of all crates in the workspace and their
+# paths relative to the root. The 'crates' script uses this
+# information to generate the necessary relative paths
+# to include when one crate in the workspace depends on
+# another.
+[crates]
+sp2                = "."
+lammps-sys         = "src/lammps-sys"
+sp2-lammps-wrap    = "src/lammps-wrap"
+sp2-tasks          = "src/tasks"
+sp2-minimize       = "src/minimize"
+sp2-phonopy-io     = "src/phonopy-io"
+sp2-array-utils    = "src/util/array"
+sp2-slice-of-array = "src/util/slice-of-array"
+sp2-assert-close   = "src/util/assert-close"
+sp2-structure      = "src/util/structure"
+sp2-structure-io   = "src/util/structure-io"
+sp2-slice-math     = "src/util/slice-math"
+sp2-byte-tools-plus-float = "src/util/byte-tools-plus-float"
+sp2-kets           = "src/util/kets"
+sp2-util-macros    = "src/util/macros"
+sp2-tempdir        = "src/util/tempdir"
+sp2-linalg         = "src/util/linalg"
+#!!INSERTION POINT FOR NEW CRATES!!#
+
+#--------------------------------------------
+# Versions for external dependencies, so that we don't have
+# to look a whole bunch of them up every single time we make
+# a new crate in the workspace.
+#
+# This also makes it easier to migrate the entire workspace
+# to a new version of a dependency.
+[preferred-versions]
+clap = "2"
+either = "1"
+env_logger = "0.4"
+error-chain = "0.11"
+itertools = "0.7"
+lazy_static = "0.2"
+log = "0.3"
+ndarray = "0.10"
+nom = "3"
+num-traits = "0.1"
+ordered-float = "0.5"
+rand = "0.3"
+serde = "1"
+serde_derive = "1"
+serde_json = "1"
+serde_yaml = "0.7"
+tempdir = "0.3"

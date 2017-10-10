@@ -1,0 +1,26 @@
+[package]
+name = "sp2-tasks"
+version = "0.1.0"
+authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+!!sp2-lammps-wrap
+!!sp2-minimize
+!!sp2-structure
+!!sp2-structure-io
+!!sp2-phonopy-io
+!!sp2-array-utils
+!!sp2-slice-of-array
+!!sp2-slice-math
+!!sp2-tempdir
+!!sp2-util-macros
+
+!!serde
+!!serde_json
+!!serde_derive
+!!rand
+!!log
+!!env_logger
