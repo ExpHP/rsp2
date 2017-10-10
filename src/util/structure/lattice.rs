@@ -48,6 +48,8 @@ impl Lattice {
     /// The identity lattice.
     pub fn eye() -> Self { Self::cubic(1.0) }
 
+    pub fn diagonal(vec: &[f64; 3]) -> Self { Self::orthorhombic(vec[0], vec[1], vec[2]) }
+
     // NOTE: Currently there are only helpers for bravais lattices whose
     //       matrix representations are DEAD OBVIOUS.
     //

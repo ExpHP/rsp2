@@ -15,6 +15,7 @@ use ::rand::random;
 use ::sp2_array_utils::vec_from_fn;
 use ::sp2_slice_of_array::prelude::*;
 use ::sp2_slice_math::{v,vnorm};
+use ::sp2_lammps_wrap::{Lammps, Error as LmpError};
 
 fn init_logger() {
     let _ = ::env_logger::init();
@@ -40,6 +41,15 @@ fn remove_mean_shift(a: &mut [[f64; 3]], b: &[[f64; 3]]) {
     for row in a {
         *row = vec_from_fn(|k| row[k] - mean[k]);
     }
+}
+
+fn lammps_flat_diff_fn<'a>(lmp: &'a mut Lammps)
+-> Box<FnMut(&[f64]) -> Result<(f64, Vec<f64>), LmpError> + 'a>
+{
+    Box::new(move |pos| {
+        lmp.set_carts(pos.nest());
+        lmp.compute().map(|(v,g)| (v, g.flat().to_vec()))
+    })
 }
 
 //#[test]
@@ -74,19 +84,12 @@ fn perturbed_graphene() {
         coords
     };
 
-    let mut lmp = sp2_lammps_wrap::Lammps::new_carbon(
-        &superstructure.lattice().matrix(),
-        &input,
-    ).unwrap();
+    let mut lmp = sp2_lammps_wrap::Lammps::new_carbon(superstructure).unwrap();
 
     let mut relaxed = ::sp2_minimize::acgsd(
         &from_json!({"stop-condition": {"grad-rms": 1e-5}}),
         input.flat(),
-        move |pos: &[f64]| {
-            let pos = pos.nest();
-            let (value, grad) = lmp.compute(pos)?;
-            Ok::<_, sp2_lammps_wrap::Error>((value, grad.flat().to_vec()))
-        },
+        &mut *lammps_flat_diff_fn(&mut lmp),
     ).unwrap().position;
     let mut input = input;
     remove_mean_shift(&mut input, &correct);

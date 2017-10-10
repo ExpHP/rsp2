@@ -1,0 +1,12 @@
+[package]
+name = "sp2-linalg"
+version = "0.1.0"
+authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+ndarray = "0.10"
+#ndarray-linalg = { version = "0.7", features = ["openblas-system", "openblas-shared"] }
+openblas-src = { version = "0.5.3", features = ["system"] }

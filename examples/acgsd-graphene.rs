@@ -14,6 +14,7 @@ extern crate sp2_tempdir;
 extern crate rand;
 extern crate env_logger;
 #[macro_use] extern crate serde_json;
+#[macro_use] extern crate log;
 
 const THZ_TO_WAVENUMBER: f64 = 33.35641;
 
@@ -21,6 +22,10 @@ use ::rand::random;
 use ::sp2_array_utils::vec_from_fn;
 use ::sp2_slice_of_array::prelude::*;
 use ::sp2_slice_math::{v,vnorm};
+use ::sp2_structure::{supercell, Coords, CoordStructure};
+use ::sp2_lammps_wrap::Lammps;
+
+type LmpError = ::sp2_lammps_wrap::Error;
 
 fn init_logger() {
     let _ = ::env_logger::init();
@@ -48,10 +53,43 @@ fn remove_mean_shift(a: &mut [[f64; 3]], b: &[[f64; 3]]) {
     }
 }
 
+fn lammps_flat_diff_fn<'a>(lmp: &'a mut Lammps)
+-> Box<FnMut(&[f64]) -> Result<(f64, Vec<f64>), LmpError> + 'a>
+{
+    Box::new(move |pos| {
+        lmp.set_carts(pos.nest())?;
+        lmp.compute().map(|(v,g)| (v, g.flat().to_vec()))
+    })
+}
+
 pub enum Panic {}
 impl<E: ::std::fmt::Debug> From<E> for Panic {
     fn from(e: E) -> Panic { Err::<(),_>(e).unwrap(); unreachable!() }
 }
+
+// fn numerical_lattice_param_slope(structure: &CoordStructure, mask: [f64; 3]) -> [f64; 3]
+// {
+//     vec![
+//         -f64::exp2(-47.),
+//         -f64::exp2(-48.),
+//         -f64::exp2(-49.),
+//         -f64::exp2(-50.),
+//         -f64::exp2(-51.),
+//         f64::exp2(-51.),
+//         f64::exp2(-50.),
+//         f64::exp2(-49.),
+//         f64::exp2(-48.),
+//         f64::exp2(-47.),
+//     ].into_iter().map(|x| {
+//         let scales = [1.0 + mask[0] * x, 1.0 + mask[1] * x, 1.0 + mask[2] * x];
+//         let mut structure = structure.clone();
+//         structure.scale_vecs(&scales);
+//         // scale_vecs.
+//         panic!("TODO")
+//     });
+
+//     *out.as_array().unwrap()
+// }
 
 fn main() { let _ = _main(); }
 fn _main() -> Result<(), Panic> {
@@ -59,9 +97,7 @@ fn _main() -> Result<(), Panic> {
     use ::sp2_phonopy_io as p;
     use ::sp2_array_utils::prelude::*;
     use ::sp2_structure_io::{xyz, poscar};
-    use ::sp2_structure::{supercell, Coords, CoordStructure};
     use ::sp2_slice_math::{v, V, vdot};
-    use ::sp2_lammps_wrap::Lammps;
     use ::std::fs::File;
     init_logger();
 
@@ -72,6 +108,7 @@ fn _main() -> Result<(), Panic> {
         String::from("shift-03"),
         String::from("aba-007-a"),
     ];
+
     for i in 0..7 {
         names.push(format!("shift-0{}", i));
     }
@@ -80,7 +117,7 @@ fn _main() -> Result<(), Panic> {
         let (supercell, sc_token) = supercell::diagonal((sc_size_relax, sc_size_relax, 1), structure);
 
         // FIXME confusing for Lammps::new_carbon to take initial position
-        let mut lmp = Lammps::new_carbon(&supercell.lattice().matrix(), &supercell.to_carts())?;
+        let mut lmp = Lammps::new_carbon(supercell.clone())?;
         let relaxed_flat = ::sp2_minimize::acgsd(
             &from_json!({
                 "stop-condition": {"any": [
@@ -91,15 +128,17 @@ fn _main() -> Result<(), Panic> {
                 "alpha-guess-first": 1e-2,
             }),
             &supercell.to_carts().flat(),
-            move |pos: &[f64]| {
-                let pos = pos.nest();
-                let (value, grad) = lmp.compute(pos)?;
-                Ok::<_, sp2_lammps_wrap::Error>((value, grad.flat().to_vec()))
-            },
+            &mut *lammps_flat_diff_fn(&mut lmp),
         )?.position;
 
         let supercell = supercell.with_coords(Coords::Carts(relaxed_flat.nest().to_vec()));
-        Ok(sc_token.deconstruct(1e-5, supercell)?)
+        match sc_token.deconstruct(1e-5, supercell.clone()) {
+            Ok(x) => Ok(x),
+            Err(e) => {
+                warn!("Suspiciously broad deviations in supercell: {:?}", e);
+                Ok(sc_token.deconstruct(1.0, supercell)?)
+            }
+        }
     };
 
     let diagonalize = |structure| -> Result<_, Panic> {
@@ -107,12 +146,13 @@ fn _main() -> Result<(), Panic> {
             (format!("DISPLACEMENT_DISTANCE"), format!("1e-3")),
             (format!("DIM"), format!("{0} {0} 1", sc_size_phonopy)),
             (format!("HDF5"), format!(".TRUE.")),
+            (format!("DIAG"), format!(".FALSE.")), // maybe?
         ];
 
         let (superstructure, displacements, disp_token)
             = p::cmd::phonopy_displacements_carbon(&conf, structure)?;
 
-        let mut lmp = Lammps::new_carbon(&superstructure.lattice().matrix(), &superstructure.to_carts())?;
+        let mut lmp = Lammps::new_carbon(superstructure.clone())?;
         println!();
         let mut i = 0;
         let force_sets = p::force_sets::compute_from_grad(
@@ -122,7 +162,8 @@ fn _main() -> Result<(), Panic> {
                 i += 1;
                 print!("\rdisp {} of {}", i, displacements.len());
                 ::std::io::stdout().flush().unwrap();
-                Ok::<_, sp2_lammps_wrap::Error>(lmp.compute(&s.to_carts())?.1)
+                lmp.set_structure(s.clone());
+                lmp.compute().map(|diff| diff.1)
             }
         )?;
         println!();
@@ -133,16 +174,12 @@ fn _main() -> Result<(), Panic> {
     };
 
     let minimize_evec = |structure: CoordStructure, evec: &[[f64; 3]]| -> Result<CoordStructure, Panic> {
-        type LmpError = ::sp2_lammps_wrap::Error;
 
         let (structure, sc_token) = supercell::diagonal((sc_size_relax, sc_size_relax, 1), structure);
         let evec = sc_token.replicate(evec);
-        let mut lmp = Lammps::new_carbon(&structure.lattice().matrix(), &structure.to_carts())?;
+        let mut lmp = Lammps::new_carbon(structure.clone())?;
 
-        let mut compute_at_flat = |pos: &[f64]| -> Result<(f64, Vec<f64>), LmpError> {
-            let (value, grad) = lmp.compute(pos.nest())?;
-            Ok((value, grad.flat().to_vec()))
-        };
+        let mut compute_at_flat = lammps_flat_diff_fn(&mut lmp);
 
         // Repeatedly perform "acceptible linesearch" in an attempt
         //  to simulate complete linesearch.

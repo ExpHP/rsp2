@@ -4,6 +4,7 @@
 #![allow(unused_unsafe)]
 
 extern crate sp2_slice_of_array;
+extern crate sp2_structure;
 extern crate lammps_sys;
 extern crate ndarray;
 #[macro_use] extern crate log;
@@ -11,6 +12,7 @@ extern crate ndarray;
 use ::std::os::raw::{c_void, c_int, c_char, c_double};
 use ::std::ffi::{CString, CStr, NulError};
 use ::sp2_slice_of_array::prelude::*;
+use ::sp2_structure::{CoordStructure, Lattice};
 
 #[derive(Debug,Copy,Clone,PartialEq,Eq,PartialOrd,Ord,Hash)]
 #[allow(unused)]
@@ -255,12 +257,20 @@ pub struct Lammps {
     ///
     /// (NOTE: I'm not entirely sure if this is correct.)
     ptr: ::std::cell::RefCell<LammpsOwner>,
+
+    /// A structure is stored to allow operations such as 'set_lattice'.
+    structure: ::sp2_structure::CoordStructure,
 }
 
 impl Lammps {
-    pub fn new_carbon(lattice: &[[f64; 3]; 3], carts: &[[f64; 3]]) -> Result<Lammps, Error> {
+
+    pub fn new_carbon(structure: CoordStructure) -> Result<Lammps, Error> {
+        let lattice = structure.lattice().matrix();
+        let carts = structure.to_carts();
+
         let lmp = ::LammpsOwner::new(&["lammps", "-screen", "none"])?;
-        let me = Lammps{ ptr: std::cell::RefCell::new(lmp) };
+        let ptr = ::std::cell::RefCell::new(lmp);
+        let mut me = Lammps { ptr , structure };
 
         me.ptr.borrow_mut().commands(&[
             "package omp 0",
@@ -270,61 +280,83 @@ impl Lammps {
             "thermo_modify lost error",     // don't let atoms disappear without telling us
             "atom_modify map array",        // store all positions in an array
             "atom_modify sort 0 0.0",       // don't reorder atoms during simulation
+        ])?;
+
+        // garbage initial lattice
+        me.ptr.borrow_mut().commands(&[
             "boundary p p p",               // (p)eriodic, (f)ixed, (s)hrinkwrap
+            "box tilt large",               // triclinic
+            "region sim prism 0 2 0 2 0 2 1 1 1", // garbage garbage garbage
         ])?;
 
-        let xx = lattice[0][0];
-        assert_eq!(0f64, lattice[0][1], "non-triangular lattices not yet supported");
-        assert_eq!(0f64, lattice[0][2], "non-triangular lattices not yet supported");
-        let xy = lattice[1][0];
-        let yy = lattice[1][1];
-        assert_eq!(0f64, lattice[1][2], "non-triangular lattices not yet supported");
-        let xz = lattice[2][0];
-        let yz = lattice[2][1];
-        let zz = lattice[2][2];
+        {
+            let n_atom_types = 2;
+            me.ptr.borrow_mut().command(&format!("create_box {} sim", n_atom_types))?;
+            me.ptr.borrow_mut().commands(&[
+                "mass 1 1.0",
+                "mass 2 12.01",
+            ])?;
+        }
 
-        // NOTE: sp2 used "region sim block" (and did not emit "box tilt large")
-        //       for orthogonal vectors, which I can only assume makes it faster
-        me.ptr.borrow_mut().commands(&[
-            "box tilt large",
-            &format!("region sim prism 0 {xx} 0 {yy} 0 {zz} {xy} {xz} {yz}",
-                xx=xx, yy=yy, zz=zz, xy=xy, xz=xz, yz=yz),
-        ])?;
+        // garbage initial positions
+        {
+            let this_atom_type = 2;
+            let seed = 0xbeef;
+            me.ptr.borrow_mut().command(
+                &format!("create_atoms {} random {} {} NULL remap yes",
+                this_atom_type, carts.len(), seed))?;
+        }
 
-        let n_atom_types = 2;
-        me.ptr.borrow_mut().command(&format!("create_box {} sim", n_atom_types))?;
-        me.ptr.borrow_mut().commands(&[
-            "mass 1 1.0",
-            "mass 2 12.01"
-        ])?;
+        // set actual structure
+        me.send_lmp_everything()?;
 
-        let this_atom_type = 2;
-        let seed = 0xbeef;
-        me.ptr.borrow_mut().command(&format!("create_atoms {} random {} {} NULL remap yes",
-            this_atom_type, carts.len(), seed))?;
-
-        let sigma_scale = 3.0; // LJ Range (x3.4 A)
-        let lj = 1;            // on/off
-        let torsion = 0;       // on/off
-        //let lj_scale = 1.0;
-        me.ptr.borrow_mut().commands(&[
-            &format!("pair_style airebo/omp {} {} {}", sigma_scale, lj, torsion),
-            &format!("pair_coeff * * CH.airebo H C"), // read potential info
-            //&format!("pair_coeff * * lj/scale {}", lj_scale), // set lj potential scaling factor (HACK)
-            &format!("compute MyPE all pe"), // set up a compute for energy
-        ])?;
+        {
+            let sigma_scale = 3.0; // LJ Range (x3.4 A)
+            let lj = 1;            // on/off
+            let torsion = 0;       // on/off
+            //let lj_scale = 1.0;
+            me.ptr.borrow_mut().commands(&[
+                &format!("pair_style airebo/omp {} {} {}", sigma_scale, lj, torsion),
+                &format!("pair_coeff * * CH.airebo H C"), // read potential info
+                //&format!("pair_coeff * * lj/scale {}", lj_scale), // set lj potential scaling factor (HACK)
+                &format!("compute MyPE all pe"), // set up a compute for energy
+            ])?;
+        }
 
         Ok(me)
     }
 
-    pub fn compute(&mut self, carts: &[[f64; 3]]) -> Result<(f64, Vec<[f64; 3]>), Error> {
-        let natoms = self.ptr.borrow_mut().get_natoms();
-        assert_eq!(natoms, carts.len());
+    pub fn set_structure(&mut self, structure: CoordStructure) -> Result<(), Error> {
+        let old = ::std::mem::replace(&mut self.structure, structure);
+        if self.structure.lattice().matrix() != old.lattice().matrix() {
+            self.send_lmp_lattice()?;
+        }
 
-        unsafe { self.ptr.borrow_mut().scatter_atoms_f("x", carts.flat()); };
+        self.send_lmp_carts()?;
+        Ok(())
+    }
 
+    pub fn set_carts(&mut self, carts: &[[f64; 3]]) -> Result<(), Error>
+    {
+        self.structure.set_carts(carts.to_vec());
+        self.send_lmp_carts()?;
+        Ok(())
+    }
+
+    pub fn set_lattice(&mut self, lattice: Lattice) -> Result<(), Error>
+    {
+        self.structure.set_lattice(&lattice);
+        self.send_lmp_lattice()?;
+        self.send_lmp_carts()?;
+        Ok(())
+    }
+
+    pub fn compute(&mut self) -> Result<(f64, Vec<[f64; 3]>), Error> {
         self.ptr.borrow_mut().command("run 0")?;
 
+        // NOTE: There are warnings in extract_compute about making sure it is valid
+        //       to run the compute.  I'm not sure what it means, and it sounds to me
+        //       like this could possibly actually cause UB; I just have no idea how.
         let value = unsafe { self.ptr.borrow_mut().extract_compute_0d("MyPE") }.unwrap();
         let grad = {
             let mut grad = unsafe { self.ptr.borrow_mut().gather_atoms_f("f", 3) };
@@ -332,6 +364,42 @@ impl Lammps {
             grad
         };
         Ok((value, grad.nest().to_vec()))
+    }
+
+    fn send_lmp_everything(&mut self) -> Result<(), Error>
+    {
+        self.send_lmp_lattice()?;
+        self.send_lmp_carts()?;
+        Ok(())
+    }
+
+    fn send_lmp_carts(&mut self) -> Result<(), Error>
+    {
+        let carts = self.structure.to_carts();
+        let natoms = self.ptr.borrow_mut().get_natoms();
+        assert_eq!(natoms, carts.len());
+
+        unsafe { self.ptr.borrow_mut().scatter_atoms_f("x", carts.flat()); };
+        Ok(())
+    }
+
+    fn send_lmp_lattice(&mut self) -> Result<(), Error>
+    {
+        let lattice = self.structure.lattice().matrix();
+        assert_eq!(0f64, lattice[0][1], "non-triangular lattices not yet supported");
+        assert_eq!(0f64, lattice[0][2], "non-triangular lattices not yet supported");
+        assert_eq!(0f64, lattice[1][2], "non-triangular lattices not yet supported");
+
+        self.ptr.borrow_mut().commands(&[
+            &format!("change_box all x final 0 {}", lattice[0][0]),
+            &format!("change_box all y final 0 {}", lattice[1][1]),
+            &format!("change_box all z final 0 {}", lattice[2][2]),
+            &format!("change_box all xy final {}", lattice[1][0]),
+            &format!("change_box all xz final {}", lattice[2][0]),
+            &format!("change_box all yz final {}", lattice[2][1]),
+        ])?;
+
+        Ok(())
     }
 }
 
