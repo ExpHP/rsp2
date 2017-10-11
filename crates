@@ -13,9 +13,6 @@ import os
 # there's any good round-trip parsers for TOML in python,
 # and I hate to destroy comments and other fine details.
 
-COMMAND_GEN = object()
-COMMAND_NEW = object()
-
 MASTER_CFG_PATH = 'crates.d/crates.toml'
 CARGO_TOMLS_DIR = 'crates.d'
 # something long enough for people to grep and find this script
