@@ -8,5 +8,5 @@ path = "lib.rs"
 
 [dependencies]
 !!ndarray
-#ndarray-linalg = { version = "0.7", features = ["openblas-system", "openblas-shared"] }
-openblas-src = { version = "0.5.3", features = ["system"] }
+ndarray-linalg = { version = "0.7", features = ["openblas-system", "openblas-shared"] }
+#openblas-src = { version = "0.5.3", features = ["system"] }

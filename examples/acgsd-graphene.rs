@@ -12,8 +12,9 @@ fn main() {
         (author: "Michael T. Lamparski")
         (about: "blah")
         (@arg OUTDIR: -o --output +takes_value +required "output directory")
-        (@arg CONFIG: -c --config +required "settings Yaml")
+        (@arg CONFIG: -c --config +takes_value +required "settings Yaml")
         (@arg INPUT: +required "POSCAR")
+        (@arg force: -f --force "replace existing output directories")
         // (@subcommand test =>
         //     (about: "controls testing features")
         //     (version: "1.3")
@@ -24,6 +25,9 @@ fn main() {
     let input = matches.value_of("INPUT").unwrap();
     let outdir = matches.value_of("OUTDIR").unwrap();
     let config = matches.value_of("CONFIG").unwrap();
+    if matches.is_present("force") {
+        ::std::fs::remove_dir_all(outdir);
+    }
 
     let settings = ::serde_yaml::from_reader(::std::fs::File::open(config).unwrap()).unwrap();
 

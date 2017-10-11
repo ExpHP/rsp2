@@ -1,4 +1,4 @@
-use ::sp2_array_utils::{dot, MatrixInverseExt};
+use ::sp2_array_utils::{dot, MatrixInverseExt, vec_from_fn};
 use ::std::ops::Mul;
 use ::std::rc::Rc;
 
@@ -45,6 +45,15 @@ impl Lattice {
     pub fn matrix(&self) -> &[[f64; 3]; 3] { &self.matrix }
     /// Inverse of the matrix where lattice vectors are rows.
     pub fn inverse_matrix(&self) -> &[[f64; 3]; 3] { &self.inverse }
+
+    pub fn lengths(&self) -> [f64; 3] {
+        let quadrances = self.quadrances();
+        vec_from_fn(|k| quadrances[k].sqrt())
+    }
+    pub fn quadrances(&self) -> [f64; 3] {
+        let matrix = self.matrix();
+        vec_from_fn(|k| dot(&matrix[k], &matrix[k]))
+    }
 }
 
 /// Helper constructors

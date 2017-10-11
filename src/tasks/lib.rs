@@ -24,7 +24,7 @@ use ::rand::random;
 use ::sp2_array_utils::vec_from_fn;
 use ::sp2_slice_of_array::prelude::*;
 use ::sp2_slice_math::{v,vnorm};
-use ::sp2_structure::{supercell, Coords, CoordStructure};
+use ::sp2_structure::{supercell, Coords, CoordStructure, Lattice};
 use ::sp2_lammps_wrap::Lammps;
 use ::std::io::Result as IoResult;
 use ::std::path::{Path, PathBuf};
@@ -34,10 +34,11 @@ type LmpError = ::sp2_lammps_wrap::Error;
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Settings {
-    supercell_relax: (u32, u32, u32),
-    supercell_phonopy: (u32, u32, u32),
+    supercell_relax: SupercellSpec,
+    supercell_phonopy: SupercellSpec,
     displacement_distance: f64, // 1e-3
     neg_frequency_threshold: f64, // 1e-3
+    hack_scale: [f64; 3], // HACK
     cg: ::sp2_minimize::acgsd::Settings,
 }
 
@@ -111,8 +112,9 @@ where P: AsRef<Path>, Q: AsRef<Path>,
     use ::sp2_slice_math::{v, V, vdot};
     use ::std::fs::File;
 
-    let relax = |structure| -> Result<CoordStructure, Panic> {
-        let (supercell, sc_token) = supercell::diagonal(settings.supercell_phonopy, structure);
+    let relax = |structure: CoordStructure| -> Result<CoordStructure, Panic> {
+        let sc_dims = tup3(settings.supercell_relax.dim_for_unitcell(structure.lattice()));
+        let (supercell, sc_token) = supercell::diagonal(sc_dims, structure);
 
         // FIXME confusing for Lammps::new_carbon to take initial position
         let mut lmp = Lammps::new_carbon(supercell.clone())?;
@@ -123,20 +125,31 @@ where P: AsRef<Path>, Q: AsRef<Path>,
         )?.position;
 
         let supercell = supercell.with_coords(Coords::Carts(relaxed_flat.nest().to_vec()));
-        match sc_token.deconstruct(1e-5, supercell.clone()) {
+        Ok(multi_threshold_deconstruct(sc_token, 1e-10, 1e-3, supercell)?)
+    };
+
+    use ::sp2_structure::supercell::{SupercellToken, DeconstructionError};
+    fn multi_threshold_deconstruct(
+        sc_token: SupercellToken,
+        warn: f64,
+        fail: f64,
+        supercell: CoordStructure,
+    ) -> Result<CoordStructure, DeconstructionError>
+    {
+        match sc_token.deconstruct(warn, supercell.clone()) {
             Ok(x) => Ok(x),
             Err(e) => {
                 warn!("Suspiciously broad deviations in supercell: {:?}", e);
-                Ok(sc_token.deconstruct(1.0, supercell)?)
+                Ok(sc_token.deconstruct(fail, supercell)?)
             }
         }
-    };
+    }
 
-    let diagonalize = |structure| -> Result<_, Panic> {
+    let diagonalize = |structure: CoordStructure| -> Result<_, Panic> {
         let conf = collect![
             (format!("DISPLACEMENT_DISTANCE"), format!("{:e}", settings.displacement_distance)),
             (format!("DIM"), {
-                let (a, b, c) = settings.supercell_phonopy;
+                let (a, b, c) = tup3(settings.supercell_phonopy.dim_for_unitcell(structure.lattice()));
                 format!("{} {} {}", a, b, c)
             }),
             (format!("HDF5"), format!(".TRUE.")),
@@ -168,8 +181,8 @@ where P: AsRef<Path>, Q: AsRef<Path>,
     };
 
     let minimize_evec = |structure: CoordStructure, evec: &[[f64; 3]]| -> Result<CoordStructure, Panic> {
-
-        let (structure, sc_token) = supercell::diagonal(settings.supercell_relax, structure);
+        let sc_dims = tup3(settings.supercell_relax.dim_for_unitcell(structure.lattice()));
+        let (structure, sc_token) = supercell::diagonal(sc_dims, structure);
         let evec = sc_token.replicate(evec);
         let mut lmp = Lammps::new_carbon(structure.clone())?;
 
@@ -185,47 +198,64 @@ where P: AsRef<Path>, Q: AsRef<Path>,
         let V(pos) = v(from_pos.flat()) + alpha * v(direction.flat());
         let structure = from_structure.with_coords(Coords::Carts(pos.nest().to_vec()));
 
-        Ok(sc_token.deconstruct(1e-5, structure)?)
+        Ok(multi_threshold_deconstruct(sc_token, 1e-10, 1e-3, structure)?)
     };
 
-    let original = poscar::load_carbon(File::open(input)?)?;
+    let mut original = poscar::load_carbon(File::open(input)?)?;
+    original.scale_vecs(&settings.hack_scale); // HACK
+    let original = original;
+
     ::std::fs::create_dir(&outdir)?;
     {
         // dumb/lazy solution to ensuring all output files go in the dir
         let cwd_guard = push_dir(outdir)?;
 
-        let mut iter_count = 0;
         let mut from_structure = original;
-        let (structure, eval, evec) = loop {
+        // HACK to stop one iteration AFTER all non-acoustics are positive
+        let mut has_been_good = false;
+        let mut iteration = 1;
+        let (structure, eval, evec) = loop { // NOTE: we use break with value
             let structure = relax(from_structure)?;
             let (eval, evec) = diagonalize(structure.clone())?;
 
             println!("============================");
-            println!("Finished relaxation # {}", iter_count + 1);
+            println!("Finished relaxation # {}", iteration + 1);
             println!("Eigenvalues: (cm-1)");
             for &x in &eval {
                 println!(" - {:?}", x);
             }
+            let mut f = File::create(format!("eigenvalues.{:02}", iteration))?;
+            for &x in &eval {
+                writeln!(f, " - {:?}", x)?;
+            }
 
-            // FIXME: this is dumb and there could be cases where it never succeeds,
-            //        which arguably we shouldn't care about anyways since at that
-            //        point we're probably looking at an acoustic frequency anyways
-            if eval[0] > -settings.neg_frequency_threshold.abs() {
-                println!("============================");
-                break (structure, eval, evec);
+            // first non-acoustic
+            if eval[3] > 0.0 {
+                if has_been_good {
+                    println!("============================");
+                    break (structure, eval, evec);
+                }
+                has_been_good = true;
             }
             println!();
             println!("!! Unsatisfied with frequency:  {:e}", eval[0]);
             println!("!! Optimizing along this band!");
             println!();
 
+
             let structure = minimize_evec(structure, &evec[0])?;
+
+            let n_negative = eval.iter().take_while(|&&e| e < 0.0).count();
+            let mut structure = structure;
+            for vec in &evec[..n_negative] {
+                structure = minimize_evec(structure, &vec[..])?;
+            }
 
             from_structure = structure;
 
             println!("============================");
 
-            iter_count += 1;
+            iteration += 1;
         }; // (structure, eval, evec)
 
         {
@@ -242,6 +272,30 @@ where P: AsRef<Path>, Q: AsRef<Path>,
 
     Ok(())
 }
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
+#[serde(rename_all="kebab-case")]
+pub enum SupercellSpec {
+    Target([f64; 3]),
+    Dim([u32; 3]),
+}
+impl SupercellSpec {
+    fn dim_for_unitcell(&self, prim: &Lattice) -> [u32; 3] {
+        match *self {
+            SupercellSpec::Dim(d) => d,
+            SupercellSpec::Target(targets) => {
+                let unit_lengths = prim.lengths();
+                vec_from_fn(|k| {
+                    (targets[k] / unit_lengths[k]).ceil().max(1.0) as u32
+                })
+            },
+        }
+    }
+}
+
+// HACK
+fn tup3(arr: [u32; 3]) -> (u32, u32, u32) { (arr[0], arr[1], arr[2]) }
 
 use util::push_dir;
 mod util {
@@ -277,9 +331,11 @@ mod util {
 
     impl Drop for PushDir {
         fn drop(&mut self) {
-            if let Err(e) = ::std::env::set_current_dir(&self.0.take().unwrap()) {
-                // uh oh.
-                panic!("automatic popdir failed: {}", e);
+            if let Some(d) = self.0.take() {
+                if let Err(e) = ::std::env::set_current_dir(d) {
+                    // uh oh.
+                    panic!("automatic popdir failed: {}", e);
+                }
             }
         }
     }

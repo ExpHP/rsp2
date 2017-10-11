@@ -43,6 +43,7 @@ sp2-kets           = "src/util/kets"
 sp2-util-macros    = "src/util/macros"
 sp2-tempdir        = "src/util/tempdir"
 sp2-linalg         = "src/util/linalg"
+sp2-eigenvector-classify = "./src/math/eigenvector-classify"
 #!!INSERTION POINT FOR NEW CRATES!!#
 
 #--------------------------------------------

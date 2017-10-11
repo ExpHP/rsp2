@@ -7,6 +7,10 @@ error_chain!{
             description("An input bound was too extreme")
             display("The input bound was too extreme: {}", b)
         }
+        GsBadValue(endvals: (f64, f64), value: f64) {
+            description("Golden search encountered value larger than endpoints")
+            display("Golden search encountered value larger than endpoints: {:?} vs {}", endvals, value)
+        }
         NoMinimum {
             description("The function appears to have no minimum")
             display("The function appears to have no minimum", )
@@ -76,8 +80,7 @@ where F: FnMut(f64) -> Result<Slope, E>
     let mut compute: Box<FnMut(f64) -> Result<SlopeBound, Result<E, Error>>>
         = Box::new(compute);
 
-    // IIFE to intercept this result so we can transform it at the end
-    match (|| {
+    nest_err(|| {
         let mut a = compute(from)?;
         if a.slope > 0.0 {
             check_mirroring_assumption(a.alpha).map_err(Err)?;
@@ -92,15 +95,10 @@ where F: FnMut(f64) -> Result<Slope, E>
         let b = compute(from + initial_step)?;
 
         let (a, b) = find_initial((a, b), &mut *compute)?;
-        bisect((a, b), &mut *compute)
-    })() {
-        Ok(bound) => {
-            trace!("LS-exit:  a: {:<23e}  s: {:<23e}", bound.alpha, bound.slope);
-            Ok(Ok(bound))
-        },
-        Err(Ok(theirs)) => Ok(Err(theirs)),
-        Err(Err(ours)) => Err(ours),
-    }
+        let bound = bisect((a, b), &mut *compute)?;
+        trace!("LS-exit:  a: {:<23e}  v: {:<23e}", bound.alpha, bound.slope);
+        Ok(bound)
+    })
 }
 
 fn find_initial<E>(
@@ -141,5 +139,90 @@ fn bisect<E>(
             true => hi = bound,
             false => lo = bound,
         }
+    }
+}
+
+// Revelations:
+//  1. In common implementations of the algorithm (such as those on wikipedia)
+//     the values of the function at the endpoints are never used.
+//     Hence **it is only necessary to save one y value.**
+//     However, we save more because we don't trust the function's accuracy.
+//  2. TECHNICALLY the step function doesn't even even need to use phi;
+//      one could record 'b' and derive the second endpoint as 'c = d - b + a'.
+//     But I don't know if that is numerically stable, so we will do what
+//     the wikipedia implementations do and recompute b and c every iter.
+pub fn golden<E, F>(
+    interval: (f64, f64),
+    initial_step: f64,
+    mut compute: F,
+// NOTE: cannot return a bound due to issue mentioned in body
+) -> LsResult<Result<f64, E>>
+where F: FnMut(f64) -> Result<Value, E>
+{
+    nest_err(|| {
+        // early wrapping:
+        //  - ValueBound for internal use
+        //  - Result<Value, Result<TheirError, OurError>> for easy short-circuiting
+        let mut compute = move |alpha| {
+            let value = compute(alpha).map_err(Ok)?;
+            ensure!(value.0.is_finite(), Err(ErrorKind::FunctionOutput(value.0).into()));
+            trace!("GS-iter:  a: {:<23e}  v: {:<23e}", alpha, value.0);
+            Ok(ValueBound { alpha, value: value.0 })
+        };
+
+        let phi: f64 = (1.0 + 5f64.sqrt()) / 2.0;
+        let get_mid_xs = |a, d| {
+            let dist = (d - a) / (1.0 + phi);
+            (a + dist, d - dist)
+        };
+
+        let (mut state, mut history) = {
+            // endpoints. (note: we allow d.alpha < a.alpha)
+            let a = compute(interval.0)?;
+            let d = compute(interval.1)?;
+
+            // inner point closer to a
+            let b = compute(get_mid_xs(a.alpha, d.alpha).0)?;
+
+            let history = vec![a, d, b];
+            ((a, b, d), history)
+        };
+
+        loop {
+            let (a, mut b, d) = state;
+            if b.value > a.value.min(d.value) {
+                break;
+            }
+
+            // re-adjust b, purportedly to avoid systematic issues with precision
+            // that can cause infinite loops. (I dunno. ask whoever edits wikipedia)
+            //
+            // NOTE: Technically this desynchronizes the alpha of our Bounds from
+            //  the values, so at the end we cannot return a bound.
+            let (b_alpha, c_alpha) = get_mid_xs(a.alpha, d.alpha);
+            b.alpha = b_alpha;
+
+            let c = compute(c_alpha)?;
+
+            history.push(c);
+            state = match b.value < c.value {
+                true => (c, b, a),
+                false => (b, c, d),
+            }
+        }
+        //history.sort_on_key(|bound| NotNaN::new(bound.alpha).unwrap());
+        let (_a, b, _d) = state;
+        Ok(b.alpha)
+    })
+}
+
+// (NOTE: takes an IIFE so that ? can be used inside of it)
+fn nest_err<A, B, C, F>(f: F)-> Result<Result<A, B>, C>
+where F: FnOnce() -> Result<A, Result<B, C>>
+{
+    match f() {
+        Ok(x) => Ok(Ok(x)),
+        Err(Ok(e)) => Ok(Err(e)),
+        Err(Err(e)) => Err(e),
     }
 }
