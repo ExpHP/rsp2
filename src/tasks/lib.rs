@@ -6,28 +6,27 @@ extern crate sp2_structure;
 extern crate sp2_structure_io;
 extern crate sp2_phonopy_io;
 extern crate sp2_array_utils;
-extern crate sp2_slice_of_array;
 extern crate sp2_slice_math;
 extern crate sp2_tempdir;
+extern crate sp2_eigenvector_classify;
 #[macro_use] extern crate sp2_util_macros;
 
 extern crate rand;
 extern crate env_logger;
+extern crate slice_of_array;
 extern crate serde;
 extern crate serde_json;
 #[macro_use] extern crate serde_derive;
 #[macro_use] extern crate log;
+#[macro_use] extern crate itertools;
 
 const THZ_TO_WAVENUMBER: f64 = 33.35641;
 
-use ::rand::random;
 use ::sp2_array_utils::vec_from_fn;
-use ::sp2_slice_of_array::prelude::*;
-use ::sp2_slice_math::{v,vnorm};
+use ::slice_of_array::prelude::*;
 use ::sp2_structure::{supercell, Coords, CoordStructure, Lattice};
 use ::sp2_lammps_wrap::Lammps;
-use ::std::io::Result as IoResult;
-use ::std::path::{Path, PathBuf};
+use ::std::path::Path;
 
 type LmpError = ::sp2_lammps_wrap::Error;
 
@@ -42,27 +41,27 @@ pub struct Settings {
     cg: ::sp2_minimize::acgsd::Settings,
 }
 
-fn array_sum(arrs: &[[f64; 3]]) -> [f64; 3] {
-    let mut acc = [0.0, 0.0, 0.0];
-    for arr in arrs {
-        acc = vec_from_fn(|k| acc[k] + arr[k]);
-    }
-    acc
-}
+// fn array_sum(arrs: &[[f64; 3]]) -> [f64; 3] {
+//     let mut acc = [0.0, 0.0, 0.0];
+//     for arr in arrs {
+//         acc = vec_from_fn(|k| acc[k] + arr[k]);
+//     }
+//     acc
+// }
 
-fn array_mean(arrs: &[[f64; 3]]) -> [f64; 3] {
-    assert!(arrs.len() > 0);
-    let out = array_sum(arrs);
-    vec_from_fn(|k| out[k] / arrs.len() as f64)
-}
+// fn array_mean(arrs: &[[f64; 3]]) -> [f64; 3] {
+//     assert!(arrs.len() > 0);
+//     let out = array_sum(arrs);
+//     vec_from_fn(|k| out[k] / arrs.len() as f64)
+// }
 
-fn remove_mean_shift(a: &mut [[f64; 3]], b: &[[f64; 3]]) {
-    let shifts = v(a.flat()) - v(b.flat());
-    let mean = array_mean(shifts.nest());
-    for row in a {
-        *row = vec_from_fn(|k| row[k] - mean[k]);
-    }
-}
+// fn remove_mean_shift(a: &mut [[f64; 3]], b: &[[f64; 3]]) {
+//     let shifts = v(a.flat()) - v(b.flat());
+//     let mean = array_mean(shifts.nest());
+//     for row in a {
+//         *row = vec_from_fn(|k| row[k] - mean[k]);
+//     }
+// }
 
 fn lammps_flat_diff_fn<'a>(lmp: &'a mut Lammps)
 -> Box<FnMut(&[f64]) -> Result<(f64, Vec<f64>), LmpError> + 'a>
@@ -107,8 +106,7 @@ where P: AsRef<Path>, Q: AsRef<Path>,
 {
     use ::std::io::prelude::*;
     use ::sp2_phonopy_io as p;
-    use ::sp2_array_utils::prelude::*;
-    use ::sp2_structure_io::{xyz, poscar};
+    use ::sp2_structure_io::poscar;
     use ::sp2_slice_math::{v, V, vdot};
     use ::std::fs::File;
 
@@ -169,7 +167,7 @@ where P: AsRef<Path>, Q: AsRef<Path>,
                 i += 1;
                 print!("\rdisp {} of {}", i, displacements.len());
                 ::std::io::stdout().flush().unwrap();
-                lmp.set_structure(s.clone());
+                lmp.set_structure(s.clone())?;
                 lmp.compute().map(|diff| diff.1)
             }
         )?;
@@ -189,16 +187,34 @@ where P: AsRef<Path>, Q: AsRef<Path>,
         let from_structure = structure;
         let direction = &evec[..];
         let from_pos = from_structure.to_carts();
-        let alpha = ::sp2_minimize::exact_ls::<LmpError, _>(0.0, 1e-4, |alpha| {
+        let pos_at_alpha = |alpha| {
             let V(pos) = v(from_pos.flat()) + alpha * v(direction.flat());
-            let (_, gradient) = lammps_flat_diff_fn(&mut lmp)(&pos[..])?;
+            pos
+        };
+        let alpha = ::sp2_minimize::exact_ls::<LmpError, _>(0.0, 1e-4, |alpha| {
+            let gradient = lammps_flat_diff_fn(&mut lmp)(&pos_at_alpha(alpha))?.1;
             let slope = vdot(&gradient[..], direction.flat());
             Ok(::sp2_minimize::exact_ls::Slope(slope))
         })??.alpha;
-        let V(pos) = v(from_pos.flat()) + alpha * v(direction.flat());
+        let pos = pos_at_alpha(alpha);
         let structure = from_structure.with_coords(Coords::Carts(pos.nest().to_vec()));
 
         Ok(multi_threshold_deconstruct(sc_token, 1e-10, 1e-3, structure)?)
+    };
+
+    let write_eigen_info = |f: &mut Write, einfos: &EigenInfo| -> Result<_, Panic>
+    {
+        writeln!(f, "{:27}  {:4} {:5} [{:4.2}, {:4.2}, {:4.2}]",
+            "# Frequency (cm^-1)", "Acou", "Layer", "X", "Y", "Z")?;
+        for item in einfos.iter() {
+            let eval = item.frequency;
+            let acou = item.acousticness;
+            let layer = item.layer_acousticness;
+            let (x, y, z) = tup3(item.polarization);
+            writeln!(f, "{:27}  {:4.2}  {:4.2} [{:4.2}, {:4.2}, {:4.2}]",
+                eval, acou, layer, x, y, z)?;
+        }
+        Ok(())
     };
 
     let mut original = poscar::load_carbon(File::open(input)?)?;
@@ -212,55 +228,49 @@ where P: AsRef<Path>, Q: AsRef<Path>,
 
         let mut from_structure = original;
         // HACK to stop one iteration AFTER all non-acoustics are positive
-        let mut has_been_good = false;
         let mut iteration = 1;
-        let (structure, eval, evec) = loop { // NOTE: we use break with value
+        let (structure, evals, _evecs) = loop { // NOTE: we use break with value
             let structure = relax(from_structure)?;
-            let (eval, evec) = diagonalize(structure.clone())?;
+            let (evals, evecs) = diagonalize(structure.clone())?;
 
             println!("============================");
             println!("Finished relaxation # {}", iteration + 1);
-            println!("Eigenvalues: (cm-1)");
-            for &x in &eval {
-                println!(" - {:?}", x);
+
+            let (layers, _nlayer) = ::sp2_structure::assign_layers(&structure, &[0, 0, 1], 0.25);
+            let einfos = get_eigensystem_info(&evals, &evecs, &layers[..]);
+            write_eigen_info(
+                &mut File::create(format!("eigenvalues.{:02}", iteration))?,
+                &einfos,
+            )?;
+            {
+                let out = ::std::io::stdout();
+                write_eigen_info(&mut out.lock(), &einfos)?;
             }
-            let mut f = File::create(format!("eigenvalues.{:02}", iteration))?;
-            for &x in &eval {
-                writeln!(f, " - {:?}", x)?;
-            }
 
-            // first non-acoustic
-            if eval[3] > 0.0 {
-                if has_been_good {
-                    println!("============================");
-                    break (structure, eval, evec);
-                }
-                has_been_good = true;
-            }
-            println!();
-            println!("!! Unsatisfied with frequency:  {:e}", eval[0]);
-            println!("!! Optimizing along this band!");
-            println!();
-
-
-            let structure = minimize_evec(structure, &evec[0])?;
-
-            let n_negative = eval.iter().take_while(|&&e| e < 0.0).count();
+            let mut all_ok = true;
             let mut structure = structure;
-            for vec in &evec[..n_negative] {
-                structure = minimize_evec(structure, &vec[..])?;
+            for (i, info, evec) in izip!(1.., &einfos, &evecs) {
+                if info.frequency < 0.0 && info.acousticness < 0.95 {
+                    println!("!! Optimizing along band {} ({})", i, info.frequency);
+                    structure = minimize_evec(structure, &evec[..])?;
+
+                    all_ok = false;
+                }
             }
 
-            from_structure = structure;
+            if all_ok {
+                break (structure, evals, evecs);
+            }
 
             println!("============================");
 
+            from_structure = structure;
             iteration += 1;
-        }; // (structure, eval, evec)
+        }; // (structure, evals, evecs)
 
         {
             let mut f = File::create("eigenvalues.final")?;
-            for &x in &eval {
+            for &x in &evals {
                 writeln!(f, "{:?}", x)?;
             }
         }
@@ -271,6 +281,41 @@ where P: AsRef<Path>, Q: AsRef<Path>,
     }
 
     Ok(())
+}
+
+pub type EigenInfo = Vec<eigen_info::Item>;
+
+pub fn get_eigensystem_info(
+    evals: &[f64],
+    evecs: &[Vec<[f64; 3]>],
+    layers: &[::sp2_structure::Layer],
+) -> EigenInfo
+{
+    use ::sp2_eigenvector_classify::{keyed_acoustic_basis, polarization};
+
+    let layers: Vec<_> = layers.iter().cloned().map(Some).collect();
+    let layer_acoustics = keyed_acoustic_basis(&layers[..], &[1,1,1]);
+    let acoustics = keyed_acoustic_basis(&vec![Some(()); evecs[0].len()], &[1,1,1]);
+
+    let mut out = vec![];
+    for (&eval, evec) in izip!(evals, evecs) {
+        out.push(eigen_info::Item {
+            frequency: eval,
+            acousticness: acoustics.probability(&evec),
+            layer_acousticness: layer_acoustics.probability(&evec),
+            polarization: polarization(&evec[..]),
+        })
+    }
+    out
+}
+
+pub mod eigen_info {
+    pub struct Item {
+        pub frequency: f64,
+        pub acousticness: f64,
+        pub layer_acousticness: f64,
+        pub polarization: [f64; 3],
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -295,7 +340,7 @@ impl SupercellSpec {
 }
 
 // HACK
-fn tup3(arr: [u32; 3]) -> (u32, u32, u32) { (arr[0], arr[1], arr[2]) }
+fn tup3<T:Copy>(arr: [T; 3]) -> (T, T, T) { (arr[0], arr[1], arr[2]) }
 
 use util::push_dir;
 mod util {
@@ -315,7 +360,7 @@ mod util {
     pub struct PushDir(Option<PathBuf>);
     pub fn push_dir<P: AsRef<Path>>(path: P) -> IoResult<PushDir> {
         let old = ::std::env::current_dir()?;
-        ::std::env::set_current_dir(path);
+        ::std::env::set_current_dir(path)?;
         Ok(PushDir(Some(old)))
     }
 

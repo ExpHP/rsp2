@@ -12,10 +12,11 @@ path = "lib.rs"
 !!serde
 !!serde-derive
 !!serde-yaml
+!!slice-of-array
 
 !!sp2-tempdir
 !!sp2-structure
 !!sp2-structure-io
-!!sp2-kets
-!!sp2-slice-of-array
 !!sp2-byte-tools-plus-float
+
+!!rsp2-kets

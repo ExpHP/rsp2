@@ -190,9 +190,9 @@ where F: FnMut(f64) -> Result<Value, E>
 
         loop {
             let (a, mut b, d) = state;
-            if b.value > a.value.min(d.value) {
-                break;
-            }
+
+            // Stop when it is dead obvious that the value is no longer numerically reliable.
+            if b.value > a.value.min(d.value) { break; }
 
             // re-adjust b, purportedly to avoid systematic issues with precision
             // that can cause infinite loops. (I dunno. ask whoever edits wikipedia)

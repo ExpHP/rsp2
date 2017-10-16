@@ -18,14 +18,16 @@ sp2-structure = { path = "../util/structure" }
 sp2-structure-io = { path = "../util/structure-io" }
 sp2-phonopy-io = { path = "../phonopy-io" }
 sp2-array-utils = { path = "../util/array" }
-sp2-slice-of-array = { path = "../util/slice-of-array" }
 sp2-slice-math = { path = "../util/slice-math" }
 sp2-tempdir = { path = "../util/tempdir" }
 sp2-util-macros = { path = "../util/macros" }
+sp2-eigenvector-classify = { path = "../math/eigenvector-classify" }
 
+slice-of-array = "0.1"
 serde = "1"
 serde_json = "1"
 serde_derive = "1"
 rand = "0.3"
 log = "0.3"
 env_logger = "0.4"
+itertools = "0.7"

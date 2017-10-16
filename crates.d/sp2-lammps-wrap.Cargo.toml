@@ -7,8 +7,9 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 path = "lib.rs"
 
 [dependencies]
+!!sp2-structure
+!!lammps-sys
+
 !!log
 !!ndarray
-!!lammps-sys
-!!sp2-slice-of-array
-!!sp2-structure
+!!slice-of-array

@@ -1,7 +1,9 @@
+#![deny(unused_must_use)]
+#![deny(unused_variables)]
+
 extern crate sp2_lammps_wrap;
 extern crate sp2_minimize;
 extern crate sp2_array_utils;
-extern crate sp2_slice_of_array;
 extern crate sp2_structure;
 extern crate sp2_structure_io;
 extern crate sp2_slice_math;
@@ -9,11 +11,12 @@ extern crate sp2_slice_math;
 
 extern crate rand;
 extern crate env_logger;
+extern crate slice_of_array;
 #[macro_use] extern crate serde_json;
 
 use ::rand::random;
 use ::sp2_array_utils::vec_from_fn;
-use ::sp2_slice_of_array::prelude::*;
+use ::slice_of_array::prelude::*;
 use ::sp2_slice_math::{v,vnorm};
 use ::sp2_lammps_wrap::{Lammps, Error as LmpError};
 
@@ -47,7 +50,7 @@ fn lammps_flat_diff_fn<'a>(lmp: &'a mut Lammps)
 -> Box<FnMut(&[f64]) -> Result<(f64, Vec<f64>), LmpError> + 'a>
 {
     Box::new(move |pos| {
-        lmp.set_carts(pos.nest());
+        lmp.set_carts(pos.nest())?;
         lmp.compute().map(|(v,g)| (v, g.flat().to_vec()))
     })
 }

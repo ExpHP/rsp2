@@ -17,10 +17,11 @@ nom = "3"
 serde = "1"
 serde_derive = "1"
 serde_yaml = "0.7"
+slice-of-array = "0.1"
 
 sp2-tempdir = { path = "../util/tempdir" }
 sp2-structure = { path = "../util/structure" }
 sp2-structure-io = { path = "../util/structure-io" }
-sp2-kets = { path = "../util/kets" }
-sp2-slice-of-array = { path = "../util/slice-of-array" }
 sp2-byte-tools-plus-float = { path = "../util/byte-tools-plus-float" }
+
+rsp2-kets = { version = "0.3", git = "https://github.com/ExpHP/rsp2-kets", features = ["serde"] } 

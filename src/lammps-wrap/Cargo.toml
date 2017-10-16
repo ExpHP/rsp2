@@ -12,8 +12,9 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 path = "lib.rs"
 
 [dependencies]
+sp2-structure = { path = "../util/structure" }
+lammps-sys = { path = "../lammps-sys" }
+
 log = "0.3"
 ndarray = "0.10"
-lammps-sys = { path = "../lammps-sys" }
-sp2-slice-of-array = { path = "../util/slice-of-array" }
-sp2-structure = { path = "../util/structure" }
+slice-of-array = "0.1"

@@ -132,7 +132,7 @@ impl SupercellToken {
 
         let out_carts = {
             let neg_offsets = {
-                use ::sp2_slice_of_array::prelude::*;
+                use ::slice_of_array::prelude::*;
                 let mut v = sc_lattice_vecs(periods, &primitive_lattice);
                 for x in v.flat_mut() {
                     *x *= -1.0;

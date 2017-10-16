@@ -26,10 +26,10 @@ fn main() {
     let outdir = matches.value_of("OUTDIR").unwrap();
     let config = matches.value_of("CONFIG").unwrap();
     if matches.is_present("force") {
-        ::std::fs::remove_dir_all(outdir);
+        ::std::fs::remove_dir_all(outdir).unwrap();
     }
 
     let settings = ::serde_yaml::from_reader(::std::fs::File::open(config).unwrap()).unwrap();
 
-    ::sp2_tasks::run_relax_with_eigenvectors(&settings, input, outdir);
+    let _ = ::sp2_tasks::run_relax_with_eigenvectors(&settings, input, outdir);
 }

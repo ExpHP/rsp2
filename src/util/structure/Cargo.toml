@@ -12,7 +12,8 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 path = "lib.rs"
 
 [dependencies]
-ordered-float = "0.5"
-
 sp2-array-utils = { path = "../array" }
-sp2-slice-of-array = { path = "../slice-of-array" }
+
+slice-of-array = "0.1"
+ordered-float = "0.5"
+itertools = "0.7"

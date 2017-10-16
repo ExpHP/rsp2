@@ -37,16 +37,21 @@ def main():
     sub.add_argument('DIR')
     sub.set_defaults(cmd=new__main)
 
+    sub = subs.add_parser('mv')
+    sub.add_argument('CURDIR')
+    sub.add_argument('DESTDIR')
+    sub.set_defaults(cmd=mv__main)
+
+
     args = parser.parse_args()
     args.cmd(parser, args)
 
 #------------
 
 def gen__main(parser, args):
-    with open(MASTER_CFG_PATH) as f:
-        data = toml.load(f)
-        crates = data.pop('crates')
-        preferred_versions = data.pop('preferred-versions')
+    data = read_master_config()
+    crates = data.pop('crates')
+    preferred_versions = data.pop('preferred-versions')
 
     # catch some dumb user errors before we get too committed
     for (name, path) in crates.items():
@@ -86,7 +91,7 @@ def gen__main(parser, args):
     for (name, path) in crates.items():
         lookup_put(name, gen_relpath_to(name, path))
     for (name, version) in preferred_versions.items():
-        lookup_put(name, gen_constant('{} = "{}"'.format(name, version)))
+        lookup_put(name, gen_constant('{} = {}'.format(name, inline_toml(version))))
 
     # generate modified forms of each Cargo.toml
     for (name, path) in crates.items():
@@ -118,6 +123,27 @@ def gen__main(parser, args):
                     parser.error(s)
 
                 write(func(path))
+
+# a makeshift toml.dumps that uses inline tables
+def inline_toml(x):
+    if isinstance(x, dict):
+        items = ', '.join(f'{k} = {inline_toml(v)}' for (k, v) in x.items())
+        return f'{{ {items} }} '
+    elif isinstance(x, list):
+        items = ', '.join(inline_toml(v) for v in x)
+        return f'[{items}]'
+    # types that only have an inline representation
+    elif isinstance(x, (str, float, int, bool)):
+        # I'm not 100% sure if python str() makes a valid toml str
+        # so dumb dumb hack dumb hack hack dumb dumb dumb
+        s = toml.dumps({'a': x}).strip()
+        assert s.startswith('a')
+        s = s[1:].strip()
+        assert s.startswith('=')
+        s = s[1:].strip()
+        return s
+    else:
+        raise TypeError(x)
 
 # If a line is of the form "  !!macro-name  ", get "macro-name", else None
 def line_as_macro(line):
@@ -152,22 +178,10 @@ def new__main(parser, args):
         parser.error(f'crate "{name}" already exists')
 
     # Insert a line to crates.toml without destroying formatting
+    # (do this now for earlier exits on error)
     with open(MASTER_CFG_PATH) as f:
         lines = list(f)
-
-    stripped = [x.strip() for x in lines]
-    try: i = stripped.index(INSERTION_POINT_TEXT)
-    except: parser.error(f'''
-Failed to find the new crate insertion point in '{MASTER_CFG_PATH}'
-It should look like the following:
-    {INSERTION_POINT_TEXT}
-'''[:-1])
-
-    lines.insert(i, f'{name} = "{path}"\n')
-
-    # don't overwrite the original just yet, in case of errors
-    with open(MASTER_CFG_PATH + '.tmp', 'w') as f:
-        f.writelines(lines)
+    lines = master_config_textual_add(lines, f'{name} = "{path}"\n', fail=parser.error)
 
     # make the directory
     os.mkdir(path)
@@ -181,15 +195,112 @@ It should look like the following:
 fn it_works() { }
 '''[1:])
 
-    # commit our changes to the main config
-    import shutil
-    shutil.move(MASTER_CFG_PATH + '.tmp', MASTER_CFG_PATH)
+    with open_tmp(MASTER_CFG_PATH) as f:
+        f.writelines(lines)
 
+    # regenerate
+    gen__main(parser, None)
+
+#------------
+
+def mv__main(parser, args):
+    curdir = args.CURDIR
+    destdir = args.DESTDIR
+    if os.path.exists(destdir):
+        parser.error(f'"{destdir}": path already exists')
+    if not os.path.exists(curdir):
+        parser.error(f'"{curdir}": path does not exist')
+
+    with open(os.path.join(curdir, "Cargo.toml")) as f:
+        crate = toml.load(f)['package']['name']
+
+    # Edit the line in crates.toml without destroying formatting
+    # (do this now for earlier exits on error)
+    with open(MASTER_CFG_PATH) as f:
+        lines = list(f)
+    lines = master_config_textual_set_path(lines, crate, destdir, fail=parser.error)
+
+    # move the directory
+    os.rename(curdir, destdir)
+
+    with open_tmp(MASTER_CFG_PATH) as f:
+        f.writelines(lines)
+
+    # regenerate
+    gen__main(parser, None)
+
+#------------
+
+def read_master_config():
+    with open(MASTER_CFG_PATH) as f:
+        return toml.load(f)
+
+# set a path for one of our crates, by plaintext search
+def master_config_textual_add(lines, line, fail):
+    lines = list(lines)
+    stripped = [x.strip() for x in lines]
+    try: i = stripped.index(INSERTION_POINT_TEXT)
+    except: parser.error(f'''
+Failed to find the new crate insertion point in '{MASTER_CFG_PATH}'
+It should look like the following:
+    {INSERTION_POINT_TEXT}
+'''[:-1])
+
+    lines.insert(i, line)
+    return lines
+
+# set a path for one of our crates, by plaintext search
+def master_config_textual_set_path(lines, name, path, fail):
+    lines = list(lines)
+    name = name.replace('_', '-')
+    stripped = [x.strip() for x in lines]
+    for (i,line) in enumerate(lines):
+        if line.strip().replace('_', '-').startswith(name):
+            # expect exactly two, paired quotes
+            quotes = list(find_all_indices_of_any("\"'", line))
+            if not (len(quotes) == 2 and line[quotes[0]] == line[quotes[1]]):
+                fail(f"""
+{MASTER_CFG_PATH}:{i}: This line looks funny, not sure how to edit it.
+It should ideally look like:
+    {name} = 'current/path/to/{name}'
+But at least make sure there are exactly two quotes of the same style.
+"""[1:])
+
+            lines[i] = lines[i][:quotes[0]+1] + path + lines[i][quotes[1]:]
+            return lines
+    else:
+        fail(f"{MASTER_CFG_PATH}: Failed to find line for {name}.")
 
 #------------
 
 def src_toml_path(crate_name):
     return os.path.join(CARGO_TOMLS_DIR, f'{crate_name}.Cargo.toml')
+
+from contextlib import contextmanager
+
+# Variant of open(path, 'w') that writes to a temp file,
+# then overwrites the requested file only once the context manager
+# is exited without an exception
+@contextmanager
+def open_tmp(path, mode='w'):
+    import tempfile
+    import shutil
+    with tempfile.NamedTemporaryFile(mode=mode, delete=False) as f:
+        try: yield f
+        except:
+            # THIS NEVER HAPPENED
+            import os
+            os.unlink(f.name)
+            raise
+    # exiting the 'with' closes (but doesn't delete) the temp file
+
+    shutil.move(f.name, path)
+
+def find_all_indices_of_any(needles, haystack):
+    needles = set(needles)
+    for (i, x) in enumerate(haystack):
+        if x in needles:
+            yield i
 
 iife = lambda f: f()
 

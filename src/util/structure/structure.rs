@@ -31,8 +31,6 @@ impl<M> Structure<M> {
     pub fn num_atoms(&self) -> usize { self.coords.len() }
     pub fn lattice(&self) -> &Lattice { &self.lattice }
 
-
-
     // FIXME bad idea for stable interface, but good enough for now
     pub fn metadata(&self) -> &[M] { &self.meta }
     pub fn map_metadata<M2, F>(self, mut f: F) -> Structure<M2>

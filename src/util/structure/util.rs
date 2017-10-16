@@ -30,7 +30,7 @@ pub(crate) fn translate_mut_n3_n3(coords: &mut [[f64; 3]], by: &[[f64; 3]])
 
 #[cfg(test)]
 pub(crate) fn not_nan_n3(coords: Vec<[f64; 3]>) -> Vec<[NotNaN<f64>; 3]> {
-    use ::sp2_slice_of_array::prelude::*;
+    use ::slice_of_array::prelude::*;
     // still a newtype?
     assert_eq!(::std::mem::size_of::<f64>(), ::std::mem::size_of::<NotNaN<f64>>());
     // (NotNaN has undefined behavior for NaN so we must check)

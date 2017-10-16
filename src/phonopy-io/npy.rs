@@ -1,7 +1,7 @@
 use ::Result;
 use ::std::io::Read;
 
-use ::sp2_kets::Basis;
+use ::rsp2_kets::Basis;
 
 pub fn read_eigenvector_npy<R: Read>(mut r: R) -> Result<Vec<Basis>> {
     let bytes = {
@@ -25,7 +25,7 @@ pub fn read_eigenvalue_npy<R: Read>(mut r: R) -> Result<Vec<Vec<f64>>> {
         .or_else(|e| bail!("{:?}", e)) // generic, not displayable...
 }
 
-macro_rules! noop { ($i:expr) => { tag!($i, []) }; }
+// macro_rules! noop { ($i:expr) => { tag!($i, []) }; }
 
 // Equivalent of 'pure'/'of' in functional languages.
 // Strangely, nom has Option and Result versions but nothing for plain values.
@@ -47,9 +47,9 @@ named!(integer<usize>, map_res!(digits, str::parse::<usize>));
 mod parse_eigenvector_npy {
     use ::nom::*;
     use ::std::mem::size_of;
-    use ::sp2_kets::Basis;
+    use ::rsp2_kets::Basis;
 
-    use super::{chunk_evenly, digits, integer};
+    use super::{chunk_evenly, integer};
 
     // Make no mistake; this file makes no attempt to actually implement the spec,
     //   which contains such phrases as "a [python] object that can be passed
@@ -146,9 +146,8 @@ mod parse_eigenvector_npy {
 mod parse_eigenvalue_npy {
     use ::nom::*;
     use ::std::mem::size_of;
-    use ::sp2_kets::Basis;
 
-    use super::{chunk_evenly, digits, integer};
+    use super::{chunk_evenly, integer};
 
     // Make no mistake; this file makes no attempt to actually implement the spec,
     //   which contains such phrases as "a [python] object that can be passed

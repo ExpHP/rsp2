@@ -1,17 +1,17 @@
 //! Math utils for variable length contiguous vectors.
- 
+
 // Currently restricted to 'f64' to make the design tractible.
 // Generic traits would be nice and I would kill for a functional-style
 // maps and folds, but issues concerning borrowed data and trait bounds
 // get ugly fast.
- 
+
 #[derive(Debug,Copy,Clone,PartialEq,PartialOrd)]
 pub struct BadNorm(pub f64);
 
 /// Implements element-wise operations.
 ///
 /// Use the lowercase [`v`] to construct.
-/// 
+///
 /// [`v`]: TODO-LINK-FN
 #[derive(Debug,Copy,Clone,PartialEq,PartialOrd)]
 pub struct V<T: AllowedV>(pub T);
@@ -99,7 +99,7 @@ macro_rules! impl_binary {
 
         // These don't work as dreamed.
         // v(&mut x) is not an lvalue so you can't do assign-ops.
-        
+
         /*
         // vector += scalar
         impl<'a> $OpAssign<f64> for VMut<'a> {
@@ -187,7 +187,7 @@ impl IntoIterator for VOwn {
 pub fn v<W: MakeV>(w: W) -> W::Output { w.make_v() }
 
 /// Implementation detail of [`v`].
-/// 
+///
 /// [`v`]: TODO-LINK-FN
 pub trait MakeV {
     type Output;

@@ -1,8 +1,8 @@
-extern crate sp2_kets;
+extern crate rsp2_kets;
 extern crate sp2_structure;
 extern crate sp2_structure_io;
-extern crate sp2_slice_of_array;
 extern crate sp2_byte_tools_plus_float as byte_tools;
+extern crate slice_of_array;
 
 #[macro_use] extern crate error_chain;
 #[macro_use] extern crate nom;
@@ -117,7 +117,7 @@ pub mod force_sets {
     ) -> StdResult<Vec<Vec<[f64; 3]>>, E>
     where F: FnMut(&Structure<M>) -> StdResult<Vec<[f64; 3]>, E>,
     {
-        use sp2_slice_of_array::prelude::*;
+        use slice_of_array::prelude::*;
 
         self::compute(structure, displacements, |s| {
             let mut force = compute_grad(s)?;
@@ -262,7 +262,7 @@ pub mod cmd {
     ) -> Result<(Vec<f64>, Vec<Vec<[f64; 3]>>)>
     where P: AsRef<Path>,
     {
-        use ::sp2_slice_of_array::prelude::*;
+        use ::slice_of_array::prelude::*;
 
         let disp_dir = disp_dir.as_ref();
 
