@@ -14,7 +14,6 @@ extern crate env_logger;
 extern crate slice_of_array;
 #[macro_use] extern crate serde_json;
 
-use ::rand::random;
 use ::sp2_array_utils::vec_from_fn;
 use ::slice_of_array::prelude::*;
 use ::sp2_slice_math::{v,vnorm};
@@ -55,7 +54,7 @@ fn lammps_flat_diff_fn<'a>(lmp: &'a mut Lammps)
     })
 }
 
-//#[test]
+#[test]
 fn perturbed_graphene() {
     use ::sp2_structure::{CoordStructure, Lattice, Coords, supercell};
     init_logger();

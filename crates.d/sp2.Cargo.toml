@@ -17,5 +17,7 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 !!log
 !!env_logger
 !!clap
+!!rsp2-kets
+!!slice-of-array
 
 [workspace]

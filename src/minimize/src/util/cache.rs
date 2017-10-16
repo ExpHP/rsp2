@@ -4,6 +4,7 @@
 #[derive(Debug,Clone,PartialEq,Eq,PartialOrd,Ord,Hash)]
 pub(crate) struct LastCache<K, V>(Option<(K, V)>);
 
+#[allow(dead_code)]
 impl<K, V> LastCache<K, V>
 where K: PartialEq,
 {
@@ -43,6 +44,7 @@ pub(crate) struct MinCacheBy<M, K, V, F> {
     projection: F,
 }
 
+#[allow(dead_code)]
 impl<M, K, V, F> MinCacheBy<M, K, V, F>
 where
     K: PartialEq,
@@ -62,6 +64,7 @@ where
     pub(crate) fn get_consume(self, key: &K) -> Option<V> { self.best.get_consume(key).map(|t| t.1) }
 }
 
+#[allow(dead_code)]
 /// Caches all input/output pairs of a function in a hashmap
 /// using the given key function to produce hashable keys.
 ///

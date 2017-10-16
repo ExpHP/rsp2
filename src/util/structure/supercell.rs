@@ -1,7 +1,7 @@
 use super::{Structure, Lattice, Coords};
 
 use ::ordered_float::NotNaN;
-use ::sp2_array_utils::{dot, try_vec_from_fn, MatrixInverseExt};
+use ::sp2_array_utils::{dot, try_vec_from_fn};
 
 pub fn diagonal<M>(dims: (u32,u32,u32), structure: Structure<M>)
 -> (Structure<M>, SupercellToken)

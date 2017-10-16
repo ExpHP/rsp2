@@ -43,6 +43,7 @@ pub mod one_dee {
         fn derivative(&self) -> Self::Derivative { self.1.derivative().scale_y(self.0) }
     }
 
+    #[allow(dead_code)]
     /// A simple polynomial in one term
     #[derive(Debug, Clone)]
     pub struct Polynomial(Vec<f64>);
@@ -443,8 +444,7 @@ pub mod n_dee {
 
         #[test]
         fn lj_minimum() {
-            use super::HyperLennardJones;
-            use ::sp2_slice_math::{v,V};
+            use ::sp2_slice_math::{v, V};
 
             let ndim = 10;
             let min_value = -40.0;
@@ -452,7 +452,7 @@ pub mod n_dee {
             let mut lj = super::HyperLennardJones { ndim, min_value, min_radius };
 
             for _ in 0..5 {
-                let V(point) = min_radius * V(::util::random::direction(ndim));
+                let V(point) = min_radius * v(::util::random::direction(ndim));
                 assert_close!(min_value, lj.value(&point));
                 for x in lj.gradient(&point) {
                     assert_close!(abs=1e-8, x, 0.0);

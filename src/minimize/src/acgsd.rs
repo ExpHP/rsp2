@@ -724,7 +724,7 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
                 settings::Linesearch::Acgsd(ref settings) => {
                     match ::linesearch::linesearch(
                         settings,
-                        saved.alpha,
+                        guess_alpha,
                         &mut *memoized,
                     ) {
                         Ok(x) => x,
@@ -735,7 +735,7 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
                 settings::Linesearch::Hager(ref settings) => {
                     ::hager_ls::linesearch(
                         settings,
-                        saved.alpha,
+                        guess_alpha,
                         &mut *memoized,
                     )?
                 },

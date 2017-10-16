@@ -153,7 +153,6 @@ fn bisect<E>(
 //     the wikipedia implementations do and recompute b and c every iter.
 pub fn golden<E, F>(
     interval: (f64, f64),
-    initial_step: f64,
     mut compute: F,
 // NOTE: cannot return a bound due to issue mentioned in body
 ) -> LsResult<Result<f64, E>>

@@ -10,6 +10,7 @@ pub(crate) enum Never { }
 
 pub(crate) mod cache;
 
+#[allow(dead_code)]
 pub(crate) mod random {
     pub(crate) fn uniform(a: f64, b: f64) -> f64 {
         a + ::rand::random::<f64>() * (b - a)

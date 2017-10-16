@@ -31,12 +31,7 @@ impl<'a> AllowedV for &'a mut [f64] {}
 //------------------------
 // Math ops
 
-use ::std::ops::{
-    Add, AddAssign, Sub, SubAssign,
-    Mul, MulAssign, Div, DivAssign,
-    Rem, RemAssign, Neg,
-    Deref, DerefMut,
-};
+use ::std::ops::{ Add, Sub, Mul, Div, Rem, Neg, Deref, DerefMut };
 
 macro_rules! impl_binary {
     ($Op:ident::$op:ident, $OpAssign:ident::$op_assign:ident)
@@ -243,7 +238,7 @@ pub fn vdot(u: &[f64], w: &[f64]) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{v,vdot,SubAssign};
+    use super::{v, vdot};
 
     // TODO: test panics on incorrect length for:
     //  - each vector-vector binop impl

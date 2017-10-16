@@ -33,7 +33,7 @@ impl<M> Structure<M> {
 
     // FIXME bad idea for stable interface, but good enough for now
     pub fn metadata(&self) -> &[M] { &self.meta }
-    pub fn map_metadata<M2, F>(self, mut f: F) -> Structure<M2>
+    pub fn map_metadata<M2, F>(self, f: F) -> Structure<M2>
     where F: FnMut(M) -> M2
     {
         let Structure { lattice, coords, meta } = self;
