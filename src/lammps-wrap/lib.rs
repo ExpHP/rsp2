@@ -6,8 +6,10 @@
 extern crate slice_of_array;
 extern crate sp2_structure;
 extern crate lammps_sys;
-extern crate ndarray;
 #[macro_use] extern crate log;
+
+pub type StdResult<T, E> = ::std::result::Result<T, E>;
+pub type Result<T> = StdResult<T, Error>;
 
 use ::std::os::raw::{c_void, c_int, c_double};
 use ::std::ffi::CString;
@@ -15,7 +17,6 @@ use ::slice_of_array::prelude::*;
 use ::sp2_structure::{CoordStructure, Lattice};
 
 #[derive(Debug,Copy,Clone,PartialEq,Eq,PartialOrd,Ord,Hash)]
-#[allow(unused)]
 enum ComputeStyle {
     Global = 0,
     PerAtom = 1,
@@ -23,7 +24,6 @@ enum ComputeStyle {
 }
 
 #[derive(Debug,Copy,Clone,PartialEq,Eq,PartialOrd,Ord,Hash)]
-#[allow(unused)]
 enum ComputeType {
     Scalar = 0,
     Vector = 1,
@@ -31,10 +31,24 @@ enum ComputeType {
 }
 
 #[derive(Debug,Copy,Clone,PartialEq,Eq,PartialOrd,Ord,Hash)]
-#[allow(unused)]
 enum ScatterGatherDatatype {
     Integer = 0,
     Float = 1,
+}
+
+macro_rules! derive_into_from_as_cast {
+    ($($A:ty as $B:ty;)*)
+    => { $(
+        impl From<$A> for $B {
+            fn from(a: $A) -> $B { a as $B }
+        }
+    )* };
+}
+
+derive_into_from_as_cast!{
+    ComputeStyle as c_int;
+    ComputeType as c_int;
+    ScatterGatherDatatype as c_int;
 }
 
 /// A light wrapper around a LAMMPS instance which handles ownership
@@ -70,7 +84,7 @@ pub struct Error; // TODO
 
 impl LammpsOwner {
     // FIXME current signature is a lie, we never return errors
-    pub fn new(argv: &[&str]) -> Result<LammpsOwner, Error> {
+    pub fn new(argv: &[&str]) -> Result<LammpsOwner> {
         let mut argv = CArgv::from_strs(argv).unwrap(); // FIXME: unwrap out of laziness
         let mut ptr: *mut c_void = ::std::ptr::null_mut();
         unsafe {
@@ -113,7 +127,7 @@ impl LammpsOwner {
     // TODO: Looks like we can change (some of?) these aborts into detectable errors
     //        by defining LAMMPS_EXCEPTIONS at build time,
     //        which introduces `lammps_has_error` and `lammps_get_last_error_message`
-    pub fn command(&mut self, cmd: &str) -> Result<(), Error> {
+    pub fn command(&mut self, cmd: &str) -> Result<()> {
         cli::trace(cmd);
         let cmd = CString::new(cmd).expect("embedded NUL!").into_raw();
         unsafe {
@@ -131,7 +145,7 @@ impl LammpsOwner {
 
     // convenience wrapper
     // NOTE: repeatedly invokes `lammps_command`, not `lammps_command_list`
-    pub fn commands<S: AsRef<str>>(&mut self, cmds: &[S]) -> Result<(), Error> {
+    pub fn commands<S: AsRef<str>>(&mut self, cmds: &[S]) -> Result<()> {
         for s in cmds { self.command(s.as_ref())?; }
         Ok(())
     }
@@ -173,7 +187,7 @@ impl LammpsOwner {
 
         let mut out = vec![T::default(); count * natoms];
         ::lammps_sys::lammps_gather_atoms(
-            self.ptr, name, ty as c_int, count as c_int,
+            self.ptr, name, ty.into(), count as c_int,
             out.as_mut_ptr() as *mut c_void,
         );
 
@@ -218,7 +232,7 @@ impl LammpsOwner {
         let count = data.len() / natoms;
 
         ::lammps_sys::lammps_scatter_atoms(
-            self.ptr, name, ty as c_int, count as c_int,
+            self.ptr, name, ty.into(), count as c_int,
             data.as_mut_ptr() as *mut c_void,
         );
 
@@ -230,15 +244,45 @@ impl LammpsOwner {
     }
 
     // Read a scalar compute, possibly computing it in the process.
+    //
+    // NOTE: There are warnings in extract_compute about making sure it is valid
+    //       to run the compute.  I'm not sure what it means, and it sounds to me
+    //       like this could possibly actually cause UB; I just have no idea how.
     pub unsafe fn extract_compute_0d(&mut self, name: &str) -> Option<f64> {
         let id = CString::new(name).expect("internal NUL").into_raw();
         let out_ptr = unsafe { ::lammps_sys::lammps_extract_compute(
             self.ptr,
             id,
-            ComputeStyle::Global as c_int,
-            ComputeType::Scalar as c_int,
+            ComputeStyle::Global.into(),
+            ComputeType::Scalar.into(),
         ) };
         unsafe { (out_ptr as *mut c_double).as_ref() }.cloned()
+    }
+
+    // Read a vector compute, possibly computing it in the process.
+    //
+    // NOTE: There are warnings in extract_compute about making sure it is valid
+    //       to run the compute.  I'm not sure what it means, and it sounds to me
+    //       like this could possibly actually cause UB; I just have no idea how.
+    pub unsafe fn extract_compute_1d(
+        &mut self,
+        name: &str,
+        style: ComputeStyle,
+        len: usize,
+    ) -> Option<Vec<f64>>
+    {
+        let id = CString::new(name).expect("internal NUL").into_raw();
+        let out_ptr = unsafe { ::lammps_sys::lammps_extract_compute(
+            self.ptr,
+            id,
+            style.into(),
+            ComputeType::Vector.into(),
+        ) } as *mut c_double;
+
+        out_ptr.as_ref().map(|p|
+            ::std::slice::from_raw_parts(p, len)
+                .iter().map(|&c| c as f64).collect()
+        )
     }
 }
 
@@ -258,18 +302,90 @@ pub struct Lammps {
     /// (NOTE: I'm not entirely sure if this is correct.)
     ptr: ::std::cell::RefCell<LammpsOwner>,
 
-    /// A structure is stored to allow operations such as 'set_lattice'.
-    structure: ::sp2_structure::CoordStructure,
+    /// The currently computed structure, encapsulated in a helper type
+    /// that tracks dirtiness and helps us decide when we need to call lammps
+    structure: MaybeDirty<CoordStructure>,
+}
+
+struct MaybeDirty<T> {
+    // NOTE: Possible states for the members:
+    //
+    //        dirty:       clean:       when
+    //        Some(s)       None       is dirty, and has never been clean.
+    //        Some(s)      Some(s)     is dirty, but has been clean in the past.
+    //         None        Some(s)     is currently clean.
+
+    /// new data that has not been marked clean.
+    dirty: Option<T>,
+    /// the last data marked clean.
+    clean: Option<T>,
+}
+
+impl<T> MaybeDirty<T> {
+    pub fn new_dirty(x: T) -> MaybeDirty<T> {
+        MaybeDirty {
+            dirty: Some(x),
+            clean: None,
+        }
+    }
+
+    pub fn is_dirty(&self) -> bool
+    { self.dirty.is_some() }
+
+    pub fn last_clean(&self) -> Option<&T>
+    { self.clean.as_ref() }
+
+    pub fn get(&self) -> &T
+    { self.dirty.as_ref().or(self.last_clean()).unwrap() }
+
+    /// Get a mutable reference. This automatically marks the value as dirty.
+    pub fn get_mut(&mut self) -> &mut T
+    where T: Clone,
+    {
+        if self.dirty.is_none() {
+            self.dirty = self.clean.clone();
+        }
+        self.dirty.as_mut().unwrap()
+    }
+
+    pub fn mark_clean(&mut self)
+    {
+        assert!(self.dirty.is_some() || self.clean.is_some());
+
+        if self.dirty.is_some() {
+            self.clean = self.dirty.take();
+        }
+
+        assert!(self.dirty.is_none());
+        assert!(self.clean.is_some());
+    }
+
+    // test if f(x) is dirty by equality
+    // HACK
+    // this is only provided to help work around borrow checker issues
+    pub fn is_projection_dirty<K, F>(&self, mut f: F) -> bool
+    where
+        K: PartialEq,
+        F: FnMut(&T) -> K,
+    {
+        match (&self.clean, &self.dirty) {
+            (&Some(ref clean), &Some(ref dirty)) => f(clean) != f(dirty),
+            (&None, &Some(_)) => true,
+            (&Some(_), &None) => false,
+            (&None, &None) => unreachable!(),
+        }
+    }
 }
 
 impl Lammps {
 
-    pub fn new_carbon(structure: CoordStructure) -> Result<Lammps, Error> {
+    pub fn new_carbon(structure: CoordStructure) -> Result<Lammps>
+    {Ok({
         let carts = structure.to_carts();
 
         let lmp = ::LammpsOwner::new(&["lammps", "-screen", "none"])?;
         let ptr = ::std::cell::RefCell::new(lmp);
-        let mut me = Lammps { ptr , structure };
+        let me = Lammps { ptr, structure: MaybeDirty::new_dirty(structure) };
 
         me.ptr.borrow_mut().commands(&[
             "package omp 0",
@@ -306,9 +422,6 @@ impl Lammps {
                 this_atom_type, carts.len(), seed))?;
         }
 
-        // set actual structure
-        me.send_lmp_everything()?;
-
         {
             let sigma_scale = 3.0; // LJ Range (x3.4 A)
             let lj = 1;            // on/off
@@ -318,73 +431,76 @@ impl Lammps {
                 &format!("pair_style airebo/omp {} {} {}", sigma_scale, lj, torsion),
                 &format!("pair_coeff * * CH.airebo H C"), // read potential info
                 //&format!("pair_coeff * * lj/scale {}", lj_scale), // set lj potential scaling factor (HACK)
-                &format!("compute MyPE all pe"), // set up a compute for energy
             ])?;
         }
 
-        Ok(me)
-    }
+        // set up computes
+        me.ptr.borrow_mut().commands(&[
+            &format!("compute RSP2_PE all pe"),
+            &format!("compute RSP2_Pressure all pressure NULL virial"),
+        ])?;
 
-    pub fn set_structure(&mut self, structure: CoordStructure) -> Result<(), Error> {
-        let old = ::std::mem::replace(&mut self.structure, structure);
-        if self.structure.lattice().matrix() != old.lattice().matrix() {
-            self.send_lmp_lattice()?;
+        me
+    })}
+
+    //-------------------------------------------
+    // modifying the system
+
+    pub fn set_structure(&mut self, structure: CoordStructure) -> Result<()>
+    {Ok({
+        *self.structure.get_mut() = structure;
+    })}
+
+    pub fn set_carts(&mut self, carts: &[[f64; 3]]) -> Result<()>
+    {Ok({
+        self.structure.get_mut().set_carts(carts.to_vec());
+    })}
+
+    pub fn set_lattice(&mut self, lattice: Lattice) -> Result<()>
+    {Ok({
+        self.structure.get_mut().set_lattice(&lattice);
+    })}
+
+    //-------------------------------------------
+    // sending input to lammps and running the main computation
+
+    // This will rerun computations in lammps, but only if things have changed.
+    //
+    // At the end, (cached, updated) == (Some(_), None)
+    fn update_computation(&mut self) -> Result<()>
+    {Ok({
+        if self.structure.is_dirty() {
+            self.structure.get_mut().ensure_carts();
+
+            // only send data that has changed from the cache.
+            // This is done because it appears that lammps does some form of
+            //  caching as well (lattice modifications in particular appear
+            //  to increase the amount of computational work)
+            if self.structure.is_projection_dirty(|s| s.lattice().clone()) {
+                self.send_lmp_lattice()?;
+            }
+
+            if self.structure.is_projection_dirty(|s| s.to_carts()) {
+                self.send_lmp_carts()?;
+            }
+
+            self.ptr.borrow_mut().command("run 0")?;
+            self.structure.mark_clean();
         }
+    })}
 
-        self.send_lmp_carts()?;
-        Ok(())
-    }
-
-    pub fn set_carts(&mut self, carts: &[[f64; 3]]) -> Result<(), Error>
-    {
-        self.structure.set_carts(carts.to_vec());
-        self.send_lmp_carts()?;
-        Ok(())
-    }
-
-    pub fn set_lattice(&mut self, lattice: Lattice) -> Result<(), Error>
-    {
-        self.structure.set_lattice(&lattice);
-        self.send_lmp_lattice()?;
-        self.send_lmp_carts()?;
-        Ok(())
-    }
-
-    pub fn compute(&mut self) -> Result<(f64, Vec<[f64; 3]>), Error> {
-        self.ptr.borrow_mut().command("run 0")?;
-
-        // NOTE: There are warnings in extract_compute about making sure it is valid
-        //       to run the compute.  I'm not sure what it means, and it sounds to me
-        //       like this could possibly actually cause UB; I just have no idea how.
-        let value = unsafe { self.ptr.borrow_mut().extract_compute_0d("MyPE") }.unwrap();
-        let grad = {
-            let mut grad = unsafe { self.ptr.borrow_mut().gather_atoms_f("f", 3) };
-            for x in &mut grad { *x *= -1.0 };
-            grad
-        };
-        Ok((value, grad.nest().to_vec()))
-    }
-
-    fn send_lmp_everything(&mut self) -> Result<(), Error>
-    {
-        self.send_lmp_lattice()?;
-        self.send_lmp_carts()?;
-        Ok(())
-    }
-
-    fn send_lmp_carts(&mut self) -> Result<(), Error>
-    {
-        let carts = self.structure.to_carts();
+    fn send_lmp_carts(&mut self) -> Result<()>
+    {Ok({
+        let carts = self.structure.get().to_carts();
         let natoms = self.ptr.borrow_mut().get_natoms();
         assert_eq!(natoms, carts.len());
 
         unsafe { self.ptr.borrow_mut().scatter_atoms_f("x", carts.flat()); };
-        Ok(())
-    }
+    })}
 
-    fn send_lmp_lattice(&mut self) -> Result<(), Error>
-    {
-        let lattice = self.structure.lattice().matrix();
+    fn send_lmp_lattice(&mut self) -> Result<()>
+    {Ok({
+        let lattice = self.structure.get().lattice().matrix();
         assert_eq!(0f64, lattice[0][1], "non-triangular lattices not yet supported");
         assert_eq!(0f64, lattice[0][2], "non-triangular lattices not yet supported");
         assert_eq!(0f64, lattice[1][2], "non-triangular lattices not yet supported");
@@ -397,9 +513,50 @@ impl Lammps {
             &format!("change_box all xz final {}", lattice[2][0]),
             &format!("change_box all yz final {}", lattice[2][1]),
         ])?;
+    })}
 
-        Ok(())
-    }
+    //-------------------------------------------
+    // gathering output from lammps
+    //
+    // NOTE: Every method here should call update_computation().
+    //       Don't worry about being sloppy with redundant calls;
+    //       the method was designed for such usage.
+
+    pub fn compute(&mut self) -> Result<(f64, Vec<[f64; 3]>)>
+    {Ok({
+        self.update_computation()?;
+
+        (self.compute_value()?, self.compute_grad()?)
+    })}
+
+    pub fn compute_value(&mut self) -> Result<f64>
+    {Ok({
+        self.update_computation()?;
+
+        unsafe { self.ptr.borrow_mut().extract_compute_0d("RSP2_PE") }.unwrap()
+    })}
+
+    pub fn compute_grad(&mut self) -> Result<Vec<[f64; 3]>>
+    {Ok({
+        self.update_computation()?;
+
+        let grad = {
+            let mut grad = unsafe { self.ptr.borrow_mut().gather_atoms_f("f", 3) };
+            for x in &mut grad { *x *= -1.0 };
+            grad
+        };
+        grad.nest().to_vec()
+    })}
+
+    pub fn compute_pressure(&mut self) -> Result<[f64; 6]>
+    {Ok({
+        self.update_computation()?;
+
+        // as_array().clone() doesn't manage type inference here as well as deref...
+        *unsafe {
+            self.ptr.borrow_mut().extract_compute_1d("RSP2_Pressure", ComputeStyle::Global, 6)
+        }.unwrap().as_array()
+    })}
 }
 
 use memory::CArgv;

@@ -74,7 +74,7 @@ fn assign_layers_impl(fracs: &[[f64; 3]], lattice: &Lattice, normal: &[i32; 3], 
         // Invariant
         assert!(cur_group.len() >= 1);
 
-        if bx - ax <= frac_sep {
+        if bx - ax > frac_sep {
             let done = mem::replace(&mut cur_group, vec![]);
             groups.push(done);
         }
@@ -84,7 +84,7 @@ fn assign_layers_impl(fracs: &[[f64; 3]], lattice: &Lattice, normal: &[i32; 3], 
     // Detect a layer crossing the periodic plane:
     // If the first and last "layers" are close enough,
     // join them together.
-    let wrap_distance = sorted[0].1 - (1.0 - sorted.last().unwrap().1);
+    let wrap_distance = sorted[0].1 - (sorted.last().unwrap().1 - 1.0);
     if wrap_distance <= frac_sep && !groups.is_empty() {
         groups[0].extend(cur_group); // join them
     } else {

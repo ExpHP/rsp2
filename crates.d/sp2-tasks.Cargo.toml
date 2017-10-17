@@ -19,6 +19,7 @@ path = "lib.rs"
 !!sp2-eigenvector-classify
 
 !!slice-of-array
+!!rsp2-kets
 !!serde
 !!serde_json
 !!serde_derive
@@ -26,3 +27,4 @@ path = "lib.rs"
 !!log
 !!env_logger
 !!itertools
+!!ansi-term

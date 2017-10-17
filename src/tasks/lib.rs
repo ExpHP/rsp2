@@ -15,6 +15,7 @@ extern crate rand;
 extern crate env_logger;
 extern crate slice_of_array;
 extern crate serde;
+extern crate ansi_term;
 extern crate serde_json;
 #[macro_use] extern crate serde_derive;
 #[macro_use] extern crate log;
@@ -178,7 +179,7 @@ where P: AsRef<Path>, Q: AsRef<Path>,
         Ok((eval, evec))
     };
 
-    let minimize_evec = |structure: CoordStructure, evec: &[[f64; 3]]| -> Result<CoordStructure, Panic> {
+    let minimize_evec = |structure: CoordStructure, evec: &[[f64; 3]]| -> Result<(f64, CoordStructure), Panic> {
         let sc_dims = tup3(settings.supercell_relax.dim_for_unitcell(structure.lattice()));
         let (structure, sc_token) = supercell::diagonal(sc_dims, structure);
         let evec = sc_token.replicate(evec);
@@ -199,20 +200,33 @@ where P: AsRef<Path>, Q: AsRef<Path>,
         let pos = pos_at_alpha(alpha);
         let structure = from_structure.with_coords(Coords::Carts(pos.nest().to_vec()));
 
-        Ok(multi_threshold_deconstruct(sc_token, 1e-10, 1e-3, structure)?)
+        Ok((alpha, multi_threshold_deconstruct(sc_token, 1e-10, 1e-3, structure)?))
     };
 
     let write_eigen_info = |f: &mut Write, einfos: &EigenInfo| -> Result<_, Panic>
     {
-        writeln!(f, "{:27}  {:4} {:5} [{:4.2}, {:4.2}, {:4.2}]",
-            "# Frequency (cm^-1)", "Acou", "Layer", "X", "Y", "Z")?;
+        use ::ansi_term::Colour::{Red, Cyan, Yellow, Black};
+        use display_util::{ColorByRange, DisplayProb};
+
+        let color_range = ColorByRange::new(vec![
+            (0.999, Cyan.bold()),
+            (0.9, Cyan.normal()),
+            (0.1, Yellow.normal()),
+            (1e-4, Red.bold()),
+            (1e-10, Black.normal()),
+        ], Red.normal());
+        let dp = |x: f64| color_range.paint_as(&x, DisplayProb(x));
+        let pol = |x: f64| color_range.paint(x);
+
+        writeln!(f, "{:27}  {:^7}  {:^7} [{:^4}, {:^4}, {:^4}]",
+            "# Frequency (cm^-1)", "Acoustc", "Layer", "X", "Y", "Z")?;
         for item in einfos.iter() {
             let eval = item.frequency;
-            let acou = item.acousticness;
-            let layer = item.layer_acousticness;
+            let acou = dp(item.acousticness);
+            let layer = dp(item.layer_acousticness);
             let (x, y, z) = tup3(item.polarization);
-            writeln!(f, "{:27}  {:4.2}  {:4.2} [{:4.2}, {:4.2}, {:4.2}]",
-                eval, acou, layer, x, y, z)?;
+            writeln!(f, "{:27}  {}  {} [{:4.2}, {:4.2}, {:4.2}]",
+                eval, acou, layer, pol(x), pol(y), pol(z))?;
         }
         Ok(())
     };
@@ -237,6 +251,7 @@ where P: AsRef<Path>, Q: AsRef<Path>,
             println!("Finished relaxation # {}", iteration + 1);
 
             let (layers, _nlayer) = ::sp2_structure::assign_layers(&structure, &[0, 0, 1], 0.25);
+            eprintln!("{:?}", layers);
             let einfos = get_eigensystem_info(&evals, &evecs, &layers[..]);
             write_eigen_info(
                 &mut File::create(format!("eigenvalues.{:02}", iteration))?,
@@ -251,10 +266,14 @@ where P: AsRef<Path>, Q: AsRef<Path>,
             let mut structure = structure;
             for (i, info, evec) in izip!(1.., &einfos, &evecs) {
                 if info.frequency < 0.0 && info.acousticness < 0.95 {
-                    println!("!! Optimizing along band {} ({})", i, info.frequency);
-                    structure = minimize_evec(structure, &evec[..])?;
+                    if all_ok {
+                        println!("!! Optimizing along bad bands");
+                        all_ok = false;
+                    }
+                    let (alpha, new_structure) = minimize_evec(structure, &evec[..])?;
+                    println!("!! Optimized along band {} ({}), a = {:e}", i, info.frequency, alpha);
 
-                    all_ok = false;
+                    structure = new_structure;
                 }
             }
 
@@ -282,6 +301,130 @@ where P: AsRef<Path>, Q: AsRef<Path>,
 
     Ok(())
 }
+
+
+macro_rules! each_fmt_trait {
+    ($mac:ident!)
+    => {
+        $mac!(::std::fmt::Display);
+        $mac!(::std::fmt::Octal);
+        $mac!(::std::fmt::LowerHex);
+        $mac!(::std::fmt::UpperHex);
+        $mac!(::std::fmt::Pointer);
+        $mac!(::std::fmt::Binary);
+        $mac!(::std::fmt::LowerExp);
+        $mac!(::std::fmt::UpperExp);
+    }
+}
+
+mod display_util {
+    use ::std::fmt;
+    use ::ansi_term::Style;
+
+
+    /// Specialized display impl for numbers that from 0 to 1 and may be
+    /// extremely close to either 0 or 1
+    #[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
+    pub struct DisplayProb(pub f64);
+    impl fmt::Display for DisplayProb {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            let log10_1p = |x: f64| x.ln_1p() / ::std::f64::consts::LN_10;
+            assert!(0.0 < self.0 && self.0 < 1.0 + 1e-5,
+                "bad probability: {}", self.0);
+
+            if self.0 >= 1.0 {
+                write!(f, "{:>7}", 1.0)
+            } else if self.0 <= 1e-3 {
+                write!(f, "  1e{:03}", self.0.log10().round())
+            } else if self.0 + 1e-3 >= 1.0 {
+                write!(f, "1-1e{:03}", log10_1p(-self.0).round())
+            } else {
+                write!(f, "{:<7.5}", self.0)
+            }
+        }
+    }
+
+    pub struct ColorByRange<T> {
+        pub divs: Vec<(T, Style)>,
+        pub lowest: Style,
+    }
+    impl<T> ColorByRange<T> {
+        pub fn new(divs: Vec<(T, Style)>, lowest: Style) -> ColorByRange<T> {
+            ColorByRange { divs, lowest }
+        }
+
+        fn style_of(&self, x: &T) -> Style
+        where T: PartialOrd,
+        {
+            for &(ref pivot, style) in &self.divs {
+                if x > pivot { return style; }
+            }
+            return self.lowest;
+        }
+
+        pub fn paint<'a, U>(&self, x: U) -> super::term::Wrapper<U, T>
+        where
+            T: PartialOrd + 'a,
+            U: ::std::borrow::Borrow<T> + 'a,
+        {
+            super::term::gpaint(self.style_of(x.borrow()), x)
+        }
+
+        pub fn paint_as<'a, U>(&self, compare_me: &T, show_me: U) -> super::term::Wrapper<U, U>
+        where T: PartialOrd,
+        {
+            super::term::paint(self.style_of(compare_me), show_me)
+        }
+    }
+}
+
+mod term {
+    // hack for type  inference issues
+    pub fn paint<T>(
+        style: ::ansi_term::Style,
+        value: T,
+    ) -> Wrapper<T, T>
+    { gpaint(style, value) }
+
+    pub fn gpaint<U, T>(
+        style: ::ansi_term::Style,
+        value: U,
+    ) -> Wrapper<U, T>
+    { Wrapper { style, value, _target: Default::default() } }
+
+    /// A wrapper for colorizing all formatting traits like `Display`.
+    ///
+    /// Except `Debug`.
+    #[derive(Debug, Copy, Clone, PartialEq)]
+    pub struct Wrapper<U, T=U> {
+        style: ::ansi_term::Style,
+        value: U,
+        _target: ::std::marker::PhantomData<T>,
+    }
+
+    use std::fmt;
+
+    macro_rules! derive_fmt_impl {
+        ($Trait:path)
+        => {
+            impl<U, T> $Trait for Wrapper<U, T>
+            where
+                U: ::std::borrow::Borrow<T>,
+                T: $Trait,
+            {
+                fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                    write!(f, "{}", self.style.prefix())?;
+                    T::fmt(self.value.borrow(), f)?;
+                    write!(f, "{}", self.style.suffix())?;
+                    Ok(())
+                }
+            }
+        };
+    }
+
+    each_fmt_trait!{derive_fmt_impl!}
+}
+
 
 pub type EigenInfo = Vec<eigen_info::Item>;
 

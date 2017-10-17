@@ -82,13 +82,14 @@ impl<'a> Slice<'a, f64>
 
     fn probability(&self, ket: &[f64]) -> f64
     {
-        let square = |x: f64| x * x;
+        let square = |x| x * x;
         let dot = |a: &[f64], b: &[f64]| {
             assert_eq!(a.len(), b.len());
             izip!(a, b).map(|(a, b)| a * b).sum()
         };
-        let sqnorm = dot(ket, ket);
+        let sqnorm: f64 = dot(ket, ket);
 
+        // FIXME square(dot()) or just dot()? WHY AM I NOT SURE?!
         self.kets().map(|bra| square(dot(bra, ket))).sum::<f64>() / sqnorm
     }
 }
@@ -124,8 +125,10 @@ fn keyed_basis<K: Eq + Hash>(keys: &[Option<K>]) -> Basis<f64>
         (0..keys.len()).map(move |i| indices.contains(&i) as i32 as f64)
     }).flat_map(|x| x).collect::<Vec<_>>();
 
-    let rnorm = data.iter().map(|x| x*x).sum::<f64>().sqrt().recip();
-    for x in &mut data { *x *= rnorm; }
+    for ket in data.chunks_mut(keys.len()) {
+        let rnorm = ket.iter().map(|x| x*x).sum::<f64>().sqrt().recip();
+        for x in ket { *x *= rnorm; }
+    }
 
     Basis { dim: keys.len(), data }
 }

@@ -5,7 +5,7 @@ hack-scale:
  - 0.9833333333333333
  - 0.9833333333333333
  - 1
-displacement-distance: 1e-3
+displacement-distance: 1e-4
 neg-frequency-threshold: 1e-3
 # neg-frequency-threshold: 1e-3
 cg:
@@ -14,7 +14,7 @@ cg:
       - grad-rms: 1e-14
       #- all:
         #- grad-rms: 1e-9
-      - iterations: 150
+      - iterations: 100
       #- iterations: 1
   alpha-guess-max: 1e-1
   alpha-guess-first: 1e-2

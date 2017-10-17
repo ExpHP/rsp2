@@ -24,6 +24,7 @@ sp2-util-macros = { path = "../util/macros" }
 sp2-eigenvector-classify = { path = "../math/eigenvector-classify" }
 
 slice-of-array = "0.1"
+rsp2-kets = { version = "0.3", git = "https://github.com/ExpHP/rsp2-kets", features = ["serde"] } 
 serde = "1"
 serde_json = "1"
 serde_derive = "1"
@@ -31,3 +32,4 @@ rand = "0.3"
 log = "0.3"
 env_logger = "0.4"
 itertools = "0.7"
+ansi_term = "0.10"
