@@ -243,12 +243,13 @@ where P: AsRef<Path>, Q: AsRef<Path>,
         let mut from_structure = original;
         // HACK to stop one iteration AFTER all non-acoustics are positive
         let mut iteration = 1;
+        let mut all_ok_count = 0;
         let (structure, evals, _evecs) = loop { // NOTE: we use break with value
             let structure = relax(from_structure)?;
             let (evals, evecs) = diagonalize(structure.clone())?;
 
             println!("============================");
-            println!("Finished relaxation # {}", iteration + 1);
+            println!("Finished relaxation # {}", iteration);
 
             let (layers, _nlayer) = ::sp2_structure::assign_layers(&structure, &[0, 0, 1], 0.25);
             eprintln!("{:?}", layers);
@@ -278,7 +279,10 @@ where P: AsRef<Path>, Q: AsRef<Path>,
             }
 
             if all_ok {
-                break (structure, evals, evecs);
+                all_ok_count += 1;
+                if all_ok_count >= 3 {
+                    break (structure, evals, evecs);
+                }
             }
 
             println!("============================");
