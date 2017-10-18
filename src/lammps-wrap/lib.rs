@@ -381,6 +381,8 @@ impl Lammps {
 
     pub fn new_carbon(structure: CoordStructure) -> Result<Lammps>
     {Ok({
+        // Lammps script based on code from Colin Daniels.
+
         let carts = structure.to_carts();
 
         let lmp = ::LammpsOwner::new(&["lammps", "-screen", "none"])?;
