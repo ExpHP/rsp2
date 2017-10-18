@@ -251,7 +251,7 @@ impl Hager {
                             slow_non_exits -= 1;          //           HACK HACK
                         }                                 //              HACK HACK
                     } else {
-                        trace!("LS: i: {:>2} ({})  a: {:<23e}  s: {:<23e}  v: {:<23}",
+                        trace!("LS: i: {:>2} ({})  a: {:<23e}  s: {:<+23e}  v: {:<23}",
                             computations, how.as_str(), alpha, bound.slope, bound.value);
                     }
 

@@ -39,12 +39,15 @@ pub struct Settings {
     displacement_distance: f64, // 1e-3
     neg_frequency_threshold: f64, // 1e-3
     hack_scale: [f64; 3], // HACK
+    layers: Option<u32>, // Number of layers, when known in advance
     cg: ::rsp2_minimize::acgsd::Settings,
 }
 
 fn setup_global_logger<P: AsRef<Path>>(path: P) -> Result<(), Panic>
 {Ok({
     use ::std::time::Instant;
+    use self::term::ColorizedLevel;
+
     let start = Instant::now();
     ::fern::Dispatch::new()
         .format(move |out, message, record| {
@@ -53,11 +56,12 @@ fn setup_global_logger<P: AsRef<Path>>(path: P) -> Result<(), Panic>
                 t.as_secs(),
                 t.subsec_nanos() / 1_000_000,
                 record.target(),
-                record.level(),
+                ColorizedLevel(record.level()),
                 message))
         })
         .level(::log::LogLevelFilter::Debug)
         .level_for("rsp2_minimize", ::log::LogLevelFilter::Trace)
+        .level_for("rsp2_minimize::exact_ls", ::log::LogLevelFilter::Debug)
         .chain(::std::io::stdout())
         .chain(::fern::log_file(path)?)
         .apply()?;
@@ -183,7 +187,7 @@ where P: AsRef<Path>, Q: AsRef<Path>,
         println!();
         let mut i = 0;
         let force_sets = p::force_sets::compute_from_grad(
-            superstructure.clone(), // FIXME only a borrow is needed later, and only for natom (dumb)
+            superstructure,
             &displacements,
             |s| {
                 i += 1;
@@ -274,8 +278,11 @@ where P: AsRef<Path>, Q: AsRef<Path>,
             println!("============================");
             println!("Finished relaxation # {}", iteration);
 
-            let (layers, _nlayer) = ::rsp2_structure::assign_layers(&structure, &[0, 0, 1], 0.25);
-            eprintln!("{:?}", layers);
+            let (layers, nlayer) = ::rsp2_structure::assign_layers(&structure, &[0, 0, 1], 0.25);
+            if let Some(expected) = settings.layers {
+                assert_eq!(nlayer, expected);
+            }
+
             let einfos = get_eigensystem_info(&evals, &evecs, &layers[..]);
             write_eigen_info(
                 &mut File::create(format!("eigenvalues.{:02}", iteration))?,
@@ -404,6 +411,9 @@ mod display_util {
 }
 
 mod term {
+    use std::fmt;
+    use ::log::LogLevel;
+
     // hack for type  inference issues
     pub fn paint<T>(
         style: ::ansi_term::Style,
@@ -427,7 +437,20 @@ mod term {
         _target: ::std::marker::PhantomData<T>,
     }
 
-    use std::fmt;
+    #[derive(Debug, Copy, Clone)]
+    pub struct ColorizedLevel(pub LogLevel);
+    impl fmt::Display for ColorizedLevel {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            let style = match self.0 {
+                LogLevel::Error => ::ansi_term::Colour::Red.bold(),
+                LogLevel::Warn  => ::ansi_term::Colour::Red.normal(),
+                LogLevel::Info  => ::ansi_term::Colour::Cyan.bold(),
+                LogLevel::Debug => ::ansi_term::Colour::Yellow.dimmed(),
+                LogLevel::Trace => ::ansi_term::Colour::Cyan.normal(),
+            };
+            write!(f, "{}", gpaint(style, self.0))
+        }
+    }
 
     macro_rules! derive_fmt_impl {
         ($Trait:path)

@@ -11,7 +11,9 @@ neg-frequency-threshold: 1e-3
 cg:
   stop-condition:
     any:
-      - grad-rms: 1e-14
+      - value-delta:
+          rel-greater-than: 0
+          steps-ago: 10
       #- all:
         #- grad-rms: 1e-9
       - iterations: 100

@@ -129,7 +129,7 @@ mod tests {
             {"any": [
                 {"all": [
                     {"grad-max": 1.0},
-                    {"value-delta": 1.0},
+                    {"grad-rms": 1.0},
                 ]},
                 {"iterations": 100},
             ]}
@@ -144,12 +144,12 @@ mod tests {
             grad_max: 2.0,
             grad_norm: 2.0,
             grad_rms: 2.0,
-            delta_value: Some(2.0),
+            values: &[],
             iterations: 0,
         };
 
         // (F && T) || F
-        let objs = ::acgsd::Objectives { delta_value: Some(0.5), ..base };
+        let objs = ::acgsd::Objectives { grad_rms: 0.5, ..base };
         assert!(!pred.should_stop(&objs));
 
         // (T && F) || F
@@ -157,7 +157,7 @@ mod tests {
         assert!(!pred.should_stop(&objs));
 
         // (T && T) || F
-        let objs = ::acgsd::Objectives { delta_value: Some(0.5), grad_max: 0.5, ..base };
+        let objs = ::acgsd::Objectives { grad_rms: 0.5, grad_max: 0.5, ..base };
         assert!( pred.should_stop(&objs));
 
         // (F && F) || T

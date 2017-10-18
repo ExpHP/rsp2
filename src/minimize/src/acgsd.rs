@@ -234,10 +234,9 @@ pub mod stop_condition {
     use ::stop_condition::prelude::*;
 
     #[derive(Debug, Clone, PartialEq)]
-    pub(crate) struct Objectives {
-        /// Signed change in potential over the previous iteration.
-        /// (`None` before the first iteration)
-        pub delta_value: Option<f64>,
+    pub(crate) struct Objectives<'a> {
+        /// All computed values so far.
+        pub values: &'a [f64],
         /// Max atomic force for the current structure.
         pub grad_max: f64,
         /// Norm of force for the current structure.
@@ -255,19 +254,43 @@ pub mod stop_condition {
     #[derive(Serialize, Deserialize)]
     #[derive(Debug, Copy, Clone, PartialEq)]
     pub enum Simple {
-        #[serde(rename = "value-delta")] ValueDelta(f64),
+        /// This compares signed values, not magnitudes.
+        ///
+        /// What this means is that:
+        /// - positive threshold says "stop if value increases more than this"
+        /// - negative threshold says "continue as long as value has decreased
+        ///                             by at least this much"
+        ///
+        /// (negative is useful when alternating between CG and other methods
+        ///  of minimization)
+        #[serde(rename = "value-delta")] ValueDelta {
+            #[serde(rename = "rel-greater-than")] delta: f64,
+            #[serde(rename =        "steps-ago")] steps_ago: u32,
+        },
         #[serde(rename =    "grad-max")] GradientMax(f64),
         #[serde(rename =   "grad-norm")] GradientNorm(f64),
         #[serde(rename =    "grad-rms")] GradientRms(f64),
         #[serde(rename =  "iterations")] Iterations(u32),
     }
 
-    impl ShouldStop<Objectives> for Simple {
-        fn should_stop(&self, objs: &Objectives) -> bool {
+    // Relative difference.
+    //
+    // This never returns NaN, although it may be infinite.
+    fn rel_sub(a: f64, b: f64) -> f64 {
+        if a == b { return 0.0; }
+        (a - b) / a.abs().min(b.abs())
+    }
+
+    impl<'a> ShouldStop<Objectives<'a>> for Simple {
+        fn should_stop(&self, objs: &Objectives<'a>) -> bool {
             match *self {
-                Simple::ValueDelta(tol) => match objs.delta_value {
-                    Some(x) => x.abs() <= tol,
-                    None => false, // first iteration; can't test dv
+                Simple::ValueDelta { delta: min_change, steps_ago } => {
+                    if let Some(i) = objs.values.len().checked_sub(steps_ago as usize + 1) {
+                        if rel_sub(*objs.values.last().unwrap(), objs.values[i]) >= min_change {
+                            return true;
+                        }
+                    }
+                    false
                 },
                 Simple::GradientMax(tol) => objs.grad_max <= tol,
                 Simple::GradientNorm(tol) => objs.grad_norm <= tol,
@@ -473,6 +496,8 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
         Saved { alpha: 1.0, position, value, gradient }
     };
 
+    // Remembers all values.
+    let mut value_history = vec![last_saved.value];
     // Describes the previous iteration
     let mut last_last = None::<Last>; // FIXME name
     // Record of previous directions
@@ -525,7 +550,7 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
         {
             let d_value = last.as_ref().map(|l| l.d_value).unwrap_or(0.0);
             let grad_mag = vnorm(&saved.gradient);
-            trace!(" i: {i:>6}  v: {v:18.14} dv: {dv:>14.7e}  g: {g:>13.7e} {cos:<24} {distrib}",
+            trace!(" i: {i:>6}  v: {v:18.14} dv: {dv:+9.2e}  g: {g:>13.7e}  {cos:<24} {distrib}",
                 i = iterations,
                 v = saved.value,
                 dv = d_value,
@@ -537,7 +562,7 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
                         write!(&mut s, "cos:").unwrap();
                         let latest = dirs.next().unwrap();
                         for other in dirs {
-                            write!(&mut s, " {:>5.2}", vdot(latest, other)).unwrap();
+                            write!(&mut s, " {:>+5.2}", vdot(latest, other)).unwrap();
                         }
                     }
                     s
@@ -567,11 +592,7 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
                 grad_norm: gnorm,
                 grad_rms: gnorm / (saved.gradient.len() as f64).sqrt(),
                 grad_max: max_norm(&saved.gradient),
-                delta_value: last.as_ref().and_then(
-                    |old|
-                        if old.ls_failed { None }
-                        else { Some(old.d_value) }
-                ),
+                values: &value_history[..],
                 iterations: iterations as u32, // FIXME remove cast?
             };
 
@@ -579,7 +600,6 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
                 info!("ACGSD Finished.");
                 info!("Iterations: {}", objectives.iterations);
                 info!("     Value: {}", saved.value);
-                info!(" Delta Val: {:e}", objectives.delta_value.unwrap_or(0.0));
                 info!(" Grad Norm: {:e}", objectives.grad_norm);
                 info!("  Grad Max: {:e}", objectives.grad_max);
 
@@ -762,6 +782,8 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
                 Saved { alpha, position, value, gradient }
             },
         };
+
+        value_history.push(next_point.value);
     }
     panic!("too many iterations")
 }
@@ -854,8 +876,15 @@ mod tests {
         assert_eq!(super::acgsd(&s, &point, quadratic_test_fn!(&target)).unwrap().iterations, 0);
 
         // note: value-delta can only be tested after at least one iteration
-        let s = from_json!({"stop-condition": {"value-delta": 1e20}});
-        assert_eq!(super::acgsd(&s, &point, quadratic_test_fn!(&target)).unwrap().iterations, 1);
+        let s = from_json!({
+            "stop-condition": {
+                "value-delta": {
+                    "rel-greater-than": -1e20,
+                    "steps-ago": 10,
+                }
+            }
+        });
+        assert_eq!(super::acgsd(&s, &point, quadratic_test_fn!(&target)).unwrap().iterations, 10);
     }
 
     // A test to make sure some physicist doesn't stick an ill-conceived
