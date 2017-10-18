@@ -6,6 +6,7 @@ extern crate slice_of_array;
 
 #[macro_use] extern crate error_chain;
 #[macro_use] extern crate nom;
+#[macro_use] extern crate log;
 #[macro_use] extern crate serde_derive;
 extern crate serde_yaml;
 extern crate rsp2_tempdir as tempdir;
@@ -232,17 +233,14 @@ pub mod cmd {
                 &structure,
             )?;
 
-            let code =
-                Command::new("phonopy")
-                .arg("--displacement")
-                .arg("phonopy.conf")
-                .current_dir(&tmp)
-                .status()?.code();
-            match code {
-                // FIXME this could be something we care about like sigint
-                None => bail!("Phonopy exited with signal"),
-                Some(0) => {},
-                Some(c) => bail!("Phonopy exited with code {}", c),
+            {
+                let mut command = Command::new("phonopy");
+                command
+                    .arg("--displacement")
+                    .arg("phonopy.conf")
+                    .current_dir(&tmp);
+
+                ::log_stdio_and_wait(command)?;
             }
 
             let DispYaml {
@@ -287,18 +285,15 @@ pub mod cmd {
             &force_sets,
         )?;
 
-        let code =
-            Command::new("phonopy")
-            .env("EIGENVECTOR_NPY_HACK", "1")
-            .arg("--eigenvectors")
-            .arg("phonopy.conf")
-            .current_dir(&tmp)
-            .status()?.code();
-        match code {
-            // FIXME this could be something we care about like sigint
-            None => bail!("Phonopy exited with signal"),
-            Some(0) => {},
-            Some(c) => bail!("Phonopy exited with code {}", c),
+        {
+            let mut command = Command::new("phonopy");
+            command
+                .env("EIGENVECTOR_NPY_HACK", "1")
+                .arg("--eigenvectors")
+                .arg("phonopy.conf")
+                .current_dir(&tmp);
+
+            ::log_stdio_and_wait(command)?;
         }
 
         let bases = ::npy::read_eigenvector_npy(File::open(tmp.join("eigenvector.npy"))?)?;
@@ -328,4 +323,52 @@ pub mod cmd {
         )).collect::<Result<_>>()?;
         Ok((freqs, evecs))
     }
+}
+
+fn log_stdio_and_wait(mut cmd: ::std::process::Command) -> Result<()>
+{Ok({
+    use ::std::process::Stdio;
+    use ::std::io::{BufRead, BufReader};
+
+    let mut child = cmd
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+
+    let stdout_worker = {
+        let f = BufReader::new(child.stdout.take().unwrap());
+        ::std::thread::spawn(move || -> Result<()> {Ok(
+            for line in f.lines() {
+                ::stdout::log(&(line?[..]));
+            }
+        )})
+    };
+
+    let stderr_worker = {
+        let f = BufReader::new(child.stderr.take().unwrap());
+        ::std::thread::spawn(move || -> Result<()> {Ok(
+            for line in f.lines() {
+                ::stderr::log(&(line?[..]));
+            }
+        )})
+    };
+
+    ensure!(child.wait()?.success(), "Phonopy failed.");
+
+    let _ = stdout_worker.join();
+    let _ = stderr_worker.join();
+})}
+
+/// This module only exists to have its name appear in logs.
+/// It marks phonopy's stdout.
+mod stdout {
+    pub fn log(s: &str)
+    { info!("{}", s) }
+}
+
+/// This module only exists to have its name appear in logs.
+/// It marks phonopy's stderr.
+mod stderr {
+    pub fn log(s: &str)
+    { warn!("{}", s) }
 }

@@ -18,6 +18,7 @@ serde = "1"
 serde_derive = "1"
 serde_yaml = "0.7"
 slice-of-array = "0.1"
+log = "0.3"
 
 rsp2-tempdir = { path = "../util/tempdir" }
 rsp2-structure = { path = "../util/structure" }

@@ -15,6 +15,5 @@ cg:
       #- all:
         #- grad-rms: 1e-9
       - iterations: 100
-      #- iterations: 1
   alpha-guess-max: 1e-1
   alpha-guess-first: 1e-2
