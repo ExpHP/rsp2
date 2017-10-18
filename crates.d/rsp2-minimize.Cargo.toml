@@ -1,5 +1,5 @@
 [package]
-name = "sp2-minimize"
+name = "rsp2-minimize"
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 
@@ -13,10 +13,10 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 !!serde_json
 !!either
 
-!!sp2-array-utils
-!!sp2-assert-close
-!!sp2-slice-math
-!!sp2-util-macros
+!!rsp2-array-utils
+!!rsp2-assert-close
+!!rsp2-slice-math
+!!rsp2-util-macros
 
 !!error-chain
 

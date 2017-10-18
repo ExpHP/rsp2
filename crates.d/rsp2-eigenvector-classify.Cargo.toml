@@ -1,5 +1,5 @@
 [package]
-name = "sp2-array-utils"
+name = "rsp2-eigenvector-classify"
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 
@@ -7,6 +7,6 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 path = "lib.rs"
 
 [dependencies]
-!!num-traits
 
-!!sp2-assert-close
+!!slice-of-array
+!!itertools

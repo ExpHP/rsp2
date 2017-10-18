@@ -1,5 +1,5 @@
 [package]
-name = "sp2-tasks"
+name = "rsp2-tasks"
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 
@@ -7,16 +7,16 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 path = "lib.rs"
 
 [dependencies]
-!!sp2-lammps-wrap
-!!sp2-minimize
-!!sp2-structure
-!!sp2-structure-io
-!!sp2-phonopy-io
-!!sp2-array-utils
-!!sp2-slice-math
-!!sp2-tempdir
-!!sp2-util-macros
-!!sp2-eigenvector-classify
+!!rsp2-lammps-wrap
+!!rsp2-minimize
+!!rsp2-structure
+!!rsp2-structure-io
+!!rsp2-phonopy-io
+!!rsp2-array-utils
+!!rsp2-slice-math
+!!rsp2-tempdir
+!!rsp2-util-macros
+!!rsp2-eigenvector-classify
 
 !!slice-of-array
 !!rsp2-kets

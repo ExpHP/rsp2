@@ -1,5 +1,5 @@
 [package]
-name = "sp2-lammps-wrap"
+name = "rsp2-structure-io"
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 
@@ -7,9 +7,6 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 path = "lib.rs"
 
 [dependencies]
-!!sp2-structure
-!!lammps-sys
+!!itertools
 
-!!log
-!!ndarray
-!!slice-of-array
+!!rsp2-structure

@@ -5,7 +5,7 @@
 # in this workspace are generated from source files that
 # contain lines like this:
 #
-#     !!sp2-assert-close
+#     !!rsp2-assert-close
 #     !!itertools
 #
 # When you run the following command in the worspace root:
@@ -14,7 +14,7 @@
 #
 # Cargo.toml files are created with those lines expanded to e.g.
 #
-#     sp2-assert-close = { path = "../../util/assert-close" }
+#     rsp2-assert-close = { path = "../../util/assert-close" }
 #     itertools = "0.7"
 #
 # based on metadata in this file.
@@ -26,22 +26,22 @@
 # to include when one crate in the workspace depends on
 # another.
 [crates]
-sp2                = "."
+rsp2                = "."
 lammps-sys         = "src/lammps-sys"
-sp2-lammps-wrap    = "src/lammps-wrap"
-sp2-tasks          = "src/tasks"
-sp2-minimize       = "src/minimize"
-sp2-phonopy-io     = "src/phonopy-io"
-sp2-array-utils    = "src/util/array"
-sp2-assert-close   = "src/util/assert-close"
-sp2-structure      = "src/util/structure"
-sp2-structure-io   = "src/util/structure-io"
-sp2-slice-math     = "src/util/slice-math"
-sp2-byte-tools-plus-float = "src/util/byte-tools-plus-float"
-sp2-util-macros    = "src/util/macros"
-sp2-tempdir        = "src/util/tempdir"
-sp2-linalg         = "src/math/linalg"
-sp2-eigenvector-classify = "./src/math/eigenvector-classify"
+rsp2-lammps-wrap    = "src/lammps-wrap"
+rsp2-tasks          = "src/tasks"
+rsp2-minimize       = "src/minimize"
+rsp2-phonopy-io     = "src/phonopy-io"
+rsp2-array-utils    = "src/util/array"
+rsp2-assert-close   = "src/util/assert-close"
+rsp2-structure      = "src/util/structure"
+rsp2-structure-io   = "src/util/structure-io"
+rsp2-slice-math     = "src/util/slice-math"
+rsp2-byte-tools-plus-float = "src/util/byte-tools-plus-float"
+rsp2-util-macros    = "src/util/macros"
+rsp2-tempdir        = "src/util/tempdir"
+rsp2-linalg         = "src/math/linalg"
+rsp2-eigenvector-classify = "./src/math/eigenvector-classify"
 #!!INSERTION POINT FOR NEW CRATES!!#
 
 #--------------------------------------------

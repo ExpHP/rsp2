@@ -27,7 +27,7 @@ pub(crate) mod random {
 
     pub(crate) fn direction(ndim: usize) -> Vec<f64> {
         use ::rand::distributions::normal::StandardNormal;
-        use ::sp2_slice_math::vnormalize;
+        use ::rsp2_slice_math::vnormalize;
 
         let vec: Vec<_> = (0..ndim).map(|_| ::rand::random::<StandardNormal>().0).collect();
         vnormalize(&vec).map(|x| x.0).unwrap_or_else(|_| direction(ndim))

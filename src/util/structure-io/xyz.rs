@@ -2,7 +2,7 @@ use ::std::io;
 use ::std::io::prelude::*;
 use ::std::ascii::AsciiExt;
 
-use ::sp2_structure::CoordStructure;
+use ::rsp2_structure::CoordStructure;
 
 /// Writes an XYZ frame to an open file.
 ///

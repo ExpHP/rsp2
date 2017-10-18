@@ -1,14 +1,14 @@
 extern crate rsp2_kets;
-extern crate sp2_structure;
-extern crate sp2_structure_io;
-extern crate sp2_byte_tools_plus_float as byte_tools;
+extern crate rsp2_structure;
+extern crate rsp2_structure_io;
+extern crate rsp2_byte_tools_plus_float as byte_tools;
 extern crate slice_of_array;
 
 #[macro_use] extern crate error_chain;
 #[macro_use] extern crate nom;
 #[macro_use] extern crate serde_derive;
 extern crate serde_yaml;
-extern crate sp2_tempdir as tempdir;
+extern crate rsp2_tempdir as tempdir;
 
 pub type IoError = ::std::io::Error;
 pub type YamlError = ::serde_yaml::Error;
@@ -37,7 +37,7 @@ pub mod disp_yaml {
     use ::Displacements;
 
     use ::std::io::prelude::*;
-    use ::sp2_structure::Structure;
+    use ::rsp2_structure::Structure;
 
     mod cereal {
         #[derive(Deserialize)]
@@ -76,7 +76,7 @@ pub mod disp_yaml {
 
     pub fn read<R: Read>(r: R) -> Result<DispYaml, Error>
     {
-        use ::sp2_structure::{Coords, Lattice};
+        use ::rsp2_structure::{Coords, Lattice};
         use self::cereal::{Point, Displacement, DispYaml as RawDispYaml};
 
         let RawDispYaml { displacements, lattice, points } = ::serde_yaml::from_reader(r)?;
@@ -106,7 +106,7 @@ pub mod force_sets {
     use ::std::result::Result as StdResult;
 
     use ::std::io::prelude::*;
-    use ::sp2_structure::{Structure, Coords};
+    use ::rsp2_structure::{Structure, Coords};
 
     /// Given a function that computes gradient, automates the process
     /// of producing displaced structures and calling the function.
@@ -189,7 +189,7 @@ pub mod cmd {
     use ::Displacements;
     use ::DispYaml;
 
-    use ::sp2_structure::CoordStructure;
+    use ::rsp2_structure::CoordStructure;
 
     use ::tempdir::TempDir;
     use ::std::process::Command;
@@ -214,9 +214,9 @@ pub mod cmd {
         structure: CoordStructure,
     ) -> Result<(CoordStructure, Displacements, TempDir)>
     {
-        use ::sp2_structure_io::poscar;
+        use ::rsp2_structure_io::poscar;
 
-        let tmp = TempDir::new("sp2-rs")?;
+        let tmp = TempDir::new("rsp2-rs")?;
         let (displacements, superstructure) = {
 
             let tmp = tmp.path();
@@ -266,7 +266,7 @@ pub mod cmd {
 
         let disp_dir = disp_dir.as_ref();
 
-        let tmp = TempDir::new("sp2-rs")?;
+        let tmp = TempDir::new("rsp2-rs")?;
         let tmp = tmp.path();
 
         let mut conf = conf.clone();

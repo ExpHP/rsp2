@@ -1,6 +1,6 @@
 #[cfg(test)]
 #[macro_use]
-extern crate sp2_assert_close;
+extern crate rsp2_assert_close;
 extern crate num_traits;
 
 #[macro_use] mod macros;

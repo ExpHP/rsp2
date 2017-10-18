@@ -1,15 +1,15 @@
 // HERE BE DRAGONS
 
-extern crate sp2_lammps_wrap;
-extern crate sp2_minimize;
-extern crate sp2_structure;
-extern crate sp2_structure_io;
-extern crate sp2_phonopy_io;
-extern crate sp2_array_utils;
-extern crate sp2_slice_math;
-extern crate sp2_tempdir;
-extern crate sp2_eigenvector_classify;
-#[macro_use] extern crate sp2_util_macros;
+extern crate rsp2_lammps_wrap;
+extern crate rsp2_minimize;
+extern crate rsp2_structure;
+extern crate rsp2_structure_io;
+extern crate rsp2_phonopy_io;
+extern crate rsp2_array_utils;
+extern crate rsp2_slice_math;
+extern crate rsp2_tempdir;
+extern crate rsp2_eigenvector_classify;
+#[macro_use] extern crate rsp2_util_macros;
 
 extern crate rand;
 extern crate env_logger;
@@ -23,13 +23,13 @@ extern crate serde_json;
 
 const THZ_TO_WAVENUMBER: f64 = 33.35641;
 
-use ::sp2_array_utils::vec_from_fn;
+use ::rsp2_array_utils::vec_from_fn;
 use ::slice_of_array::prelude::*;
-use ::sp2_structure::{supercell, Coords, CoordStructure, Lattice};
-use ::sp2_lammps_wrap::Lammps;
+use ::rsp2_structure::{supercell, Coords, CoordStructure, Lattice};
+use ::rsp2_lammps_wrap::Lammps;
 use ::std::path::Path;
 
-type LmpError = ::sp2_lammps_wrap::Error;
+type LmpError = ::rsp2_lammps_wrap::Error;
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -39,7 +39,7 @@ pub struct Settings {
     displacement_distance: f64, // 1e-3
     neg_frequency_threshold: f64, // 1e-3
     hack_scale: [f64; 3], // HACK
-    cg: ::sp2_minimize::acgsd::Settings,
+    cg: ::rsp2_minimize::acgsd::Settings,
 }
 
 // fn array_sum(arrs: &[[f64; 3]]) -> [f64; 3] {
@@ -106,9 +106,9 @@ pub fn run_relax_with_eigenvectors<P, Q>(settings: &Settings, input: P, outdir: 
 where P: AsRef<Path>, Q: AsRef<Path>,
 {
     use ::std::io::prelude::*;
-    use ::sp2_phonopy_io as p;
-    use ::sp2_structure_io::poscar;
-    use ::sp2_slice_math::{v, V, vdot};
+    use ::rsp2_phonopy_io as p;
+    use ::rsp2_structure_io::poscar;
+    use ::rsp2_slice_math::{v, V, vdot};
     use ::std::fs::File;
 
     let relax = |structure: CoordStructure| -> Result<CoordStructure, Panic> {
@@ -117,7 +117,7 @@ where P: AsRef<Path>, Q: AsRef<Path>,
 
         // FIXME confusing for Lammps::new_carbon to take initial position
         let mut lmp = Lammps::new_carbon(supercell.clone())?;
-        let relaxed_flat = ::sp2_minimize::acgsd(
+        let relaxed_flat = ::rsp2_minimize::acgsd(
             &settings.cg,
             &supercell.to_carts().flat(),
             &mut *lammps_flat_diff_fn(&mut lmp),
@@ -127,7 +127,7 @@ where P: AsRef<Path>, Q: AsRef<Path>,
         Ok(multi_threshold_deconstruct(sc_token, 1e-10, 1e-3, supercell)?)
     };
 
-    use ::sp2_structure::supercell::{SupercellToken, DeconstructionError};
+    use ::rsp2_structure::supercell::{SupercellToken, DeconstructionError};
     fn multi_threshold_deconstruct(
         sc_token: SupercellToken,
         warn: f64,
@@ -192,10 +192,10 @@ where P: AsRef<Path>, Q: AsRef<Path>,
             let V(pos) = v(from_pos.flat()) + alpha * v(direction.flat());
             pos
         };
-        let alpha = ::sp2_minimize::exact_ls::<LmpError, _>(0.0, 1e-4, |alpha| {
+        let alpha = ::rsp2_minimize::exact_ls::<LmpError, _>(0.0, 1e-4, |alpha| {
             let gradient = lammps_flat_diff_fn(&mut lmp)(&pos_at_alpha(alpha))?.1;
             let slope = vdot(&gradient[..], direction.flat());
-            Ok(::sp2_minimize::exact_ls::Slope(slope))
+            Ok(::rsp2_minimize::exact_ls::Slope(slope))
         })??.alpha;
         let pos = pos_at_alpha(alpha);
         let structure = from_structure.with_coords(Coords::Carts(pos.nest().to_vec()));
@@ -251,7 +251,7 @@ where P: AsRef<Path>, Q: AsRef<Path>,
             println!("============================");
             println!("Finished relaxation # {}", iteration);
 
-            let (layers, _nlayer) = ::sp2_structure::assign_layers(&structure, &[0, 0, 1], 0.25);
+            let (layers, _nlayer) = ::rsp2_structure::assign_layers(&structure, &[0, 0, 1], 0.25);
             eprintln!("{:?}", layers);
             let einfos = get_eigensystem_info(&evals, &evecs, &layers[..]);
             write_eigen_info(
@@ -435,10 +435,10 @@ pub type EigenInfo = Vec<eigen_info::Item>;
 pub fn get_eigensystem_info(
     evals: &[f64],
     evecs: &[Vec<[f64; 3]>],
-    layers: &[::sp2_structure::Layer],
+    layers: &[::rsp2_structure::Layer],
 ) -> EigenInfo
 {
-    use ::sp2_eigenvector_classify::{keyed_acoustic_basis, polarization};
+    use ::rsp2_eigenvector_classify::{keyed_acoustic_basis, polarization};
 
     let layers: Vec<_> = layers.iter().cloned().map(Some).collect();
     let layer_acoustics = keyed_acoustic_basis(&layers[..], &[1,1,1]);

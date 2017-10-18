@@ -1,5 +1,5 @@
 [package]
-name = "sp2-eigenvector-classify"
+name = "rsp2-util-macros"
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 
@@ -7,6 +7,3 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 path = "lib.rs"
 
 [dependencies]
-
-!!slice-of-array
-!!itertools

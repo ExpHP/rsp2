@@ -1,5 +1,5 @@
 [package]
-name = "sp2-structure"
+name = "rsp2-tempdir"
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 
@@ -7,8 +7,4 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 path = "lib.rs"
 
 [dependencies]
-!!sp2-array-utils
-
-!!slice-of-array
-!!ordered-float
-!!itertools
+tempdir = "0.3"

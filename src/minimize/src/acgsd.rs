@@ -1,6 +1,6 @@
 // HERE BE DRAGONS
 
-use ::sp2_slice_math::{vnorm, vdot, V, v, vnormalize};
+use ::rsp2_slice_math::{vnorm, vdot, V, v, vnormalize};
 use ::stop_condition::prelude::*;
 
 use ::itertools::Itertools;
@@ -309,7 +309,7 @@ pub mod hager_beta {
     }
 
     pub fn compute(input: Input) -> f64 {
-        use sp2_slice_math::{v, V, vnormalize, vnorm, vdot, BadNorm};
+        use rsp2_slice_math::{v, V, vnormalize, vnorm, vdot, BadNorm};
 
         let Input {
             eta, last_direction, last_d_gradient, from_gradient
@@ -970,7 +970,7 @@ mod tests {
 
     #[test]
     fn lj() {
-        use ::sp2_slice_math::{v, V};
+        use ::rsp2_slice_math::{v, V};
         use ::test_functions::n_dee::{HyperLennardJones, OnceDifferentiable, Sum};
         use ::util::random as urand;
         let d = 10;

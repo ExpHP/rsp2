@@ -4,7 +4,7 @@
 #![allow(unused_unsafe)]
 
 extern crate slice_of_array;
-extern crate sp2_structure;
+extern crate rsp2_structure;
 extern crate lammps_sys;
 #[macro_use] extern crate log;
 
@@ -14,7 +14,7 @@ pub type Result<T> = StdResult<T, Error>;
 use ::std::os::raw::{c_void, c_int, c_double};
 use ::std::ffi::CString;
 use ::slice_of_array::prelude::*;
-use ::sp2_structure::{CoordStructure, Lattice};
+use ::rsp2_structure::{CoordStructure, Lattice};
 
 #[derive(Debug,Copy,Clone,PartialEq,Eq,PartialOrd,Ord,Hash)]
 enum ComputeStyle {

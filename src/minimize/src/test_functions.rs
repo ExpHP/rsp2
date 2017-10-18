@@ -129,7 +129,7 @@ pub mod one_dee {
 
 // N-dimensional test functions for e.g. conjugate gradient
 pub mod n_dee {
-    use ::sp2_slice_math::{vdot,v,V,vsqnorm};
+    use ::rsp2_slice_math::{vdot,v,V,vsqnorm};
 
     /// NOTE: Default implementations are mutually recursive.
     /// You must define either both `value()` and `gradient()`, or just `diff()`.
@@ -386,7 +386,7 @@ pub mod n_dee {
         fn refine_path(path: &[Vec<f64>]) -> Vec<Vec<f64>>
         {
             use ::itertools::Itertools;
-            use ::sp2_slice_math::{v,V};
+            use ::rsp2_slice_math::{v,V};
             let mut new = vec![];
             for (prev, cur) in path.iter().tuple_windows() {
                 let V(mid) = (v(cur) + v(prev)) / 2.0;
@@ -401,7 +401,7 @@ pub mod n_dee {
         where D: OnceDifferentiable,
         {
             use ::itertools::Itertools;
-            use ::sp2_slice_math::{v,V,vdot};
+            use ::rsp2_slice_math::{v,V,vdot};
             path.iter().tuple_windows().map(|(cur, prev)| {
                 let V(mid) = (v(cur) + v(prev)) / 2.0;
                 let V(displacement) = v(cur) - v(prev);
@@ -444,7 +444,7 @@ pub mod n_dee {
 
         #[test]
         fn lj_minimum() {
-            use ::sp2_slice_math::{v, V};
+            use ::rsp2_slice_math::{v, V};
 
             let ndim = 10;
             let min_value = -40.0;

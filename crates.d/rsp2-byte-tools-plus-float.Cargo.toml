@@ -1,5 +1,5 @@
 [package]
-name = "sp2-assert-close"
+name = "rsp2-byte-tools-plus-float"
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 
@@ -7,3 +7,4 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 path = "lib.rs"
 
 [dependencies]
+byte-tools = "0.2.0"

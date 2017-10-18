@@ -240,7 +240,7 @@ def master_config_textual_add(lines, line, fail):
     lines = list(lines)
     stripped = [x.strip() for x in lines]
     try: i = stripped.index(INSERTION_POINT_TEXT)
-    except: parser.error(f'''
+    except: fail(f'''
 Failed to find the new crate insertion point in '{MASTER_CFG_PATH}'
 It should look like the following:
     {INSERTION_POINT_TEXT}

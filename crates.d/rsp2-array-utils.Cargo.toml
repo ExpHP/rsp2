@@ -1,5 +1,5 @@
 [package]
-name = "sp2-byte-tools-plus-float"
+name = "rsp2-array-utils"
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 
@@ -7,4 +7,6 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 path = "lib.rs"
 
 [dependencies]
-byte-tools = "0.2.0"
+!!num-traits
+
+!!rsp2-assert-close

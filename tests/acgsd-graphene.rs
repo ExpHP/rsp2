@@ -1,23 +1,23 @@
 #![deny(unused_must_use)]
 #![deny(unused_variables)]
 
-extern crate sp2_lammps_wrap;
-extern crate sp2_minimize;
-extern crate sp2_array_utils;
-extern crate sp2_structure;
-extern crate sp2_structure_io;
-extern crate sp2_slice_math;
-#[macro_use] extern crate sp2_util_macros;
+extern crate rsp2_lammps_wrap;
+extern crate rsp2_minimize;
+extern crate rsp2_array_utils;
+extern crate rsp2_structure;
+extern crate rsp2_structure_io;
+extern crate rsp2_slice_math;
+#[macro_use] extern crate rsp2_util_macros;
 
 extern crate rand;
 extern crate env_logger;
 extern crate slice_of_array;
 #[macro_use] extern crate serde_json;
 
-use ::sp2_array_utils::vec_from_fn;
+use ::rsp2_array_utils::vec_from_fn;
 use ::slice_of_array::prelude::*;
-use ::sp2_slice_math::{v,vnorm};
-use ::sp2_lammps_wrap::{Lammps, Error as LmpError};
+use ::rsp2_slice_math::{v,vnorm};
+use ::rsp2_lammps_wrap::{Lammps, Error as LmpError};
 
 fn init_logger() {
     let _ = ::env_logger::init();
@@ -56,7 +56,7 @@ fn lammps_flat_diff_fn<'a>(lmp: &'a mut Lammps)
 
 #[test]
 fn perturbed_graphene() {
-    use ::sp2_structure::{CoordStructure, Lattice, Coords, supercell};
+    use ::rsp2_structure::{CoordStructure, Lattice, Coords, supercell};
     init_logger();
 
     let a = 2.46;
@@ -86,9 +86,9 @@ fn perturbed_graphene() {
         coords
     };
 
-    let mut lmp = sp2_lammps_wrap::Lammps::new_carbon(superstructure).unwrap();
+    let mut lmp = rsp2_lammps_wrap::Lammps::new_carbon(superstructure).unwrap();
 
-    let mut relaxed = ::sp2_minimize::acgsd(
+    let mut relaxed = ::rsp2_minimize::acgsd(
         &from_json!({"stop-condition": {"grad-rms": 1e-5}}),
         input.flat(),
         &mut *lammps_flat_diff_fn(&mut lmp),

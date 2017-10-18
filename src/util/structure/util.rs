@@ -5,7 +5,7 @@ use ::ordered_float::NotNaN;
 
 pub(crate) fn dot_n3_33(coords: &[[f64; 3]], mat: &[[f64; 3]; 3]) -> Vec<[f64; 3]>
 {
-    use ::sp2_array_utils::dot;
+    use ::rsp2_array_utils::dot;
     coords.iter().map(|v| dot(v, mat)).collect()
 }
 

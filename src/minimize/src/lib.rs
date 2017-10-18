@@ -4,10 +4,10 @@ extern crate serde;
 #[macro_use] extern crate error_chain;
 #[macro_use] extern crate serde_json;
 
-#[cfg_attr(test, macro_use)] extern crate sp2_assert_close;
-#[macro_use] extern crate sp2_util_macros;
-extern crate sp2_array_utils;
-extern crate sp2_slice_math;
+#[cfg_attr(test, macro_use)] extern crate rsp2_assert_close;
+#[macro_use] extern crate rsp2_util_macros;
+extern crate rsp2_array_utils;
+extern crate rsp2_slice_math;
 
 extern crate either;
 

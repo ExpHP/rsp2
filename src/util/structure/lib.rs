@@ -1,4 +1,4 @@
-extern crate sp2_array_utils;
+extern crate rsp2_array_utils;
 
 extern crate ordered_float;
 extern crate slice_of_array;

@@ -11,7 +11,7 @@ use ::small_vec::ArrayFromFunctionExt;
 /// # Examples
 ///
 /// ```
-/// use ::sp2_array_utils::mat_from_fn;
+/// use ::rsp2_array_utils::mat_from_fn;
 ///
 /// let x = [2i32, 3];
 ///

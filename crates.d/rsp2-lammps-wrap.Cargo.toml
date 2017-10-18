@@ -1,5 +1,5 @@
 [package]
-name = "sp2-slice-math"
+name = "rsp2-lammps-wrap"
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 
@@ -7,3 +7,9 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 path = "lib.rs"
 
 [dependencies]
+!!rsp2-structure
+!!lammps-sys
+
+!!log
+!!ndarray
+!!slice-of-array

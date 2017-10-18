@@ -3,7 +3,7 @@ use ::std::io::prelude::*;
 use ::itertools::Itertools;
 use ::std::ascii::AsciiExt;
 
-use ::sp2_structure::{CoordStructure, Lattice, Coords};
+use ::rsp2_structure::{CoordStructure, Lattice, Coords};
 
 // HACK this is closer to how the function was originally written,
 //      with support for atom types, but I don't want to have to worry

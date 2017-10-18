@@ -1,4 +1,4 @@
-use ::sp2_array_utils::{dot, MatrixInverseExt, vec_from_fn};
+use ::rsp2_array_utils::{dot, MatrixInverseExt, vec_from_fn};
 use ::std::ops::Mul;
 use ::std::rc::Rc;
 

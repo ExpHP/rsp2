@@ -1,5 +1,5 @@
 extern crate env_logger;
-extern crate sp2_tasks;
+extern crate rsp2_tasks;
 #[macro_use]
 extern crate clap;
 extern crate serde_yaml;
@@ -31,5 +31,5 @@ fn main() {
 
     let settings = ::serde_yaml::from_reader(::std::fs::File::open(config).unwrap()).unwrap();
 
-    let _ = ::sp2_tasks::run_relax_with_eigenvectors(&settings, input, outdir);
+    let _ = ::rsp2_tasks::run_relax_with_eigenvectors(&settings, input, outdir);
 }
