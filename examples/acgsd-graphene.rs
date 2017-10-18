@@ -1,11 +1,9 @@
-extern crate env_logger;
 extern crate rsp2_tasks;
 #[macro_use]
 extern crate clap;
 extern crate serde_yaml;
 
 fn main() {
-    let _ = ::env_logger::init();
 
     let matches = clap_app!(myapp =>
         (version: "negative 0.00.3-734.bubbles")
@@ -25,7 +23,7 @@ fn main() {
     let input = matches.value_of("INPUT").unwrap();
     let outdir = matches.value_of("OUTDIR").unwrap();
     let config = matches.value_of("CONFIG").unwrap();
-    if matches.is_present("force") {
+    if matches.is_present("force") && ::std::path::Path::new(outdir).exists() {
         ::std::fs::remove_dir_all(outdir).unwrap();
     }
 

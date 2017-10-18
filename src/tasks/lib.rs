@@ -12,11 +12,11 @@ extern crate rsp2_eigenvector_classify;
 #[macro_use] extern crate rsp2_util_macros;
 
 extern crate rand;
-extern crate env_logger;
 extern crate slice_of_array;
 extern crate serde;
 extern crate ansi_term;
 extern crate serde_json;
+extern crate fern;
 #[macro_use] extern crate serde_derive;
 #[macro_use] extern crate log;
 #[macro_use] extern crate itertools;
@@ -41,6 +41,27 @@ pub struct Settings {
     hack_scale: [f64; 3], // HACK
     cg: ::rsp2_minimize::acgsd::Settings,
 }
+
+fn setup_global_logger<P: AsRef<Path>>(path: P) -> Result<(), Panic>
+{Ok({
+    use ::std::time::Instant;
+    let start = Instant::now();
+    ::fern::Dispatch::new()
+        .format(move |out, message, record| {
+            let t = start.elapsed();
+            out.finish(format_args!("[{:>4}.{:03}s][{}][{}] {}",
+                t.as_secs(),
+                t.subsec_nanos() / 1_000_000,
+                record.target(),
+                record.level(),
+                message))
+        })
+        .level(::log::LogLevelFilter::Debug)
+        .level_for("rsp2_minimize", ::log::LogLevelFilter::Trace)
+        .chain(::std::io::stdout())
+        .chain(::fern::log_file(path)?)
+        .apply()?;
+})}
 
 // fn array_sum(arrs: &[[f64; 3]]) -> [f64; 3] {
 //     let mut acc = [0.0, 0.0, 0.0];
@@ -240,6 +261,8 @@ where P: AsRef<Path>, Q: AsRef<Path>,
         // dumb/lazy solution to ensuring all output files go in the dir
         let cwd_guard = push_dir(outdir)?;
 
+        setup_global_logger("rsp2.log")?;
+
         let mut from_structure = original;
         // HACK to stop one iteration AFTER all non-acoustics are positive
         let mut iteration = 1;
@@ -306,7 +329,6 @@ where P: AsRef<Path>, Q: AsRef<Path>,
     Ok(())
 }
 
-
 macro_rules! each_fmt_trait {
     ($mac:ident!)
     => {
@@ -324,7 +346,6 @@ macro_rules! each_fmt_trait {
 mod display_util {
     use ::std::fmt;
     use ::ansi_term::Style;
-
 
     /// Specialized display impl for numbers that from 0 to 1 and may be
     /// extremely close to either 0 or 1

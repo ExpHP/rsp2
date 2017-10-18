@@ -11,5 +11,6 @@ path = "lib.rs"
 !!lammps-sys
 
 !!log
+!!chrono
 !!ndarray
 !!slice-of-array

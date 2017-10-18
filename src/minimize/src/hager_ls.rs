@@ -222,7 +222,7 @@ impl Hager {
         // Which we do.
 
         // FIXME
-        trace!("                                   entry slope: {:<23e}", compute(start_alpha)?.slope);
+        //trace!("                                   entry slope: {:<23e}", compute(start_alpha)?.slope);
 
         // This IIFE acts as a poor-man's `catch` block.  It scopes the
         // `?` operators inside so we can post-process the result.
@@ -300,7 +300,8 @@ impl Hager {
         let result = result.err().expect("buggg");
         if let Ok(Bound { slope, .. }) = result {
             // FIXME
-            trace!("                                    exit slope: {:<23e}", slope);
+            //trace!("                                    exit slope: {:<23e}", slope);
+            let _ = slope;
         }
         result
     }

@@ -15,7 +15,7 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 !!serde_json
 !!serde_yaml
 !!log
-!!env_logger
+!!fern
 !!clap
 !!rsp2-kets
 !!slice-of-array

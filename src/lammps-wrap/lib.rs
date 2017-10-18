@@ -7,6 +7,7 @@ extern crate slice_of_array;
 extern crate rsp2_structure;
 extern crate lammps_sys;
 #[macro_use] extern crate log;
+extern crate chrono;
 
 pub type StdResult<T, E> = ::std::result::Result<T, E>;
 pub type Result<T> = StdResult<T, Error>;
@@ -385,11 +386,32 @@ impl Lammps {
 
         let carts = structure.to_carts();
 
-        let lmp = ::LammpsOwner::new(&["lammps", "-screen", "none"])?;
+
+        let lmp = ::LammpsOwner::new(&["lammps",
+            "-screen", "none",
+            "-log", "none", // logs opened from CLI are truncated, but we want to append
+        ])?;
         let ptr = ::std::cell::RefCell::new(lmp);
         let me = Lammps { ptr, structure: MaybeDirty::new_dirty(structure) };
 
+        let log_file = "lammps.log";
+        {
+            use ::std::io::prelude::*;
+            if let Ok(mut f) =
+                ::std::fs::OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .append(true)
+                    .open(log_file)
+            {
+                let _ = writeln!(f, "---------------------------------------------");
+                let _ = writeln!(f, "---- Begin run at {}", ::chrono::Local::now());
+                let _ = writeln!(f, "---------------------------------------------");
+            }
+        }
+
         me.ptr.borrow_mut().commands(&[
+            &format!("log {} append", log_file)[..],
             "package omp 0",
             "units metal",                  // Angstroms, picoseconds, eV
             "processors * * *",             // automatic processor mapping

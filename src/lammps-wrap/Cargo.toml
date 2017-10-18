@@ -16,5 +16,6 @@ rsp2-structure = { path = "../util/structure" }
 lammps-sys = { path = "../lammps-sys" }
 
 log = "0.3"
+chrono = "0.4"
 ndarray = "0.10"
 slice-of-array = "0.1"

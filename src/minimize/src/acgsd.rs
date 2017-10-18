@@ -498,16 +498,11 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
 
         let warning = |msg: &str, alpha, point: Point|
         {
-            if settings.has_verbosity(1) {
-                println!("{}", msg);
-                println!("Iterations: {}", iterations);
-                println!("     Alpha: {}", alpha);
-                println!("     Value: {}", point.value);
-                println!(" Grad Norm: {}
-                ", vnorm(&point.gradient));
-                // if (additional_output)
-                //     additional_output(cerr);
-            }
+            warn!("{}", msg);
+            warn!("Iterations: {}", iterations);
+            warn!("     Alpha: {}", alpha);
+            warn!("     Value: {}", point.value);
+            warn!(" Grad Norm: {}", vnorm(&point.gradient));
         };
 
         // use as 'return fatal(...);'
@@ -527,46 +522,40 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
 // Per-iteration output                                                       //
 // /////////////////////////////////////////////////////////////////////////////
 
-        if settings.has_verbosity(2) {
+        {
             let d_value = last.as_ref().map(|l| l.d_value).unwrap_or(0.0);
             let grad_mag = vnorm(&saved.gradient);
-            print!(" i: {:>6}", iterations);
-            print!("  v: {:18.14}", saved.value);
-            print!(" dv: {:>14.7e}", d_value);
-            print!("  g: {:>13.7e}", grad_mag);
-
-            let cosines = {
-                let mut s = String::new();
-                let mut dirs = past_directions.iter();
-                if dirs.len() >= 2 {
-                    write!(&mut s, "  cosines:").unwrap();
-                    let latest = dirs.next().unwrap();
-                    for other in dirs {
-                        write!(&mut s, " {:>6.2}", vdot(latest, other)).unwrap();
+            trace!(" i: {i:>6}  v: {v:18.14} dv: {dv:>14.7e}  g: {g:>13.7e} {cos:<24} {distrib}",
+                i = iterations,
+                v = saved.value,
+                dv = d_value,
+                g = grad_mag,
+                cos = {
+                    let mut s = String::new();
+                    let mut dirs = past_directions.iter();
+                    if dirs.len() >= 2 {
+                        write!(&mut s, "cos:").unwrap();
+                        let latest = dirs.next().unwrap();
+                        for other in dirs {
+                            write!(&mut s, " {:>5.2}", vdot(latest, other)).unwrap();
+                        }
                     }
+                    s
+                },
+                distrib = {
+                    use ::reporting::Bins;
+                    let grad_data = saved.gradient.iter().map(|&x| NotNaN::new(x.abs()).unwrap()).collect_vec();
+                    let &grad_max = grad_data.iter().max().unwrap();
+                    let grad_fracs = {
+                        if grad_max == NotNaN::new(0.0).unwrap() { grad_data }
+                        else { grad_data.iter().map(|&x| x / grad_max).collect() }
+                    };
+                    let divs = vec![0.0, 0.05, 0.50, 1.0].into_iter().map(|x| NotNaN::new(x).unwrap()).collect_vec();
+                    let bins = Bins::from_iter(divs, grad_fracs);
+                    format!(" {:20} {}", bins.display(), *bins.as_counts().last().unwrap())
                 }
-                s
-            };
-            print!("{:<28}", cosines);
-            use ::reporting::Bins;
-            let grad_data = saved.gradient.iter().map(|&x| NotNaN::new(x.abs()).unwrap()).collect_vec();
-            let &grad_max = grad_data.iter().max().unwrap();
-            let grad_fracs = {
-                if grad_max == NotNaN::new(0.0).unwrap() { grad_data }
-                else { grad_data.iter().map(|&x| x / grad_max).collect() }
-            };
-            let divs = vec![0.0, 0.05, 0.40, 0.80, 1.0].into_iter().map(|x| NotNaN::new(x).unwrap()).collect_vec();
-            let bins = Bins::from_iter(divs, grad_fracs);
-            print!(" {:40} {}", bins.display(), *bins.as_counts().last().unwrap() );
-            println!();
+            );
         }
-
-        // // call the output function if applicable
-        // if settings.intermediate_output_interval > 0 &&
-        //     iterations % settings.intermediate_output_interval == 0
-        // {
-        //     settings.output_fn(saved.position)
-        // };
 
 // /////////////////////////////////////////////////////////////////////////////
 // Evaluate exit conditions                                                   //
@@ -587,14 +576,12 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
             };
 
             if stop_condition.should_stop(&objectives) {
-                if settings.has_verbosity(1) {
-                    println!("ACGSD Finished.");
-                    println!("Iterations: {}", objectives.iterations);
-                    println!("     Value: {}", saved.value);
-                    println!(" Delta Val: {}", objectives.delta_value.unwrap_or(0.0));
-                    println!(" Grad Norm: {}", objectives.grad_norm);
-                    println!("  Grad Max: {}", objectives.grad_max);
-                }
+                info!("ACGSD Finished.");
+                info!("Iterations: {}", objectives.iterations);
+                info!("     Value: {}", saved.value);
+                info!(" Delta Val: {:e}", objectives.delta_value.unwrap_or(0.0));
+                info!(" Grad Norm: {:e}", objectives.grad_norm);
+                info!("  Grad Max: {:e}", objectives.grad_max);
 
                 let Point { position, value, gradient } = saved.to_point();
                 return Ok(Output { iterations, position, value, gradient, __no_full_destructure: () });
@@ -650,9 +637,7 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
             }
 
             // Fallback to steepest descent:  '-g'
-            if settings.has_verbosity(2) {
-                println!("Using steepest descent.");
-            }
+            debug!("Using steepest descent. (i: {})", iterations + 1);
 
             let V(direction) = -v(&saved.gradient);
             direction
@@ -702,14 +687,6 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
                             ls_point = point.clone();
                         }
 
-                        if let Some(Last { ls_failed: true, .. }) = last {
-                            if settings.has_verbosity(1) {
-                                print!("LS: a: {:.14e}", alpha);
-                                print!("\tv: {:14e}", point.value);
-                                print!("\ts: {:14e}", slope);
-                                println!("");
-                            }
-                        }
                         Ok((point.value, slope))
                     },
                 );

@@ -53,7 +53,9 @@ rsp2-eigenvector-classify = "./src/math/eigenvector-classify"
 # to a new version of a dependency.
 [preferred-versions]
 clap = "2"
+chrono = "0.4"
 either = "1"
+fern = "0.4"
 env_logger = "0.4"
 error-chain = "0.11"
 itertools = "0.7"

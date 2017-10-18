@@ -25,6 +25,6 @@ path = "lib.rs"
 !!serde_derive
 !!rand
 !!log
-!!env_logger
+!!fern
 !!itertools
 !!ansi-term

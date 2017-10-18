@@ -21,4 +21,5 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 !!error-chain
 
 # FIXME make this dev-dependencies once rust-lang-nursery/rls#169 is fixed
-!!env_logger
+# FIXME use fern for less hax?
+!!env-logger
