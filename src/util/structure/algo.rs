@@ -1,4 +1,5 @@
 pub(crate) mod layer {
+    use ::Result;
     use ::{Structure, Lattice};
 
     use ::std::mem;
@@ -11,6 +12,11 @@ pub(crate) mod layer {
     #[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Hash, Eq, Ord)]
     pub struct Layer(pub u32);
 
+    // FIXME this is wrong wrong wrong.
+    //       Only correct when the other two lattice vectors are
+    //         perpendicular to the chosen lattice vector.
+    //       May need to rethink the API.
+    //
     /// Determine layers in a structure, numbered from zero.
     /// Also returns the count.
     ///
@@ -21,7 +27,7 @@ pub(crate) mod layer {
     /// Normal is in fractional coords, and is currently limited such
     /// that it must be one of the lattice vectors.
     pub fn assign_layers<M>(structure: &Structure<M>, normal: &[i32; 3], sep: f64)
-    -> (Vec<Layer>, u32)
+    -> Result<(Vec<Layer>, u32)>
     {
         assign_layers_impl(
             &structure.to_fracs(),
@@ -33,16 +39,16 @@ pub(crate) mod layer {
 
     // monomorphic for less codegen
     fn assign_layers_impl(fracs: &[[f64; 3]], lattice: &Lattice, normal: &[i32; 3], sep: f64)
-    -> (Vec<Layer>, u32)
-    {
+    -> Result<(Vec<Layer>, u32)>
+    {Ok({
         if fracs.len() == 0 {
-            return (vec![], 0);
+            return Ok((vec![], 0));
         }
 
         let axis = {
             let mut sorted = *normal;
             sorted.sort_unstable();
-            assert!(sorted == [0, 0, 1],
+            ensure!(sorted == [0, 0, 1],
                 "unsupported layer normal: {:?}", normal);
 
             normal.iter().position(|&x| x == 1).unwrap()
@@ -60,6 +66,27 @@ pub(crate) mod layer {
 
         let frac_sep = sep / lattice.lengths()[axis];
 
+        // FIXME: On second thought I think this is incorrect.
+        //        Our requirement should not be that the normal is a
+        //        lattice vector; but rather, that two of the lattice
+        //        vectors lie within the plane.
+
+        { // Safety HACK!
+            use ::rsp2_array_utils::dot;
+            let lengths = lattice.lengths();
+            let vecs = lattice.matrix();
+            for k in 0..3 {
+                if k != axis {
+                    let cos = dot(&vecs[k], &vecs[axis]) / (lengths[k] * lengths[axis]);
+                    ensure!(cos.abs() < 1e-7,
+                        "For your safety, assign_layers is currently limited to \
+                        lattices where the normal is perpendicular to the other two \
+                        lattice vectors.");
+                }
+            }
+        }
+
+        // --(original (incorrect) text)--
         // NOTE: the validity of the following algorithm is
         //       predicated on the normal pointing precisely along
         //       a lattice vector.  This ensures that there's no
@@ -71,6 +98,7 @@ pub(crate) mod layer {
         //       could be handled in the future by a unimodular
         //       transform to make that direction become one of the
         //       lattice vectors....In theory.
+        // --(end original text)--
 
         // Split the positions into contiguous segments of atoms
         // where the distance between any two consecutive atoms
@@ -107,19 +135,106 @@ pub(crate) mod layer {
             }
         }
         (out, n_layers as u32)
+    })}
+
+    #[cfg(test)]
+    #[deny(unused)]
+    mod tests {
+        use super::Layer;
+        use ::Lattice;
+        use ::util::perm::{self, Permute, Perm};
+
+        #[test]
+        fn assign_layers_impl() {
+            let go = super::assign_layers_impl;
+
+            let fracs = vec![
+                // we will be looking along y with frac_tol = 0.11
+                [0.0, 0.1, 0.0],
+                [0.0, 0.2, 0.0], // obviously same layer
+                [0.8, 0.3, 0.4], // laterally displaced, but still same layer
+                [0.0, 0.7, 0.0], // a second layer
+                [0.0, 0.8, 0.0],
+                // (first and last not close enough to meet)
+            ];
+
+            // NOTE this does try a non-diagonal lattice and even
+            //      goes along an awkwardly oriented vector
+            //       but we restrict it to a form that the
+            //       (currently broken) algorithm will work on
+            //      (1st and 3rd vecs must be orthogonal to 2nd vec)
+            let ylen = 4.0;
+            let cart_tol    = 0.11 * ylen;  // produces 2 layers
+            let smaller_tol = 0.09 * ylen;  // makes all atoms look separate
+
+            const IR2: f64 = ::std::f64::consts::FRAC_1_SQRT_2;
+            let lattice = Lattice::new(&[
+                [ ylen * IR2, ylen *  IR2,  0.0],
+                [ ylen * IR2, ylen * -IR2,  0.0], // (axis we're using)
+                [        0.0,         0.0, 13.0],
+            ]);
+
+            let layers = |xs: Vec<_>| xs.into_iter().map(Layer).collect();
+
+            assert_eq!(
+                go(&fracs, &lattice, &[0, 1, 0], cart_tol).unwrap(),
+                (layers(vec![0, 0, 0, 1, 1]), 2));
+
+            // put them out of order
+            let (fracs, perm) = perm::shuffle(&fracs);
+            assert_eq!(
+                go(&fracs, &lattice, &[0, 1, 0], cart_tol).unwrap().0,
+                layers(vec![0, 0, 0, 1, 1]).permute(&perm));
+
+            // try a smaller tolerance
+            assert_eq!(
+                go(&fracs, &lattice, &[0, 1, 0], smaller_tol).unwrap().0,
+                layers(vec![0, 1, 2, 3, 4]).permute(&perm));
+
+            // try bridging across the periodic boundary to
+            //   join the two layers.
+            // also, try a position outside the unit cell.
+            let (mut fracs, mut perm) = (fracs, perm);
+            fracs.push([0.0, 1.9, 0.0]);
+            fracs.push([0.0, 0.0, 0.0]);
+            perm.append_mut(&Perm::eye(2));
+
+            assert_eq!(
+                go(&fracs, &lattice, &[0, 1, 0], cart_tol).unwrap().0,
+                layers(vec![0, 0, 0, 0, 0, 0, 0]).permute(&perm));
+
+            // try joining the end regions when there is more than one layer
+            // (this might use a different codepath for some implementations)
+            fracs.push([0.0, 0.5, 0.0]);
+            perm.append_mut(&Perm::eye(1));
+
+            assert_eq!(
+                go(&fracs, &lattice, &[0, 1, 0], cart_tol).unwrap().0,
+                layers(vec![0, 0, 0, 0, 0, 0, 0, 1]).permute(&perm));
+        }
     }
 }
 
+// FIXME
+// multiple things want to work with permutations but I don't
+// yet have an ideal set of utilities
+
+#[allow(dead_code)] // FIXME
 pub(crate) mod perm {
     use ::slice_of_array::prelude::*;
     use ::{Lattice, CoordStructure};
     use ::symmops::FracRot;
-    error_chain!{ }
 
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    pub struct Perm(Vec<u32>);
+    use ::Result;
+    use ::util::perm::{Perm, argsort, Permute};
 
-    pub fn of_rotation(
+    // NOTE: Takes CoordStructure to communicate that the algorithm only cares
+    //       about positions.  There is a small use-case for an <M: Eq> variant
+    //       which could possibly allow two identical positions to be distinguished
+    //       (maybe e.g. representing a defect as some superposition with a ghost)
+    //       but I wouldn't want it to be the default.
+    #[allow(unused)] // FIXME
+    pub(crate) fn of_rotation(
         structure: &CoordStructure,
         rotation: &FracRot,
         tol: f64,
@@ -161,7 +276,7 @@ pub(crate) mod perm {
                     .map(|x| NotNaN::new(dot(&x, &x).sqrt()).unwrap())
                     .collect::<Vec<_>>();
             let perm = argsort(&distances);
-            (perm.clone(), permute(&fracs, &perm))
+            (perm.clone(), fracs.permute(&perm))
         };
 
         let (perm_from, sorted_from) = sort_by_lattice_distance(&from_fracs);
@@ -176,38 +291,13 @@ pub(crate) mod perm {
 
         // Compose all of the permutations for the full permutation.
         //
-        // Note the following properties of permutation arrays:
-        //
-        // 1. Inverse:         if  x[perm] == y  then  x == y[argsort(perm)]
-        // 2. Associativity:   x[p][q] == x[p[q]]
-        let perm = perm_from.0;
-        let perm = permute(&perm, &perm_between);
-        let perm = permute(&perm, &invert(&perm_to));
-        Perm(perm)
+        // Note that permutations are associative; that is,
+        //     x.permute(p).permute(q) == x.permute(p.permute(q))
+        perm_from
+            .permute(&perm_between)
+            .permute(&perm_to.inverted())
     })}
 
-    fn permute<T: Clone>(xs: &[T], perm: &Perm) -> Vec<T>
-    {
-        assert_eq!(xs.len(), perm.0.len());
-        perm.0.iter().map(|&i| xs[i as usize].clone()).collect()
-    }
-
-    fn sort<T: Ord + Clone>(xs: &[T]) -> (Perm, Vec<T>)
-    {
-        let mut xs: Vec<_> = xs.iter().cloned().enumerate().collect();
-        xs.sort_by(|a, b| a.1.cmp(&b.1));
-        let (perm, xs) = xs.into_iter().map(|(i, x)| (i as u32, x)).unzip();
-        (Perm(perm), xs)
-    }
-
-    fn argsort<T: Ord + Clone>(xs: &[T]) -> Perm
-    { sort(xs).0 }
-
-    fn invert(perm: &Perm) -> Perm
-    {
-        // bah. less code to test...
-        argsort(&perm.0)
-    }
 
     // Optimized for permutations near the identity.
     fn brute_force_near_identity(
@@ -278,24 +368,17 @@ pub(crate) mod perm {
             perm.iter().all(|&x| x != UNSET),
             "multiple positions mapped to the same index");
 
-        Perm(perm)
+        Perm::from_vec(perm)?
     })}
 
     #[cfg(test)]
+    #[deny(unused)]
     mod tests {
         use ::Lattice;
-        use super::Perm;
+        use super::{Perm, Permute};
 
         use ::slice_of_array::*;
-        use ::rand::{Rng, Rand};
-
-        // hmmm, this is just begging for quickcheck...
-        fn random_perm(n: u32) -> Perm
-        {
-            let mut perm: Vec<_> = (0..n as u32).collect();
-            ::rand::thread_rng().shuffle(&mut perm);
-            Perm(perm)
-        }
+        use ::rand::Rand;
 
         fn random_vec<T: Rand>(n: u32) -> Vec<T>
         { (0..n).map(|_| ::rand::random()).collect() }
@@ -303,20 +386,9 @@ pub(crate) mod perm {
         fn random_problem(n: u32) -> (Vec<[f64; 3]>, Perm, Vec<[f64; 3]>)
         {
             let original: Vec<[f64; 3]> = random_vec(n);
-            let perm = random_perm(n);
-            let permuted = super::permute(&original, &perm);
+            let perm = Perm::random(n);
+            let permuted = original.permute(&perm);
             (original, perm, permuted)
-        }
-
-        #[test]
-        fn perm_inverse()
-        {
-            const SIZE: u32 = 20;
-            let perm = random_perm(SIZE);
-            let inv = super::invert(&perm);
-
-            assert!(super::permute(&perm.0, &inv).into_iter().eq(0..SIZE));
-            assert!(super::permute(&inv.0, &perm).into_iter().eq(0..SIZE));
         }
 
         #[test]

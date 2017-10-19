@@ -75,6 +75,24 @@ impl Lattice {
 
     /// An orthorhombic lattice ((a, b, c), (90, 90, 90))
     pub fn orthorhombic(a: f64, b: f64, c: f64) -> Self { Self::new(&[[a, 0., 0.], [0., b, 0.], [0., 0., c]]) }
+
+    // who needs quickcheck
+    /// Generate a random lattice.
+    ///
+    /// NOTE:
+    /// Elements are pulled from a uniform distribution of [-x, x]
+    /// and in all honesty I doubt this is representative of typical
+    #[cfg(test)]
+    pub fn random_uniform(max: f64) -> Self {
+        use ::slice_of_array::prelude::*;
+
+        Lattice::new(
+            (0..9)
+            .map(|_| (::rand::random::<f64>() - 0.5) * 2.0 * max)
+            .collect::<Vec<_>>()
+            .nest().as_array()
+        )
+    }
 }
 
 /// Defaults to the identity matrix.

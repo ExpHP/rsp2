@@ -1,7 +1,5 @@
 use ::Lattice;
 
-use ::std::ops::{Deref, DerefMut};
-
 /// Wrapper type for coordinates used as input to some APIs.
 ///
 /// This allows a function to support either cartesian coordinates,

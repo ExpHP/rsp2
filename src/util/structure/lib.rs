@@ -6,6 +6,15 @@ extern crate itertools;
 #[macro_use] extern crate error_chain;
 #[cfg(test)] extern crate rand;
 
+error_chain!{
+    errors {
+        BadPerm {
+            description("Tried to construct an invalid permutation.")
+            display("Tried to construct an invalid permutation.")
+        }
+    }
+}
+
 pub mod supercell;
 
 pub use lattice::Lattice;
