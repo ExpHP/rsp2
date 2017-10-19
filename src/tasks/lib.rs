@@ -60,7 +60,9 @@ fn setup_global_logger<P: AsRef<Path>>(path: P) -> Result<(), Panic>
                 message))
         })
         .level(::log::LogLevelFilter::Debug)
+        .level_for("rsp2_tasks", ::log::LogLevelFilter::Trace)
         .level_for("rsp2_minimize", ::log::LogLevelFilter::Trace)
+        .level_for("rsp2_phonopy_io", ::log::LogLevelFilter::Trace)
         .level_for("rsp2_minimize::exact_ls", ::log::LogLevelFilter::Debug)
         .chain(::std::io::stdout())
         .chain(::fern::log_file(path)?)
@@ -183,8 +185,8 @@ where P: AsRef<Path>, Q: AsRef<Path>,
         let (superstructure, displacements, disp_token)
             = p::cmd::phonopy_displacements_carbon(&conf, structure)?;
 
+        trace!("Computing forces at displacements");
         let mut lmp = Lammps::new_carbon(superstructure.clone())?;
-        println!();
         let mut i = 0;
         let force_sets = p::force_sets::compute_from_grad(
             superstructure,
@@ -228,7 +230,7 @@ where P: AsRef<Path>, Q: AsRef<Path>,
         Ok((alpha, multi_threshold_deconstruct(sc_token, 1e-10, 1e-3, structure)?))
     };
 
-    let write_eigen_info = |f: &mut Write, einfos: &EigenInfo| -> Result<_, Panic>
+    let write_eigen_info = |einfos: &EigenInfo, writeln: &mut FnMut(&::std::fmt::Display) -> Result<(), Panic>| -> Result<_, Panic>
     {
         use ::ansi_term::Colour::{Red, Cyan, Yellow, Black};
         use display_util::{ColorByRange, DisplayProb};
@@ -243,15 +245,15 @@ where P: AsRef<Path>, Q: AsRef<Path>,
         let dp = |x: f64| color_range.paint_as(&x, DisplayProb(x));
         let pol = |x: f64| color_range.paint(x);
 
-        writeln!(f, "{:27}  {:^7}  {:^7} [{:^4}, {:^4}, {:^4}]",
-            "# Frequency (cm^-1)", "Acoustc", "Layer", "X", "Y", "Z")?;
+        writeln(&format_args!("{:27}  {:^7}  {:^7} [{:^4}, {:^4}, {:^4}]",
+            "# Frequency (cm^-1)", "Acoustc", "Layer", "X", "Y", "Z"))?;
         for item in einfos.iter() {
             let eval = item.frequency;
             let acou = dp(item.acousticness);
             let layer = dp(item.layer_acousticness);
             let (x, y, z) = tup3(item.polarization);
-            writeln!(f, "{:27}  {}  {} [{:4.2}, {:4.2}, {:4.2}]",
-                eval, acou, layer, pol(x), pol(y), pol(z))?;
+            writeln(&format_args!("{:27}  {}  {} [{:4.2}, {:4.2}, {:4.2}]",
+                eval, acou, layer, pol(x), pol(y), pol(z)))?;
         }
         Ok(())
     };
@@ -275,22 +277,39 @@ where P: AsRef<Path>, Q: AsRef<Path>,
             let structure = relax(from_structure)?;
             let (evals, evecs) = diagonalize(structure.clone())?;
 
-            println!("============================");
-            println!("Finished relaxation # {}", iteration);
+            trace!("============================");
+            trace!("Finished relaxation # {}", iteration);
 
+            trace!("Finding layers");
             let (layers, nlayer) = ::rsp2_structure::assign_layers(&structure, &[0, 0, 1], 0.25);
             if let Some(expected) = settings.layers {
                 assert_eq!(nlayer, expected);
             }
 
-            let einfos = get_eigensystem_info(&evals, &evecs, &layers[..]);
-            write_eigen_info(
-                &mut File::create(format!("eigenvalues.{:02}", iteration))?,
-                &einfos,
-            )?;
             {
-                let out = ::std::io::stdout();
-                write_eigen_info(&mut out.lock(), &einfos)?;
+                let fname = format!("./structure-{:02}.1.vasp", iteration);
+                trace!("Writing '{}'", &fname);
+                poscar::dump_carbon(
+                    File::create(fname)?,
+                    &format!("Structure after CG round {}", iteration),
+                    &structure)?;
+            }
+
+            trace!("Computing eigensystem info");
+            let einfos = get_eigensystem_info(&evals, &evecs, &layers[..]);
+            {
+                let mut file = File::create(format!("eigenvalues.{:02}", iteration))?;
+                write_eigen_info(&einfos, &mut |s| writeln!(file, "{}", s).map_err(Into::into))?;
+            }
+            write_eigen_info(&einfos, &mut |s| Ok::<_, Panic>(info!("{}", s)))?;
+
+            {
+                let fname = format!("./structure-{:02}.2.vasp", iteration);
+                trace!("Writing '{}'", &fname);
+                poscar::dump_carbon(
+                    File::create(fname)?,
+                    &format!("Structure after eigenmode-chasing round {}", iteration),
+                    &structure)?;
             }
 
             let mut all_ok = true;
@@ -298,11 +317,11 @@ where P: AsRef<Path>, Q: AsRef<Path>,
             for (i, info, evec) in izip!(1.., &einfos, &evecs) {
                 if info.frequency < 0.0 && info.acousticness < 0.95 {
                     if all_ok {
-                        println!("!! Optimizing along bad bands");
+                        trace!("Optimizing along bands...");
                         all_ok = false;
                     }
                     let (alpha, new_structure) = minimize_evec(structure, &evec[..])?;
-                    println!("!! Optimized along band {} ({}), a = {:e}", i, info.frequency, alpha);
+                    info!("Optimized along band {} ({}), a = {:e}", i, info.frequency, alpha);
 
                     structure = new_structure;
                 }
@@ -314,8 +333,6 @@ where P: AsRef<Path>, Q: AsRef<Path>,
                     break (structure, evals, evecs);
                 }
             }
-
-            println!("============================");
 
             from_structure = structure;
             iteration += 1;

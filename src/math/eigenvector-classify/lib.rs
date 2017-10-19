@@ -22,13 +22,19 @@ pub fn keyed_acoustic_basis<K: Eq + Hash>(keys: &[Option<K>], mask: &[u32; 3]) -
 
 pub fn polarization(ev: &[[f64; 3]]) -> [f64; 3]
 {
-    // inefficient HACK
-    // really just normed sum along each of three components
-    let all_unique: Vec<_> = (0..ev.len()).map(Some).collect();
-    let x = keyed_acousticness(ev, &all_unique, &[1, 0, 0]);
-    let y = keyed_acousticness(ev, &all_unique, &[0, 1, 0]);
-    let z = keyed_acousticness(ev, &all_unique, &[0, 0, 1]);
-    [x, y, z]
+    // dumb loops
+    let mut acc = [0f64; 3];
+    for row in ev {
+        for c in 0..3 {
+            acc[c] += row[c] * row[c];
+        }
+    }
+    let sqnorm = acc[0] + acc[1] + acc[2];
+    [
+        acc[0] / sqnorm,
+        acc[1] / sqnorm,
+        acc[2] / sqnorm,
+    ]
 }
 
 #[derive(Debug, Clone)]

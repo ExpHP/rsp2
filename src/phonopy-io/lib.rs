@@ -221,6 +221,7 @@ pub mod cmd {
         let (displacements, superstructure) = {
 
             let tmp = tmp.path();
+            trace!("Entered '{}'...", tmp.display());
 
             write_conf(
                 File::create(tmp.join("phonopy.conf"))?,
@@ -233,6 +234,7 @@ pub mod cmd {
                 &structure,
             )?;
 
+            trace!("Calling phonopy for displacements...");
             {
                 let mut command = Command::new("phonopy");
                 command
@@ -243,6 +245,7 @@ pub mod cmd {
                 ::log_stdio_and_wait(command)?;
             }
 
+            trace!("Parsing disp.yaml...");
             let DispYaml {
                 displacements, structure: superstructure
             } = ::disp_yaml::read(File::open(tmp.join("disp.yaml"))?)?;
@@ -266,6 +269,7 @@ pub mod cmd {
 
         let tmp = TempDir::new("rsp2-rs")?;
         let tmp = tmp.path();
+        trace!("Entered '{}'...", tmp.display());
 
         let mut conf = conf.clone();
         conf.insert("BAND".to_string(), "0 0 0 1 0 0".to_string());
@@ -274,10 +278,12 @@ pub mod cmd {
 
         fs::copy(disp_dir.join("POSCAR"), tmp.join("POSCAR"))?;
 
+        trace!("Parsing disp.yaml...");
         let DispYaml {
             displacements, structure: superstructure,
         } = ::disp_yaml::read(File::open(disp_dir.join("disp.yaml"))?)?;
 
+        trace!("Writing FORCE_SETS...");
         ::force_sets::write(
             File::create(tmp.join("FORCE_SETS"))?,
             &superstructure,
@@ -285,6 +291,7 @@ pub mod cmd {
             &force_sets,
         )?;
 
+        trace!("Calling phonopy for eigenvectors...");
         {
             let mut command = Command::new("phonopy");
             command
@@ -296,24 +303,16 @@ pub mod cmd {
             ::log_stdio_and_wait(command)?;
         }
 
+        trace!("Reading eigenvectors...");
         let bases = ::npy::read_eigenvector_npy(File::open(tmp.join("eigenvector.npy"))?)?;
+        trace!("Reading eigenvalues...");
         let freqs = ::npy::read_eigenvalue_npy(File::open(tmp.join("eigenvalue.npy"))?)?;
-
-        for (i, basis) in bases.iter().enumerate() {
-            use ::std::io::prelude::*;
-            let mut f = File::create(format!("wowee-{}", i))?;
-            for v in basis.iter() {
-                for x in v.iter() {
-                    writeln!(f, "{:>20e}  +  j {:>20e}", x.real, x.imag)?;
-                }
-                writeln!(f, "")?;
-            }
-        }
 
         // eigensystem at first kpoint (gamma)
         let basis = bases.into_iter().next().unwrap();
         let freqs = freqs.into_iter().next().unwrap();
 
+        trace!("Getting real..."); // :P
         let evecs = basis.iter().map(|ev| Ok(
             ev.iter().map(|c| {
                 // gamma kets are real
@@ -321,6 +320,7 @@ pub mod cmd {
                 Ok(c.real)
             }).collect::<Result<Vec<_>>>()?.nest().to_vec()
         )).collect::<Result<_>>()?;
+        trace!("Done computing eigensystem");
         Ok((freqs, evecs))
     }
 }
@@ -337,20 +337,20 @@ fn log_stdio_and_wait(mut cmd: ::std::process::Command) -> Result<()>
 
     let stdout_worker = {
         let f = BufReader::new(child.stdout.take().unwrap());
-        ::std::thread::spawn(move || -> Result<()> {Ok(
+        ::std::thread::spawn(move || -> Result<()> {Ok({
             for line in f.lines() {
                 ::stdout::log(&(line?[..]));
             }
-        )})
+        })})
     };
 
     let stderr_worker = {
         let f = BufReader::new(child.stderr.take().unwrap());
-        ::std::thread::spawn(move || -> Result<()> {Ok(
+        ::std::thread::spawn(move || -> Result<()> {Ok({
             for line in f.lines() {
                 ::stderr::log(&(line?[..]));
             }
-        )})
+        })})
     };
 
     ensure!(child.wait()?.success(), "Phonopy failed.");

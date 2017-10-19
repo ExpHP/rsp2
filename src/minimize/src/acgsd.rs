@@ -275,7 +275,8 @@ pub mod stop_condition {
 
     // Relative difference.
     //
-    // This never returns NaN, although it may be infinite.
+    // This won't return NaN for finite inputs, although it
+    // WILL be infinite if exactly one of the two operands is zero
     fn rel_sub(a: f64, b: f64) -> f64 {
         if a == b { return 0.0; }
         (a - b) / a.abs().min(b.abs())
@@ -550,7 +551,7 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
         {
             let d_value = last.as_ref().map(|l| l.d_value).unwrap_or(0.0);
             let grad_mag = vnorm(&saved.gradient);
-            trace!(" i: {i:>6}  v: {v:18.14} dv: {dv:+9.2e}  g: {g:>13.7e}  {cos:<24} {distrib}",
+            trace!(" i: {i:>6}  v: {v:18.14} dv: {dv:+8.2e}  g: {g:>12.7e}  {cos:<24} {distrib}",
                 i = iterations,
                 v = saved.value,
                 dv = d_value,
