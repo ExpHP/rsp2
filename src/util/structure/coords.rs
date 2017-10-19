@@ -1,5 +1,7 @@
 use ::Lattice;
 
+use ::std::ops::{Deref, DerefMut};
+
 /// Wrapper type for coordinates used as input to some APIs.
 ///
 /// This allows a function to support either cartesian coordinates,
@@ -11,42 +13,40 @@ pub enum Coords {
 }
 
 impl Coords {
-    pub fn len(&self) -> usize { self.as_slice().len() }
+    pub fn len(&self) -> usize
+    { self.as_slice().len() }
 
-    pub fn as_slice(&self) -> &[[f64; 3]] { match *self {
+    pub fn as_slice(&self) -> &[[f64; 3]]
+    { match *self {
         Coords::Carts(ref c) => c,
         Coords::Fracs(ref c) => c,
     }}
 }
 
 impl Coords {
-    pub fn into_carts(self, lattice: &Lattice) -> Vec<[f64; 3]> {
-        match self {
-            Coords::Carts(c) => c,
-            Coords::Fracs(c) => ::util::dot_n3_33(&c, &lattice.matrix()),
-        }
-    }
+    pub fn into_carts(self, lattice: &Lattice) -> Vec<[f64; 3]>
+    { match self {
+        Coords::Carts(c) => c,
+        Coords::Fracs(c) => ::util::dot_n3_33(&c, &lattice.matrix()),
+    }}
 
-    pub fn into_fracs(self, lattice: &Lattice) -> Vec<[f64; 3]> {
-        match self {
-            Coords::Carts(c) => ::util::dot_n3_33(&c, &lattice.inverse_matrix()),
-            Coords::Fracs(c) => c,
-        }
-    }
+    pub fn into_fracs(self, lattice: &Lattice) -> Vec<[f64; 3]>
+    { match self {
+        Coords::Carts(c) => ::util::dot_n3_33(&c, &lattice.inverse_matrix()),
+        Coords::Fracs(c) => c,
+    }}
 
-    pub fn to_carts(&self, lattice: &Lattice) -> Vec<[f64; 3]> {
-        match *self {
-            Coords::Carts(ref c) => c.clone(),
-            Coords::Fracs(ref c) => ::util::dot_n3_33(c, &lattice.matrix()),
-        }
-    }
+    pub fn to_carts(&self, lattice: &Lattice) -> Vec<[f64; 3]>
+    { match *self {
+        Coords::Carts(ref c) => c.clone(),
+        Coords::Fracs(ref c) => ::util::dot_n3_33(c, &lattice.matrix()),
+    }}
 
-    pub fn to_fracs(&self, lattice: &Lattice) -> Vec<[f64; 3]> {
-        match *self {
-            Coords::Carts(ref c) => ::util::dot_n3_33(c, &lattice.inverse_matrix()),
-            Coords::Fracs(ref c) => c.clone(),
-        }
-    }
+    pub fn to_fracs(&self, lattice: &Lattice) -> Vec<[f64; 3]>
+    { match *self {
+        Coords::Carts(ref c) => ::util::dot_n3_33(c, &lattice.inverse_matrix()),
+        Coords::Fracs(ref c) => c.clone(),
+    }}
 }
 
 #[cfg(test)]

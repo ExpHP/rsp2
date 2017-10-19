@@ -3,11 +3,26 @@
 #[cfg(test)]
 use ::ordered_float::NotNaN;
 
+// Multiply on the right
 pub(crate) fn dot_n3_33(coords: &[[f64; 3]], mat: &[[f64; 3]; 3]) -> Vec<[f64; 3]>
 {
     use ::rsp2_array_utils::dot;
     coords.iter().map(|v| dot(v, mat)).collect()
 }
+
+// Multiply by transpose on the right
+//
+// I think this one is more likely to be able to use SIMD
+// but I have not tested this. - ML
+pub(crate) fn dot_n3_33T(coords: &[[f64; 3]], mat: &[[f64; 3]; 3]) -> Vec<[f64; 3]>
+{
+    use ::rsp2_array_utils::vec_from_fn;
+    coords.iter().map(|v|
+        vec_from_fn(|c| (0..3).map(|k| v[k] * mat[c][k]).sum())
+    ).collect()
+}
+
+
 
 pub(crate) fn translate_mut_n3_3(coords: &mut [[f64; 3]], t: &[f64; 3])
 {

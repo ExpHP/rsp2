@@ -14,6 +14,9 @@ path = "lib.rs"
 [dependencies]
 rsp2-array-utils = { path = "../array" }
 
+error-chain = "0.11"
 slice-of-array = "0.1"
 ordered-float = "0.5"
 itertools = "0.7"
+
+rand = "0.3"
