@@ -73,11 +73,18 @@ pub fn phonopy_gamma_eigensystem<P>(
     force_sets: Vec<Vec<[f64; 3]>>,
     disp_dir: &P,
 ) -> Result<(Vec<f64>, Vec<Vec<[f64; 3]>>)>
-where P: AsRef<Path>,
+where P: AsRef<Path>
+{ _phonopy_gamma_eigensystem(conf, force_sets, disp_dir.as_ref()) }
+
+// monomorphic
+#[inline(never)]
+fn _phonopy_gamma_eigensystem(
+    conf: &HashMap<String, String>,
+    force_sets: Vec<Vec<[f64; 3]>>,
+    disp_dir: &Path,
+) -> Result<(Vec<f64>, Vec<Vec<[f64; 3]>>)>
 {
     use ::slice_of_array::prelude::*;
-
-    let disp_dir = disp_dir.as_ref();
 
     let tmp = TempDir::new("rsp2-rs")?;
     let tmp = tmp.path();

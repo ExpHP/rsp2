@@ -67,6 +67,91 @@ pub mod disp_yaml {
     }
 }
 
+pub mod symmetry_yaml {
+    use ::Result;
+
+    use ::std::io::prelude::*;
+
+    mod cereal {
+        #[derive(Deserialize)]
+        pub(super) struct SymmetryYaml {
+            pub space_group_type: String,
+            pub space_group_number: u32,
+            pub point_group_type: String,
+            pub space_group_operations: Vec<Operation>,
+        }
+
+        #[derive(Deserialize)]
+        pub(super) struct Operation {
+            pub rotation: [[i16; 3]; 3],
+            pub translation: [f64; 3],
+        }
+    }
+
+    /// A parsed --sym output
+    pub struct SymmetryYaml {
+        pub space_group_type: String,
+        pub space_group_number: u32,
+        pub point_group_type: String,
+        pub space_group_operations: Vec<Operation>,
+        _more: (),
+    }
+
+    /// Spacegroup operator from disp.yaml
+    pub struct Operation {
+        pub rotation: [[i16; 3]; 3],
+        pub translation_twelfths: [i16; 3],
+    }
+
+    pub fn read<R: Read>(r: R) -> Result<SymmetryYaml>
+    {Ok({
+        parse(::serde_yaml::from_reader(r)?)?
+    })}
+
+    // monomorphic
+    fn parse(yaml: cereal::SymmetryYaml) -> Result<SymmetryYaml>
+    {Ok({
+        use self::cereal::SymmetryYaml as RawYaml;
+        use self::cereal::Operation as RawOperation;
+
+        let RawYaml {
+            space_group_type,
+            space_group_number,
+            point_group_type,
+            space_group_operations,
+        } = yaml;
+
+        let space_group_operations =
+            space_group_operations.into_iter().map(|op| {Ok({
+                let RawOperation { rotation, translation } = op;
+
+                let translation_twelfths = {
+                    let t = translation;
+                    let f = |mut x: f64| -> Result<i16> {Ok({
+                        x *= 12.0;
+                        // generous tolerance due to low precision in file
+                        ensure!((x - x.round()).abs() < 1e-4,
+                            "translation not divisible by 12: {:?}", translation);
+
+                        x.round() as i16
+                    })};
+
+                    [f(t[0])?, f(t[1])?, f(t[2])?]
+                };
+
+                Operation { rotation, translation_twelfths }
+             })}).collect::<Result<_>>()?;
+
+        SymmetryYaml {
+            space_group_type,
+            space_group_number,
+            point_group_type,
+            space_group_operations,
+            _more: (),
+        }
+    })}
+}
+
 pub mod force_sets {
     // Adapted from code by Colin Daniels.
 

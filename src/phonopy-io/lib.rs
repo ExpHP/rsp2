@@ -16,7 +16,7 @@ pub type YamlError = ::serde_yaml::Error;
 pub type Shareable = Send + Sync + 'static;
 
 pub(crate) use self::filetypes::{Displacements, DispYaml};
-pub use self::filetypes::{disp_yaml, force_sets};
+pub use self::filetypes::{disp_yaml, force_sets, symmetry_yaml};
 
 pub mod cmd;
 mod filetypes;
