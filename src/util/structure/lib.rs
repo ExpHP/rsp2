@@ -4,6 +4,7 @@ extern crate ordered_float;
 extern crate slice_of_array;
 extern crate itertools;
 #[macro_use] extern crate error_chain;
+#[macro_use] extern crate lazy_static;
 #[cfg(test)] extern crate rand;
 
 error_chain!{
@@ -19,7 +20,8 @@ pub mod supercell;
 
 pub use lattice::Lattice;
 pub use coords::Coords;
-pub use structure::{Structure, CoordStructure};
+pub use element::Element;
+pub use structure::{Structure, CoordStructure, ElementStructure};
 
 pub use algo::layer::Layer;
 pub use algo::layer::assign_layers;
@@ -30,3 +32,4 @@ mod lattice;
 mod util;
 mod algo;
 mod symmops;
+mod element;

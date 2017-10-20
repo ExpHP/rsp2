@@ -18,5 +18,6 @@ error-chain = "0.11"
 slice-of-array = "0.1"
 ordered-float = "0.5"
 itertools = "0.7"
+lazy_static = "0.2"
 
 rand = "0.3"

@@ -1,4 +1,4 @@
-use ::{Lattice, Coords};
+use ::{Lattice, Coords, Element};
 
 /// Pairs [`Coords`] together with their [`Lattice`] and metadata.
 ///
@@ -13,6 +13,9 @@ pub struct Structure<M = ()> {
 
 /// Type of a Structure with no metadata at all (not even atom types).
 pub type CoordStructure = Structure<()>;
+
+/// A Structure whose only metadata is atomic numbers.
+pub type ElementStructure = Structure<Element>;
 
 impl CoordStructure {
     /// Create a structure with no metadata; just coordinates.

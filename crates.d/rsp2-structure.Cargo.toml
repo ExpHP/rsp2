@@ -13,5 +13,6 @@ path = "lib.rs"
 !!slice-of-array
 !!ordered-float
 !!itertools
+!!lazy-static
 
 !!rand
