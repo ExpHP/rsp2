@@ -1,8 +1,8 @@
 pub(crate) type Displacements = Vec<(usize, [f64; 3])>;
-pub(crate) use disp_yaml::DispYaml;
+pub(crate) use self::disp_yaml::DispYaml;
 pub mod disp_yaml {
     use ::Error;
-    use ::Displacements;
+    use super::Displacements;
 
     use ::std::io::prelude::*;
     use ::rsp2_structure::Structure;

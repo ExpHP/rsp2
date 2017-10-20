@@ -1,7 +1,6 @@
 use ::Result;
 use ::Displacements;
 use ::DispYaml;
-use ::std::{disp_yaml, force_sets};
 
 use ::rsp2_structure::CoordStructure;
 
@@ -113,7 +112,7 @@ where P: AsRef<Path>,
             .arg("phonopy.conf")
             .current_dir(&tmp);
 
-        ::log_stdio_and_wait(command)?;
+        log_stdio_and_wait(command)?;
     }
 
     trace!("Reading eigenvectors...");
