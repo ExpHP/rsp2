@@ -267,6 +267,7 @@ where P: AsRef<Path>, Q: AsRef<Path>,
     let mut original = poscar::load(File::open(input)?)?.map_metadata(|_| ());
     original.scale_vecs(&settings.hack_scale); // HACK
     let original = original;
+    poscar::dump(File::create("./initial.vasp")?, "", &carbon(&original))?;
 
     ::std::fs::create_dir(&outdir)?;
     {
@@ -279,7 +280,7 @@ where P: AsRef<Path>, Q: AsRef<Path>,
         // HACK to stop one iteration AFTER all non-acoustics are positive
         let mut iteration = 1;
         let mut all_ok_count = 0;
-        let (structure, evals, _evecs) = loop { // NOTE: we use break with value
+        let (structure, einfos, _evecs) = loop { // NOTE: we use break with value
             let structure = relax(from_structure)?;
             let (evals, evecs) = diagonalize(structure.clone())?;
 
@@ -336,18 +337,26 @@ where P: AsRef<Path>, Q: AsRef<Path>,
             if all_ok {
                 all_ok_count += 1;
                 if all_ok_count >= 3 {
-                    break (structure, evals, evecs);
+                    break (structure, einfos, evecs);
                 }
             }
 
             from_structure = structure;
             iteration += 1;
-        }; // (structure, evals, evecs)
+        }; // (structure, einfos, evecs)
 
         {
             let mut f = File::create("eigenvalues.final")?;
-            for &x in &evals {
-                writeln!(f, "{:?}", x)?;
+            writeln!(f, "{:27}  {:4}  {:4}  {:^4} {:^4} {:^4}",
+                "# Frequency (cm^-1)", "Acou", "Layr", "X", "Y", "Z")?;
+            for item in einfos.iter() {
+                // don't use DisplayProb, keep things readible
+                let eval = item.frequency;
+                let acou = item.acousticness;
+                let layer = item.layer_acousticness;
+                let (x, y, z) = tup3(item.polarization);
+                writeln!(f, "{:27}  {:4.2}  {:4.2}  {:4.2} {:4.2} {:4.2}",
+                    eval, acou, layer, x, y, z)?;
             }
         }
 
