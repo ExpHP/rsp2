@@ -23,6 +23,10 @@ mod filetypes;
 mod npy;
 
 error_chain!{
+    links {
+        StructureIo(::rsp2_structure_io::Error, ::rsp2_structure_io::ErrorKind);
+    }
+
     foreign_links {
         Io(::std::io::Error);
         Yaml(::serde_yaml::Error);

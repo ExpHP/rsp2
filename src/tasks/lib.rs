@@ -26,6 +26,7 @@ const THZ_TO_WAVENUMBER: f64 = 33.35641;
 use ::rsp2_array_utils::vec_from_fn;
 use ::slice_of_array::prelude::*;
 use ::rsp2_structure::{supercell, Coords, CoordStructure, Lattice};
+use ::rsp2_structure::{Element, ElementStructure};
 use ::rsp2_lammps_wrap::Lammps;
 use ::std::path::Path;
 
@@ -90,6 +91,11 @@ fn setup_global_logger<P: AsRef<Path>>(path: P) -> Result<(), Panic>
 //         *row = vec_from_fn(|k| row[k] - mean[k]);
 //     }
 // }
+
+fn carbon(structure: &CoordStructure) -> ElementStructure {
+    structure.clone().map_metadata(|()|
+        Element::from_symbol("C").unwrap())
+}
 
 fn lammps_flat_diff_fn<'a>(lmp: &'a mut Lammps)
 -> Box<FnMut(&[f64]) -> Result<(f64, Vec<f64>), LmpError> + 'a>
@@ -183,7 +189,7 @@ where P: AsRef<Path>, Q: AsRef<Path>,
         ];
 
         let (superstructure, displacements, disp_token)
-            = p::cmd::phonopy_displacements_carbon(&conf, structure)?;
+            = p::cmd::phonopy_displacements(&conf, carbon(&structure))?;
 
         trace!("Computing forces at displacements");
         let mut lmp = Lammps::new_carbon(superstructure.clone())?;
@@ -258,7 +264,7 @@ where P: AsRef<Path>, Q: AsRef<Path>,
         Ok(())
     };
 
-    let mut original = poscar::load_carbon(File::open(input)?)?;
+    let mut original = poscar::load(File::open(input)?)?.map_metadata(|_| ());
     original.scale_vecs(&settings.hack_scale); // HACK
     let original = original;
 
@@ -289,10 +295,10 @@ where P: AsRef<Path>, Q: AsRef<Path>,
             {
                 let fname = format!("./structure-{:02}.1.vasp", iteration);
                 trace!("Writing '{}'", &fname);
-                poscar::dump_carbon(
+                poscar::dump(
                     File::create(fname)?,
                     &format!("Structure after CG round {}", iteration),
-                    &structure)?;
+                    &carbon(&structure))?;
             }
 
             trace!("Computing eigensystem info");
@@ -306,10 +312,10 @@ where P: AsRef<Path>, Q: AsRef<Path>,
             {
                 let fname = format!("./structure-{:02}.2.vasp", iteration);
                 trace!("Writing '{}'", &fname);
-                poscar::dump_carbon(
+                poscar::dump(
                     File::create(fname)?,
                     &format!("Structure after eigenmode-chasing round {}", iteration),
-                    &structure)?;
+                    &carbon(&structure))?;
             }
 
             let mut all_ok = true;
@@ -345,7 +351,7 @@ where P: AsRef<Path>, Q: AsRef<Path>,
             }
         }
 
-        poscar::dump_carbon(File::create("./final.vasp")?, "", &structure)?;
+        poscar::dump(File::create("./final.vasp")?, "", &carbon(&structure))?;
 
         cwd_guard.pop()?;
     }

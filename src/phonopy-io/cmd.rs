@@ -2,7 +2,7 @@ use ::Result;
 use ::Displacements;
 use ::DispYaml;
 
-use ::rsp2_structure::CoordStructure;
+use ::rsp2_structure::{CoordStructure, ElementStructure};
 
 use ::tempdir::TempDir;
 use ::std::process::Command;
@@ -22,9 +22,9 @@ where W: Write,
     Ok(())
 }
 
-pub fn phonopy_displacements_carbon(
+pub fn phonopy_displacements(
     conf: &HashMap<String, String>,
-    structure: CoordStructure,
+    structure: ElementStructure,
 ) -> Result<(CoordStructure, Displacements, TempDir)>
 {
     use ::rsp2_structure_io::poscar;
@@ -40,7 +40,7 @@ pub fn phonopy_displacements_carbon(
             &conf,
         )?;
 
-        poscar::dump_carbon(
+        poscar::dump(
             File::create(tmp.join("POSCAR"))?,
             "blah",
             &structure,

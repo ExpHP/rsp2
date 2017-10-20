@@ -1,47 +1,42 @@
-use ::std::io;
+
+use ::Result;
+
 use ::std::io::prelude::*;
 use ::itertools::Itertools;
-use ::std::ascii::AsciiExt;
 
+use ::rsp2_structure::{Element, ElementStructure};
 use ::rsp2_structure::{CoordStructure, Lattice, Coords};
 
 // HACK this is closer to how the function was originally written,
 //      with support for atom types, but I don't want to have to worry
 //      about atom types right now.
 /// Writes a POSCAR to an open file.
-pub fn dump_carbon<W>(
+pub fn dump<W>(
     w: W,
     title: &str,
-    structure: &CoordStructure,
-) -> io::Result<()>
-where
-    W: Write,
+    structure: &ElementStructure,
+) -> Result<()>
+where W: Write,
 {
-    _dump_carbon(
+    _dump(
         w,
         title,
-        structure,
-        &vec!["C"; structure.num_atoms()],
+        &structure.clone().map_metadata(|_| ()),
+        structure.metadata(),
     )
 }
 
-// HACK this is closer to how the function was originally written,
-//      with support for atom types, but I don't want to have to worry
-//      about atom types right now.
 /// Writes a POSCAR to an open file.
-fn _dump_carbon<W, S>(
+fn _dump<W>(
     mut w: W,
     title: &str,
     structure: &CoordStructure,
-    types: &[S],
-) -> io::Result<()>
-where
-    W: Write,
-    S: ::std::borrow::Borrow<str>,
+    types: &[Element],
+) -> Result<()>
+where W: Write
 {
     assert!(!title.contains("\n"));
     assert!(!title.contains("\r"));
-    assert!(types.iter().all(|s| s.borrow().chars().all(|c| c.is_ascii() && c.is_alphabetic())));
     assert_eq!(structure.num_atoms(), types.len());
 
     writeln!(&mut w, "{}", title)?;
@@ -52,10 +47,10 @@ where
 
     {
         let mut pairs = Vec::with_capacity(structure.num_atoms());
-        for (key, group) in &types.iter().group_by(|s| s.borrow()) {
+        for (key, group) in &types.iter().group_by(|typ| *typ) {
             pairs.push((key, group.count()));
         }
-        for &(symbol, _) in &pairs { write!(&mut w, " {}", symbol)?; }
+        for &(typ, _) in &pairs { write!(&mut w, " {}", typ.symbol())?; }
         writeln!(&mut w)?;
         for &(_, count) in &pairs { write!(&mut w, " {}", count)?; }
         writeln!(&mut w)?;
@@ -65,16 +60,15 @@ where
     writeln!(&mut w, "Cartesian")?;
 
     for (c, typ) in structure.to_carts().iter().zip(types) {
-        writeln!(&mut w, " {} {} {} {}", c[0], c[1], c[2], typ.borrow())?;
+        writeln!(&mut w, " {} {} {} {}", c[0], c[1], c[2], typ.symbol())?;
     }
 
     Ok(())
 }
 
 /// Reads a POSCAR from an open file.
-pub fn load_carbon<R>(f: R) -> io::Result<CoordStructure>
-  where
-    R: Read,
+pub fn load<R>(f: R) -> Result<ElementStructure>
+where R: Read,
 {
     // this is to get us up and running and nothing else
     let f = ::std::io::BufReader::new(f);
@@ -106,11 +100,15 @@ pub fn load_carbon<R>(f: R) -> io::Result<CoordStructure>
     let lattice = Lattice::new(lattice);
 
     // atom types
-    {
-        let s = lines.next().unwrap()?;
-        let words = s.trim().split_whitespace().map(String::from).collect::<Vec<_>>();
-        assert_eq!(words, vec!["C"]);
-    }
+    let elements = {
+        lines.next().unwrap()?
+            .trim().split_whitespace()
+            .map(|sym| match Element::from_symbol(sym) {
+                None => bail!("Unknown element: '{}'", sym),
+                Some(e) => Ok(e),
+            })
+            .collect::<Result<Vec<Element>>>()?
+    };
     // atom counts
     let n: usize = {
         let s = lines.next().unwrap()?;
@@ -159,5 +157,5 @@ pub fn load_carbon<R>(f: R) -> io::Result<CoordStructure>
         assert_eq!(line?.trim(), "");
     }
 
-    Ok(CoordStructure::new_coords(lattice, coords))
+    Ok(ElementStructure::new(lattice, coords, elements))
 }
