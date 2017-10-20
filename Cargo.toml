@@ -41,4 +41,5 @@ rsp2-kets = { version = "0.3", git = "https://github.com/ExpHP/rsp2-kets", featu
 slice-of-array = "0.1"
 ansi_term = "0.10"
 
-[workspace]
+# This is NOT a workspace anymore.
+# I don't have time to debug the RLS.
