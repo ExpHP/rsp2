@@ -1,4 +1,5 @@
 use ::Lattice;
+use ::util::perm::{Perm, Permute};
 
 /// Wrapper type for coordinates used as input to some APIs.
 ///
@@ -45,6 +46,15 @@ impl Coords {
         Coords::Carts(ref c) => ::util::dot_n3_33(c, &lattice.inverse_matrix()),
         Coords::Fracs(ref c) => c.clone(),
     }}
+}
+
+impl Permute for Coords {
+    fn permuted_by(self, perm: &Perm) -> Coords {
+        match self {
+            Coords::Carts(c) => Coords::Carts(c.permuted_by(perm)),
+            Coords::Fracs(c) => Coords::Fracs(c.permuted_by(perm)),
+        }
+    }
 }
 
 #[cfg(test)]

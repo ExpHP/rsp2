@@ -72,6 +72,8 @@ pub(crate) mod perm {
         pub fn eye(n: u32) -> Perm
         { Perm((0..n).collect()) }
 
+        pub fn len(&self) -> usize { self.0.len() }
+
         /// This performs O(n log n) validation on the data
         /// to verify that it satisfies the invariants of Perm.
         pub fn from_vec(vec: Vec<u32>) -> Result<Perm>
@@ -147,27 +149,42 @@ pub(crate) mod perm {
     {
         let xs = xs.to_vec();
         let perm = Perm::random(xs.len() as u32);
-        (xs.permute(&perm), perm)
+        (xs.permuted_by(&perm), perm)
     }
 
     pub(crate) fn argsort<T: Clone + Ord>(xs: &[T]) -> Perm
     { sort(xs).1 }
 
-    pub(crate) trait Permute: ToOwned {
-        fn permute(&self, perm: &Perm) -> Self::Owned;
+    pub(crate)
+    trait Permute: Sized {
+        fn permuted_by(self, perm: &Perm) -> Self;
     }
 
-    impl<T: Clone> Permute for [T] {
-        fn permute(&self, perm: &Perm) -> Vec<T>
+    impl<T> Permute for Vec<T> {
+        fn permuted_by(self, perm: &Perm) -> Vec<T>
         {
-            // NOTE: Clone bound could be removed with some unsafe code
-            perm.0.iter().map(|&i| self[i as usize].clone()).collect()
+            use ::std::ptr;
+
+            assert_eq!(self.len(), perm.0.len());
+            let mut out = Vec::with_capacity(self.len());
+
+            //------------------------------------------------
+            // You are now entering a PANIC FREE ZONE
+            unsafe { out.set_len(self.len()); }
+            for (to, &from) in perm.0.iter().enumerate() {
+                let tmp = unsafe { ptr::read(&self[from as usize]) };
+                unsafe { ptr::write(&mut out[to], tmp) };
+            }
+            ::std::mem::forget(self);
+            //------------------------------------------------
+
+            out
         }
     }
 
     impl Permute for Perm {
-        fn permute(&self, perm: &Perm) -> Perm
-        { Perm(self.0.permute(perm)) }
+        fn permuted_by(self, perm: &Perm) -> Perm
+        { Perm(self.0.permuted_by(perm)) }
     }
 
     #[cfg(test)]
@@ -181,8 +198,8 @@ pub(crate) mod perm {
             let perm = Perm::random(20);
             let inv = perm.inverted();
 
-            assert_eq!(perm.permute(&inv), Perm::eye(20));
-            assert_eq!(inv.permute(&perm), Perm::eye(20));
+            assert_eq!(perm.clone().permuted_by(&inv), Perm::eye(20));
+            assert_eq!(inv.permuted_by(&perm), Perm::eye(20));
         }
     }
 }

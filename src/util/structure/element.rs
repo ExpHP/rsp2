@@ -162,7 +162,6 @@ lazy_static!{
     static ref NUMBER_TO_SHORT: HashMap<u16, &'static str> =
     {
         // TODO: add systematic names for missing elements up to 999
-        panic!("3 letter atomic symbols not currently supported");
         SPECIAL_NAMES.iter()
             .map(|&(num, sym, _)| (num, sym))
             .collect()

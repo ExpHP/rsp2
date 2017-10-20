@@ -1,4 +1,5 @@
 use ::{Lattice, Coords, Element};
+use ::util::perm::{Perm, Permute};
 
 /// Pairs [`Coords`] together with their [`Lattice`] and metadata.
 ///
@@ -126,5 +127,15 @@ impl<M> Structure<M> {
         let dummy = Coords::Carts(vec![]);
         let coords = ::std::mem::replace(&mut self.coords, dummy);
         self.coords = Coords::Fracs(coords.into_fracs(&self.lattice));
+    }
+}
+
+impl<M> Permute for Structure<M> {
+    fn permuted_by(self, perm: &Perm) -> Self
+    {
+        let lattice = self.lattice;
+        let coords = self.coords.permuted_by(perm);
+        let meta = self.meta.permuted_by(perm);
+        Structure { lattice, coords, meta }
     }
 }

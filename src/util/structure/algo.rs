@@ -184,12 +184,12 @@ pub(crate) mod layer {
             let (fracs, perm) = perm::shuffle(&fracs);
             assert_eq!(
                 go(&fracs, &lattice, &[0, 1, 0], cart_tol).unwrap().0,
-                layers(vec![0, 0, 0, 1, 1]).permute(&perm));
+                layers(vec![0, 0, 0, 1, 1]).permuted_by(&perm));
 
             // try a smaller tolerance
             assert_eq!(
                 go(&fracs, &lattice, &[0, 1, 0], smaller_tol).unwrap().0,
-                layers(vec![0, 1, 2, 3, 4]).permute(&perm));
+                layers(vec![0, 1, 2, 3, 4]).permuted_by(&perm));
 
             // try bridging across the periodic boundary to
             //   join the two layers.
@@ -201,7 +201,7 @@ pub(crate) mod layer {
 
             assert_eq!(
                 go(&fracs, &lattice, &[0, 1, 0], cart_tol).unwrap().0,
-                layers(vec![0, 0, 0, 0, 0, 0, 0]).permute(&perm));
+                layers(vec![0, 0, 0, 0, 0, 0, 0]).permuted_by(&perm));
 
             // try joining the end regions when there is more than one layer
             // (this might use a different codepath for some implementations)
@@ -210,7 +210,7 @@ pub(crate) mod layer {
 
             assert_eq!(
                 go(&fracs, &lattice, &[0, 1, 0], cart_tol).unwrap().0,
-                layers(vec![0, 0, 0, 0, 0, 0, 0, 1]).permute(&perm));
+                layers(vec![0, 0, 0, 0, 0, 0, 0, 1]).permuted_by(&perm));
         }
     }
 }
@@ -276,7 +276,7 @@ pub(crate) mod perm {
                     .map(|x| NotNaN::new(dot(&x, &x).sqrt()).unwrap())
                     .collect::<Vec<_>>();
             let perm = argsort(&distances);
-            (perm.clone(), fracs.permute(&perm))
+            (perm.clone(), fracs.permuted_by(&perm))
         };
 
         let (perm_from, sorted_from) = sort_by_lattice_distance(&from_fracs);
@@ -294,8 +294,8 @@ pub(crate) mod perm {
         // Note that permutations are associative; that is,
         //     x.permute(p).permute(q) == x.permute(p.permute(q))
         perm_from
-            .permute(&perm_between)
-            .permute(&perm_to.inverted())
+            .permuted_by(&perm_between)
+            .permuted_by(&perm_to.inverted())
     })}
 
 
@@ -387,7 +387,7 @@ pub(crate) mod perm {
         {
             let original: Vec<[f64; 3]> = random_vec(n);
             let perm = Perm::random(n);
-            let permuted = original.permute(&perm);
+            let permuted = original.clone().permuted_by(&perm);
             (original, perm, permuted)
         }
 
