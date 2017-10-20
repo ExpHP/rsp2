@@ -240,8 +240,8 @@ where P: AsRef<Path>, Q: AsRef<Path>,
             (0.9, Cyan.normal()),
             (0.1, Yellow.normal()),
             (1e-4, Red.bold()),
-            (1e-10, Black.normal()),
-        ], Red.normal());
+            (1e-10, Red.normal()),
+        ], Black.normal());
         let dp = |x: f64| color_range.paint_as(&x, DisplayProb(x));
         let pol = |x: f64| color_range.paint(x);
 
