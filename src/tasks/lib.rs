@@ -35,6 +35,7 @@ type LmpError = ::rsp2_lammps_wrap::Error;
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Settings {
+    thread_strategy: ThreadStrategy,
     supercell_relax: SupercellSpec,
     supercell_phonopy: SupercellSpec,
     displacement_distance: f64, // 1e-3
@@ -194,17 +195,19 @@ where P: AsRef<Path>, Q: AsRef<Path>,
         trace!("Computing forces at displacements");
         let mut lmp = Lammps::new_carbon(superstructure.clone())?;
         let mut i = 0;
-        let force_sets = p::force_sets::compute_from_grad(
-            superstructure,
-            &displacements,
-            |s| {
+        let force_sets =
+            p::disp_yaml::displaced_structures(superstructure, &displacements)
+            .map(|s| Ok({
+                // TODO rayon vs lammps threads here
                 i += 1;
                 print!("\rdisp {} of {}", i, displacements.len());
                 ::std::io::stdout().flush().unwrap();
-                lmp.set_structure(s.clone())?;
-                lmp.compute().map(|diff| diff.1)
-            }
-        )?;
+
+                lmp.set_structure(s)?;
+                let grad = lmp.compute_grad()?;
+                let V(force) = -1.0 * v(grad.flat());
+                force.nest().to_vec()
+            })).collect::<Result<Vec<_>, Panic>>()?;
         println!();
 
         let (eval, evec) = p::cmd::phonopy_gamma_eigensystem(&conf, force_sets, &disp_token)?;
@@ -560,6 +563,14 @@ impl SupercellSpec {
             },
         }
     }
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all="kebab-case")]
+pub enum ThreadStrategy {
+    Lammps,
+    Rayon,
 }
 
 // HACK
