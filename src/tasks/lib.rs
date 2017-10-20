@@ -281,7 +281,7 @@ where P: AsRef<Path>, Q: AsRef<Path>,
             trace!("Finished relaxation # {}", iteration);
 
             trace!("Finding layers");
-            let (layers, nlayer) = ::rsp2_structure::assign_layers(&structure, &[0, 0, 1], 0.25);
+            let (layers, nlayer) = ::rsp2_structure::assign_layers(&structure, &[0, 0, 1], 0.25)?;
             if let Some(expected) = settings.layers {
                 assert_eq!(nlayer, expected);
             }

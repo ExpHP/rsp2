@@ -1,0 +1,2 @@
+thread '<unnamed>' panicked at 'called `Option::unwrap()` on a `None` value', /checkout/src/libcore/option.rs:335:20
+thread 'main' panicked at 'called `Result::unwrap()` on an `Err` value: "PoisonError { inner: .. }"', /checkout/src/libcore/result.rs:906:4
