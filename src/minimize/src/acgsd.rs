@@ -784,6 +784,7 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
             },
         };
 
+        println!("{:?}", value_history);
         value_history.push(next_point.value);
     }
     panic!("too many iterations")
@@ -866,7 +867,7 @@ mod tests {
     fn insta_finish() {
         use ::util::random::uniform_n;
 
-        // constant potential
+        // a potential where we are not initially at the minimum
         let point = uniform_n(18, -10.0, 10.0);
         let target = uniform_n(18, -10.0, 10.0);
 
@@ -880,12 +881,12 @@ mod tests {
         let s = from_json!({
             "stop-condition": {
                 "value-delta": {
-                    "rel-greater-than": -1e20,
-                    "steps-ago": 10,
+                    "rel-greater-than": -1e100,
+                    "steps-ago": 2,
                 }
             }
         });
-        assert_eq!(super::acgsd(&s, &point, quadratic_test_fn!(&target)).unwrap().iterations, 10);
+        assert_eq!(super::acgsd(&s, &point, quadratic_test_fn!(&target)).unwrap().iterations, 2);
     }
 
     // A test to make sure some physicist doesn't stick an ill-conceived

@@ -209,8 +209,9 @@ impl Hager {
         // meets the wolfe conditions; but this algorithm uses many different
         // strategies for choosing points to evaluate, and managing this gets
         // horrendous fast.
-        // FIXME: (This isn't always necessarily true; I've observed that exiting
-        //         super quick like this can lead to slow convergence)
+
+        // NOTE: (Some of this comment is not necessarily true.
+        //        Scroll down until you see HACK-MAN)
 
         // So... we put the Wolfe condition tests inside the compute function
         // itself, and allow it to use `Err(Ok(x))` to signal a successful return.
@@ -245,11 +246,31 @@ impl Hager {
                     // Legitimate errors are now `Err(Err(e))`.
                     let bound = compute(alpha).map_err(Err)?;
                     if how == How::Hack_IsLsState {
+
+                        // HACK:
+                        //  Okay, I guess I should explain what this is doing.
+                        //
+                        //  If `slow_exit` is initially assigned a value greater than 0,
+                        //  then the algorithm is forced to run through until it hits
+                        //  step L0 in the original paper at least that many times.
+                        //
+                        //  As such, a value >= 2 guarantees that we have a chance to
+                        //  perform the double-secant strategy, even if our initial interval
+                        //  satisfies the wolfe conditions.
+                        //
+                        //  Why do this?  Because I have found it to improve convergence
+                        //  speed of conjugate gradient immensely!
+                        //
+                        //  Why do it in such a confusing way with the word "HACK" spraypainted
+                        //  all over the place?  Well... it was an afterthought.  This code was
+                        //  originally written with the design to support exiting as early as
+                        //  possible.
                         if slow_exit > 0 {                //              HACK HACK
                             slow_exit -= 1;               //           HACK HACK
                         } else {                          //          HACKHACK    HACK   HACK   HACK
                             slow_non_exits -= 1;          //           HACK HACK
                         }                                 //              HACK HACK
+
                     } else {
                         trace!("LS: i: {:>2} ({})  a: {:<23e}  s: {:<+23e}  v: {:<23}",
                             computations, how.as_str(), alpha, bound.slope, bound.value);
@@ -357,7 +378,17 @@ impl Hager {
         let out = match (cur.strictly_downhill(), self.reasonable_value(cur)) {
             (false, _) => (lo, cur),
             (true, true) => unreachable!(), // taken care of by above loop
-            (true, false) => self.funky_loop_in_u3((lo, cur), &mut *compute)?,
+            (true, false) => match self.funky_loop_in_u3((lo, cur), &mut *compute)? {
+                Ok(ivl) => ivl,
+                Err(_) => {
+                    // so... we COULD try to find another interval to search,
+                    // but honestly, this should hardly come up in real problems.
+
+                    // Give up, but do it quite vocally.
+                    warn!("Unable to find an initial interval.");
+                    return Err(Ok(self.initial));
+                }
+            },
         };
         self.validate_opposite_slope(out);
         Ok(out)
@@ -391,7 +422,10 @@ impl Hager {
             (false, _) => (lo, guess),     // condition (U1), p. 182
 
             // tough case; bisect until we have a good interval again.
-            (true, false) => self.funky_loop_in_u3((lo, guess), &mut *compute)?,
+            (true, false) => match self.funky_loop_in_u3((lo, guess), &mut *compute)? {
+                Ok(ivl) => ivl,
+                Err(new_lo) => (new_lo, hi), // Today is just not our day, huh?
+            },
         };
 
         let is_improper_subset = |a: Interval, b: Interval|
@@ -408,11 +442,14 @@ impl Hager {
     /// has a greater value (suggesting that the function follows some sort
     /// of rotated 'S' shape), and returns an interval satisfying the opposite
     /// slope condition.
+    ///
+    /// If for some reason the loop is unable to terminate, will only return
+    /// an updated 'lo'.
     fn funky_loop_in_u3<E>(
         &self,
         (mut lo, mut hi): Interval,
         compute: &mut FnMut(f64, How) -> Result<Bound, E>,
-    ) -> Result<Interval, E>
+    ) -> Result<Result<Interval, Bound>, E>
     {
         debug!("update_interval: Beginning same-slope bisection strategy.");
 
@@ -425,11 +462,23 @@ impl Hager {
             assert!(self.reasonable_value(lo));
             assert!(!self.reasonable_value(hi)); // <-- new condition
 
-            // TODO: I'm not yet convinced by the paper's argument for why this
-            //       loop terminates ("The loop embedded in U3a-c [...]").
-            //       It seems to me that it could potentially reach a point where
-            //       'lo.alpha < mid.alpha < hi.alpha' fails before exiting.
+            // I'm not convinced by the paper's argument for why this
+            // loop terminates ("The loop embedded in U3a-c [...]"),
+            // because it would seem that one could potentially reach
+            // a point where 'lo.alpha < mid.alpha < hi.alpha' fails
+            // to hold.
+            //
+            // And in fact, I now *have* observed this to occur in
+            // some scenarios where the algorithm is pushed to its limit.
+            //
+            // If it happens, we'll bail out.
+
             let mid_alpha = linterp(self.params.bisection_point, (lo.alpha, hi.alpha));
+            if !(lo.alpha < mid_alpha && mid_alpha < hi.alpha) {
+                debug!("Unsucessful termination of U3 loop!");
+                return Ok(Err(lo));
+            }
+
             let mid = compute(mid_alpha, How::SameSlopeBisect)?;
             match (mid.strictly_downhill(), self.reasonable_value(mid)) {
                 (true, true) => lo = mid,
@@ -439,7 +488,7 @@ impl Hager {
         }; // let out = loop { ... }
 
         self.validate_opposite_slope(out);
-        Ok(out)
+        Ok(Ok(out))
     }
 
     /// # Citation:

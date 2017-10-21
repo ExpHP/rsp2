@@ -3,8 +3,10 @@
 # This file is licensed under WTFPL 2.0.
 # I honestly do not care what you do with it.
 
-import pytoml as toml
+from contextlib import contextmanager
 import os
+
+import pytoml as toml
 
 # See crates.d/crates.toml for what this script is all about.
 #
@@ -23,106 +25,114 @@ def main():
 
     parser = ArgumentParser(description='manage Cargo.tomls in sp2')
 
-    def no_command(*junk):
+    def no_command(*_junk):
         parser.error("no subcommand specified")
-    parser.set_defaults(cmd=no_command)
+    parser.set_defaults(klass=no_command)
 
     subs = parser.add_subparsers(title='subcommands')
-    sub = subs.add_parser('gen',
-        description=f'Regenerate Cargo.tomls from the source files in ./{CARGO_TOMLS_DIR}')
-    sub.set_defaults(cmd=gen__main)
 
-    sub = subs.add_parser('new')
-    sub.add_argument('CRATENAME')
-    sub.add_argument('DIR')
-    sub.set_defaults(cmd=new__main)
-
-    sub = subs.add_parser('mv')
-    sub.add_argument('CURDIR')
-    sub.add_argument('DESTDIR')
-    sub.set_defaults(cmd=mv__main)
-
+    for klass in ALL_COMMANDS:
+        sub = subs.add_parser(klass.cmd, **klass.parser_kw)
+        sub.set_defaults(klass=klass)
+        klass.configure(sub)
 
     args = parser.parse_args()
-    args.cmd(parser, args)
+    args.klass.run(parser, args)
+
+ALL_COMMANDS = []
+def register(klass):
+    ALL_COMMANDS.append(klass)
+    return klass
 
 #------------
 
-def gen__main(parser, args):
-    data = read_master_config()
-    crates = data.pop('crates')
-    preferred_versions = data.pop('preferred-versions')
+@register
+class Gen:
+    cmd = 'gen'
+    parser_kw = dict(
+        description = f'Regenerate Cargo.tomls from the source files in ./{CARGO_TOMLS_DIR}',
+    )
 
-    # catch some dumb user errors before we get too committed
-    for (name, path) in crates.items():
-        if not os.path.isdir(path):
-            parser.error('[crates."{}"]: "{}": no such directory'.format(name, path))
+    @staticmethod
+    def configure(_sub):
+        pass
 
-        src = src_toml_path(name)
-        if not os.path.isfile(src):
-            parser.error('{}: no such file'.format(src))
+    @staticmethod
+    def run(parser, _args):
+        data = read_master_config()
+        crates = data.pop('crates')
+        preferred_versions = data.pop('preferred-versions')
 
-    # callbacks that generate substitutions for the line !!some-crate-name,
-    # which accept the current Cargo.toml's directory as an argument
-    def gen_constant(s):
-        return lambda _: s
-
-    def gen_relpath_to(crate_name, dep_dir):
-        from os.path import normpath, relpath
-        def inner(d):
-            rel = normpath(relpath(dep_dir, start=d))
-            return f'{crate_name} = {{ path = "{rel}" }}'
-        return inner
-
-    def gen_members_as_pathdeps(_):
-        lines = []
+        # catch some dumb user errors before we get too committed
         for (name, path) in crates.items():
-            if path != ".":
-                lines.append(f'{name} = {{ path = "{path}" }}')
-        return '\n'.join(lines)
+            if not os.path.isdir(path):
+                parser.error('[crates."{}"]: "{}": no such directory'.format(name, path))
 
-    # build a dash-insensitive lookup table of callbacks
-    lookup_d = {
-        'WORKSPACE-MEMBERS-AS-PATH-DEPS': gen_members_as_pathdeps,
-    }
-    lookup_put = lambda k, v: lookup_d.__setitem__(k.replace('_', '-'), v)
-    lookup_get = lambda k: lookup_d.get(k.replace('_', '-'))
+            src = src_toml_path(name)
+            if not os.path.isfile(src):
+                parser.error('{}: no such file'.format(src))
 
-    for (name, path) in crates.items():
-        lookup_put(name, gen_relpath_to(name, path))
-    for (name, version) in preferred_versions.items():
-        lookup_put(name, gen_constant('{} = {}'.format(name, inline_toml(version))))
+        # callbacks that generate substitutions for the line !!some-crate-name,
+        # which accept the current Cargo.toml's directory as an argument
+        def gen_constant(s):
+            return lambda _: s
 
-    # generate modified forms of each Cargo.toml
-    for (name, path) in crates.items():
-        src_path = os.path.join(src_toml_path(name))
-        dest_path = os.path.join(path, 'Cargo.toml')
+        def gen_relpath_to(crate_name, dep_dir):
+            from os.path import normpath, relpath
+            def inner(d):
+                rel = normpath(relpath(dep_dir, start=d))
+                return f'{crate_name} = {{ path = "{rel}" }}'
+            return inner
 
-        with open(src_path) as f:
-            lines = list(f)
+        def gen_members_as_pathdeps(_):
+            lines = []
+            for (name, path) in crates.items():
+                if path != ".":
+                    lines.append(f'{name} = {{ path = "{path}" }}')
+            return '\n'.join(lines)
 
-        with open(dest_path, 'w') as f:
-            write = lambda *args: print(*args, file=f)
-            write("# DO NOT EDIT THIS FILE BY HAND!!")
-            write("# It has been autogenerated from", src_path)
-            write("#")
-            write("# To update it, run './crates gen' in the workspace root")
-            write()
+        # build a dash-insensitive lookup table of callbacks
+        lookup_d = {
+            'WORKSPACE-MEMBERS-AS-PATH-DEPS': gen_members_as_pathdeps,
+        }
+        lookup_put = lambda k, v: lookup_d.__setitem__(k.replace('_', '-'), v)
+        lookup_get = lambda k: lookup_d.get(k.replace('_', '-'))
 
-            for (i, line) in enumerate(lines):
-                line = line.rstrip('\n')
+        for (name, path) in crates.items():
+            lookup_put(name, gen_relpath_to(name, path))
+        for (name, version) in preferred_versions.items():
+            lookup_put(name, gen_constant('{} = {}'.format(name, inline_toml(version))))
 
-                macro = line_as_macro(line)
-                if macro is None:
-                    write(line)
-                    continue
+        # generate modified forms of each Cargo.toml
+        for (name, path) in crates.items():
+            src_path = os.path.join(src_toml_path(name))
+            dest_path = os.path.join(path, 'Cargo.toml')
 
-                func = lookup_get(macro)
-                if func is None:
-                    s = f"{src_path}:{i}: unknown macro: {format_macro(macro)}"
-                    parser.error(s)
+            with open(src_path) as f:
+                lines = list(f)
 
-                write(func(path))
+            with open(dest_path, 'w') as f:
+                write = lambda *args: print(*args, file=f)
+                write("# DO NOT EDIT THIS FILE BY HAND!!")
+                write("# It has been autogenerated from", src_path)
+                write("#")
+                write("# To update it, run './crates gen' in the workspace root")
+                write()
+
+                for (i, line) in enumerate(lines):
+                    line = line.rstrip('\n')
+
+                    macro = line_as_macro(line)
+                    if macro is None:
+                        write(line)
+                        continue
+
+                    func = lookup_get(macro)
+                    if func is None:
+                        s = f"{src_path}:{i}: unknown macro: {format_macro(macro)}"
+                        parser.error(s)
+
+                    write(func(path))
 
 # a makeshift toml.dumps that uses inline tables
 def inline_toml(x):
@@ -169,65 +179,138 @@ path = "lib.rs"
 [dependencies]
 '''[1:]
 
-def new__main(parser, args):
-    name = args.CRATENAME
-    path = args.DIR
-    if os.path.exists(path):
-        parser.error(f'"{path}": path already exists')
-    if os.path.exists(src_toml_path(name)):
-        parser.error(f'crate "{name}" already exists')
+@register
+class New:
+    cmd = 'new'
+    parser_kw = {}
 
-    # Insert a line to crates.toml without destroying formatting
-    # (do this now for earlier exits on error)
-    with open(MASTER_CFG_PATH) as f:
-        lines = list(f)
-    lines = master_config_textual_add(lines, f'{name} = "{path}"\n', fail=parser.error)
+    @staticmethod
+    def configure(sub):
+        sub.add_argument('CRATENAME')
+        sub.add_argument('DIR')
 
-    # make the directory
-    os.mkdir(path)
-    with open(src_toml_path(name), 'w') as f:
-        f.write(CARGO_TOML_TEMPLATE.format(name))
-    with open(os.path.join(path, "Cargo.toml"), 'w') as f:
-        f.write(CARGO_TOML_TEMPLATE.format(name))
-    with open(os.path.join(path, 'lib.rs'), 'w') as f:
-        f.write('''
+    @staticmethod
+    def run(parser, args):
+        name = args.CRATENAME
+        path = args.DIR
+        if os.path.exists(path):
+            parser.error(f'"{path}": path already exists')
+        if os.path.exists(src_toml_path(name)):
+            parser.error(f'crate "{name}" already exists')
+
+        # Insert a line to crates.toml without destroying formatting
+        # (do this now for earlier exits on error)
+        with open(MASTER_CFG_PATH) as f:
+            lines = list(f)
+        lines = master_config_textual_add(lines, f'{name} = "{path}"\n', fail=parser.error)
+
+        # make the directory
+        os.mkdir(path)
+        with open(src_toml_path(name), 'w') as f:
+            f.write(CARGO_TOML_TEMPLATE.format(name))
+        with open(os.path.join(path, "Cargo.toml"), 'w') as f:
+            f.write(CARGO_TOML_TEMPLATE.format(name))
+        with open(os.path.join(path, 'lib.rs'), 'w') as f:
+            f.write('''
 #[test]
 fn it_works() { }
 '''[1:])
 
-    with open_tmp(MASTER_CFG_PATH) as f:
-        f.writelines(lines)
+        with open_tmp(MASTER_CFG_PATH) as f:
+            f.writelines(lines)
 
-    # regenerate
-    gen__main(parser, None)
+        # regenerate
+        Gen.run(parser, None)
 
 #------------
 
-def mv__main(parser, args):
-    curdir = args.CURDIR
-    destdir = args.DESTDIR
-    if os.path.exists(destdir):
-        parser.error(f'"{destdir}": path already exists')
-    if not os.path.exists(curdir):
-        parser.error(f'"{curdir}": path does not exist')
+@register
+class Mv:
+    cmd = 'mv'
+    parser_kw = {}
 
-    with open(os.path.join(curdir, "Cargo.toml")) as f:
-        crate = toml.load(f)['package']['name']
+    @staticmethod
+    def configure(sub):
+        sub.add_argument('CURDIR')
+        sub.add_argument('DESTDIR')
 
-    # Edit the line in crates.toml without destroying formatting
-    # (do this now for earlier exits on error)
-    with open(MASTER_CFG_PATH) as f:
-        lines = list(f)
-    lines = master_config_textual_set_path(lines, crate, destdir, fail=parser.error)
+    @staticmethod
+    def run(parser, args):
+        curdir = args.CURDIR
+        destdir = args.DESTDIR
+        if os.path.exists(destdir):
+            parser.error(f'"{destdir}": path already exists')
+        if not os.path.exists(curdir):
+            parser.error(f'"{curdir}": path does not exist')
 
-    # move the directory
-    os.rename(curdir, destdir)
+        with open(os.path.join(curdir, "Cargo.toml")) as f:
+            crate = toml.load(f)['package']['name']
 
-    with open_tmp(MASTER_CFG_PATH) as f:
-        f.writelines(lines)
+        # Edit the line in crates.toml without destroying formatting
+        # (do this now for earlier exits on error)
+        with open(MASTER_CFG_PATH) as f:
+            lines = list(f)
+        lines = master_config_textual_set_path(lines, crate, destdir, fail=parser.error)
 
-    # regenerate
-    gen__main(parser, None)
+        # move the directory
+        os.rename(curdir, destdir)
+
+        with open_tmp(MASTER_CFG_PATH) as f:
+            f.writelines(lines)
+
+        # regenerate
+        Gen.run(parser, None)
+
+#------------
+
+@register
+class Test:
+    cmd = 'test'
+    parser_kw = dict(
+        description=
+            "Replacement for 'cargo test --all' now that this isn't a workspace."
+            " You won't believe how it works."
+    )
+
+    @staticmethod
+    def configure(sub):
+        pass
+
+    @staticmethod
+    def run(parser, _args):
+        import sys
+        from subprocess import Popen
+
+        # regenerate
+        Gen.run(parser, None)
+
+        # Create a replica that looks exactly like our project,
+        #  except that it truly is a workspace.
+        TEST_ROOT = '.secret-test-dir'
+        ensure_test_replica_exists(TEST_ROOT)
+
+        code = Popen(['cargo', 'test', '--all'], cwd=TEST_ROOT).wait()
+        if code:
+            sys.exit(code)
+
+        # keep TEST_ROOT around for build artefacts
+
+def ensure_test_replica_exists(test_root):
+    import shutil
+
+    if not os.path.exists(test_root):
+        os.mkdir(test_root)
+
+    for path in ['src', 'tests', 'examples']:
+        test_path = os.path.join(test_root, path)
+        if not os.path.exists(test_path):
+            os.symlink('../' + path, test_path)
+
+    test_cargo = os.path.join(test_root, 'Cargo.toml')
+    shutil.copyfile('Cargo.toml', test_cargo)
+    with open(test_cargo, 'a') as f:
+        f.write('\n')
+        f.write('[workspace]\n')
 
 #------------
 
@@ -253,7 +336,7 @@ It should look like the following:
 def master_config_textual_set_path(lines, name, path, fail):
     lines = list(lines)
     name = name.replace('_', '-')
-    stripped = [x.strip() for x in lines]
+
     for (i,line) in enumerate(lines):
         if line.strip().replace('_', '-').startswith(name):
             # expect exactly two, paired quotes
@@ -268,15 +351,13 @@ But at least make sure there are exactly two quotes of the same style.
 
             lines[i] = lines[i][:quotes[0]+1] + path + lines[i][quotes[1]:]
             return lines
-    else:
-        fail(f"{MASTER_CFG_PATH}: Failed to find line for {name}.")
+
+    fail(f"{MASTER_CFG_PATH}: Failed to find line for {name}.")
 
 #------------
 
 def src_toml_path(crate_name):
     return os.path.join(CARGO_TOMLS_DIR, f'{crate_name}.Cargo.toml')
-
-from contextlib import contextmanager
 
 # Variant of open(path, 'w') that writes to a temp file,
 # then overwrites the requested file only once the context manager
@@ -284,17 +365,32 @@ from contextlib import contextmanager
 @contextmanager
 def open_tmp(path, mode='w'):
     import tempfile
-    import shutil
     with tempfile.NamedTemporaryFile(mode=mode, delete=False) as f:
         try: yield f
         except:
             # THIS NEVER HAPPENED
-            import os
             os.unlink(f.name)
             raise
     # exiting the 'with' closes (but doesn't delete) the temp file
+    f.flush()
 
-    shutil.move(f.name, path)
+    # Make the new file official.
+    #
+    # Writing Cargo.toml seems to cause rebuilds of any crate
+    # that has a build.rs, so try to avoid it if we can.
+    replace_if_different(path, f.name)
+
+def replace_if_different(current, candidate):
+    import shutil
+    with open(current) as f:
+        a = f.read()
+    with open(candidate) as f:
+        b = f.read()
+
+    if a != b:
+        shutil.move(candidate, current)
+    else:
+        os.unlink(candidate)
 
 def find_all_indices_of_any(needles, haystack):
     needles = set(needles)
