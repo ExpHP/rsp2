@@ -16,6 +16,24 @@ error_chain!{
     }
 }
 
+#[cfg(test)]
+macro_rules! assert_matches {
+    ($pat:pat, $expr:expr,)
+    => { assert_matches!($pat, $expr) };
+    ($pat:pat, $expr:expr)
+    => { assert_matches!($pat, $expr, "actual {:?}", $expr) };
+    ($pat:pat, $expr:expr, $($arg:expr),+ $(,)*)
+    => {
+        match $expr {
+            $pat => {},
+            _ => panic!(
+                "assertion failed: {} ({})",
+                stringify!(assert_matches!($pat, $expr)),
+                format_args!($($arg),+))
+        }
+    };
+}
+
 pub mod supercell;
 
 pub use lattice::Lattice;
