@@ -65,7 +65,7 @@ pub fn phonopy_displacements(
         (displacements, superstructure)
     };
 
-    Ok((superstructure.map_metadata(|_| ()), displacements, tmp))
+    Ok((superstructure.map_metadata_into(|_| ()), displacements, tmp))
 }
 
 pub fn phonopy_gamma_eigensystem<P>(

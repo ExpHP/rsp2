@@ -21,7 +21,7 @@ where W: Write,
     _dump(
         w,
         title,
-        &structure.clone().map_metadata(|_| ()),
+        &structure.map_metadata_to(|_| ()),
         structure.metadata(),
     )
 }

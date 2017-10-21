@@ -1,7 +1,12 @@
 use ::{Lattice, Coords, Element};
 use ::util::perm::{Perm, Permute};
 
-/// Pairs [`Coords`] together with their [`Lattice`] and metadata.
+/// Pairs [`Coords`] together with their [`Lattice`], and metadata.
+///
+/// Currently the metadata story is pretty weak and hardly resembles
+/// any sort of final design.  You should let the `M` type contain all
+/// of the information you need, and then when certain functions request
+/// a certain `M` type, use `map_metadata_to` to extract that information.
 ///
 /// [`Coords`]: ../struct.Coords.html
 /// [`Lattice`]: ../struct.Lattice.html
@@ -37,11 +42,22 @@ impl<M> Structure<M> {
 
     // FIXME bad idea for stable interface, but good enough for now
     pub fn metadata(&self) -> &[M] { &self.meta }
-    pub fn map_metadata<M2, F>(self, f: F) -> Structure<M2>
+    pub fn map_metadata_into<M2, F>(self, f: F) -> Structure<M2>
     where F: FnMut(M) -> M2
     {
         let Structure { lattice, coords, meta } = self;
         let meta = meta.into_iter().map(f).collect();
+        Structure { lattice, coords, meta }
+    }
+    // This variant can be useful when using the by-value variant
+    // would require the user to clone() first, uneccessarily
+    // cloning the entire metadata.
+    pub fn map_metadata_to<M2, F>(&self, f: F) -> Structure<M2>
+    where F: FnMut(&M) -> M2
+    {
+        let lattice = self.lattice.clone();
+        let coords = self.coords.clone();
+        let meta = self.meta.iter().map(f).collect();
         Structure { lattice, coords, meta }
     }
 }

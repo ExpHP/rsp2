@@ -1,17 +1,23 @@
 use ::std::collections::HashMap;
+use ::std::fmt;
 
 // member is private because I'm hoping there's some way
 // (possibly insane) to get the nonzero optimization for
 // Option<Element>
 
-//// Represents a specific atomic number.
+/// Represents a specific atomic number.
+///
+/// Only Elements up to `MAX_ATOMIC_NUMBER` are supported.
+/// This limitation enables methods to return `&'static str`.
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
 pub struct Element(u16);
+
+const MAX_ATOMIC_NUMBER: u32 = 999;
 
 impl Element {
     pub fn from_atomic_number(n: u32) -> Option<Self>
     {
-        if 1 <= n && n <= 999 { Some(Element(n as u16)) }
+        if 1 <= n && n <= MAX_ATOMIC_NUMBER { Some(Element(n as u16)) }
         else { None }
     }
 
@@ -30,6 +36,16 @@ impl Element {
 
     pub fn name(&self) -> &'static str
     { NUMBER_TO_AMERICAN[&self.0] }
+}
+
+impl fmt::Display for Element {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result
+    {
+        match f.alternate() {
+            false => self.symbol().fmt(f),
+            true => self.name().fmt(f),
+        }
+    }
 }
 
 // Table of elements with names that are not just systematically
@@ -152,7 +168,7 @@ const SPECIAL_NAMES: &'static [(u16, &'static str, &'static str)] = &[
 lazy_static!{
     static ref SHORT_TO_NUMBER: HashMap<&'static str, u16> =
     {
-        // TODO: add systematic names for all elements 100-999,
+        // TODO: add systematic names for all elements >= 100,
         //       including those who also have official names
         SPECIAL_NAMES.iter()
             .map(|&(num, sym, _)| (sym, num))
@@ -161,7 +177,8 @@ lazy_static!{
 
     static ref NUMBER_TO_SHORT: HashMap<u16, &'static str> =
     {
-        // TODO: add systematic names for missing elements up to 999
+        // TODO: add systematic names for missing elements
+        //       up to MAX_ATOMIC_NUMBER
         SPECIAL_NAMES.iter()
             .map(|&(num, sym, _)| (num, sym))
             .collect()
@@ -169,9 +186,126 @@ lazy_static!{
 
     static ref NUMBER_TO_AMERICAN: HashMap<u16, &'static str> =
     {
-        // TODO: add systematic names for others up to 999
+        // TODO: add systematic names for others up to MAX_ATOMIC_NUMBER
         SPECIAL_NAMES.iter()
             .map(|&(num, _, american)| (num, american))
             .collect()
     };
+}
+
+pub mod consts {
+    use super::*;
+
+    pub const HYDROGEN: Element = Element(001);
+    pub const HELIUM: Element = Element(002);
+    pub const LITHIUM: Element = Element(003);
+    pub const BERYLLIUM: Element = Element(004);
+    pub const BORON: Element = Element(005);
+    pub const CARBON: Element = Element(006);
+    pub const NITROGEN: Element = Element(007);
+    pub const OXYGEN: Element = Element(008);
+    pub const FLUORINE: Element = Element(009);
+    pub const NEON: Element = Element(010);
+    pub const SODIUM: Element = Element(011);
+    pub const MAGNESIUM: Element = Element(012);
+    pub const ALUMINUM: Element = Element(013);
+    pub const SILICON: Element = Element(014);
+    pub const PHOSPHORUS: Element = Element(015);
+    pub const SULFUR: Element = Element(016);
+    pub const CHLORINE: Element = Element(017);
+    pub const ARGON: Element = Element(018);
+    pub const POTASSIUM: Element = Element(019);
+    pub const CALCIUM: Element = Element(020);
+    pub const SCANDIUM: Element = Element(021);
+    pub const TITANIUM: Element = Element(022);
+    pub const VANADIUM: Element = Element(023);
+    pub const CHROMIUM: Element = Element(024);
+    pub const MANGANESE: Element = Element(025);
+    pub const IRON: Element = Element(026);
+    pub const COBALT: Element = Element(027);
+    pub const NICKEL: Element = Element(028);
+    pub const COPPER: Element = Element(029);
+    pub const ZINC: Element = Element(030);
+    pub const GALLIUM: Element = Element(031);
+    pub const GERMANIUM: Element = Element(032);
+    pub const ARSENIC: Element = Element(033);
+    pub const SELENIUM: Element = Element(034);
+    pub const BROMINE: Element = Element(035);
+    pub const KRYPTON: Element = Element(036);
+    pub const RUBIDIUM: Element = Element(037);
+    pub const STRONTIUM: Element = Element(038);
+    pub const YTTRIUM: Element = Element(039);
+    pub const ZIRCONIUM: Element = Element(040);
+    pub const NIOBIUM: Element = Element(041);
+    pub const MOLYBDENUM: Element = Element(042);
+    pub const TECHNETIUM: Element = Element(043);
+    pub const RUTHENIUM: Element = Element(044);
+    pub const RHODIUM: Element = Element(045);
+    pub const PALLADIUM: Element = Element(046);
+    pub const SILVER: Element = Element(047);
+    pub const CADMIUM: Element = Element(048);
+    pub const INDIUM: Element = Element(049);
+    pub const TIN: Element = Element(050);
+    pub const ANTIMONY: Element = Element(051);
+    pub const TELLURIUM: Element = Element(052);
+    pub const IODINE: Element = Element(053);
+    pub const XENON: Element = Element(054);
+    pub const CAESIUM: Element = Element(055);
+    pub const BARIUM: Element = Element(056);
+    pub const LANTHANUM: Element = Element(057);
+    pub const CERIUM: Element = Element(058);
+    pub const PRASEODYMIUM: Element = Element(059);
+    pub const NEODYMIUM: Element = Element(060);
+    pub const PROMETHIUM: Element = Element(061);
+    pub const SAMARIUM: Element = Element(062);
+    pub const EUROPIUM: Element = Element(063);
+    pub const GADOLINIUM: Element = Element(064);
+    pub const TERBIUM: Element = Element(065);
+    pub const DYSPROSIUM: Element = Element(066);
+    pub const HOLMIUM: Element = Element(067);
+    pub const ERBIUM: Element = Element(068);
+    pub const THULIUM: Element = Element(069);
+    pub const YTTERBIUM: Element = Element(070);
+    pub const LUTETIUM: Element = Element(071);
+    pub const HAFNIUM: Element = Element(072);
+    pub const TANTALUM: Element = Element(073);
+    pub const TUNGSTEN: Element = Element(074);
+    pub const RHENIUM: Element = Element(075);
+    pub const OSMIUM: Element = Element(076);
+    pub const IRIDIUM: Element = Element(077);
+    pub const PLATINUM: Element = Element(078);
+    pub const GOLD: Element = Element(079);
+    pub const MERCURY: Element = Element(080);
+    pub const THALLIUM: Element = Element(081);
+    pub const LEAD: Element = Element(082);
+    pub const BISMUTH: Element = Element(083);
+    pub const POLONIUM: Element = Element(084);
+    pub const ASTATINE: Element = Element(085);
+    pub const RADON: Element = Element(086);
+    pub const FRANCIUM: Element = Element(087);
+    pub const RADIUM: Element = Element(088);
+    pub const ACTINIUM: Element = Element(089);
+    pub const THORIUM: Element = Element(090);
+    pub const PROTACTINIUM: Element = Element(091);
+    pub const URANIUM: Element = Element(092);
+    pub const NEPTUNIUM: Element = Element(093);
+    pub const PLUTONIUM: Element = Element(094);
+    pub const AMERICIUM: Element = Element(095);
+    pub const CURIUM: Element = Element(096);
+    pub const BERKELIUM: Element = Element(097);
+    pub const CALIFORNIUM: Element = Element(098);
+    pub const EINSTEINIUM: Element = Element(099);
+    pub const FERMIUM: Element = Element(100);
+    pub const MENDELEVIUM: Element = Element(101);
+    pub const NOBELIUM: Element = Element(102);
+    pub const LAWRENCIUM: Element = Element(103);
+    pub const RUTHERFORDIUM: Element = Element(104);
+    pub const DUBNIUM: Element = Element(105);
+    pub const SEABORGIUM: Element = Element(106);
+    pub const BOHRIUM: Element = Element(107);
+    pub const HASSIUM: Element = Element(108);
+    pub const MEITNERIUM: Element = Element(109);
+    pub const DARMSTADTIUM: Element = Element(110);
+    pub const ROENTGENIUM: Element = Element(111);
+    pub const COPERNICIUM: Element = Element(112);
 }

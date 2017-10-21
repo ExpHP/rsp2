@@ -23,10 +23,12 @@ extern crate fern;
 
 const THZ_TO_WAVENUMBER: f64 = 33.35641;
 
+use ::rsp2_structure::consts::CARBON;
+
 use ::rsp2_array_utils::vec_from_fn;
 use ::slice_of_array::prelude::*;
 use ::rsp2_structure::{supercell, Coords, CoordStructure, Lattice};
-use ::rsp2_structure::{Element, ElementStructure};
+use ::rsp2_structure::{ElementStructure};
 use ::rsp2_lammps_wrap::Lammps;
 use ::std::path::Path;
 
@@ -93,9 +95,21 @@ fn setup_global_logger<P: AsRef<Path>>(path: P) -> Result<(), Panic>
 //     }
 // }
 
-fn carbon(structure: &CoordStructure) -> ElementStructure {
-    structure.clone().map_metadata(|()|
-        Element::from_symbol("C").unwrap())
+// HACK: These adapters are temporary to help the existing code
+//       (written only with carbon in mind) adapt to ElementStructure.
+fn carbon(structure: &CoordStructure) -> ElementStructure
+{
+    // I want it PAINTED BLACK!
+    structure.map_metadata_to(|_| CARBON)
+}
+
+fn uncarbon(structure: &ElementStructure) -> CoordStructure
+{
+    assert!(structure.metadata().iter().all(|&e| e == CARBON),
+        "if you want to use this code on non-carbon stuff, you better \
+        do something about all the carbon-specific code.  Look for calls \
+        to `carbon()`");
+    structure.map_metadata_to(|_| ())
 }
 
 fn lammps_flat_diff_fn<'a>(lmp: &'a mut Lammps)
@@ -267,7 +281,7 @@ where P: AsRef<Path>, Q: AsRef<Path>,
         Ok(())
     };
 
-    let mut original = poscar::load(File::open(input)?)?.map_metadata(|_| ());
+    let mut original = uncarbon(&poscar::load(File::open(input)?)?);
     original.scale_vecs(&settings.hack_scale); // HACK
     let original = original;
     poscar::dump(File::create("./initial.vasp")?, "", &carbon(&original))?;

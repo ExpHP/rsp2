@@ -51,3 +51,5 @@ mod util;
 mod algo;
 mod symmops;
 mod element;
+
+pub use element::consts as consts;

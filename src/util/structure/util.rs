@@ -65,6 +65,7 @@ pub(crate) fn eq_unordered_n3(a: &[[f64; 3]], b: &[[f64; 3]]) -> bool {
 pub(crate) mod perm {
     use ::{Result, ErrorKind};
 
+    /// Represents a reordering operation on atoms.
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub(crate) struct Perm(Vec<u32>);
 
@@ -83,13 +84,12 @@ pub(crate) mod perm {
             Perm(vec)
         })}
 
-        /// This does not check the invariants of Perm,
-        /// namely that vec must contain each element
-        /// in `(0..vec.len())` once.
+        /// This does not check the invariants of Perm.
         ///
-        /// This is unsafe because Perm may in the future
-        /// use unsafe optimizations based on these invariants.
-        // (NOTE: such as moving Drop data without clones)
+        /// # Safety
+        ///
+        /// `vec` must contain every element in `(0..vec.len())`,
+        /// or else the behavior is undefined.
         pub unsafe fn from_vec_unchecked(vec: Vec<u32>) -> Perm
         {
             debug_assert!(Self::validate_perm(&vec));
@@ -165,9 +165,6 @@ pub(crate) mod perm {
         //   (relevant when Self is Perm)
         // - The permutation is not in-place.
         fn permuted_by(self, perm: &Perm) -> Self;
-
-        fn permute_mut(&mut self, perm: &Perm) where Self: Clone
-        { *self = self.clone().permuted_by(perm) }
     }
 
     // (module to protect from lollipop model; the unsafety here
