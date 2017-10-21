@@ -99,23 +99,33 @@ where R: Read,
     }
     let lattice = Lattice::new(lattice);
 
-    // atom types
-    let elements = {
-        lines.next().unwrap()?
-            .trim().split_whitespace()
-            .map(|sym| match Element::from_symbol(sym) {
-                None => bail!("Unknown element: '{}'", sym),
-                Some(e) => Ok(e),
-            })
-            .collect::<Result<Vec<Element>>>()?
+    let (elements, n);
+    {
+        // atom types
+        let kinds = {
+            lines.next().unwrap()?
+                .trim().split_whitespace()
+                .map(|sym| match Element::from_symbol(sym) {
+                    None => bail!("Unknown element: '{}'", sym),
+                    Some(e) => Ok(e),
+                })
+                .collect::<Result<Vec<Element>>>()?
+        };
+
+        // atom counts
+        let kounts = {
+            lines.next().unwrap()?
+                .trim().split_whitespace()
+                .map(|s| Ok(s.parse()?))
+                .collect::<Result<Vec<usize>>>()?
+        };
+
+        n = kounts.iter().sum();
+        elements = izip!(kounts, kinds)
+            .flat_map(|(c, sym)| ::std::iter::repeat(sym).take(c))
+            .collect();
     };
-    // atom counts
-    let n: usize = {
-        let s = lines.next().unwrap()?;
-        let words = s.trim().split_whitespace().collect::<Vec<_>>();
-        assert_eq!(words.len(), 1);
-        words[0].parse().unwrap()
-    };
+
 
     // selective dynamics and/or cartesian
     let direct = {

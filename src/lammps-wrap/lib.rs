@@ -424,7 +424,7 @@ impl Lammps {
         // garbage initial lattice
         me.ptr.borrow_mut().commands(&[
             "boundary p p p",               // (p)eriodic, (f)ixed, (s)hrinkwrap
-            "box tilt large",               // triclinic
+            "box tilt small",               // triclinic
             "region sim prism 0 2 0 2 0 2 1 1 1", // garbage garbage garbage
         ])?;
 
