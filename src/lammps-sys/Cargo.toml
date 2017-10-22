@@ -8,5 +8,5 @@ name = "lammps-sys"
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 
-#[build-dependencies]
-#bindgen = "0.30.0"
+[build-dependencies]
+bindgen = "0.30"
