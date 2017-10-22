@@ -8,7 +8,7 @@
 #     !!rsp2-assert-close
 #     !!itertools
 #
-# When you run the following command in the worspace root:
+# When you run the following command in the workspace root:
 #
 #     ./crates gen
 #
@@ -27,7 +27,6 @@
 # another.
 [crates]
 rsp2                = "."
-lammps-sys         = "src/lammps-sys"
 rsp2-lammps-wrap    = "src/lammps-wrap"
 rsp2-tasks          = "src/tasks"
 rsp2-minimize       = "src/minimize"
@@ -74,3 +73,4 @@ tempdir = "0.3"
 ansi_term = "0.10"
 slice-of-array = "0.1"
 rsp2-kets = { version = "0.3", git = "https://github.com/ExpHP/rsp2-kets", features = ["serde"] }
+lammps-sys = { version = "0.1", git = "https://github.com/ExpHP/lammps-sys" }

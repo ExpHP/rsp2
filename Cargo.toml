@@ -11,7 +11,6 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 [dependencies]
 
 # Workspace members
-lammps-sys = { path = "src/lammps-sys" }
 rsp2-lammps-wrap = { path = "src/lammps-wrap" }
 rsp2-tasks = { path = "src/tasks" }
 rsp2-minimize = { path = "src/minimize" }
