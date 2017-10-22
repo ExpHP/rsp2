@@ -18,4 +18,5 @@ lammps-sys = { version = "0.1", git = "https://github.com/ExpHP/lammps-sys" }
 log = "0.3"
 chrono = "0.4"
 ndarray = "0.10"
+error-chain = "0.11"
 slice-of-array = "0.1"

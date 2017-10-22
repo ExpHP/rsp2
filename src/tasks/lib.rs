@@ -32,6 +32,21 @@ use ::rsp2_structure::{ElementStructure};
 use ::rsp2_lammps_wrap::Lammps;
 use ::std::path::Path;
 
+
+// make `?` panic by default.
+// This is only a good idea for very high level code,
+//  which is exactly what this crate is supposed to be.
+pub enum Never {}
+impl<E: ::std::fmt::Display> From<E> for Never {
+    fn from(e: E) -> Never {
+        panic!("{}", e);
+    }
+}
+pub type StdResult<T, E> = ::std::result::Result<T, E>;
+pub type Result<T> = StdResult<T, Never>;
+
+
+
 type LmpError = ::rsp2_lammps_wrap::Error;
 
 #[derive(Serialize, Deserialize)]
@@ -47,7 +62,7 @@ pub struct Settings {
     cg: ::rsp2_minimize::acgsd::Settings,
 }
 
-fn setup_global_logger<P: AsRef<Path>>(path: P) -> Result<(), Panic>
+fn setup_global_logger<P: AsRef<Path>>(path: P) -> Result<()>
 {Ok({
     use ::std::time::Instant;
     use self::term::ColorizedLevel;
@@ -113,17 +128,12 @@ fn uncarbon(structure: &ElementStructure) -> CoordStructure
 }
 
 fn lammps_flat_diff_fn<'a>(lmp: &'a mut Lammps)
--> Box<FnMut(&[f64]) -> Result<(f64, Vec<f64>), LmpError> + 'a>
+-> Box<FnMut(&[f64]) -> StdResult<(f64, Vec<f64>), LmpError> + 'a>
 {
     Box::new(move |pos| {
         lmp.set_carts(pos.nest())?;
         lmp.compute().map(|(v,g)| (v, g.flat().to_vec()))
     })
-}
-
-pub enum Panic {}
-impl<E: ::std::fmt::Debug> From<E> for Panic {
-    fn from(e: E) -> Panic { Err::<(),_>(e).unwrap(); unreachable!() }
 }
 
 // fn numerical_lattice_param_slope(structure: &CoordStructure, mask: [f64; 3]) -> [f64; 3]
@@ -150,7 +160,7 @@ impl<E: ::std::fmt::Debug> From<E> for Panic {
 //     *out.as_array().unwrap()
 // }
 
-pub fn run_relax_with_eigenvectors<P, Q>(settings: &Settings, input: P, outdir: Q) -> Result<(), Panic>
+pub fn run_relax_with_eigenvectors<P, Q>(settings: &Settings, input: P, outdir: Q) -> Result<()>
 where P: AsRef<Path>, Q: AsRef<Path>,
 {
     use ::std::io::prelude::*;
@@ -159,7 +169,7 @@ where P: AsRef<Path>, Q: AsRef<Path>,
     use ::rsp2_slice_math::{v, V, vdot};
     use ::std::fs::File;
 
-    let relax = |structure: CoordStructure| -> Result<CoordStructure, Panic> {
+    let relax = |structure: CoordStructure| -> Result<CoordStructure> {
         let sc_dims = tup3(settings.supercell_relax.dim_for_unitcell(structure.lattice()));
         let (supercell, sc_token) = supercell::diagonal(sc_dims, structure);
 
@@ -169,30 +179,30 @@ where P: AsRef<Path>, Q: AsRef<Path>,
             &settings.cg,
             &supercell.to_carts().flat(),
             &mut *lammps_flat_diff_fn(&mut lmp),
-        )?.position;
+        ).unwrap().position;
 
         let supercell = supercell.with_coords(Coords::Carts(relaxed_flat.nest().to_vec()));
         Ok(multi_threshold_deconstruct(sc_token, 1e-10, 1e-3, supercell)?)
     };
 
-    use ::rsp2_structure::supercell::{SupercellToken, DeconstructionError};
+    use ::rsp2_structure::supercell::{SupercellToken};
     fn multi_threshold_deconstruct(
         sc_token: SupercellToken,
         warn: f64,
         fail: f64,
         supercell: CoordStructure,
-    ) -> Result<CoordStructure, DeconstructionError>
+    ) -> StdResult<CoordStructure, ::rsp2_structure::Error>
     {
         match sc_token.deconstruct(warn, supercell.clone()) {
             Ok(x) => Ok(x),
             Err(e) => {
-                warn!("Suspiciously broad deviations in supercell: {:?}", e);
+                warn!("{}", e);
                 Ok(sc_token.deconstruct(fail, supercell)?)
             }
         }
     }
 
-    let diagonalize = |structure: CoordStructure| -> Result<_, Panic> {
+    let diagonalize = |structure: CoordStructure| -> Result<_> {
         let conf = collect![
             (format!("DISPLACEMENT_DISTANCE"), format!("{:e}", settings.displacement_distance)),
             (format!("DIM"), {
@@ -221,7 +231,7 @@ where P: AsRef<Path>, Q: AsRef<Path>,
                 let grad = lmp.compute_grad()?;
                 let V(force) = -1.0 * v(grad.flat());
                 force.nest().to_vec()
-            })).collect::<Result<Vec<_>, Panic>>()?;
+            })).collect::<Result<Vec<_>>>()?;
         println!();
 
         let (eval, evec) = p::cmd::phonopy_gamma_eigensystem(&conf, force_sets, &disp_token)?;
@@ -229,7 +239,7 @@ where P: AsRef<Path>, Q: AsRef<Path>,
         Ok((eval, evec))
     };
 
-    let minimize_evec = |structure: CoordStructure, evec: &[[f64; 3]]| -> Result<(f64, CoordStructure), Panic> {
+    let minimize_evec = |structure: CoordStructure, evec: &[[f64; 3]]| -> Result<(f64, CoordStructure)> {
         let sc_dims = tup3(settings.supercell_relax.dim_for_unitcell(structure.lattice()));
         let (structure, sc_token) = supercell::diagonal(sc_dims, structure);
         let evec = sc_token.replicate(evec);
@@ -253,7 +263,7 @@ where P: AsRef<Path>, Q: AsRef<Path>,
         Ok((alpha, multi_threshold_deconstruct(sc_token, 1e-10, 1e-3, structure)?))
     };
 
-    let write_eigen_info = |einfos: &EigenInfo, writeln: &mut FnMut(&::std::fmt::Display) -> Result<(), Panic>| -> Result<_, Panic>
+    let write_eigen_info = |einfos: &EigenInfo, writeln: &mut FnMut(&::std::fmt::Display) -> Result<()>| -> Result<_>
     {
         use ::ansi_term::Colour::{Red, Cyan, Yellow, Black};
         use display_util::{ColorByRange, DisplayProb};
@@ -325,7 +335,7 @@ where P: AsRef<Path>, Q: AsRef<Path>,
                 let mut file = File::create(format!("eigenvalues.{:02}", iteration))?;
                 write_eigen_info(&einfos, &mut |s| writeln!(file, "{}", s).map_err(Into::into))?;
             }
-            write_eigen_info(&einfos, &mut |s| Ok::<_, Panic>(info!("{}", s)))?;
+            write_eigen_info(&einfos, &mut |s| Ok::<_, Never>(info!("{}", s)))?;
 
             {
                 let fname = format!("./structure-{:02}.2.vasp", iteration);

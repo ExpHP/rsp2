@@ -7,6 +7,7 @@ use ::itertools::Itertools;
 use ::ordered_float::NotNaN;
 use ::std::fmt::Write;
 use ::std::collections::VecDeque;
+use ::std::fmt;
 
 use ::either::{Either, Left, Right};
 
@@ -412,6 +413,11 @@ pub struct Failure<E> {
     /// inside the acgsd implementation.
     pub best_position: Option<Vec<f64>>,
     pub error: Either<Error, E>,
+}
+
+impl<E: fmt::Display> fmt::Display for Failure<E> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result
+    { self.error.fmt(f) }
 }
 
 #[derive(Serialize, Deserialize)]

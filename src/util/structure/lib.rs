@@ -13,6 +13,10 @@ error_chain!{
             description("Tried to construct an invalid permutation.")
             display("Tried to construct an invalid permutation.")
         }
+        BigDisplacement(d: f64) {
+            description("Suspiciously large movement between supercell images."),
+            display("Suspiciously large movement between supercell images: {:e}", d),
+        }
     }
 }
 

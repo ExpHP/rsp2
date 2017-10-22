@@ -7,10 +7,24 @@ extern crate slice_of_array;
 extern crate rsp2_structure;
 extern crate lammps_sys;
 #[macro_use] extern crate log;
+#[macro_use] extern crate error_chain;
 extern crate chrono;
 
+error_chain! {
+    // stub... currently the library always actually panics.
+    foreign_links {
+        NulError(::std::ffi::NulError);
+    }
+}
+
+// constructs an Error, as opposed to bail!() which diverges with a Result.
+// Useful in `ok_or_else`.
+macro_rules! err {
+    ($($t:tt)+)
+    => { Error::from(format!($($t)+)) }
+}
+
 pub type StdResult<T, E> = ::std::result::Result<T, E>;
-pub type Result<T> = StdResult<T, Error>;
 
 use ::std::os::raw::{c_void, c_int, c_double};
 use ::std::ffi::CString;
@@ -80,13 +94,9 @@ impl Drop for LammpsOwner {
     }
 }
 
-#[derive(Debug,Copy,Clone,PartialEq,Eq,PartialOrd,Ord,Hash)]
-pub struct Error; // TODO
-
 impl LammpsOwner {
-    // FIXME current signature is a lie, we never return errors
     pub fn new(argv: &[&str]) -> Result<LammpsOwner> {
-        let mut argv = CArgv::from_strs(argv).unwrap(); // FIXME: unwrap out of laziness
+        let mut argv = CArgv::from_strs(argv)?;
         let mut ptr: *mut c_void = ::std::ptr::null_mut();
         unsafe {
             ::lammps_sys::lammps_open_no_mpi(
@@ -98,8 +108,10 @@ impl LammpsOwner {
 
         Ok(LammpsOwner {
             argv,
-            // FIXME should probably produce some sort of Err
-            ptr: unsafe { ptr.as_mut() }.expect("Lammps initialization failed"),
+            ptr: {
+                unsafe { ptr.as_mut() }
+                    .ok_or_else(|| err!("Lammps initialization failed"))?
+            },
         })
     }
 }
@@ -128,9 +140,10 @@ impl LammpsOwner {
     // TODO: Looks like we can change (some of?) these aborts into detectable errors
     //        by defining LAMMPS_EXCEPTIONS at build time,
     //        which introduces `lammps_has_error` and `lammps_get_last_error_message`
-    pub fn command(&mut self, cmd: &str) -> Result<()> {
+    pub fn command(&mut self, cmd: &str) -> Result<()>
+    {Ok({
         cli::trace(cmd);
-        let cmd = CString::new(cmd).expect("embedded NUL!").into_raw();
+        let cmd = CString::new(cmd)?.into_raw();
         unsafe {
             // FIXME: I still don't know if I'm supposed to free the output or not.
             // NOTE:  This returns "the command name" as a 'char *'.
@@ -141,35 +154,35 @@ impl LammpsOwner {
             assert!(!ret.is_null());
             let _ = CString::from_raw(cmd);
         }
-        Ok(())
-    }
+    })}
 
     // convenience wrapper
     // NOTE: repeatedly invokes `lammps_command`, not `lammps_command_list`
-    pub fn commands<S: AsRef<str>>(&mut self, cmds: &[S]) -> Result<()> {
+    pub fn commands<S: AsRef<str>>(&mut self, cmds: &[S]) -> Result<()>
+    {Ok({
         for s in cmds { self.command(s.as_ref())?; }
-        Ok(())
-    }
+    })}
 
-    pub fn get_natoms(&mut self) -> usize {
-        unsafe { ::lammps_sys::lammps_get_natoms(self.ptr) as usize }
-    }
+    pub fn get_natoms(&mut self) -> usize
+    { unsafe { ::lammps_sys::lammps_get_natoms(self.ptr) as usize } }
 
     // Gather an integer property across all atoms.
     //
     // unsafe because an incorrect 'count' or a non-integer field may cause an out-of-bounds read.
-    pub unsafe fn gather_atoms_i(&mut self, name: &str, count: usize) -> Vec<i64> {
-        self.__gather_atoms_c_ty::<c_int>(name, ScatterGatherDatatype::Integer, count)
+    pub unsafe fn gather_atoms_i(&mut self, name: &str, count: usize) -> Result<Vec<i64>>
+    {Ok({
+        self.__gather_atoms_c_ty::<c_int>(name, ScatterGatherDatatype::Integer, count)?
             .into_iter().map(|x| x as i64).collect()
-    }
+    })}
 
     // Gather a floating property across all atoms.
     //
     // unsafe because an incorrect 'count' or a non-floating field may cause an out-of-bounds read.
-    pub unsafe fn gather_atoms_f(&mut self, name: &str, count: usize) -> Vec<f64> {
-        self.__gather_atoms_c_ty::<c_double>(name, ScatterGatherDatatype::Float, count)
+    pub unsafe fn gather_atoms_f(&mut self, name: &str, count: usize) -> Result<Vec<f64>>
+    {Ok({
+        self.__gather_atoms_c_ty::<c_double>(name, ScatterGatherDatatype::Float, count)?
             .into_iter().map(|x| x as f64).collect()
-    }
+    })}
 
     // unsafe because an incorrect 'count', 'ty', or 'T' may cause an out-of-bounds read.
     //
@@ -181,9 +194,9 @@ impl LammpsOwner {
         name: &str,
         ty: ScatterGatherDatatype,
         count: usize,
-    ) -> Vec<T>
-    {
-        let name = CString::new(name).expect("embedded NUL!").into_raw();
+    ) -> Result<Vec<T>>
+    {Ok({
+        let name = CString::new(name)?.into_raw();
         let natoms = self.get_natoms();
 
         let mut out = vec![T::default(); count * natoms];
@@ -199,25 +212,27 @@ impl LammpsOwner {
         // The function returns nothing, and prints a warning on failure.  - ML
         let yolo = out;
         yolo
-    }
+    })}
 
     // Write an integer property across all atoms.
     //
     // unsafe because a non-integer field may copy data of the wrong size,
     // and data of inappropriate length could cause an out of bounds write.
-    pub unsafe fn scatter_atoms_i(&mut self, name: &str, data: &[i64]) {
+    pub unsafe fn scatter_atoms_i(&mut self, name: &str, data: &[i64]) -> Result<()>
+    {Ok({
         let mut cdata: Vec<_> = data.iter().map(|&x| x as c_int).collect();
-        self.__scatter_atoms_c_ty(name, ScatterGatherDatatype::Integer, &mut cdata);
-    }
+        self.__scatter_atoms_c_ty(name, ScatterGatherDatatype::Integer, &mut cdata)?;
+    })}
 
     // Write a floating property across all atoms.
     //
     // unsafe because a non-floating field may copy data of the wrong size,
     // and data of inappropriate length could cause an out of bounds write.
-    unsafe fn scatter_atoms_f(&mut self, name: &str, data: &[f64]) {
+    unsafe fn scatter_atoms_f(&mut self, name: &str, data: &[f64]) -> Result<()>
+    {Ok({
         let mut cdata: Vec<_> = data.iter().map(|&x| x as c_double).collect();
-        self.__scatter_atoms_c_ty(name, ScatterGatherDatatype::Float, &mut cdata);
-    }
+        self.__scatter_atoms_c_ty(name, ScatterGatherDatatype::Float, &mut cdata)?;
+    })}
 
     // unsafe because an incorrect 'ty' or 'T' may cause an out-of-bounds write.
     unsafe fn __scatter_atoms_c_ty<T>(
@@ -225,9 +240,9 @@ impl LammpsOwner {
         name: &str,
         ty: ScatterGatherDatatype,
         data: &mut [T]
-    )
-    {
-        let name = CString::new(name).expect("embedded NUL!").into_raw();
+    ) -> Result<()>
+    {Ok({
+        let name = CString::new(name)?.into_raw();
         let natoms = self.get_natoms();
         assert_eq!(data.len() % natoms, 0);
         let count = data.len() / natoms;
@@ -242,23 +257,26 @@ impl LammpsOwner {
         // I'm not sure if there is any way at all for us to verify that the operation
         // actually succeeded without screenscraping diagnostic output from LAMMPS.
         // The function returns nothing, and prints a warning on failure.  - ML
-    }
+    })}
 
     // Read a scalar compute, possibly computing it in the process.
     //
     // NOTE: There are warnings in extract_compute about making sure it is valid
     //       to run the compute.  I'm not sure what it means, and it sounds to me
     //       like this could possibly actually cause UB; I just have no idea how.
-    pub unsafe fn extract_compute_0d(&mut self, name: &str) -> Option<f64> {
-        let id = CString::new(name).expect("internal NUL").into_raw();
+    pub unsafe fn extract_compute_0d(&mut self, name: &str) -> Result<f64>
+    {Ok({
+        let id = CString::new(name)?.into_raw();
         let out_ptr = unsafe { ::lammps_sys::lammps_extract_compute(
             self.ptr,
             id,
             ComputeStyle::Global.into(),
             ComputeType::Scalar.into(),
         ) };
-        unsafe { (out_ptr as *mut c_double).as_ref() }.cloned()
-    }
+        unsafe { (out_ptr as *mut c_double).as_ref() }
+            .cloned()
+            .ok_or_else(|| Error::from(format!("could not extract {:?}", name)))?
+    })}
 
     // Read a vector compute, possibly computing it in the process.
     //
@@ -270,9 +288,9 @@ impl LammpsOwner {
         name: &str,
         style: ComputeStyle,
         len: usize,
-    ) -> Option<Vec<f64>>
-    {
-        let id = CString::new(name).expect("internal NUL").into_raw();
+    ) -> Result<Vec<f64>>
+    {Ok({
+        let id = CString::new(name)?.into_raw();
         let out_ptr = unsafe { ::lammps_sys::lammps_extract_compute(
             self.ptr,
             id,
@@ -280,11 +298,13 @@ impl LammpsOwner {
             ComputeType::Vector.into(),
         ) } as *mut c_double;
 
-        out_ptr.as_ref().map(|p|
-            ::std::slice::from_raw_parts(p, len)
-                .iter().map(|&c| c as f64).collect()
-        )
-    }
+        let p =
+            out_ptr.as_ref()
+            .ok_or_else(|| err!("Could not extract {:?}", name))?;
+
+        ::std::slice::from_raw_parts(p, len)
+            .iter().map(|&c| c as f64).collect()
+    })}
 }
 
 pub struct Lammps {
@@ -519,7 +539,7 @@ impl Lammps {
         let natoms = self.ptr.borrow_mut().get_natoms();
         assert_eq!(natoms, carts.len());
 
-        unsafe { self.ptr.borrow_mut().scatter_atoms_f("x", carts.flat()); };
+        unsafe { self.ptr.borrow_mut().scatter_atoms_f("x", carts.flat()) }?;
     })}
 
     fn send_lmp_lattice(&mut self) -> Result<()>
@@ -557,7 +577,7 @@ impl Lammps {
     {Ok({
         self.update_computation()?;
 
-        unsafe { self.ptr.borrow_mut().extract_compute_0d("RSP2_PE") }.unwrap()
+        unsafe { self.ptr.borrow_mut().extract_compute_0d("RSP2_PE") }?
     })}
 
     pub fn compute_grad(&mut self) -> Result<Vec<[f64; 3]>>
@@ -565,7 +585,7 @@ impl Lammps {
         self.update_computation()?;
 
         let grad = {
-            let mut grad = unsafe { self.ptr.borrow_mut().gather_atoms_f("f", 3) };
+            let mut grad = unsafe { self.ptr.borrow_mut().gather_atoms_f("f", 3)? };
             for x in &mut grad { *x *= -1.0 };
             grad
         };
@@ -579,7 +599,7 @@ impl Lammps {
         // as_array().clone() doesn't manage type inference here as well as deref...
         *unsafe {
             self.ptr.borrow_mut().extract_compute_1d("RSP2_Pressure", ComputeStyle::Global, 6)
-        }.unwrap().as_array()
+        }?.as_array()
     })}
 }
 

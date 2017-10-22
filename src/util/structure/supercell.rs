@@ -1,4 +1,5 @@
-use super::{Structure, Lattice, Coords};
+use ::{Structure, Lattice, Coords};
+use ::{Result, Error, ErrorKind};
 
 use ::ordered_float::NotNaN;
 use ::rsp2_array_utils::{dot, try_vec_from_fn};
@@ -50,18 +51,6 @@ where F: FnMut(&M, (u32,u32,u32)) -> M,
     (structure, token)
 }
 
-// FIXME impl Error
-#[derive(Debug,Clone)]
-pub enum DeconstructionError {
-    String(String),
-    BigDisplacement(f64),
-}
-impl DeconstructionError {
-    fn string<S: ::std::borrow::Borrow<str>>(s: S) -> Self {
-        DeconstructionError::String(s.borrow().to_string())
-    }
-}
-
 /// Contains enough information to deconstruct a supercell produced by this library.
 pub struct SupercellToken {
     periods: [u32; 3],
@@ -71,6 +60,7 @@ pub struct SupercellToken {
 
 pub type OwnedMetas<'a,T> = ::std::vec::Drain<'a,T>;
 impl SupercellToken {
+
     pub fn num_cells(&self) -> usize {
         (self.periods[0] * self.periods[1] * self.periods[2]) as usize
     }
@@ -98,7 +88,7 @@ impl SupercellToken {
     /// * Wrapping of positions (FIXME unnecessary limitation)
     /// * Images of an atom did not move by equal amounts (within `validation_radius`)
     pub fn deconstruct<M>(&self, validation_radius: f64, structure: Structure<M>)
-    -> Result<Structure<M>, DeconstructionError>
+    -> Result<Structure<M>>
     {
         self.deconstruct_with(
             validation_radius,
@@ -117,15 +107,13 @@ impl SupercellToken {
     /// * Wrapping of positions (FIXME unnecessary limitation)
     /// * Images of an atom did not move by equal amounts (within `validation_radius`)
     pub fn deconstruct_with<M, F>(&self, validation_radius: f64, structure: Structure<M>, mut fold_meta: F)
-    -> Result<Structure<M>, DeconstructionError>
+    -> Result<Structure<M>>
     where F: FnMut(OwnedMetas<M>) -> M,
     {
         let SupercellToken { periods, ref integer_lattice } = *self;
         let Structure { lattice, coords, meta } = structure;
         let num_sc = (periods[0] * periods[1] * periods[2]) as usize;
-        if coords.len() % num_sc != 0 {
-            return Err(DeconstructionError::string("bad # of atoms"));
-        };
+        ensure!(coords.len() % num_sc == 0, "wrong # of atoms in supercell");
         let num_atoms = coords.len() / num_sc;
 
         let primitive_lattice = integer_lattice.inverse_matrix() * &lattice;
@@ -158,12 +146,12 @@ impl SupercellToken {
 
                     let min = not_nans.iter().cloned().min().unwrap().into_inner();
                     let max = not_nans.iter().cloned().max().unwrap().into_inner();
-                    if max - min > 2.0 * validation_radius {
-                        return Err(DeconstructionError::BigDisplacement(max - min));
-                    }
+                    ensure!(
+                        max - min > 2.0 * validation_radius,
+                        ErrorKind::BigDisplacement(max - min));
 
                     let sum = not_nans.into_iter().map(NotNaN::into_inner).sum::<f64>();
-                    Ok(sum / num_sc as f64)
+                    Ok::<_, Error>(sum / num_sc as f64)
                 })?);
             }
             // Atoms were done in reverse order
