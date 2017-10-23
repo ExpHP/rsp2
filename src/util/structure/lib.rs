@@ -17,7 +17,14 @@ error_chain!{
             description("Suspiciously large movement between supercell images."),
             display("Suspiciously large movement between supercell images: {:e}", d),
         }
+        IntPrecisionError(d: f64) {
+            description("Poor precision for float approximation of integer."),
+            display("Not nearly an integer: {}", d),
+        }
     }
+}
+mod errors {
+    pub use ::{Result, Error, ErrorKind, ResultExt};
 }
 
 #[cfg(test)]
@@ -47,6 +54,9 @@ pub use structure::{Structure, CoordStructure, ElementStructure};
 
 pub use algo::layer::Layer;
 pub use algo::layer::assign_layers;
+
+// yuck. would rather not expose this yet
+pub use symmops::{FracRot, FracTrans, FracOp};
 
 mod coords;
 mod structure;

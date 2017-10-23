@@ -1,8 +1,9 @@
-use ::Result;
+use ::errors::*;
 use ::Displacements;
 use ::DispYaml;
 
 use ::rsp2_structure::{CoordStructure, ElementStructure};
+use ::rsp2_structure::{FracRot, FracTrans, FracOp};
 
 use ::tempdir::TempDir;
 use ::std::process::Command;
@@ -22,6 +23,8 @@ where W: Write,
     Ok(())
 }
 
+// FIXME stuttering names, these shouldn't need to start with "phonopy"
+
 pub fn phonopy_displacements(
     conf: &HashMap<String, String>,
     structure: ElementStructure,
@@ -29,7 +32,7 @@ pub fn phonopy_displacements(
 {
     use ::rsp2_structure_io::poscar;
 
-    let tmp = TempDir::new("rsp2-rs")?;
+    let tmp = TempDir::new("rsp2")?;
     let (displacements, superstructure) = {
 
         let tmp = tmp.path();
@@ -83,10 +86,10 @@ fn _phonopy_gamma_eigensystem(
     force_sets: Vec<Vec<[f64; 3]>>,
     disp_dir: &Path,
 ) -> Result<(Vec<f64>, Vec<Vec<[f64; 3]>>)>
-{
+{Ok({
     use ::slice_of_array::prelude::*;
 
-    let tmp = TempDir::new("rsp2-rs")?;
+    let tmp = TempDir::new("rsp2")?;
     let tmp = tmp.path();
     trace!("Entered '{}'...", tmp.display());
 
@@ -140,8 +143,73 @@ fn _phonopy_gamma_eigensystem(
         }).collect::<Result<Vec<_>>>()?.nest().to_vec()
     )).collect::<Result<_>>()?;
     trace!("Done computing eigensystem");
-    Ok((freqs, evecs))
-}
+    (freqs, evecs)
+})}
+
+pub fn phonopy_symmetry(
+    conf: &HashMap<String, String>,
+    structure: &ElementStructure,
+) -> Result<(Vec<FracOp>)>
+{Ok({
+    use ::rsp2_structure_io::poscar;
+    use ::filetypes::symmetry_yaml;
+
+    let tmp = TempDir::new("rsp2")?;
+    let tmp = tmp.path();
+    trace!("Entered '{}'...", tmp.display());
+
+    write_conf(File::create(tmp.join("phonopy.conf"))?, &conf)?;
+
+    poscar::dump(
+        File::create(tmp.join("POSCAR"))?,
+        "blah",
+        &structure,
+    )?;
+
+    trace!("Calling phonopy for symmetry...");
+    check_status(Command::new("phonopy")
+        .arg("--sym")
+        .arg("phonopy.conf")
+        .current_dir(&tmp)
+        .stdout(File::create(tmp.join("symmetry.yaml"))?)
+        .status()?)?;
+
+    // check if input structure was primitive
+    {
+        let prim = poscar::load(File::open("PPOSCAR")?)?;
+
+        let ratio = structure.lattice().volume() / prim.lattice().volume();
+        let ratio = round_checked(ratio, 1e-4)?;
+
+        // sorry, supercells are just not supported... yet.
+        //
+        // (In the future we may be able to instead return an object
+        //  which will allow the spacegroup operators of the primitive
+        //  to be applied in meaningful ways to the superstructure.)
+        ensure!(ratio == 1, ErrorKind::NonPrimitiveStructure);
+    }
+
+    let yaml = symmetry_yaml::read(File::open(tmp.join("symmetry.yaml"))?)?;
+    yaml.space_group_operations.into_iter()
+        .map(|op| Ok({
+            let rotation = FracRot::new(&op.rotation);
+            let translation = FracTrans::from_floats(&op.translation)?;
+            FracOp::new(&rotation, &translation)
+        }))
+        .collect::<Result<_>>()?
+})}
+
+fn round_checked(x: f64, tol: f64) -> Result<i32>
+{Ok({
+    let r = x.round();
+    ensure!((r - x).abs() < tol, "not nearly integral: {}", x);
+    r as i32
+})}
+
+fn check_status(status: ::std::process::ExitStatus) -> Result<()>
+{Ok({
+    ensure!(status.success(), ErrorKind::PhonopyFailed(status));
+})}
 
 fn log_stdio_and_wait(mut cmd: ::std::process::Command) -> Result<()>
 {Ok({
@@ -171,7 +239,7 @@ fn log_stdio_and_wait(mut cmd: ::std::process::Command) -> Result<()>
         })})
     };
 
-    ensure!(child.wait()?.success(), "Phonopy failed.");
+    check_status(child.wait()?)?;
 
     let _ = stdout_worker.join();
     let _ = stderr_worker.join();

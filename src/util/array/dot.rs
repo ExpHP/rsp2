@@ -69,9 +69,9 @@ gen_each!{
 
 gen_each!{
     // Compile time is a big problem here.
-    [{2} {3}]
-    [{2} {3}]
-    [{2} {3}]
+    [{2} {3} {4}]
+    [{2} {3} {4}]
+    [{2} {3} {4}]
     impl_vec_mat_dot!({$r:expr} {$k:expr} {$c:expr})
     => {
         // (r, k) x (k, c) -> (r, c)

@@ -215,11 +215,48 @@ pub(crate) mod layer {
     }
 }
 
-// FIXME
-// multiple things want to work with permutations but I don't
-// yet have an ideal set of utilities
+#[allow(dead_code)]
+pub(crate) mod group {
+    use ::errors::*;
+    use ::std::hash::Hash;
 
-#[allow(dead_code)] // FIXME
+    /// Tree representation of a finite group, with generators as leaves.
+    pub(crate) struct GroupTree<G> {
+        members: Vec<G>,
+        decomps: Vec<Option<(usize, usize)>>,
+    }
+
+    impl<G> GroupTree<G>
+    {
+        /// Generates a `GroupTree<G>` containing all members in the
+        /// closure of the given members under the group operator.
+        pub fn from_members<GFn>(members: Vec<G>, mut f: GFn)
+        -> Result<Self>
+        where
+            G: Hash + Eq + Clone,
+            GFn: FnMut(&G, &G) -> G,
+        {
+            unimplemented!();
+        }
+
+        /// Compute a homomorphism of a group using the tree
+        /// to elide expensive computations.
+        ///
+        /// Ideally, `F` should be a function that is very expensive to
+        /// compute, while `HFn` should be comparatively cheaper.
+        pub fn compute_homomorphism<H, F, HFn>(&self, mut f: F)
+        -> Result<Vec<H>>
+        where
+            H: Hash + Eq + Clone,
+            F: FnMut(&G) -> H,
+            HFn: FnMut(&H, &H) -> H,
+        {
+            unimplemented!();
+        }
+    }
+}
+
+#[allow(dead_code)]
 pub(crate) mod perm {
     use ::slice_of_array::prelude::*;
     use ::{Lattice, CoordStructure};
@@ -242,7 +279,7 @@ pub(crate) mod perm {
     {Ok({
         let lattice = structure.lattice();
         let from_fracs = structure.to_fracs();
-        let to_fracs = rotation.transform(&from_fracs);
+        let to_fracs = rotation.transform_prim(&from_fracs);
 
         of_rotation_impl(lattice, &from_fracs, &to_fracs, tol)?
     })}

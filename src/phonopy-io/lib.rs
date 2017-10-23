@@ -22,8 +22,11 @@ pub mod cmd;
 mod filetypes;
 mod npy;
 
+pub use errors::*;
+pub(crate) mod errors {
 error_chain!{
     links {
+        Structure(::rsp2_structure::Error, ::rsp2_structure::ErrorKind);
         StructureIo(::rsp2_structure_io::Error, ::rsp2_structure_io::ErrorKind);
     }
 
@@ -33,11 +36,16 @@ error_chain!{
     }
 
     errors {
-        PhonopyExitCode(code: u32) {
+        PhonopyFailed(status: ::std::process::ExitStatus) {
             description("phonopy exited unsuccessfully"),
-            display("phonopy exited unsuccessfully ({})", code),
+            display("phonopy exited unsuccessfully ({})", status),
+        }
+        NonPrimitiveStructure {
+            description("attempted to compute symmetry of a supercell"),
+            display("attempted to compute symmetry of a supercell"),
         }
     }
+}
 }
 
 /// This module only exists to have its name appear in logs.

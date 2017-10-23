@@ -23,8 +23,6 @@ pub(crate) fn dot_n3_33T(coords: &[[f64; 3]], mat: &[[f64; 3]; 3]) -> Vec<[f64; 
     ).collect()
 }
 
-
-
 pub(crate) fn translate_mut_n3_3(coords: &mut [[f64; 3]], t: &[f64; 3])
 {
     for row in coords {

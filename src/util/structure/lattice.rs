@@ -1,4 +1,5 @@
-use ::rsp2_array_utils::{dot, MatrixInverseExt, vec_from_fn};
+use ::rsp2_array_utils::{MatrixInverseExt, MatrixDeterminantExt};
+use ::rsp2_array_utils::{dot, vec_from_fn};
 use ::std::ops::Mul;
 use ::std::rc::Rc;
 
@@ -46,14 +47,18 @@ impl Lattice {
     /// Inverse of the matrix where lattice vectors are rows.
     pub fn inverse_matrix(&self) -> &[[f64; 3]; 3] { &self.inverse }
 
-    pub fn lengths(&self) -> [f64; 3] {
+    pub fn lengths(&self) -> [f64; 3]
+    {
         let quadrances = self.quadrances();
         vec_from_fn(|k| quadrances[k].sqrt())
     }
-    pub fn quadrances(&self) -> [f64; 3] {
-        let matrix = self.matrix();
-        vec_from_fn(|k| dot(&matrix[k], &matrix[k]))
-    }
+
+    pub fn quadrances(&self) -> [f64; 3]
+    { vec_from_fn(|k| dot(&self.matrix[k], &self.matrix[k])) }
+
+    /// Get the (positive) volume of the lattice cell.
+    pub fn volume(&self) -> f64
+    { self.matrix.determinant().abs() }
 }
 
 /// Helper constructors
