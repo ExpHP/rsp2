@@ -62,14 +62,14 @@ pub struct Settings {
     cg: ::rsp2_minimize::acgsd::Settings,
 }
 
-fn setup_global_logger<P: AsRef<Path>>(path: P) -> Result<()>
+fn setup_global_logger(path: Option<&AsRef<Path>>) -> Result<()>
 {Ok({
     use ::std::time::Instant;
     use self::term::ColorizedLevel;
 
     let start = Instant::now();
-    ::fern::Dispatch::new()
-        .format(move |out, message, record| {
+    let mut fern = ::fern::Dispatch::new();
+    fern = fern.format(move |out, message, record| {
             let t = start.elapsed();
             out.finish(format_args!("[{:>4}.{:03}s][{}][{}] {}",
                 t.as_secs(),
@@ -83,9 +83,13 @@ fn setup_global_logger<P: AsRef<Path>>(path: P) -> Result<()>
         .level_for("rsp2_minimize", ::log::LogLevelFilter::Trace)
         .level_for("rsp2_phonopy_io", ::log::LogLevelFilter::Trace)
         .level_for("rsp2_minimize::exact_ls", ::log::LogLevelFilter::Debug)
-        .chain(::std::io::stdout())
-        .chain(::fern::log_file(path)?)
-        .apply()?;
+        .chain(::std::io::stdout());
+
+    if let Some(path) = path {
+        fern = fern.chain(::fern::log_file(path)?);
+    }
+
+    fern.apply()?;
 })}
 
 // fn array_sum(arrs: &[[f64; 3]]) -> [f64; 3] {
@@ -301,7 +305,7 @@ where P: AsRef<Path>, Q: AsRef<Path>,
         // dumb/lazy solution to ensuring all output files go in the dir
         let cwd_guard = push_dir(outdir)?;
 
-        setup_global_logger("rsp2.log")?;
+        setup_global_logger(Some(&"rsp2.log"))?;
 
         let mut from_structure = original;
         // HACK to stop one iteration AFTER all non-acoustics are positive
@@ -394,6 +398,19 @@ where P: AsRef<Path>, Q: AsRef<Path>,
 
     Ok(())
 }
+
+pub fn run_symmetry_test(input: &Path) -> Result<()>
+{Ok({
+    use ::rsp2_structure_io::poscar;
+    use ::std::fs::File;
+
+    setup_global_logger(None)?;
+
+    let conf = collect![];
+    let poscar = poscar::load(File::open(input)?)?;
+    let symmops = ::rsp2_phonopy_io::cmd::phonopy_symmetry(&conf, &poscar)?;
+    ::rsp2_structure::dumb_symmetry_test(&poscar.map_metadata_to(|_| ()), &symmops, 1e-6)?;
+})}
 
 macro_rules! each_fmt_trait {
     ($mac:ident!)

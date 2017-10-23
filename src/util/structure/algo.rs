@@ -215,10 +215,11 @@ pub(crate) mod layer {
     }
 }
 
-#[allow(dead_code)]
+#[allow(unused)]
 pub(crate) mod group {
     use ::errors::*;
     use ::std::hash::Hash;
+    use ::std::result::Result as StdResult;
 
     /// Tree representation of a finite group, with generators as leaves.
     pub(crate) struct GroupTree<G> {
@@ -228,31 +229,69 @@ pub(crate) mod group {
 
     impl<G> GroupTree<G>
     {
-        /// Generates a `GroupTree<G>` containing all members in the
-        /// closure of the given members under the group operator.
-        pub fn from_members<GFn>(members: Vec<G>, mut f: GFn)
+        /// Constructs a `GroupTree<G>` given a sequence that contains
+        /// each member of a finite group exactly once.
+        ///
+        /// A `GroupTree<G>` constructed in this manner is guaranteed to
+        /// order its elements in the same order as the input `Vec`.
+        ///
+        /// Arguments of the closure should follow the convention of function
+        /// composition; `of(a, b)` should compute "`a` of `b`".
+        pub fn from_all_members<GFn>(members: Vec<G>, mut of: GFn)
         -> Result<Self>
         where
-            G: Hash + Eq + Clone,
+            G: Hash + Eq + Clone + ::std::fmt::Debug,
             GFn: FnMut(&G, &G) -> G,
-        {
-            unimplemented!();
-        }
+        {Ok({
+            ensure!(members.len() > 0, "empty groups do not exist!");
+
+            let indices: ::std::collections::HashMap<G, usize> =
+                members.iter().cloned()
+                .enumerate().map(|(i, x)| (x, i))
+                .collect();
+
+            // Brute force O(G)^2 attempt to fill the tree.
+            // I'm fairly certain this can be improved in some way by using
+            // known element-inverse pairs to quickly find new members,
+            // but I don't think it's worth it since this will probably only ever
+            // be used on spacegroups, which are not terribly large.
+            let mut decomps = vec![None; members.len()];
+            for a in 0..members.len() {
+                for b in 0..a + 1 {
+                    let c = indices[&of(&members[a], &members[b])];
+                    if c > a {
+                        decomps[c] = Some((a, b));
+                    }
+                }
+            }
+            GroupTree { members, decomps }
+        })}
 
         /// Compute a homomorphism of a group using the tree
         /// to elide expensive computations.
         ///
         /// Ideally, `F` should be a function that is very expensive to
         /// compute, while `HFn` should be comparatively cheaper.
-        pub fn compute_homomorphism<H, F, HFn>(&self, mut f: F)
-        -> Result<Vec<H>>
+        pub fn try_compute_homomorphism<E, H, F, HFn>(
+            &self,
+            mut compute: F,
+            mut compose: HFn,
+        ) -> StdResult<Vec<H>, E>
         where
-            H: Hash + Eq + Clone,
-            F: FnMut(&G) -> H,
-            HFn: FnMut(&H, &H) -> H,
-        {
-            unimplemented!();
-        }
+            F: FnMut(&G) -> StdResult<H, E>,
+            HFn: FnMut(&H, &H) -> StdResult<H, E>,
+        {Ok({
+            let mut out = Vec::with_capacity(self.members.len());
+
+            for (g, decomp) in izip!(&self.members, &self.decomps) {
+                let value = match *decomp {
+                    None => compute(g)?,
+                    Some((a, b)) => compose(&out[a], &out[b])?,
+                };
+                out.push(value);
+            }
+            out
+        })}
     }
 }
 
@@ -260,10 +299,117 @@ pub(crate) mod group {
 pub(crate) mod perm {
     use ::slice_of_array::prelude::*;
     use ::{Lattice, CoordStructure};
-    use ::symmops::FracRot;
+    use ::{FracRot, FracOp};
+    use super::group::GroupTree;
 
     use ::Result;
     use ::util::perm::{Perm, argsort, Permute};
+
+    pub fn dumb_symmetry_test(
+        structure: &CoordStructure,
+        ops: &[FracOp],
+        tol: f64,
+    ) -> Result<()>
+    {Ok({
+        let lattice = structure.lattice();
+        let from_fracs = structure.to_fracs();
+        let perms = of_spacegroup(structure, ops, tol)?;
+
+        for (op, perm) in izip!(ops, perms) {
+            dumb_validate_equivalent(
+                lattice,
+                &op.transform_prim(&from_fracs),
+                &from_fracs.to_vec().permuted_by(&perm),
+                tol,
+            )
+        }
+    })}
+
+    // Slow, and not even always correct
+    fn dumb_nearest_distance(
+        lattice: &Lattice,
+        frac_a: &[f64; 3],
+        frac_b: &[f64; 3],
+    ) -> f64
+    {
+        use ::rsp2_array_utils::{vec_from_fn, dot};
+        use ::Coords;
+        let diff: [_; 3] = vec_from_fn(|k| frac_a[k] - frac_b[k]);
+        let diff: [_; 3] = vec_from_fn(|k| diff[k] - diff[k].round());
+
+        let mut diffs = vec![];
+        for &a in &[-1., 0., 1.] {
+            for &b in &[-1., 0., 1.] {
+                for &c in &[-1., 0., 1.] {
+                    diffs.push([diff[0] + a, diff[1] + b, diff[2] + c]);
+                }
+            }
+        }
+        let carts = Coords::Fracs(diffs).to_carts(lattice);
+        carts.into_iter().map(|v| dot(&v, &v).sqrt())
+            .min_by(|a, b| a.partial_cmp(b).unwrap()).unwrap()
+    }
+
+    // Slow, and not even always correct
+    fn dumb_validate_equivalent(
+        lattice: &Lattice,
+        frac_a: &[[f64; 3]],
+        frac_b: &[[f64; 3]],
+        tol: f64,
+    )
+    {
+        for i in 0..frac_a.len() {
+            let d = dumb_nearest_distance(lattice, &frac_a[i], &frac_b[i]);
+            assert!(d < tol * (1.0 + 1e-7));
+        }
+    }
+
+    // NOTE: Takes CoordStructure to communicate that the algorithm only cares
+    //       about positions.  There is a small use-case for an <M: Eq> variant
+    //       which could possibly allow two identical positions to be distinguished
+    //       (maybe e.g. representing a defect as some superposition with a ghost)
+    //       but I wouldn't want it to be the default.
+    #[allow(unused)] // FIXME
+    pub(crate) fn of_spacegroup(
+        prim_structure: &CoordStructure,
+        ops: &[FracOp],
+        tol: f64,
+    ) -> Result<Vec<Perm>>
+    {Ok({
+        use ::errors::*;
+        let lattice = prim_structure.lattice();
+        let from_fracs = prim_structure.to_fracs();
+
+        let tree = GroupTree::from_all_members(
+            ops.to_vec(),
+            |second, first| second * first,
+        )?;
+
+        assert_eq!(
+            ops,
+            &tree.try_compute_homomorphism(
+                |op| Ok::<_, Error>(op.clone()),
+                |second, first| Ok::<_, Error>(second * first),
+            )?[..]
+        );
+
+        tree.try_compute_homomorphism(
+            |op| {
+                let to_fracs = op.transform_prim(&from_fracs);
+                let perm = of_rotation_impl(lattice, &from_fracs, &to_fracs[..], tol)?;
+                dumb_validate_equivalent(
+                    lattice,
+                    &to_fracs[..],
+                    &from_fracs.to_vec().permuted_by(&perm)[..],
+                    tol
+                );
+                Ok::<_, Error>(perm)
+            },
+            // FIXME this works with second.permuted_by(first) but that's clearly wrong,
+            //         the error is somewhere else
+            |second, first| Ok(first.clone().permuted_by(second)),
+        )?
+    })}
 
     // NOTE: Takes CoordStructure to communicate that the algorithm only cares
     //       about positions.  There is a small use-case for an <M: Eq> variant

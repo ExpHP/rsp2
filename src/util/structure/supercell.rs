@@ -147,7 +147,7 @@ impl SupercellToken {
                     let min = not_nans.iter().cloned().min().unwrap().into_inner();
                     let max = not_nans.iter().cloned().max().unwrap().into_inner();
                     ensure!(
-                        max - min > 2.0 * validation_radius,
+                        max - min <= 2.0 * validation_radius,
                         ErrorKind::BigDisplacement(max - min));
 
                     let sum = not_nans.into_iter().map(NotNaN::into_inner).sum::<f64>();

@@ -101,24 +101,38 @@ where R: Read,
 
     let (elements, n);
     {
+        let line = lines.next().unwrap()?;
+        let line = line.trim();
+        let has_atom_types = match line.chars().next().unwrap(){
+            '0'...'9' => false,
+            _ => true,
+        };
+
         // atom types
-        let kinds = {
-            lines.next().unwrap()?
-                .trim().split_whitespace()
-                .map(|sym| match Element::from_symbol(sym) {
-                    None => bail!("Unknown element: '{}'", sym),
-                    Some(e) => Ok(e),
-                })
-                .collect::<Result<Vec<Element>>>()?
+        let (kinds, kounts_line) = {
+            if has_atom_types {
+                let kinds = line
+                    .trim().split_whitespace()
+                    .map(|sym| match Element::from_symbol(sym) {
+                        None => bail!("Unknown element: '{}'", sym),
+                        Some(e) => Ok(e),
+                    })
+                    .collect::<Result<Vec<Element>>>()?;
+                (Some(kinds), lines.next().unwrap()?)
+            } else { (None, line.to_string()) }
         };
 
         // atom counts
         let kounts = {
-            lines.next().unwrap()?
+            kounts_line
                 .trim().split_whitespace()
                 .map(|s| Ok(s.parse()?))
                 .collect::<Result<Vec<usize>>>()?
         };
+
+        // FIXME will need to change return type to not necessarily contain Elements
+        let kinds = kinds.unwrap_or_else(||
+            vec![::rsp2_structure::consts::CARBON; kounts.len()]);
 
         n = kounts.iter().sum();
         elements = izip!(kounts, kinds)

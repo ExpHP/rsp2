@@ -174,9 +174,11 @@ pub fn phonopy_symmetry(
         .stdout(File::create(tmp.join("symmetry.yaml"))?)
         .status()?)?;
 
+    trace!("Done calling phonopy");
+
     // check if input structure was primitive
     {
-        let prim = poscar::load(File::open("PPOSCAR")?)?;
+        let prim = poscar::load(File::open(tmp.join("PPOSCAR"))?)?;
 
         let ratio = structure.lattice().volume() / prim.lattice().volume();
         let ratio = round_checked(ratio, 1e-4)?;

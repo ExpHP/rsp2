@@ -269,5 +269,20 @@ pub(crate) mod perm {
             }
             assert_eq!(drop_history.borrow().len(), 5);
         }
+
+        #[test]
+        fn permute_associativity()
+        {
+            let xy = Perm::from_vec(vec![1,0,2]).unwrap();
+            let zx = Perm::from_vec(vec![2,1,0]).unwrap();
+            let zxxy = Perm::from_vec(vec![2,0,1]).unwrap();
+            assert_eq!(xy.clone().permuted_by(&zx), zxxy);
+            assert_eq!(
+                vec![0,1,2].permuted_by(&xy).permuted_by(&zx),
+                vec![0,1,2].permuted_by(&zxxy));
+            assert_eq!(
+                vec![0,1,2].permuted_by(&xy).permuted_by(&zx),
+                vec![2,0,1]);
+        }
     }
 }

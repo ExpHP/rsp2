@@ -2,7 +2,7 @@ extern crate rsp2_array_utils;
 
 extern crate ordered_float;
 extern crate slice_of_array;
-extern crate itertools;
+#[macro_use] extern crate itertools;
 #[macro_use] extern crate error_chain;
 #[macro_use] extern crate lazy_static;
 #[cfg(test)] extern crate rand;
@@ -65,5 +65,7 @@ mod util;
 mod algo;
 mod symmops;
 mod element;
+
+pub use algo::perm::dumb_symmetry_test;
 
 pub use element::consts as consts;

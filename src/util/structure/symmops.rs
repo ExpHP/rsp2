@@ -43,7 +43,7 @@ pub struct FracOp {
     ///
     /// Invariants:
     ///  - translation elements are reduced into the range `0 <= x < 12`.
-    ///  - final element is 12
+    ///  - final element is 1
     t: Rc<[[i32; 4]; 4]>,
 }
 
@@ -101,10 +101,10 @@ impl FracTrans {
 }
 
 const FRAC_OP_EYE: [[i32; 4]; 4] = [
-    [1, 0, 0,  0],
-    [0, 1, 0,  0],
-    [0, 0, 1,  0],
-    [0, 0, 0, 12],
+    [1, 0, 0, 0],
+    [0, 1, 0, 0],
+    [0, 0, 1, 0],
+    [0, 0, 0, 1],
 ];
 
 impl FracOp {
@@ -156,19 +156,14 @@ impl<'a, 'b> Mul<&'b FracOp> for &'a FracOp {
         // reverse order due to working with transpose
         let mut t = dot(&*other.t, &*self.t);
 
-        // reduce the translation and counteract against
-        // an extra factor of 12 that wil have appeared
-        debug_assert!(t[3].iter().all(|x| x % 12 == 0));
-        for k in 0..4 {
-            t[3][k] /= 12;
-        }
-        for k in 0..3 {
-            t[3][k] %= 12;
-            t[3][k] += 12;
-            t[3][k] %= 12;
+        // reduce the translation for a unique representation
+        for x in &mut t[3][..3] {
+            *x %= 12;
+            *x += 12;
+            *x %= 12;
         }
         debug_assert!(t[3][..3].iter().all(|&x| 0 <= x && x < 12));
-        debug_assert_eq!(t[3][3], 12);
+        debug_assert_eq!(t[3][3], 1);
 
         FracOp { t: t.into() }
     }
@@ -176,7 +171,7 @@ impl<'a, 'b> Mul<&'b FracOp> for &'a FracOp {
 
 impl FracRot {
     pub fn transform_prim(&self, fracs: &[[f64; 3]]) -> Vec<[f64; 3]>
-    { ::util::dot_n3_33T(fracs, &self.float_t()) }
+    { ::util::dot_n3_33(fracs, &self.float_t()) }
 }
 
 impl FracTrans {
@@ -199,3 +194,82 @@ fn round_checked(x: f64, tol: f64) -> Result<i32>
     ensure!((r - x).abs() < tol, ErrorKind::IntPrecisionError(x));
     r as i32
 })}
+
+#[cfg(test)]
+#[deny(unused)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rot_transform()
+    {
+        let r = [
+            [0, -1, 0],
+            [1,  0, 0],
+            [0,  0, 1],
+        ];
+        assert_eq!(
+            FracRot::new(&r).transform_prim(&[[1.0, 5.0, 7.0]]),
+            vec![[-5.0, 1.0, 7.0]]
+        );
+    }
+
+    #[test]
+    fn two_transform()
+    {
+        let xy = FracRot::new(&[
+            [0, 1, 0],
+            [1, 0, 0],
+            [0, 0, 1],
+        ]);
+        let zx = FracRot::new(&[
+            [0, 0, 1],
+            [0, 1, 0],
+            [1, 0, 0],
+        ]);
+        let zxxy = FracRot::new(&[
+            [0, 0, 1],
+            [1, 0, 0],
+            [0, 1, 0],
+        ]);
+        assert_eq!(&zx * &xy, zxxy);
+        assert_eq!(
+            zx.transform_prim(&xy.transform_prim(&[[1., 2., 3.]])),
+            zxxy.transform_prim(&[[1., 2., 3.]]));
+
+        let t = FracTrans::eye();
+        let zx = FracOp::new(&zx, &t);
+        let xy = FracOp::new(&xy, &t);
+        let zxxy = FracOp::new(&zxxy, &t);
+        assert_eq!(&zx * &xy, zxxy);
+        assert_eq!(
+            zx.transform_prim(&xy.transform_prim(&[[1., 2., 3.]])),
+            zxxy.transform_prim(&[[1., 2., 3.]]));
+
+    }
+
+    #[test]
+    fn symmop_mul()
+    {
+        // FIXME should really test with things that don't commute
+        // (this is just a regression test)
+        let op = FracOp::new(
+            &FracRot::new(&[
+                [ 0,  1, 0],
+                [-1,  1, 0],
+                [ 0,  0, 1],
+            ]),
+            &FracTrans::from_floats(&[1./3., 2./3., 0.0]).unwrap(),
+        );
+        let square = FracOp::new(
+            &FracRot::new(&[
+                [-1, 1, 0],
+                [-1, 0, 0],
+                [ 0, 0, 1],
+            ]),
+            &FracTrans::from_floats(&[0., 0., 0.]).unwrap(),
+        );
+
+        assert_eq!(&op * &op, square);
+    }
+}
