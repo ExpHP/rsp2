@@ -237,13 +237,12 @@ pub(crate) mod group {
         ///
         /// Arguments of the closure should follow the convention of function
         /// composition; `of(a, b)` should compute "`a` of `b`".
-        pub fn from_all_members<GFn>(members: Vec<G>, mut of: GFn)
-        -> Result<Self>
+        pub fn from_all_members<GFn>(members: Vec<G>, mut of: GFn) -> Self
         where
-            G: Hash + Eq + Clone + ::std::fmt::Debug,
+            G: Hash + Eq + Clone,
             GFn: FnMut(&G, &G) -> G,
-        {Ok({
-            ensure!(members.len() > 0, "empty groups do not exist!");
+        {
+            assert!(members.len() > 0, "empty groups do not exist!");
 
             let indices: ::std::collections::HashMap<G, usize> =
                 members.iter().cloned()
@@ -265,7 +264,7 @@ pub(crate) mod group {
                 }
             }
             GroupTree { members, decomps }
-        })}
+        }
 
         /// Compute a homomorphism of a group using the tree
         /// to elide expensive computations.
@@ -292,6 +291,36 @@ pub(crate) mod group {
             }
             out
         })}
+    }
+
+    /// Generates a finite group from a non-empty set of generators.
+    ///
+    /// The generators may contain duplicates or extraneous elements.
+    ///
+    /// The order of the output is arbitrary, but consistent for
+    /// inputs that are related by a group isomorphism.
+    pub fn generate_finite_group<G, GFn>(generators: &[G], mut g_fn: GFn) -> Vec<G>
+    where
+        G: Hash + Eq + Clone,
+        GFn: FnMut(&G, &G) -> G,
+    {
+        use ::std::collections::{HashSet, VecDeque};
+        assert!(generators.len() > 0, "empty groups do not exist!");
+
+        let mut seen = HashSet::new();
+        let mut out = vec![];
+
+        let mut queue: VecDeque<_> = generators.iter().cloned().collect();
+
+        while let Some(g) = queue.pop_front() {
+            if seen.insert(g.clone()) {
+                for h in generators {
+                    queue.push_back(g_fn(&g, h));
+                }
+                out.push(g);
+            }
+        }
+        out
     }
 }
 
@@ -383,7 +412,7 @@ pub(crate) mod perm {
         let tree = GroupTree::from_all_members(
             ops.to_vec(),
             |second, first| second * first,
-        )?;
+        );
 
         assert_eq!(
             ops,

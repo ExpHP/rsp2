@@ -83,7 +83,7 @@ impl FracRot {
     }
 
     // transposed float matrix
-    fn float_t(&self) -> [[f64; 3]; 3]
+    pub(crate) fn float_t(&self) -> [[f64; 3]; 3]
     { mat_from_fn(|r, c| self.t[r][c].into()) }
 }
 

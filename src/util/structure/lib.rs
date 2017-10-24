@@ -69,3 +69,6 @@ mod element;
 pub use algo::perm::dumb_symmetry_test;
 
 pub use element::consts as consts;
+
+
+mod octo;
