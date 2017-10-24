@@ -95,7 +95,6 @@ impl<'a> Slice<'a, f64>
         };
         let sqnorm: f64 = dot(ket, ket);
 
-        // FIXME square(dot()) or just dot()? WHY AM I NOT SURE?!
         self.kets().map(|bra| square(dot(bra, ket))).sum::<f64>() / sqnorm
     }
 }

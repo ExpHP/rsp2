@@ -21,8 +21,9 @@ path = "lib.rs"
 !!slice-of-array
 !!rsp2-kets
 !!serde
-!!serde_json
-!!serde_derive
+!!serde-json
+!!serde-yaml
+!!serde-derive
 !!rand
 !!log
 !!fern

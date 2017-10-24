@@ -24,28 +24,28 @@ mod npy;
 
 pub use errors::*;
 pub(crate) mod errors {
-error_chain!{
-    links {
-        Structure(::rsp2_structure::Error, ::rsp2_structure::ErrorKind);
-        StructureIo(::rsp2_structure_io::Error, ::rsp2_structure_io::ErrorKind);
-    }
-
-    foreign_links {
-        Io(::std::io::Error);
-        Yaml(::serde_yaml::Error);
-    }
-
-    errors {
-        PhonopyFailed(status: ::std::process::ExitStatus) {
-            description("phonopy exited unsuccessfully"),
-            display("phonopy exited unsuccessfully ({})", status),
+    error_chain!{
+        links {
+            Structure(::rsp2_structure::Error, ::rsp2_structure::ErrorKind);
+            StructureIo(::rsp2_structure_io::Error, ::rsp2_structure_io::ErrorKind);
         }
-        NonPrimitiveStructure {
-            description("attempted to compute symmetry of a supercell"),
-            display("attempted to compute symmetry of a supercell"),
+
+        foreign_links {
+            Io(::std::io::Error);
+            Yaml(::serde_yaml::Error);
+        }
+
+        errors {
+            PhonopyFailed(status: ::std::process::ExitStatus) {
+                description("phonopy exited unsuccessfully"),
+                display("phonopy exited unsuccessfully ({})", status),
+            }
+            NonPrimitiveStructure {
+                description("attempted to compute symmetry of a supercell"),
+                display("attempted to compute symmetry of a supercell"),
+            }
         }
     }
-}
 }
 
 /// This module only exists to have its name appear in logs.

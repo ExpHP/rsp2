@@ -27,6 +27,7 @@ slice-of-array = "0.1"
 rsp2-kets = { version = "0.3", git = "https://github.com/ExpHP/rsp2-kets", features = ["serde"] } 
 serde = "1"
 serde_json = "1"
+serde_yaml = "0.7"
 serde_derive = "1"
 rand = "0.3"
 log = "0.3"

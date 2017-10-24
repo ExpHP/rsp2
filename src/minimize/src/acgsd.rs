@@ -790,7 +790,6 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
             },
         };
 
-        println!("{:?}", value_history);
         value_history.push(next_point.value);
     }
     panic!("too many iterations")

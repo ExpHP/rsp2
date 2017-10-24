@@ -20,10 +20,6 @@ impl PartialEq<Lattice> for Lattice {
 }
 
 impl Lattice {
-    // FIXME API in limbo, it should do one of the following:
-    //  * have new() return Lattice, make `inverse` a lazy Option,
-    //      make `inverse_matrix` and `inverted` return Results
-    //  * have new() return Result, with `inverse` strictly computed as it is now
     /// Create a lattice from a matrix where the rows are lattice vectors.
     pub fn new(matrix: &[[f64; 3]; 3]) -> Self {
         let inverse = Rc::new(matrix.inverse());
