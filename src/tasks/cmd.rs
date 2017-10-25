@@ -435,11 +435,10 @@ pub fn get_energy_surface(
     outdir: &AsRef<Path>,
 ) -> Result<()>
 {Ok({
-    use ::std::io::prelude::*;
     use ::rsp2_structure_io::poscar;
     use ::std::fs::File;
 
-    let mut structure = &poscar::load(File::open(input)?)?;
+    let structure = &poscar::load(File::open(input)?)?;
 
     ::std::fs::create_dir(&outdir)?;
     {
@@ -451,8 +450,12 @@ pub fn get_energy_surface(
 
         let (evals, evecs) = do_diagonalize(settings, structure.clone())?;
 
+        trace!("Finding layers");
+        let (layers, nlayer) = ::rsp2_structure::assign_layers(&structure, &[0, 0, 1], 0.25)?;
+        assert_eq!(nlayer, 2);
+
         trace!("Computing eigensystem info");
-        let einfos = get_eigensystem_info(&evals, &evecs, &vec![(); structure.num_atoms()][..]);
+        let einfos = get_eigensystem_info(&evals, &evecs, &layers);
 
         write_eigen_info(&einfos, &mut |s| Ok::<_, Never>(info!("{}", s)))?;
 
@@ -469,18 +472,28 @@ pub fn get_energy_surface(
         };
 
         let mut lmp = Lammps::new_carbon(uncarbon(&structure))?;
-        ::integrate_2d::integrate_two_eigenvectors::<Never,_>(
-            (200, 200),
+        const W: usize = 200;
+        const H: usize = 200;
+        let data = ::integrate_2d::integrate_two_eigenvectors::<Never,_>(
+            (W, H),
             &structure.to_carts(),
             (-1.0..1.0, -1.0..1.0),
             (&shear_evecs.0, &shear_evecs.1),
-            |pos| {Ok({
-                lmp.set_carts(&pos)?;
-                lmp.compute_grad()?
-            })}
+            {
+                let mut i = 0;
+                move |pos| {Ok({
+                    i += 1;
+                    eprint!("\rdatapoint {:>6} of {}", i, W * H);
+                    lmp.set_carts(&pos)?;
+                    lmp.compute_grad()?
+                })}
+            }
         )?;
+        let chunked: Vec<_> = data.chunks(W).collect();
+        ::serde_json::to_writer_pretty(File::create("out.json")?, &chunked)?;
         cwd_guard.pop()?;
     }
+
 })}
 
 

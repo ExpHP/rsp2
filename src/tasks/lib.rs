@@ -32,6 +32,7 @@ mod integrate_2d;
 pub use ::config::Settings;
 pub use ::cmd::run_relax_with_eigenvectors;
 pub use ::cmd::run_symmetry_test;
+pub use ::cmd::get_energy_surface;
 
 // make `?` panic by default.
 // This is only a good idea for very high level code,
