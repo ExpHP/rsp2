@@ -49,7 +49,7 @@ pub fn run_relax_with_eigenvectors(
         // HACK to stop one iteration AFTER all non-acoustics are positive
         let mut all_ok_count = 0;
         let (structure, einfos, _evecs) = loop { // NOTE: we use break with value
-            let structure = do_relax(settings, from_structure)?;
+            let structure = do_relax(&settings.cg, &settings.potential, from_structure)?;
             let (evals, evecs) = do_diagonalize(&settings.phonons, structure.clone())?;
 
             trace!("============================");
@@ -78,19 +78,22 @@ pub fn run_relax_with_eigenvectors(
             }
             write_eigen_info(&einfos, &mut |s| Ok::<_, Never>(info!("{}", s)))?;
 
-            let mut all_ok = true;
             let mut structure = structure;
-            for (i, info, evec) in izip!(1.., &einfos, &evecs) {
-                if info.frequency < 0.0 && !info.is_acoustic() {
-                    if all_ok {
-                        trace!("Optimizing along bands...");
-                        all_ok = false;
-                    }
-                    let (alpha, new_structure) = do_minimize_along_evec(settings, structure, &evec[..])?;
-                    info!("Optimized along band {} ({}), a = {:e}", i, info.frequency, alpha);
+            let bad_evs: Vec<_> = izip!(1.., &einfos, &evecs)
+                .filter(|&(_, ref info, _)| info.frequency < 0.0 && !info.is_acoustic())
+                .map(|(i, info, evec)| {
+                    let name = format!("band {} ({})", i, info.frequency);
+                    (name, &evec[..])
+                }).collect();
 
-                    structure = new_structure;
-                }
+            if !bad_evs.is_empty() {
+                trace!("Chasing eigenvectors...");
+                structure = do_eigenvector_chase(
+                    &settings.ev_chase,
+                    &settings.potential,
+                    structure,
+                    &bad_evs[..],
+                )?;
             }
 
             {
@@ -102,17 +105,17 @@ pub fn run_relax_with_eigenvectors(
                     &structure)?;
             }
 
-            if all_ok {
+            if bad_evs.is_empty() {
                 all_ok_count += 1;
                 if all_ok_count >= 3 {
-                    break (structure, einfos, evecs);
+                    // (clone is HACK because bad_evs borrows from evecs)
+                    break (structure, einfos, evecs.clone());
                 }
             }
 
             from_structure = structure;
-            iteration += 1;
+            iteration += 1; // NOTE: not a for loop due to 'break value;'
         }; // (structure, einfos, evecs)
-
 
         {
             let mut f = File::create("eigenvalues.final")?;
@@ -163,18 +166,19 @@ pub fn run_relax_with_eigenvectors(
 })}
 
 fn do_relax(
-    settings: &Settings,
+    cg_settings: &::config::Acgsd,
+    potential_settings: &::config::Potential,
     structure: ElementStructure,
 ) -> Result<ElementStructure>
 {Ok({
-    let sc_dims = tup3(settings.supercell_relax.dim_for_unitcell(structure.lattice()));
+    let sc_dims = tup3(potential_settings.supercell.dim_for_unitcell(structure.lattice()));
     let (supercell, sc_token) = supercell::diagonal(sc_dims, structure);
 
     // FIXME confusing for Lammps::new_carbon to take initial position
     let mut lmp = Lammps::new_carbon(uncarbon(&supercell))?;
     let relaxed_flat = ::rsp2_minimize::acgsd(
-        &settings.cg,
-        &supercell.to_carts().flat(),
+        cg_settings,
+        supercell.to_carts().flat(),
         &mut *lammps_flat_diff_fn(&mut lmp),
     ).unwrap().position;
 
@@ -224,13 +228,86 @@ fn do_diagonalize(
     (eval, evec)
 })}
 
+fn do_eigenvector_chase(
+    chase_settings: &::config::EigenvectorChase,
+    potential_settings: &::config::Potential,
+    mut structure: ElementStructure,
+    bad_evecs: &[(String, &[[f64; 3]])],
+) -> Result<ElementStructure>
+{Ok({
+    match *chase_settings {
+        ::config::EigenvectorChase::OneByOne => {
+            for &(ref name, evec) in bad_evecs {
+                let (alpha, new_structure) = do_minimize_along_evec(potential_settings, structure, &evec[..])?;
+                info!("Optimized along {}, a = {:e}", name, alpha);
+
+                structure = new_structure;
+            }
+            structure
+        },
+        ::config::EigenvectorChase::Acgsd(ref cg_settings) => {
+            let evecs: Vec<_> = bad_evecs.iter().map(|&(_, ev)| ev).collect();
+            do_cg_along_evecs(
+                cg_settings,
+                potential_settings,
+                structure,
+                &evecs[..],
+            )?
+        },
+    }
+})}
+
+fn do_cg_along_evecs<V, I>(
+    cg_settings: &::config::Acgsd,
+    potential_settings: &::config::Potential,
+    structure: ElementStructure,
+    evecs: I,
+) -> Result<ElementStructure>
+where
+    V: AsRef<[[f64; 3]]>,
+    I: IntoIterator<Item=V>,
+{Ok({
+    let evecs: Vec<_> = evecs.into_iter().collect();
+    let refs: Vec<_> = evecs.iter().map(|x| x.as_ref()).collect();
+    _do_cg_along_evecs(cg_settings, potential_settings, structure, &refs)?
+})}
+
+fn _do_cg_along_evecs(
+    cg_settings: &::config::Acgsd,
+    potential_settings: &::config::Potential,
+    structure: ElementStructure,
+    evecs: &[&[[f64; 3]]],
+) -> Result<ElementStructure>
+{Ok({
+    let sc_dims = tup3(potential_settings.supercell.dim_for_unitcell(structure.lattice()));
+    let (supercell, sc_token) = supercell::diagonal(sc_dims, structure);
+    let evecs: Vec<_> = evecs.iter().map(|ev| sc_token.replicate(ev)).collect();
+
+    let flat_evecs: Vec<_> = evecs.iter().map(|ev| ev.flat()).collect();
+    let init_pos = supercell.to_carts();
+
+    let mut lmp = Lammps::new_carbon(uncarbon(&supercell))?;
+    let relaxed_flat = ::rsp2_minimize::acgsd(
+        cg_settings,
+        &vec![0.0; evecs.len()],
+        &mut *lammps_constrained_diff_fn(
+            &mut lmp,
+            init_pos.flat(),
+            &flat_evecs,
+            ),
+    ).unwrap().position;
+
+    let supercell = supercell.with_coords(Coords::Carts(relaxed_flat.nest().to_vec()));
+    multi_threshold_deconstruct(sc_token, 1e-10, 1e-3, supercell)?
+})}
+
 fn do_minimize_along_evec(
-    settings: &Settings,
+    settings: &::config::Potential,
     structure: ElementStructure,
     evec: &[[f64; 3]],
 ) -> Result<(f64, ElementStructure)>
 {Ok({
-    let sc_dims = tup3(settings.supercell_relax.dim_for_unitcell(structure.lattice()));
+    let sc_dims = tup3(settings.supercell.dim_for_unitcell(structure.lattice()));
     let (structure, sc_token) = supercell::diagonal(sc_dims, structure);
     let evec = sc_token.replicate(evec);
     let mut lmp = Lammps::new_carbon(uncarbon(&structure))?;
@@ -413,6 +490,54 @@ fn lammps_flat_diff_fn<'a>(lmp: &'a mut Lammps)
     })
 }
 
+// cg differential function along a restricted set of eigenvectors.
+//
+// There will be one coordinate for each eigenvector.
+fn lammps_constrained_diff_fn<'a>(
+    lmp: &'a mut Lammps,
+    flat_init_pos: &'a [f64],
+    flat_evs: &'a [&[f64]],
+)
+-> Box<FnMut(&[f64]) -> StdResult<(f64, Vec<f64>), LmpError> + 'a>
+{
+    let mut compute_from_3n_flat = lammps_flat_diff_fn(lmp);
+
+    Box::new(move |coeffs| {Ok({
+        assert_eq!(coeffs.len(), flat_evs.len());
+
+        // This is dead simple.
+        // The kth element of the new gradient is the slope along the kth ev.
+        // The change in position is a sum over contributions from each ev.
+        // These relationships have a simple expression in terms of
+        //   the matrix whose columns are the selected eigenvectors.
+        // (though the following is transposed for our row-centric formalism)
+        let flat_d_pos = dot_vec_mat_dumb(coeffs, flat_evs);
+        let V(flat_pos): V<Vec<_>> = v(flat_init_pos) + v(flat_d_pos);
+
+        let (value, flat_grad) = compute_from_3n_flat(&flat_pos)?;
+
+        let grad = dot_mat_vec_dumb(flat_evs, &flat_grad);
+        (value, grad)
+    })})
+}
+
+//----------------------
+// a slice of slices is a really dumb representation for a matrix
+// but hey; what works, works
+
+fn dot_vec_mat_dumb(vec: &[f64], mat: &[&[f64]]) -> Vec<f64>
+{ mat.iter().map(|row| vdot(vec, row)).collect() }
+
+fn dot_mat_vec_dumb(mat: &[&[f64]], vec: &[f64]) -> Vec<f64>
+{
+    assert_eq!(mat.len(), vec.len());
+    assert_ne!(mat.len(), 0, "cannot determine width of matrix with no rows");
+    let init = v(vec![0.0; mat[0].len()]);
+    let V(out) = izip!(mat, vec)
+        .fold(init, |acc, (&row, &alpha)| acc + alpha * v(row));
+    out
+}
+
 //=================================================================
 
 pub fn run_symmetry_test(input: &Path) -> Result<()>
@@ -477,7 +602,7 @@ pub fn get_energy_surface(
         let data = ::integrate_2d::integrate_two_eigenvectors::<Never,_>(
             (W, H),
             &structure.to_carts(),
-            (-1.0..1.0, -1.0..1.0),
+            (-10.0..10.0, -10.0..10.0),
             (&shear_evecs.0, &shear_evecs.1),
             {
                 let mut i = 0;

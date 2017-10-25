@@ -1,15 +1,34 @@
 use ::rsp2_array_utils::vec_from_fn;
 use ::rsp2_structure::Lattice;
 
+pub use ::rsp2_minimize::acgsd::Settings as Acgsd;
+
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Settings {
-    pub supercell_relax: SupercellSpec,
-    pub neg_frequency_threshold: f64, // 1e-3
+    pub potential: Potential,
     pub hack_scale: [f64; 3], // HACK
     pub layers: Option<u32>, // Number of layers, when known in advance
-    pub cg: ::rsp2_minimize::acgsd::Settings,
+    pub cg: Acgsd,
     pub phonons: Phonons,
+    pub ev_chase: EigenvectorChase,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct Potential {
+    // supercell for lammps.
+    // Purpose is to help eliminate boundary effects or something?
+    // I forget.  Might not be necessary
+    pub supercell: SupercellSpec,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum EigenvectorChase {
+    OneByOne,
+    #[serde(rename = "cg")]
+    Acgsd(Acgsd),
 }
 
 #[derive(Serialize, Deserialize)]

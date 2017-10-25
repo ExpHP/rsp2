@@ -1,22 +1,20 @@
-supercell-relax: {target: [1, 1, 1]}
+potential:
+  supercell: {target: [1, 1, 1]}
 # coarse linear search gives this for all AB structures
 hack-scale:
  - 0.9833333333333333
  - 0.9833333333333333
  - 1
-neg-frequency-threshold: 1e-3
-# neg-frequency-threshold: 1e-3
 cg:
   stop-condition:
     any:
       - value-delta:
           rel-greater-than: 0
           steps-ago: 10
-      #- all:
-        #- grad-rms: 1e-9
       - iterations: 100
   alpha-guess-max: 1e-1
   alpha-guess-first: 1e-2
+ev-chase: one-by-one
 phonons:
   supercell: {target: [35, 35, 1]}
   symmetry-tolerance: 1e-2
