@@ -16,6 +16,7 @@ use ::rsp2_structure::{Coords, CoordStructure};
 use ::rsp2_structure::{ElementStructure};
 use ::rsp2_lammps_wrap::Lammps;
 use ::std::path::Path;
+use ::std::hash::Hash;
 use ::std::io::prelude::*;
 
 type LmpError = ::rsp2_lammps_wrap::Error;
@@ -30,7 +31,7 @@ pub fn run_relax_with_eigenvectors(
     use ::rsp2_structure_io::poscar;
     use ::std::fs::File;
 
-    let mut original = uncarbon(&poscar::load(File::open(input)?)?);
+    let mut original = poscar::load(File::open(input)?)?;
     original.scale_vecs(&settings.hack_scale); // HACK
     let original = original;
 
@@ -39,7 +40,7 @@ pub fn run_relax_with_eigenvectors(
         // dumb/lazy solution to ensuring all output files go in the dir
         let cwd_guard = push_dir(outdir)?;
 
-        poscar::dump(File::create("./initial.vasp")?, "", &carbon(&original))?;
+        poscar::dump(File::create("./initial.vasp")?, "", &original)?;
 
         setup_global_logger(Some(&"rsp2.log"))?;
 
@@ -49,7 +50,7 @@ pub fn run_relax_with_eigenvectors(
         let mut all_ok_count = 0;
         let (structure, einfos, _evecs) = loop { // NOTE: we use break with value
             let structure = do_relax(settings, from_structure)?;
-            let (evals, evecs) = do_diagonalize(settings, structure.clone())?;
+            let (evals, evecs) = do_diagonalize(&settings.phonons, structure.clone())?;
 
             trace!("============================");
             trace!("Finished relaxation # {}", iteration);
@@ -66,7 +67,7 @@ pub fn run_relax_with_eigenvectors(
                 poscar::dump(
                     File::create(fname)?,
                     &format!("Structure after CG round {}", iteration),
-                    &carbon(&structure))?;
+                    &structure)?;
             }
 
             trace!("Computing eigensystem info");
@@ -98,7 +99,7 @@ pub fn run_relax_with_eigenvectors(
                 poscar::dump(
                     File::create(fname)?,
                     &format!("Structure after eigenmode-chasing round {}", iteration),
-                    &carbon(&structure))?;
+                    &structure)?;
             }
 
             if all_ok {
@@ -128,7 +129,7 @@ pub fn run_relax_with_eigenvectors(
             }
         }
 
-        poscar::dump(File::create("./final.vasp")?, "", &carbon(&structure))?;
+        poscar::dump(File::create("./final.vasp")?, "", &structure)?;
 
         { // write summary file
             use self::summary::{Modes, Summary, EnergyPerAtom};
@@ -140,11 +141,11 @@ pub fn run_relax_with_eigenvectors(
             let modes = Modes { acoustic, shear, layer_breathing };
 
             let energy_per_atom = {
-                let f = |structure: CoordStructure| {Ok::<_, Never>({
+                let f = |structure: ElementStructure| {Ok::<_, Never>({
                     let na = structure.num_atoms() as f64;
-                    Lammps::new_carbon(structure)?.compute_value()? / na
+                    Lammps::new_carbon(uncarbon(&structure))?.compute_value()? / na
                 })};
-                let f_path = |s: &AsRef<Path>| Ok::<_, Never>(f(uncarbon(&poscar::load(File::open(s)?)?))?);
+                let f_path = |s: &AsRef<Path>| Ok::<_, Never>(f(poscar::load(File::open(s)?)?)?);
 
                 let initial = f(original.clone())?;
                 let final_ = f(structure)?;
@@ -163,14 +164,14 @@ pub fn run_relax_with_eigenvectors(
 
 fn do_relax(
     settings: &Settings,
-    structure: CoordStructure,
-) -> Result<CoordStructure>
+    structure: ElementStructure,
+) -> Result<ElementStructure>
 {Ok({
     let sc_dims = tup3(settings.supercell_relax.dim_for_unitcell(structure.lattice()));
     let (supercell, sc_token) = supercell::diagonal(sc_dims, structure);
 
     // FIXME confusing for Lammps::new_carbon to take initial position
-    let mut lmp = Lammps::new_carbon(supercell.clone())?;
+    let mut lmp = Lammps::new_carbon(uncarbon(&supercell))?;
     let relaxed_flat = ::rsp2_minimize::acgsd(
         &settings.cg,
         &supercell.to_carts().flat(),
@@ -182,8 +183,8 @@ fn do_relax(
 })}
 
 fn do_diagonalize(
-    settings: &Settings,
-    structure: CoordStructure,
+    settings: &::config::Phonons,
+    structure: ElementStructure,
 ) -> Result<(Vec<f64>, Vec<Vec<[f64; 3]>>)>
 {Ok({
 
@@ -191,15 +192,14 @@ fn do_diagonalize(
         .symmetry_tolerance(settings.symmetry_tolerance)
         .conf("DISPLACEMENT_DISTANCE", format!("{:e}", settings.displacement_distance))
         .conf("DIM", {
-            let (a, b, c) = tup3(settings.supercell_phonopy.dim_for_unitcell(structure.lattice()));
+            let (a, b, c) = tup3(settings.supercell.dim_for_unitcell(structure.lattice()));
             format!("{} {} {}", a, b, c)
         })
         .conf("HDF5", ".TRUE.")
         .conf("DIAG", ".FALSE.") // maybe?
         ;
 
-    let (superstructure, displacements, disp_token)
-        = phonopy.displacements(carbon(&structure))?;
+    let (superstructure, displacements, disp_token) = phonopy.displacements(structure)?;
 
     trace!("Computing forces at displacements");
     let mut lmp = Lammps::new_carbon(superstructure.clone())?;
@@ -226,14 +226,14 @@ fn do_diagonalize(
 
 fn do_minimize_along_evec(
     settings: &Settings,
-    structure: CoordStructure,
+    structure: ElementStructure,
     evec: &[[f64; 3]],
-) -> Result<(f64, CoordStructure)>
+) -> Result<(f64, ElementStructure)>
 {Ok({
     let sc_dims = tup3(settings.supercell_relax.dim_for_unitcell(structure.lattice()));
     let (structure, sc_token) = supercell::diagonal(sc_dims, structure);
     let evec = sc_token.replicate(evec);
-    let mut lmp = Lammps::new_carbon(structure.clone())?;
+    let mut lmp = Lammps::new_carbon(uncarbon(&structure))?;
 
     let from_structure = structure;
     let direction = &evec[..];
@@ -257,8 +257,8 @@ fn multi_threshold_deconstruct(
     sc_token: SupercellToken,
     warn: f64,
     fail: f64,
-    supercell: CoordStructure,
-) -> StdResult<CoordStructure, ::rsp2_structure::Error>
+    supercell: ElementStructure,
+) -> StdResult<ElementStructure, ::rsp2_structure::Error>
 {Ok({
     match sc_token.deconstruct(warn, supercell.clone()) {
         Ok(x) => x,
@@ -303,10 +303,10 @@ fn write_eigen_info(
 
 pub type EigenInfo = Vec<eigen_info::Item>;
 
-pub fn get_eigensystem_info(
+pub fn get_eigensystem_info<L: Eq + Clone + Hash>(
     evals: &[f64],
     evecs: &[Vec<[f64; 3]>],
-    layers: &[::rsp2_structure::Layer],
+    layers: &[L],
 ) -> EigenInfo
 {
     use ::rsp2_eigenvector_classify::{keyed_acoustic_basis, polarization};
@@ -388,6 +388,7 @@ mod summary {
 
 // HACK: These adapters are temporary to help the existing code
 //       (written only with carbon in mind) adapt to ElementStructure.
+#[allow(unused)]
 fn carbon(structure: &CoordStructure) -> ElementStructure
 {
     // I want it PAINTED BLACK!
@@ -425,6 +426,63 @@ pub fn run_symmetry_test(input: &Path) -> Result<()>
     let symmops = ::rsp2_phonopy_io::cmd::Builder::new().symmetry(&poscar)?;
     ::rsp2_structure::dumb_symmetry_test(&poscar.map_metadata_to(|_| ()), &symmops, 1e-6)?;
 })}
+
+//=================================================================
+
+pub fn get_energy_surface(
+    settings: &::config::Phonons,
+    input: &AsRef<Path>,
+    outdir: &AsRef<Path>,
+) -> Result<()>
+{Ok({
+    use ::std::io::prelude::*;
+    use ::rsp2_structure_io::poscar;
+    use ::std::fs::File;
+
+    let mut structure = &poscar::load(File::open(input)?)?;
+
+    ::std::fs::create_dir(&outdir)?;
+    {
+        // dumb/lazy solution to ensuring all output files go in the dir
+        let cwd_guard = push_dir(outdir)?;
+        setup_global_logger(Some(&"rsp2.log"))?;
+
+        poscar::dump(File::create("./input.vasp")?, "", &structure)?;
+
+        let (evals, evecs) = do_diagonalize(settings, structure.clone())?;
+
+        trace!("Computing eigensystem info");
+        let einfos = get_eigensystem_info(&evals, &evecs, &vec![(); structure.num_atoms()][..]);
+
+        write_eigen_info(&einfos, &mut |s| Ok::<_, Never>(info!("{}", s)))?;
+
+        let shear_evecs = {
+            let mut iter = einfos
+                .iter().enumerate()
+                .filter(|&(_, info)| info.is_shear())
+                .map(|(i, _)| evecs[i].clone());
+
+            match (iter.next(), iter.next()) {
+                (Some(a), Some(b)) => (a, b),
+                _ => panic!("Expected at least two shear modes"),
+            }
+        };
+
+        let mut lmp = Lammps::new_carbon(uncarbon(&structure))?;
+        ::integrate_2d::integrate_two_eigenvectors::<Never,_>(
+            (200, 200),
+            &structure.to_carts(),
+            (-1.0..1.0, -1.0..1.0),
+            (&shear_evecs.0, &shear_evecs.1),
+            |pos| {Ok({
+                lmp.set_carts(&pos)?;
+                lmp.compute_grad()?
+            })}
+        )?;
+        cwd_guard.pop()?;
+    }
+})}
+
 
 //=================================================================
 

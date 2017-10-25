@@ -27,6 +27,7 @@ mod util;
 mod config;
 mod logging;
 mod cmd;
+mod integrate_2d;
 
 pub use ::config::Settings;
 pub use ::cmd::run_relax_with_eigenvectors;

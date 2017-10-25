@@ -5,13 +5,19 @@ use ::rsp2_structure::Lattice;
 #[serde(rename_all = "kebab-case")]
 pub struct Settings {
     pub supercell_relax: SupercellSpec,
-    pub supercell_phonopy: SupercellSpec,
-    pub symmetry_tolerance: f64, // 1e-5
-    pub displacement_distance: f64, // 1e-3
     pub neg_frequency_threshold: f64, // 1e-3
     pub hack_scale: [f64; 3], // HACK
     pub layers: Option<u32>, // Number of layers, when known in advance
     pub cg: ::rsp2_minimize::acgsd::Settings,
+    pub phonons: Phonons,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct Phonons {
+    pub symmetry_tolerance: f64,
+    pub displacement_distance: f64,
+    pub supercell: SupercellSpec,
 }
 
 #[derive(Serialize, Deserialize)]
