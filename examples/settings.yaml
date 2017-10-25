@@ -1,12 +1,9 @@
-supercell-relax: {target: [35, 35, 1]}
-supercell-phonopy: {target: [35, 35, 1]}
+supercell-relax: {target: [1, 1, 1]}
 # coarse linear search gives this for all AB structures
 hack-scale:
  - 0.9833333333333333
  - 0.9833333333333333
  - 1
-symmetry-tolerance: 1e-5
-displacement-distance: 1e-4
 neg-frequency-threshold: 1e-3
 # neg-frequency-threshold: 1e-3
 cg:
@@ -20,3 +17,7 @@ cg:
       - iterations: 100
   alpha-guess-max: 1e-1
   alpha-guess-first: 1e-2
+phonons:
+  supercell: {target: [35, 35, 1]}
+  symmetry-tolerance: 1e-2
+  displacement-distance: 1e-4
