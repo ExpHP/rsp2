@@ -215,25 +215,26 @@ fn do_diagonalize(
 
     trace!("Computing forces at displacements");
 
-    let mut i = 0;
-    let force_sets =
-        displacements.iter()
-        .map(|disp| Ok({
-            i += 1;
-            eprint!("\rdisp {} of {}", i, displacements.len());
-            ::std::io::stderr().flush().unwrap();
-            let superstructure = apply_displacement(&superstructure, *disp);
+    // let mut i = 0;
+    // let force_sets =
+    //     displacements.iter()
+    //     .map(|disp| Ok({
+    //         i += 1;
+    //         eprint!("\rdisp {} of {}", i, displacements.len());
+    //         ::std::io::stderr().flush().unwrap();
+    //         let superstructure = apply_displacement(&superstructure, *disp);
 
-            let grad = lmp.initialize_carbon(superstructure)?.compute_grad()?;
-            let V(force) = -1.0 * v(grad.flat());
-            force.nest().to_vec()
-        })).collect::<Result<Vec<_>>>()?;
-        // do the first chunk on its own
+    //         let grad = lmp.initialize_carbon(superstructure)?.compute_grad()?;
+    //         let V(force) = -1.0 * v(grad.flat());
+    //         force.nest().to_vec()
+    //     })).collect::<Result<Vec<_>>>()?;
+    //     // do the first chunk on its own
 
     // NOTE: Here's how you *could* do them in parallel,
     //       but attempting to do so with lammps leads to segfaults.
     #[cfg(nope)]
-    {
+    { }
+        use ::rayon::prelude::*;
         // bigger chunks = fewer opportunities for starved worker threads
         // smaller chunks = more frequent visual feedback
         const CHUNK_SIZE: usize = 100;
@@ -256,7 +257,8 @@ fn do_diagonalize(
 
                 eprintln!(
                     "Completed {:>6} displacements (of {})",
-                    CHUNK_SIZE * (chunk_index + 1), displacements.len());
+                    (CHUNK_SIZE * (chunk_index + 1)).min(displacements.len()),
+                    displacements.len());
 
                 buf
             })})
@@ -266,7 +268,7 @@ fn do_diagonalize(
                 Vec::with_capacity(displacements.len()),
                 |mut acc, chunk| { acc.extend(chunk); acc }
             );
-    }
+    //}
 
     let (eval, evec) = phonopy.gamma_eigensystem(force_sets, &disp_token)?;
     let V(eval) = THZ_TO_WAVENUMBER * v(eval);

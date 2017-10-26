@@ -15,3 +15,4 @@ path = "lib.rs"
 !!ndarray
 !!error-chain
 !!slice-of-array
+!!lazy-static

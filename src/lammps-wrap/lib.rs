@@ -8,12 +8,20 @@ extern crate rsp2_structure;
 extern crate lammps_sys;
 #[macro_use] extern crate log;
 #[macro_use] extern crate error_chain;
+#[macro_use] extern crate lazy_static;
 extern crate chrono;
 
 error_chain! {
     // stub... currently the library always actually panics.
     foreign_links {
         NulError(::std::ffi::NulError);
+    }
+
+    errors {
+        Locked {
+            description("Another Lammps instance already exists")
+            display("Another Lammps instance already exists")
+        }
     }
 }
 
@@ -24,6 +32,7 @@ macro_rules! err {
     => { Error::from(format!($($t)+)) }
 }
 
+
 pub type StdResult<T, E> = ::std::result::Result<T, E>;
 
 use ::std::os::raw::{c_void, c_int, c_double};
@@ -31,6 +40,7 @@ use ::std::ffi::CString;
 use ::std::path::{Path, PathBuf};
 use ::slice_of_array::prelude::*;
 use ::rsp2_structure::{CoordStructure, Lattice};
+use ::std::mem::ManuallyDrop;
 
 #[derive(Debug,Copy,Clone,PartialEq,Eq,PartialOrd,Ord,Hash)]
 enum ComputeStyle {
@@ -67,6 +77,8 @@ derive_into_from_as_cast!{
     ScatterGatherDatatype as c_int;
 }
 
+//----------------------------
+
 /// A light wrapper around a LAMMPS instance which handles ownership
 /// concerns and provides an interface that uses rust primitive types.
 ///
@@ -96,7 +108,12 @@ impl Drop for LammpsOwner {
 }
 
 impl LammpsOwner {
-    pub fn new(argv: &[&str]) -> Result<LammpsOwner> {
+    /// # Safety
+    ///
+    /// This can cause memory unsafety if an instance of Lammps
+    /// currently exists. The precise details of why this occurs
+    /// are currently unknown to the author of this wrapper library.
+    pub unsafe fn new(argv: &[&str]) -> Result<LammpsOwner> {
         let mut argv = CArgv::from_strs(argv)?;
         let mut ptr: *mut c_void = ::std::ptr::null_mut();
         unsafe {
@@ -122,6 +139,24 @@ mod cli { // name shows up in log output
         trace!("{}", cmd);
     }
 }
+
+//----------------------------
+
+use lock::{InstanceLock, INSTANCE_LOCK};
+type MutexGuard = ::std::sync::MutexGuard<'static, InstanceLock>;
+mod lock {
+    use ::std::sync::Mutex;
+
+    #[derive(Debug)]
+    pub struct InstanceLock(());
+
+    /// Authority on when it is safe to create instances of Lammps.
+    lazy_static! {
+        pub static ref INSTANCE_LOCK: Mutex<InstanceLock> = Mutex::new(InstanceLock(()));
+    }
+}
+
+//----------------------------
 
 impl LammpsOwner {
     /// Invokes `lammps_command`.
@@ -322,7 +357,9 @@ pub struct Lammps {
     /// - Be careful providing methods that borrow `&self` and take a callback.
     ///
     /// (NOTE: I'm not entirely sure if this is correct.)
-    ptr: ::std::cell::RefCell<LammpsOwner>,
+    ptr: ManuallyDrop<::std::cell::RefCell<LammpsOwner>>,
+
+    guard: ManuallyDrop<MutexGuard>,
 
     /// The currently computed structure, encapsulated in a helper type
     /// that tracks dirtiness and helps us decide when we need to call lammps
@@ -428,19 +465,48 @@ impl Builder {
 }
 
 impl Lammps {
+    fn instantiate(args: &[&str]) -> Result<(MutexGuard, LammpsOwner)>
+    {Ok({
+        // acquire the guard first
+        match INSTANCE_LOCK.lock() {
+            Ok(guard) => {
+                // safe because no other instances exist.
+                let lmp = unsafe { LammpsOwner::new(args) }?;
+                (guard, lmp)
+            },
+            Err(_) => bail!(ErrorKind::Locked),
+        }
+    })}
+}
 
+impl Drop for Lammps {
+    fn drop(&mut self)
+    {
+        unsafe {
+            // Release the guard last
+            ManuallyDrop::drop(&mut self.ptr);
+            ManuallyDrop::drop(&mut self.guard);
+        }
+    }
+}
+
+impl Lammps {
     fn from_builder_carbon(builder: &Builder, structure: CoordStructure) -> Result<Lammps>
     {Ok({
         // Lammps script based on code from Colin Daniels.
 
         let carts = structure.to_carts();
 
-        let lmp = ::LammpsOwner::new(&["lammps",
+        let (guard, lmp) = Self::instantiate(&["lammps",
             "-screen", "none",
             "-log", "none", // logs opened from CLI are truncated, but we want to append
         ])?;
         let ptr = ::std::cell::RefCell::new(lmp);
-        let me = Lammps { ptr, structure: MaybeDirty::new_dirty(structure) };
+        let me = Lammps {
+            ptr: ManuallyDrop::new(ptr.into()),
+            guard: ManuallyDrop::new(guard.into()),
+            structure: MaybeDirty::new_dirty(structure),
+        };
 
         if let Some(ref log_file) = builder.append_log
         {
