@@ -1,3 +1,5 @@
-supercell: {target: [35, 35, 1]}
-symmetry-tolerance: 1e-2
-displacement-distance: 1e-4
+threading: lammps
+phonons:
+  supercell: {target: [35, 35, 1]}
+  symmetry-tolerance: 1e-2
+  displacement-distance: 1e-4

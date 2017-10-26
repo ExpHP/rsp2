@@ -48,6 +48,8 @@ macro_rules! assert_matches {
 pub mod supercell;
 
 pub use lattice::Lattice;
+pub use lattice::Sent as SentLattice;
+pub use structure::Sent as SentStructure;
 pub use coords::Coords;
 pub use element::Element;
 pub use structure::{Structure, CoordStructure, ElementStructure};

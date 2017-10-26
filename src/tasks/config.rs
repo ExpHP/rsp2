@@ -4,8 +4,10 @@ use ::rsp2_structure::Lattice;
 pub use ::rsp2_minimize::acgsd::Settings as Acgsd;
 
 #[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub struct Settings {
+    pub threading: Threading,
     pub potential: Potential,
     pub hack_scale: [f64; 3], // HACK
     pub layers: Option<u32>, // Number of layers, when known in advance
@@ -15,6 +17,15 @@ pub struct Settings {
 }
 
 #[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub struct EnergyPlotSettings {
+    pub threading: Threading,
+    pub phonons: Phonons,
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub struct Potential {
     // supercell for lammps.
@@ -24,6 +35,7 @@ pub struct Potential {
 }
 
 #[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub enum EigenvectorChase {
     OneByOne,
@@ -32,6 +44,7 @@ pub enum EigenvectorChase {
 }
 
 #[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub struct Phonons {
     pub symmetry_tolerance: f64,
@@ -59,4 +72,12 @@ impl SupercellSpec {
             },
         }
     }
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
+#[serde(rename_all="kebab-case")]
+pub enum Threading {
+    Lammps,
+    Rayon,
 }

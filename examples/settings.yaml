@@ -15,6 +15,7 @@ cg:
   alpha-guess-max: 1e-1
   alpha-guess-first: 1e-2
 ev-chase: one-by-one
+threading: lammps
 phonons:
   supercell: {target: [35, 35, 1]}
   symmetry-tolerance: 1e-2

@@ -5,7 +5,7 @@ pub mod disp_yaml {
     use super::Displacements;
 
     use ::std::io::prelude::*;
-    use ::rsp2_structure::{Structure, Coords};
+    use ::rsp2_structure::{Structure};
 
     mod cereal {
         #[derive(Deserialize)]
@@ -42,21 +42,20 @@ pub mod disp_yaml {
         pub mass: f64,
     }
 
-    pub fn displaced_structures<'a, M: Clone + 'a>(
-        mut structure: Structure<M>,
-        displacements: &'a [(usize, [f64; 3])],
-    ) -> Box<Iterator<Item=Structure<M>> + 'a>
+    // helper for generating displaced structures
+    pub fn apply_displacement<M: Clone>(
+        structure: &Structure<M>,
+        (atom, disp): (usize, [f64; 3]),
+    ) -> Structure<M>
     {
-        let orig_coords = structure.to_carts();
-
-        Box::new(displacements.iter().map(move |&(atom, disp)| {
-            let mut coords = orig_coords.clone();
+        let mut structure = structure.clone();
+        {
+            let coords = structure.carts_mut();
             for k in 0..3 {
                 coords[atom][k] += disp[k];
             }
-            structure.set_coords(Coords::Carts(coords));
-            structure.clone()
-        }))
+        }
+        structure
     }
 
     pub fn read<R: Read>(r: R) -> Result<DispYaml, Error>

@@ -11,6 +11,7 @@ extern crate rsp2_tempdir;
 extern crate rsp2_eigenvector_classify;
 //#[macro_use] extern crate rsp2_util_macros;
 
+extern crate rayon;
 extern crate rand;
 extern crate slice_of_array;
 extern crate serde;

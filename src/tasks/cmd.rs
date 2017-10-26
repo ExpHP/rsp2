@@ -15,9 +15,11 @@ use ::rsp2_structure::supercell::{self, SupercellToken};
 use ::rsp2_structure::{Coords, CoordStructure};
 use ::rsp2_structure::{ElementStructure};
 use ::rsp2_lammps_wrap::Lammps;
+use ::rsp2_lammps_wrap::Builder as LammpsBuilder;
+use ::rsp2_phonopy_io::cmd::Builder as PhonopyBuilder;
+
 use ::std::path::Path;
 use ::std::hash::Hash;
-use ::std::io::prelude::*;
 
 type LmpError = ::rsp2_lammps_wrap::Error;
 
@@ -35,6 +37,8 @@ pub fn run_relax_with_eigenvectors(
     original.scale_vecs(&settings.hack_scale); // HACK
     let original = original;
 
+    let lmp = make_lammps_builder(&settings.threading);
+
     ::std::fs::create_dir(&outdir)?;
     {
         // dumb/lazy solution to ensuring all output files go in the dir
@@ -49,8 +53,8 @@ pub fn run_relax_with_eigenvectors(
         // HACK to stop one iteration AFTER all non-acoustics are positive
         let mut all_ok_count = 0;
         let (structure, einfos, _evecs) = loop { // NOTE: we use break with value
-            let structure = do_relax(&settings.cg, &settings.potential, from_structure)?;
-            let (evals, evecs) = do_diagonalize(&settings.phonons, structure.clone())?;
+            let structure = do_relax(&lmp, &settings.cg, &settings.potential, from_structure)?;
+            let (evals, evecs) = do_diagonalize(&lmp, &settings.phonons, structure.clone())?;
 
             trace!("============================");
             trace!("Finished relaxation # {}", iteration);
@@ -89,6 +93,7 @@ pub fn run_relax_with_eigenvectors(
             if !bad_evs.is_empty() {
                 trace!("Chasing eigenvectors...");
                 structure = do_eigenvector_chase(
+                    &lmp,
                     &settings.ev_chase,
                     &settings.potential,
                     structure,
@@ -146,7 +151,7 @@ pub fn run_relax_with_eigenvectors(
             let energy_per_atom = {
                 let f = |structure: ElementStructure| {Ok::<_, Never>({
                     let na = structure.num_atoms() as f64;
-                    Lammps::new_carbon(uncarbon(&structure))?.compute_value()? / na
+                    lmp.initialize_carbon(uncarbon(&structure))?.compute_value()? / na
                 })};
                 let f_path = |s: &AsRef<Path>| Ok::<_, Never>(f(poscar::load(File::open(s)?)?)?);
 
@@ -166,6 +171,7 @@ pub fn run_relax_with_eigenvectors(
 })}
 
 fn do_relax(
+    lmp: &LammpsBuilder,
     cg_settings: &::config::Acgsd,
     potential_settings: &::config::Potential,
     structure: ElementStructure,
@@ -174,8 +180,7 @@ fn do_relax(
     let sc_dims = tup3(potential_settings.supercell.dim_for_unitcell(structure.lattice()));
     let (supercell, sc_token) = supercell::diagonal(sc_dims, structure);
 
-    // FIXME confusing for Lammps::new_carbon to take initial position
-    let mut lmp = Lammps::new_carbon(uncarbon(&supercell))?;
+    let mut lmp = lmp.clone().threaded(true).initialize_carbon(uncarbon(&supercell))?;
     let relaxed_flat = ::rsp2_minimize::acgsd(
         cg_settings,
         supercell.to_carts().flat(),
@@ -187,12 +192,15 @@ fn do_relax(
 })}
 
 fn do_diagonalize(
+    lmp: &LammpsBuilder,
     settings: &::config::Phonons,
     structure: ElementStructure,
 ) -> Result<(Vec<f64>, Vec<Vec<[f64; 3]>>)>
 {Ok({
+    use ::rsp2_phonopy_io::disp_yaml::apply_displacement;
+    use ::std::io::prelude::*;
 
-    let phonopy = ::rsp2_phonopy_io::cmd::Builder::new()
+    let phonopy = PhonopyBuilder::new()
         .symmetry_tolerance(settings.symmetry_tolerance)
         .conf("DISPLACEMENT_DISTANCE", format!("{:e}", settings.displacement_distance))
         .conf("DIM", {
@@ -206,22 +214,59 @@ fn do_diagonalize(
     let (superstructure, displacements, disp_token) = phonopy.displacements(structure)?;
 
     trace!("Computing forces at displacements");
-    let mut lmp = Lammps::new_carbon(superstructure.clone())?;
+
     let mut i = 0;
     let force_sets =
-        ::rsp2_phonopy_io::disp_yaml::displaced_structures(superstructure, &displacements)
-        .map(|s| Ok({
-            // TODO rayon vs lammps threads here
+        displacements.iter()
+        .map(|disp| Ok({
             i += 1;
             eprint!("\rdisp {} of {}", i, displacements.len());
-            ::std::io::stdout().flush().unwrap();
+            ::std::io::stderr().flush().unwrap();
+            let superstructure = apply_displacement(&superstructure, *disp);
 
-            lmp.set_structure(s)?;
-            let grad = lmp.compute_grad()?;
+            let grad = lmp.initialize_carbon(superstructure)?.compute_grad()?;
             let V(force) = -1.0 * v(grad.flat());
             force.nest().to_vec()
         })).collect::<Result<Vec<_>>>()?;
-    eprintln!();
+        // do the first chunk on its own
+
+    // NOTE: Here's how you *could* do them in parallel,
+    //       but attempting to do so with lammps leads to segfaults.
+    #[cfg(nope)]
+    {
+        // bigger chunks = fewer opportunities for starved worker threads
+        // smaller chunks = more frequent visual feedback
+        const CHUNK_SIZE: usize = 100;
+        let superstructure = superstructure.send();
+        let force_sets =
+            displacements
+            .chunks(CHUNK_SIZE)
+            .enumerate()
+            .map(|(chunk_index, chunk)| {Ok({
+                let buf: Vec<_> =
+                    chunk.par_iter()
+                    .map(|&disp| {Ok({
+                        let superstructure = superstructure.clone().recv();
+                        let superstructure = apply_displacement(&superstructure, disp);
+                        let grad = lmp.initialize_carbon(superstructure.clone())?.compute_grad()?;
+                        let V(force) = -1.0 * v(grad.flat());
+                        force.nest().to_vec()
+                    })})
+                    .collect::<Result<_>>()?;
+
+                eprintln!(
+                    "Completed {:>6} displacements (of {})",
+                    CHUNK_SIZE * (chunk_index + 1), displacements.len());
+
+                buf
+            })})
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .fold(
+                Vec::with_capacity(displacements.len()),
+                |mut acc, chunk| { acc.extend(chunk); acc }
+            );
+    }
 
     let (eval, evec) = phonopy.gamma_eigensystem(force_sets, &disp_token)?;
     let V(eval) = THZ_TO_WAVENUMBER * v(eval);
@@ -229,6 +274,7 @@ fn do_diagonalize(
 })}
 
 fn do_eigenvector_chase(
+    lmp: &LammpsBuilder,
     chase_settings: &::config::EigenvectorChase,
     potential_settings: &::config::Potential,
     mut structure: ElementStructure,
@@ -238,7 +284,7 @@ fn do_eigenvector_chase(
     match *chase_settings {
         ::config::EigenvectorChase::OneByOne => {
             for &(ref name, evec) in bad_evecs {
-                let (alpha, new_structure) = do_minimize_along_evec(potential_settings, structure, &evec[..])?;
+                let (alpha, new_structure) = do_minimize_along_evec(lmp, potential_settings, structure, &evec[..])?;
                 info!("Optimized along {}, a = {:e}", name, alpha);
 
                 structure = new_structure;
@@ -248,6 +294,7 @@ fn do_eigenvector_chase(
         ::config::EigenvectorChase::Acgsd(ref cg_settings) => {
             let evecs: Vec<_> = bad_evecs.iter().map(|&(_, ev)| ev).collect();
             do_cg_along_evecs(
+                lmp,
                 cg_settings,
                 potential_settings,
                 structure,
@@ -258,6 +305,7 @@ fn do_eigenvector_chase(
 })}
 
 fn do_cg_along_evecs<V, I>(
+    lmp: &LammpsBuilder,
     cg_settings: &::config::Acgsd,
     potential_settings: &::config::Potential,
     structure: ElementStructure,
@@ -269,10 +317,11 @@ where
 {Ok({
     let evecs: Vec<_> = evecs.into_iter().collect();
     let refs: Vec<_> = evecs.iter().map(|x| x.as_ref()).collect();
-    _do_cg_along_evecs(cg_settings, potential_settings, structure, &refs)?
+    _do_cg_along_evecs(lmp, cg_settings, potential_settings, structure, &refs)?
 })}
 
 fn _do_cg_along_evecs(
+    lmp: &LammpsBuilder,
     cg_settings: &::config::Acgsd,
     potential_settings: &::config::Potential,
     structure: ElementStructure,
@@ -286,7 +335,7 @@ fn _do_cg_along_evecs(
     let flat_evecs: Vec<_> = evecs.iter().map(|ev| ev.flat()).collect();
     let init_pos = supercell.to_carts();
 
-    let mut lmp = Lammps::new_carbon(uncarbon(&supercell))?;
+    let mut lmp = lmp.clone().threaded(true).initialize_carbon(uncarbon(&supercell))?;
     let relaxed_flat = ::rsp2_minimize::acgsd(
         cg_settings,
         &vec![0.0; evecs.len()],
@@ -302,6 +351,7 @@ fn _do_cg_along_evecs(
 })}
 
 fn do_minimize_along_evec(
+    lmp: &LammpsBuilder,
     settings: &::config::Potential,
     structure: ElementStructure,
     evec: &[[f64; 3]],
@@ -310,7 +360,7 @@ fn do_minimize_along_evec(
     let sc_dims = tup3(settings.supercell.dim_for_unitcell(structure.lattice()));
     let (structure, sc_token) = supercell::diagonal(sc_dims, structure);
     let evec = sc_token.replicate(evec);
-    let mut lmp = Lammps::new_carbon(uncarbon(&structure))?;
+    let mut lmp = lmp.clone().threaded(true).initialize_carbon(uncarbon(&structure))?;
 
     let from_structure = structure;
     let direction = &evec[..];
@@ -462,7 +512,6 @@ mod summary {
     }
 }
 
-
 // HACK: These adapters are temporary to help the existing code
 //       (written only with carbon in mind) adapt to ElementStructure.
 #[allow(unused)]
@@ -479,6 +528,14 @@ fn uncarbon(structure: &ElementStructure) -> CoordStructure
         do something about all the carbon-specific code.  Look for calls \
         to `carbon()`");
     structure.map_metadata_to(|_| ())
+}
+
+fn make_lammps_builder(threading: &::config::Threading) -> LammpsBuilder
+{
+    let mut lmp = LammpsBuilder::new();
+    lmp.append_log("lammps.log");
+    lmp.threaded(*threading == ::config::Threading::Lammps);
+    lmp
 }
 
 fn lammps_flat_diff_fn<'a>(lmp: &'a mut Lammps)
@@ -548,14 +605,14 @@ pub fn run_symmetry_test(input: &Path) -> Result<()>
     setup_global_logger(None)?;
 
     let poscar = poscar::load(File::open(input)?)?;
-    let symmops = ::rsp2_phonopy_io::cmd::Builder::new().symmetry(&poscar)?;
+    let symmops = PhonopyBuilder::new().symmetry(&poscar)?;
     ::rsp2_structure::dumb_symmetry_test(&poscar.map_metadata_to(|_| ()), &symmops, 1e-6)?;
 })}
 
 //=================================================================
 
 pub fn get_energy_surface(
-    settings: &::config::Phonons,
+    settings: &::config::EnergyPlotSettings,
     input: &AsRef<Path>,
     outdir: &AsRef<Path>,
 ) -> Result<()>
@@ -565,6 +622,8 @@ pub fn get_energy_surface(
 
     let structure = &poscar::load(File::open(input)?)?;
 
+    let lmp = make_lammps_builder(&settings.threading);
+
     ::std::fs::create_dir(&outdir)?;
     {
         // dumb/lazy solution to ensuring all output files go in the dir
@@ -573,7 +632,7 @@ pub fn get_energy_surface(
 
         poscar::dump(File::create("./input.vasp")?, "", &structure)?;
 
-        let (evals, evecs) = do_diagonalize(settings, structure.clone())?;
+        let (evals, evecs) = do_diagonalize(&lmp, &settings.phonons, structure.clone())?;
 
         trace!("Finding layers");
         let (layers, nlayer) = ::rsp2_structure::assign_layers(&structure, &[0, 0, 1], 0.25)?;
@@ -596,24 +655,27 @@ pub fn get_energy_surface(
             }
         };
 
-        let mut lmp = Lammps::new_carbon(uncarbon(&structure))?;
         const W: usize = 200;
         const H: usize = 200;
-        let data = ::integrate_2d::integrate_two_eigenvectors::<Never,_>(
-            (W, H),
-            &structure.to_carts(),
-            (-10.0..10.0, -10.0..10.0),
-            (&shear_evecs.0, &shear_evecs.1),
-            {
-                let mut i = 0;
-                move |pos| {Ok({
-                    i += 1;
-                    eprint!("\rdatapoint {:>6} of {}", i, W * H);
-                    lmp.set_carts(&pos)?;
-                    lmp.compute_grad()?
-                })}
-            }
-        )?;
+        let data = {
+            let mut lmp = lmp.initialize_carbon(uncarbon(&structure))?;
+
+            ::integrate_2d::integrate_two_eigenvectors::<Never,_>(
+                (W, H),
+                &structure.to_carts(),
+                (-10.0..10.0, -10.0..10.0),
+                (&shear_evecs.0, &shear_evecs.1),
+                {
+                    let mut i = 0;
+                    move |pos| {Ok({
+                        i += 1;
+                        eprint!("\rdatapoint {:>6} of {}", i, W * H);
+                        lmp.set_carts(&pos)?;
+                        lmp.compute_grad()?
+                    })}
+                }
+            )?
+        };
         let chunked: Vec<_> = data.chunks(W).collect();
         ::serde_json::to_writer_pretty(File::create("out.json")?, &chunked)?;
         cwd_guard.pop()?;

@@ -127,6 +127,31 @@ impl<'a, 'b> Mul<&'b Lattice> for &'a [[f64; 3]; 3] {
     }
 }
 
+/// A Lattice that can be sent across thread boundaries.
+#[derive(Debug, Clone)]
+pub struct Sent {
+    matrix: Box<[[f64; 3]; 3]>,
+    inverse: Box<[[f64; 3]; 3]>,
+}
+
+impl Lattice {
+    pub fn send(self) -> Sent {
+        let Lattice { matrix, inverse } = self;
+        let matrix = Box::new((&*matrix).clone());
+        let inverse = Box::new((&*inverse).clone());
+        Sent { matrix, inverse }
+    }
+}
+
+impl Sent {
+    pub fn recv(self) -> Lattice {
+        let Sent { matrix, inverse } = self;
+        let matrix = matrix.into();
+        let inverse = inverse.into();
+        Lattice { matrix, inverse }
+    }
+}
+
 #[cfg(tests)]
 #[deny(unused)]
 mod tests {

@@ -28,6 +28,7 @@ pub type StdResult<T, E> = ::std::result::Result<T, E>;
 
 use ::std::os::raw::{c_void, c_int, c_double};
 use ::std::ffi::CString;
+use ::std::path::{Path, PathBuf};
 use ::slice_of_array::prelude::*;
 use ::rsp2_structure::{CoordStructure, Lattice};
 
@@ -398,14 +399,41 @@ impl<T> MaybeDirty<T> {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct Builder {
+    append_log: Option<PathBuf>,
+    threaded: bool,
+}
+
+impl Default for Builder {
+    fn default() -> Self
+    { Builder::new() }
+}
+
+impl Builder {
+    pub fn new() -> Self
+    { Builder {
+        append_log: None,
+        threaded: true,
+    }}
+
+    pub fn append_log<P: AsRef<Path>>(&mut self, path: P) -> &mut Self
+    { self.append_log = Some(path.as_ref().to_owned()); self }
+
+    pub fn threaded(&mut self, value: bool) -> &mut Self
+    { self.threaded = value; self }
+
+    pub fn initialize_carbon(&self, structure: CoordStructure) -> Result<Lammps>
+    { Lammps::from_builder_carbon(self, structure) }
+}
+
 impl Lammps {
 
-    pub fn new_carbon(structure: CoordStructure) -> Result<Lammps>
+    fn from_builder_carbon(builder: &Builder, structure: CoordStructure) -> Result<Lammps>
     {Ok({
         // Lammps script based on code from Colin Daniels.
 
         let carts = structure.to_carts();
-
 
         let lmp = ::LammpsOwner::new(&["lammps",
             "-screen", "none",
@@ -414,7 +442,7 @@ impl Lammps {
         let ptr = ::std::cell::RefCell::new(lmp);
         let me = Lammps { ptr, structure: MaybeDirty::new_dirty(structure) };
 
-        let log_file = "lammps.log";
+        if let Some(ref log_file) = builder.append_log
         {
             use ::std::io::prelude::*;
             if let Ok(mut f) =
@@ -428,13 +456,19 @@ impl Lammps {
                 let _ = writeln!(f, "---- Begin run at {}", ::chrono::Local::now());
                 let _ = writeln!(f, "---------------------------------------------");
             }
+
+            me.ptr.borrow_mut().command(
+                &format!("log {} append", log_file.display()),
+            )?;
         }
 
         me.ptr.borrow_mut().commands(&[
-            &format!("log {} append", log_file)[..],
             "package omp 0",
             "units metal",                  // Angstroms, picoseconds, eV
-            "processors * * *",             // automatic processor mapping
+            match builder.threaded {
+                true => "processors * * *",
+                false => "processors 1 1 1",
+            },
             "atom_style atomic",            // attributes to store per-atom
             "thermo_modify lost error",     // don't let atoms disappear without telling us
             "atom_modify map array",        // store all positions in an array

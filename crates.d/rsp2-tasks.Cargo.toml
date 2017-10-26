@@ -29,3 +29,4 @@ path = "lib.rs"
 !!fern
 !!itertools
 !!ansi-term
+!!rayon

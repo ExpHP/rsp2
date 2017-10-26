@@ -155,3 +155,27 @@ impl<M> Permute for Structure<M> {
         Structure { lattice, coords, meta }
     }
 }
+
+/// A Structure rendered into a form sendable across threads.
+#[derive(Debug, Clone)]
+pub struct Sent<M> {
+    pub(crate) lattice: ::lattice::Sent,
+    pub(crate) coords: Coords,
+    pub(crate) meta: Vec<M>,
+}
+
+impl<M: Send> Structure<M> {
+    pub fn send(self) -> Sent<M> {
+        let Structure { lattice, coords, meta } = self;
+        let lattice = lattice.send();
+        Sent { lattice, coords, meta }
+    }
+}
+
+impl<M: Send> Sent<M> {
+    pub fn recv(self) -> Structure<M> {
+        let Sent { lattice, coords, meta } = self;
+        let lattice = lattice.recv();
+        Structure { lattice, coords, meta }
+    }
+}
