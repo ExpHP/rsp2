@@ -46,6 +46,10 @@ def register(klass):
 
 #------------
 
+thru = lambda f: lambda g: lambda *a, **kw: f(g(*a, **kw))
+
+#------------
+
 @register
 class Gen:
     cmd = 'gen'
@@ -314,9 +318,72 @@ def ensure_test_replica_exists(test_root):
 
 #------------
 
+@register
+class Dot:
+    cmd = 'dot'
+    parser_kw = dict(
+        description="Show dependency graph."
+    )
+
+    @staticmethod
+    def configure(sub):
+        sub.add_argument('--root', action='store_true', dest='root')
+        sub.add_argument('--no-root', action='store_false', dest='root')
+        sub.set_defaults(root=False)
+
+        sub.add_argument('--no-leaves', action='store_false', dest='leaves')
+        sub.add_argument('--leaves', action='store_true', dest='leaves')
+        sub.set_defaults(leaves=True)
+
+    @staticmethod
+    def run(parser, args):
+        import matplotlib.pyplot as plt
+        import networkx as nx
+        from networkx.drawing.nx_pydot import write_dot
+        import sys
+
+        # regenerate
+        Gen.run(parser, None)
+
+        g = nx.DiGraph()
+        crates = get_internal_crates_and_paths()
+        for (crate, path) in crates.items():
+            with open(os.path.join(path, 'Cargo.toml')) as f:
+                d = toml.load(f)
+            for dep in d['dependencies']:
+                if dep in crates:
+                    g.add_edge(crate, dep)
+
+        if not args.root:
+            g.remove_node(get_root_package())
+
+        if not args.leaves:
+            leaves = [node for node in g if g.out_degree(node) == 0]
+            for node in leaves:
+                g.remove_node(node)
+
+        write_dot(g, sys.stdout)
+        plt.show()
+
+#------------
+
 def read_master_config():
     with open(MASTER_CFG_PATH) as f:
         return toml.load(f)
+
+@thru(dict)
+def get_internal_crates_and_paths():
+    d = read_master_config()
+    d = d['crates']
+    for (k, v) in d.items():
+        if isinstance(v, dict):
+            yield (k, v['path'])
+        elif isinstance(v, str):
+            yield (k, v)
+        else: assert False
+
+def get_root_package():
+    return read_master_config()['root']
 
 # set a path for one of our crates, by plaintext search
 def master_config_textual_add(lines, line, fail):

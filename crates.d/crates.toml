@@ -20,6 +20,10 @@
 # based on metadata in this file.
 
 #--------------------------------------------
+# Which crate represents the workspace?
+root = "rsp2"
+
+#--------------------------------------------
 # Specification of all crates in the workspace and their
 # paths relative to the root. The 'crates' script uses this
 # information to generate the necessary relative paths
