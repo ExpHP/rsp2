@@ -438,8 +438,9 @@ def open_tmp(path, mode='w'):
             # THIS NEVER HAPPENED
             os.unlink(f.name)
             raise
+        f.flush()
+
     # exiting the 'with' closes (but doesn't delete) the temp file
-    f.flush()
 
     # Make the new file official.
     #
