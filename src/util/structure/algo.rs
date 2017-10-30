@@ -221,6 +221,15 @@ pub(crate) mod group {
     use ::std::hash::Hash;
     use ::std::result::Result as StdResult;
 
+    // NOTE: Currently there is no "group" trait, for a couple of reasons:
+    //
+    // * Many groups will depend on some form of context, which is awkward
+    //   to work into a trait (but trivial to add to a closure).
+    // * Making the group operation as part of the type hides some
+    //   potentially important considerations.  A type may have multiple
+    //   possible choices of the group operator, and use of a homomorphism
+    //   requires selecting the right one.
+
     /// Tree representation of a finite group, with generators as leaves.
     pub(crate) struct GroupTree<G> {
         members: Vec<G>,
@@ -235,13 +244,16 @@ pub(crate) mod group {
         /// A `GroupTree<G>` constructed in this manner is guaranteed to
         /// order its elements in the same order as the input `Vec`.
         ///
-        /// Arguments of the closure should follow the convention of function
-        /// composition; `of(a, b)` should compute "`a` of `b`".
-        pub fn from_all_members<GFn>(members: Vec<G>, mut of: GFn) -> Self
+        /// In line with the library's predominantly row-centric design,
+        /// arguments of the closure are flipped from the typical mathematical
+        /// convention. `compose(a, b)` should perform *`a` followed by `b`*,
+        /// (i.e. "`b` of `a`").
+        pub fn from_all_members<GFn>(members: Vec<G>, mut compose: GFn) -> Self
         where
             G: Hash + Eq + Clone,
             GFn: FnMut(&G, &G) -> G,
         {
+            // we cannot construct the identity without any generators
             assert!(members.len() > 0, "empty groups do not exist!");
 
             let indices: ::std::collections::HashMap<G, usize> =
@@ -257,7 +269,7 @@ pub(crate) mod group {
             let mut decomps = vec![None; members.len()];
             for a in 0..members.len() {
                 for b in 0..a + 1 {
-                    let c = indices[&of(&members[a], &members[b])];
+                    let c = indices[&compose(&members[a], &members[b])];
                     if c > a {
                         decomps[c] = Some((a, b));
                     }
@@ -271,6 +283,24 @@ pub(crate) mod group {
         ///
         /// Ideally, `F` should be a function that is very expensive to
         /// compute, while `HFn` should be comparatively cheaper.
+        ///
+        /// `compose(a, b)` should compute `b of a`.
+        pub fn compute_homomorphism<H, F, HFn>(
+            &self,
+            mut compute: F,
+            mut compose: HFn,
+        ) -> Vec<H>
+        where
+            F: FnMut(&G) -> H,
+            HFn: FnMut(&H, &H) -> H,
+        {
+            self.try_compute_homomorphism(
+                |g| Ok::<_, ()>(compute(g)),
+                |a, b| Ok::<_, ()>(compose(a, b)),
+            ).unwrap()
+        }
+
+        /// `compute_homomorphism` for fallible functions.
         pub fn try_compute_homomorphism<E, H, F, HFn>(
             &self,
             mut compute: F,
@@ -314,9 +344,7 @@ pub(crate) mod group {
 
         while let Some(g) = queue.pop_front() {
             if seen.insert(g.clone()) {
-                for h in generators {
-                    queue.push_back(g_fn(&g, h));
-                }
+                queue.extend(generators.iter().map(|h| g_fn(&g, h)));
                 out.push(g);
             }
         }
@@ -334,6 +362,10 @@ pub(crate) mod perm {
     use ::Result;
     use ::util::perm::{Perm, argsort, Permute};
 
+    /// Validate that structure is symmetric under the given operators.
+    ///
+    /// Slow, and not even always correct. (the voronoi cell of the lattice
+    /// must be fully contained within one cell image in each direction)
     pub fn dumb_symmetry_test(
         structure: &CoordStructure,
         ops: &[FracOp],
@@ -398,7 +430,6 @@ pub(crate) mod perm {
     //       which could possibly allow two identical positions to be distinguished
     //       (maybe e.g. representing a defect as some superposition with a ghost)
     //       but I wouldn't want it to be the default.
-    #[allow(unused)] // FIXME
     pub(crate) fn of_spacegroup(
         prim_structure: &CoordStructure,
         ops: &[FracOp],
@@ -411,19 +442,11 @@ pub(crate) mod perm {
 
         let tree = GroupTree::from_all_members(
             ops.to_vec(),
-            |second, first| second * first,
-        );
-
-        assert_eq!(
-            ops,
-            &tree.try_compute_homomorphism(
-                |op| Ok::<_, Error>(op.clone()),
-                |second, first| Ok::<_, Error>(second * first),
-            )?[..]
+            |a, b| b * a,
         );
 
         tree.try_compute_homomorphism(
-            |op| {
+            |op| Ok::<_, Error>({
                 let to_fracs = op.transform_prim(&from_fracs);
                 let perm = of_rotation_impl(lattice, &from_fracs, &to_fracs[..], tol)?;
                 dumb_validate_equivalent(
@@ -432,11 +455,17 @@ pub(crate) mod perm {
                     &from_fracs.to_vec().permuted_by(&perm)[..],
                     tol
                 );
-                Ok::<_, Error>(perm)
-            },
-            // FIXME this works with second.permuted_by(first) but that's clearly wrong,
-            //         the error is somewhere else
-            |second, first| Ok(first.clone().permuted_by(second)),
+                perm
+            }),
+            |a, b| Ok({
+                // Flip the order, because the permutations we seek
+                //  actually come from the opposite group.
+                //
+                // i.e.  given P_a X = X R_a
+                //         and P_b X = X R_b,
+                //  one can easily show that  X R_a R_b = P_a P_b X
+                b.clone().permuted_by(a)
+            }),
         )?
     })}
 
@@ -445,7 +474,6 @@ pub(crate) mod perm {
     //       which could possibly allow two identical positions to be distinguished
     //       (maybe e.g. representing a defect as some superposition with a ghost)
     //       but I wouldn't want it to be the default.
-    #[allow(unused)] // FIXME
     pub(crate) fn of_rotation(
         structure: &CoordStructure,
         rotation: &FracRot,
@@ -512,6 +540,8 @@ pub(crate) mod perm {
 
 
     // Optimized for permutations near the identity.
+    // NOTE: Lattice must be reduced so that the voronoi cell fits
+    //       within the four unit cells around the origin
     fn brute_force_near_identity(
         lattice: &Lattice,
         from_fracs: &[[f64; 3]],
@@ -553,21 +583,14 @@ pub(crate) mod perm {
                     continue;
                 }
 
-                // FIXME use utils
-                let mut diff = [0f64; 3];
-                for k in 0..3 {
-                    diff[k] = from_fracs[from][k] - to_fracs[to][k];
-                    diff[k] -= diff[k].round();
-                }
-                let mut distance2 = 0.0;
-                for k in 0..3 {
-                    let mut diff_cart = 0.0;
-                    for l in 0..3 {
-                        diff_cart += lattice.matrix()[k][l] * diff[l];
-                    }
-                    distance2 += diff_cart * diff_cart;
-                }
+                let distance2 = {
+                    use ::rsp2_array_utils::{vec_from_fn, dot};
+                    let diff: [_; 3] = vec_from_fn(|k| from_fracs[from][k] - to_fracs[to][k]);
+                    let diff: [_; 3] = vec_from_fn(|k| diff[k] - diff[k].round());
 
+                    let cart = dot(&diff, lattice.matrix());
+                    dot(&cart, &cart)
+                };
                 if distance2 < tol * tol {
                     perm[to] = from as u32;
                     continue 'from;

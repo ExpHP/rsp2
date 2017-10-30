@@ -64,7 +64,7 @@ pub(crate) mod perm {
     use ::{Result, ErrorKind};
 
     /// Represents a reordering operation on atoms.
-    #[derive(Debug, Clone, PartialEq, Eq)]
+    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     pub(crate) struct Perm(Vec<u32>);
 
     impl Perm {
@@ -275,11 +275,11 @@ pub(crate) mod perm {
         {
             let xy = Perm::from_vec(vec![1,0,2]).unwrap();
             let zx = Perm::from_vec(vec![2,1,0]).unwrap();
-            let zxxy = Perm::from_vec(vec![2,0,1]).unwrap();
-            assert_eq!(xy.clone().permuted_by(&zx), zxxy);
+            let xyzx = Perm::from_vec(vec![2,0,1]).unwrap();
+            assert_eq!(xy.clone().permuted_by(&zx), xyzx);
             assert_eq!(
                 vec![0,1,2].permuted_by(&xy).permuted_by(&zx),
-                vec![0,1,2].permuted_by(&zxxy));
+                vec![0,1,2].permuted_by(&xyzx));
             assert_eq!(
                 vec![0,1,2].permuted_by(&xy).permuted_by(&zx),
                 vec![2,0,1]);
