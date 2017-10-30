@@ -287,7 +287,7 @@ mod tests {
             let eye = FracRot::eye();
             let generators = &*ROTATION_GENERATORS;
 
-            fn compose(a: &G, b: &G) -> G { b * a }
+            fn compose(a: &G, b: &G) -> G { a.then(b) }
             fn action(x: &X, g: &G) -> X { g.transform_prim(x) }
             let members = generate_finite_group(generators, compose);
             Data { generators, members, compose, action, eye }
@@ -298,7 +298,7 @@ mod tests {
             let eye = Perm::eye(8);
             let generators = &*VERTEX_PERM_GENERATORS;
 
-            fn compose(a: &G, b: &G) -> G { a.clone().permuted_by(&b) }
+            fn compose(a: &G, b: &G) -> G { a.then(b) }
             fn action(x: &X, g: &G) -> X { x.clone().permuted_by(g) }
             let members = generate_finite_group(generators, compose);
             Data { generators, members, compose, action, eye }

@@ -442,7 +442,7 @@ pub(crate) mod perm {
 
         let tree = GroupTree::from_all_members(
             ops.to_vec(),
-            |a, b| b * a,
+            |a, b| a.then(b),
         );
 
         tree.try_compute_homomorphism(

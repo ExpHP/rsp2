@@ -1,6 +1,5 @@
 use ::rsp2_array_utils::{dot, vec_from_fn, try_vec_from_fn, mat_from_fn, MatrixDeterminantExt};
 use ::errors::*;
-use ::std::ops::Mul;
 use ::std::rc::Rc;
 
 // NOTE: This API is in flux. Some (possibly incorrect) notes:
@@ -76,6 +75,10 @@ impl FracRot {
     pub fn eye() -> Self
     { Self { t: [[1, 0, 0], [0, 1, 0], [0, 0, 1]] } }
 
+    /// Construct from a matrix.
+    ///
+    /// The input should be a matrix `R` such that `X R^T ~ X`,
+    /// where the rows of `X` are fractional positions.
     pub fn new(mat: &[[i32; 3]; 3]) -> FracRot
     {
         assert_eq!(mat.determinant().abs(), 1);
@@ -85,6 +88,22 @@ impl FracRot {
     // transposed float matrix
     pub(crate) fn float_t(&self) -> [[f64; 3]; 3]
     { mat_from_fn(|r, c| self.t[r][c].into()) }
+}
+
+impl FracRot {
+    /// Flipped group operator.
+    ///
+    /// `a.then(b) == b.of(a)`.  The flipped order is more aligned
+    /// with this library's generally row-centric design.
+    pub fn then(&self, other: &FracRot) -> FracRot
+    {
+        // (since these are transposes, this is the natural order of application)
+        FracRot { t: dot(&self.t, &other.t) }
+    }
+
+    /// Conventional group operator.
+    pub fn of(&self, other: &FracRot) -> FracRot
+    { other.then(self) }
 }
 
 impl FracTrans {
@@ -138,23 +157,15 @@ impl FracOp {
     }
 }
 
-impl<'a, 'b> Mul<&'b FracRot> for &'a FracRot {
-    type Output = FracRot;
-
-    fn mul(self, other: &'b FracRot) -> FracRot
+impl FracOp {
+    /// Flipped group operator.
+    ///
+    /// `a.then(b) == b.of(a)`.  The flipped order is more aligned
+    /// with this library's generally row-centric design.
+    pub fn then(&self, other: &FracOp) -> FracOp
     {
-        // reverse order due to working with transpose
-        FracRot { t: dot(&other.t, &self.t) }
-    }
-}
-
-impl<'a, 'b> Mul<&'b FracOp> for &'a FracOp {
-    type Output = FracOp;
-
-    fn mul(self, other: &'b FracOp) -> FracOp
-    {
-        // reverse order due to working with transpose
-        let mut t = dot(&*other.t, &*self.t);
+        // this is the natural order of application for transposes
+        let mut t = dot(&*self.t, &*other.t);
 
         // reduce the translation for a unique representation
         for x in &mut t[3][..3] {
@@ -167,6 +178,10 @@ impl<'a, 'b> Mul<&'b FracOp> for &'a FracOp {
 
         FracOp { t: t.into() }
     }
+
+    /// Conventional group operator.
+    pub fn of(&self, other: &FracOp) -> FracOp
+    { other.then(self) }
 }
 
 impl FracRot {
@@ -217,6 +232,7 @@ mod tests {
     #[test]
     fn two_transform()
     {
+        // two operations that don't commute
         let xy = FracRot::new(&[
             [0, 1, 0],
             [1, 0, 0],
@@ -227,32 +243,32 @@ mod tests {
             [0, 1, 0],
             [1, 0, 0],
         ]);
-        let zxxy = FracRot::new(&[
+        let xyzx = FracRot::new(&[
             [0, 0, 1],
             [1, 0, 0],
             [0, 1, 0],
         ]);
-        assert_eq!(&zx * &xy, zxxy);
+        assert_eq!(xy.then(&zx), xyzx);
+        assert_eq!(zx.of(&xy), xyzx);
         assert_eq!(
             zx.transform_prim(&xy.transform_prim(&[[1., 2., 3.]])),
-            zxxy.transform_prim(&[[1., 2., 3.]]));
+            xyzx.transform_prim(&[[1., 2., 3.]]));
 
         let t = FracTrans::eye();
-        let zx = FracOp::new(&zx, &t);
         let xy = FracOp::new(&xy, &t);
-        let zxxy = FracOp::new(&zxxy, &t);
-        assert_eq!(&zx * &xy, zxxy);
+        let zx = FracOp::new(&zx, &t);
+        let xyzx = FracOp::new(&xyzx, &t);
+        assert_eq!(xy.then(&zx), xyzx);
+        assert_eq!(zx.of(&xy), xyzx);
         assert_eq!(
             zx.transform_prim(&xy.transform_prim(&[[1., 2., 3.]])),
-            zxxy.transform_prim(&[[1., 2., 3.]]));
+            xyzx.transform_prim(&[[1., 2., 3.]]));
 
     }
 
     #[test]
     fn symmop_mul()
     {
-        // FIXME should really test with things that don't commute
-        // (this is just a regression test)
         let op = FracOp::new(
             &FracRot::new(&[
                 [ 0,  1, 0],
@@ -270,6 +286,6 @@ mod tests {
             &FracTrans::from_floats(&[0., 0., 0.]).unwrap(),
         );
 
-        assert_eq!(&op * &op, square);
+        assert_eq!(op.then(&op), square);
     }
 }

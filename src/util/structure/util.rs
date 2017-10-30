@@ -133,6 +133,22 @@ pub(crate) mod perm {
         }
     }
 
+    impl Perm {
+        /// Flipped group operator.
+        ///
+        /// `a.then(b) == b.of(a)`.  The flipped order is more aligned
+        /// with this library's generally row-centric design.
+        ///
+        /// More naturally,
+        /// `x.permuted_by(a).permuted_by(b) == x.permuted_by(a.then(b))`.
+        pub fn then(&self, other: &Perm) -> Perm
+        { self.clone().permuted_by(other) }
+
+        /// Conventional group operator.
+        pub fn of(&self, other: &Perm) -> Perm
+        { other.then(self) }
+    }
+
     /// Decompose a sequence into (sorted, perm).
     ///
     /// The output will satisfy `sorted.permute_by(&perm) == original`
@@ -277,6 +293,8 @@ pub(crate) mod perm {
             let zx = Perm::from_vec(vec![2,1,0]).unwrap();
             let xyzx = Perm::from_vec(vec![2,0,1]).unwrap();
             assert_eq!(xy.clone().permuted_by(&zx), xyzx);
+            assert_eq!(xy.then(&zx), xyzx);
+            assert_eq!(zx.of(&xy), xyzx);
             assert_eq!(
                 vec![0,1,2].permuted_by(&xy).permuted_by(&zx),
                 vec![0,1,2].permuted_by(&xyzx));
