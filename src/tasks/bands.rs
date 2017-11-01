@@ -85,7 +85,8 @@ pub fn unfold_phonon<M: Eq + Hash + Clone>(
             }).sum::<f64>() * q_weight
         }).sum::<f64>();
 
-        (quotient_q_index, total / quotient_data.len() as f64)
+        // the test bra has a norm of sqrt(N); cancel that out
+        (quotient_q_index, total / superstructure.num_atoms() as f64)
     }).collect()
 }
 
@@ -185,10 +186,14 @@ fn make_direct_sum<M: Hash + Eq>(
     assert_eq!(eigenvector.len(), 3 * structure.num_atoms());
     let metas = structure.metadata();
     let mut map = HashMap::new();
+
+    // HACK
+    let eigenvector = eigenvector.iter().collect::<Vec<_>>().nest::<[_; 3]>().to_vec();
+
     for (cart, m, complex) in izip!(structure.to_carts(), metas, eigenvector) {
         for k in 0..3 {
             let key = (m, k);
-            map.entry(key).or_insert_with(|| vec![]).push((cart, complex));
+            map.entry(key).or_insert_with(|| vec![]).push((cart, complex[k]));
         }
     }
 
@@ -208,6 +213,7 @@ struct DirectSumItem {
 
 mod tests {
     use super::*;
+    use rsp2_structure::{Coords, Lattice};
 
     #[test]
     fn test_approximate_fbz_samples()
@@ -275,4 +281,185 @@ mod tests {
                 ]),
             ]);
     }
+
+    #[test]
+    fn simple_unfold()
+    {
+        use ::itertools::{Itertools, Either};
+
+        const GAMMA: [f64; 3] = [0.0, 0.0, 0.0];
+
+        fn do_it(structure: &Structure<()>, sc_vec: [i32; 3], expect_index: &[[u32; 3]], eigenvector: Vec<[f64; 3]>) {
+            let config = from_json!({
+                "fbz": "approximate",
+                "sampling": "gamma",
+            });
+            let eigenvector: Ket = eigenvector.flat().iter().map(|&r| Rect::from(r)).collect();
+            let sc_mat = [[sc_vec[0], 0, 0], [0, sc_vec[1], 0], [0, 0, sc_vec[2]]];
+            let unfolded = unfold_phonon(&config, structure, &GAMMA, eigenvector.as_ref(), &sc_mat);
+
+            let (mut ayes, mut nays) = (0.0, 0.0);
+            for &(index, p) in &unfolded {
+                match expect_index.contains(&index) {
+                    true => ayes += p,
+                    false => nays += p,
+                }
+            }
+            assert!(
+                (ayes - 1.0).abs() < 1e-6 && nays < 1e-6,
+                "{:?} {:?}", expect_index, unfolded);
+        };
+
+        //--------------------------------------------
+        // easy 1D case
+        let structure = Structure::new_coords(
+            Lattice::diagonal(&[1.0, 1.0, 4.0]),
+            Coords::Carts(vec![
+                [0.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0],
+                [0.0, 0.0, 2.0],
+                [0.0, 0.0, 3.0],
+            ]),
+        );
+        let sc_vec = [1, 1, 4];
+        let go_do_it = |expected, eigenvector|
+            do_it(&structure, sc_vec, expected, eigenvector);
+
+        go_do_it(&[[0, 0, 0]], vec![
+            [0.0, 0.0, -0.5],
+            [0.0, 0.0, -0.5],
+            [0.0, 0.0, -0.5],
+            [0.0, 0.0, -0.5],
+        ]);
+
+        go_do_it(&[[0, 0, 2]], vec![
+            [0.0, 0.0,  0.5],
+            [0.0, 0.0, -0.5],
+            [0.0, 0.0,  0.5],
+            [0.0, 0.0, -0.5],
+        ]);
+
+        go_do_it(&[[0, 0, 1], [0, 0, 3]], vec![
+            [0.0, 0.0,  0.5],
+            [0.0, 0.0,  0.5],
+            [0.0, 0.0, -0.5],
+            [0.0, 0.0, -0.5],
+        ]);
+
+        //--------------------------------------------
+        // supercell along multiple dimensions
+        let structure = Structure::new_coords(
+            Lattice::diagonal(&[2.0, 2.0, 1.0]),
+            Coords::Carts(vec![
+                [0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [1.0, 1.0, 0.0],
+            ]),
+        );
+        let sc_vec = [2, 2, 1];
+
+        let go_do_it = |expected, eigenvector|
+            do_it(&structure, sc_vec, expected, eigenvector);
+
+        let p = 8_f64.sqrt().recip();
+        go_do_it(&[[0, 0, 0]], vec![
+            [ p,  p, 0.0],
+            [ p,  p, 0.0],
+            [ p,  p, 0.0],
+            [ p,  p, 0.0],
+        ]);
+
+        let p = 8_f64.sqrt().recip();
+        go_do_it(&[[0, 1, 0]], vec![
+            [-p,  p, 0.0],
+            [ p, -p, 0.0],
+            [-p,  p, 0.0],
+            [ p, -p, 0.0],
+        ]);
+
+        let p = 8_f64.sqrt().recip();
+        go_do_it(&[[1, 1, 0]], vec![
+            [-p,  p, 0.0],
+            [ p, -p, 0.0],
+            [ p, -p, 0.0],
+            [-p,  p, 0.0],
+        ]);
+
+
+        //--------------------------------------------
+        // non-diagonal lattice
+        let structure = Structure::new_coords(
+            Lattice::new(&[
+                [1.0, 0.0, 0.0],
+                [-0.5, 0.5 * 3_f64.sqrt(), 0.0],
+                [0.0, 0.0, 1.0],
+            ]),
+            Coords::Fracs(vec![
+                [0.0, 0.0, 0.0],
+                [0.0, 0.5, 0.0],
+                [0.5, 0.0, 0.0],
+                [0.5, 0.5, 0.0],
+            ]),
+        );
+        let sc_vec = [2, 2, 1];
+
+        let go_do_it = |expected, eigenvector|
+            do_it(&structure, sc_vec, expected, eigenvector);
+
+        go_do_it(&[[1, 1, 0]], vec![
+            [0.0, 0.0, -0.5],
+            [0.0, 0.0,  0.5],
+            [0.0, 0.0,  0.5],
+            [0.0, 0.0, -0.5],
+        ]);
+
+        //--------------------------------------------
+        // primitive structure with more than one atom
+        let structure = Structure::new_coords(
+            Lattice::new(&[
+                // doubled along b
+                [1.0, 0.0, 0.0],
+                [-1.0, 1.0 * 3_f64.sqrt(), 0.0],
+                [0.0, 0.0, 1.0],
+            ]),
+            Coords::Fracs(vec![
+                // honeycomb pattern
+                [    0.0, 0.0, 0.0],
+                [1.0/3.0, 0.0, 0.0],
+                [    0.0, 0.5, 0.0],
+                [1.0/3.0, 0.5, 0.0],
+            ]),
+        );
+        let sc_vec = [1, 2, 1];
+
+        let go_do_it = |expected, eigenvector|
+            do_it(&structure, sc_vec, expected, eigenvector);
+
+        // the obvious gamma vec
+        go_do_it(&[[0, 0, 0]], vec![
+            [0.0, 0.0,  0.5],
+            [0.0, 0.0,  0.5],
+            [0.0, 0.0,  0.5],
+            [0.0, 0.0,  0.5],
+        ]);
+
+        // the less obvious gamma vec
+        // (sign only changes within the primitive cell)
+        go_do_it(&[[0, 0, 0]], vec![
+            [0.0, 0.0,  0.5],
+            [0.0, 0.0, -0.5],
+            [0.0, 0.0,  0.5],
+            [0.0, 0.0, -0.5],
+        ]);
+
+        // a non-gamma vec
+        go_do_it(&[[0, 1, 0]], vec![
+            [0.0, 0.0,  0.5],
+            [0.0, 0.0,  0.5],
+            [0.0, 0.0, -0.5],
+            [0.0, 0.0, -0.5],
+        ]);
+    }
+
 }
