@@ -61,3 +61,17 @@ mod stderr {
     pub fn log(s: &str)
     { warn!("{}", s) }
 }
+
+pub trait As3<T> {
+    fn as_3(&self) -> (&T, &T, &T);
+}
+
+impl<T> As3<T> for [T; 3] {
+    fn as_3(&self) -> (&T, &T, &T)
+    { (&self[0], &self[1], &self[2]) }
+}
+
+impl<T> As3<T> for (T, T, T) {
+    fn as_3(&self) -> (&T, &T, &T)
+    { (&self.0, &self.1, &self.2) }
+}

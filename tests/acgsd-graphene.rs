@@ -54,7 +54,8 @@ fn lammps_flat_diff_fn<'a>(lmp: &'a mut Lammps)
     })
 }
 
-#[test]
+// FIXME: slow
+//#[test]
 fn perturbed_graphene() {
     use ::rsp2_structure::{CoordStructure, Lattice, Coords, supercell};
     init_logger();
@@ -86,7 +87,9 @@ fn perturbed_graphene() {
         coords
     };
 
-    let mut lmp = rsp2_lammps_wrap::Lammps::new_carbon(superstructure).unwrap();
+    // don't multithread in tests
+    let mut lmp = rsp2_lammps_wrap::Builder::new().threaded(false)
+        .initialize_carbon(superstructure).unwrap();
 
     let mut relaxed = ::rsp2_minimize::acgsd(
         &from_json!({"stop-condition": {"grad-rms": 1e-5}}),

@@ -13,7 +13,7 @@ use ::rsp2_slice_math::{v, V, vdot};
 use ::slice_of_array::prelude::*;
 use ::rsp2_structure::supercell::{self, SupercellToken};
 use ::rsp2_structure::{Coords, CoordStructure};
-use ::rsp2_structure::{ElementStructure};
+use ::rsp2_structure::{Structure, ElementStructure};
 use ::rsp2_lammps_wrap::Lammps;
 use ::rsp2_lammps_wrap::Builder as LammpsBuilder;
 use ::rsp2_phonopy_io::cmd::Builder as PhonopyBuilder;
@@ -203,10 +203,7 @@ fn do_diagonalize(
     let phonopy = PhonopyBuilder::new()
         .symmetry_tolerance(settings.symmetry_tolerance)
         .conf("DISPLACEMENT_DISTANCE", format!("{:e}", settings.displacement_distance))
-        .conf("DIM", {
-            let (a, b, c) = tup3(settings.supercell.dim_for_unitcell(structure.lattice()));
-            format!("{} {} {}", a, b, c)
-        })
+        .supercell_dim(settings.supercell.dim_for_unitcell(structure.lattice()))
         .conf("HDF5", ".TRUE.")
         .conf("DIAG", ".FALSE.") // maybe?
         ;
@@ -224,11 +221,8 @@ fn do_diagonalize(
             ::std::io::stderr().flush().unwrap();
             let superstructure = apply_displacement(&superstructure, *disp);
 
-            let grad = lmp.initialize_carbon(superstructure)?.compute_grad()?;
-            let V(force) = -1.0 * v(grad.flat());
-            force.nest().to_vec()
+            lmp.initialize_carbon(superstructure)?.compute_force()?
         })).collect::<Result<Vec<_>>>()?;
-        // do the first chunk on its own
 
     // NOTE: Here's how you *could* do them in parallel,
     //       but attempting to do so with lammps leads to segfaults.
@@ -248,9 +242,7 @@ fn do_diagonalize(
                     .map(|&disp| {Ok({
                         let superstructure = superstructure.clone().recv();
                         let superstructure = apply_displacement(&superstructure, disp);
-                        let grad = lmp.initialize_carbon(superstructure.clone())?.compute_grad()?;
-                        let V(force) = -1.0 * v(grad.flat());
-                        force.nest().to_vec()
+                        lmp.initialize_carbon(superstructure.clone())?.compute_force()?
                     })})
                     .collect::<Result<_>>()?;
 

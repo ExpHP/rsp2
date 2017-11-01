@@ -25,4 +25,4 @@ rsp2-structure = { path = "../util/structure" }
 rsp2-structure-io = { path = "../util/structure-io" }
 rsp2-byte-tools-plus-float = { path = "../util/byte-tools-plus-float" }
 
-rsp2-kets = { version = "0.3", git = "https://github.com/ExpHP/rsp2-kets", features = ["serde"] } 
+rsp2-kets = { version = "0.3.6", git = "https://github.com/ExpHP/rsp2-kets", features = ["serde"] } 

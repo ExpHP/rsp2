@@ -21,6 +21,7 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 !!rsp2-kets
 !!slice-of-array
 !!ansi-term
+!!itertools
 
 # This is NOT a workspace anymore.
 # I don't have time to debug the RLS.

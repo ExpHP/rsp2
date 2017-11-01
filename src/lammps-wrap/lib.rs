@@ -614,16 +614,23 @@ impl Lammps {
         unsafe { self.ptr.borrow_mut().extract_compute_0d("RSP2_PE") }?
     })}
 
+    pub fn compute_force(&mut self) -> Result<Vec<[f64; 3]>>
+    {Ok({
+        self.update_computation()?;
+
+        let grad = unsafe { self.ptr.borrow_mut().gather_atoms_f("f", 3)? };
+        grad.nest().to_vec()
+    })}
+
     pub fn compute_grad(&mut self) -> Result<Vec<[f64; 3]>>
     {Ok({
         self.update_computation()?;
 
-        let grad = {
-            let mut grad = unsafe { self.ptr.borrow_mut().gather_atoms_f("f", 3)? };
-            for x in &mut grad { *x *= -1.0 };
-            grad
-        };
-        grad.nest().to_vec()
+        let mut grad = self.compute_force()?;
+        for x in grad.flat_mut() {
+            *x *= -1.0;
+        }
+        grad
     })}
 
     pub fn compute_pressure(&mut self) -> Result<[f64; 6]>

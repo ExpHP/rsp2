@@ -19,6 +19,7 @@ extern crate ansi_term;
 extern crate serde_json;
 extern crate serde_yaml;
 extern crate fern;
+extern crate rsp2_kets;
 #[macro_use] extern crate serde_derive;
 #[macro_use] extern crate log;
 #[macro_use] extern crate itertools;
@@ -29,11 +30,14 @@ mod config;
 mod logging;
 mod cmd;
 mod integrate_2d;
+mod bands;
 
 pub use ::config::Settings;
 pub use ::cmd::run_relax_with_eigenvectors;
 pub use ::cmd::run_symmetry_test;
 pub use ::cmd::get_energy_surface;
+
+pub use ::bands::unfold_phonon;
 
 // make `?` panic by default.
 // This is only a good idea for very high level code,
