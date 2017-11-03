@@ -39,8 +39,8 @@ pub mod config {
     #[derive(PartialEq, Eq, Hash)]
     #[serde(rename_all = "kebab-case")]
     pub enum IntegralType {
-        /// Only sample the gamma point.
-        Gamma,
+        /// Evenly-spaced distribution around gamma.
+        GammaCentered([u32; 3]),
         // there could be things like tetrahedron method, and monkhurst-pack...
     }
 }
@@ -67,7 +67,7 @@ pub fn unfold_phonon<M: Eq + Hash + Clone>(
     let direct_sum = make_direct_sum(superstructure, eigenvector);
 
     // for each Q in the quotient space of the two FBZs
-    quotient_data.iter().map(|&(quotient_q_index, ref ks_and_weights)| {
+    let mut out: Vec<_> = quotient_data.iter().map(|&(quotient_q_index, ref ks_and_weights)| {
 
         // integrate over the image of the supercell FBZ that corresponds to this Q
         let total = ks_and_weights.iter().map(|&(ref q_unit_frac, q_weight)| {
@@ -87,7 +87,14 @@ pub fn unfold_phonon<M: Eq + Hash + Clone>(
 
         // the test bra has a norm of sqrt(N); cancel that out
         (quotient_q_index, total / superstructure.num_atoms() as f64)
-    }).collect()
+    }).collect();
+
+    // HACK:
+    let total: f64 = out.iter().map(|&(_, p)| p).sum();
+    for &mut (_, ref mut p) in &mut out {
+        *p /= total;
+    }
+    out
 }
 
 
@@ -111,6 +118,8 @@ fn fbz_samples(
     }
 }
 
+
+
 // output has "floatly-typed" integers.
 // This uses a parallelepiped FBZ which is, strictly speaking, not correct.
 fn approximate_fbz_samples(
@@ -119,44 +128,19 @@ fn approximate_fbz_samples(
     sampling: &config::IntegralType,
 ) -> WeightMap<SuperFracQ, [u32; 3]>
 {
-    // FIXME
-    // even n gets even trickier with other types of sampling because
-    // some of the points may get distributed to opposite sides of the FBZ.
-    // In general this seems too hard to just code manually; we need
-    // a higher level abstraction for constructing these weighted integrations.
-
     match *sampling {
-        config::IntegralType::Gamma => {
-            let axis_inds: [Vec<Vec<(i32, f64)>>; 3] = vec_from_fn(|k| {
-                let d = (sc_dim[k] / 2) as i32;
-                let r = sc_dim[k] % 2;
+        config::IntegralType::GammaCentered(k_divs) => {
 
-                match r {
-                    // odd;
-                    // each image -d, -d+1, ..., d-1, d is distinct
-                    1 => (0..d+1).chain(-d..0).map(|i| vec![(i, 1.0)]).collect(),
-
-                    // even;
-                    // one of the images of gamma lies on the FBZ boundary
-                    // and must be replaced with a sum
-                    0 => {
-                        let mut out: Vec<_> = (0..d).map(|i| vec![(i, 1.0)]).collect();
-                        out.push(vec![(d, 0.5), (-d, 0.5)]);
-                        out.extend((-d+1..0).map(|i| vec![(i, 1.0)]));
-                        out
-                    },
-
-                    _ => unreachable!(),
-                }
-            });
+            let by_axis: [_; 3] =
+                vec_from_fn(|k| gamma_centered_1d_kdivs(sc_dim[k], k_divs[k]));
 
             // Behold, The Great Pyramid
             let mut out = vec![];
-            for (a_i, a_list) in axis_inds[0].iter().enumerate() {
-                for (b_i, b_list) in axis_inds[1].iter().enumerate() {
-                    for (c_i, c_list) in axis_inds[2].iter().enumerate() {
+            for &(a_i, ref a_list) in by_axis[0].iter() {
+                for &(b_i, ref b_list) in by_axis[1].iter() {
+                    for &(c_i, ref c_list) in by_axis[2].iter() {
 
-                        let index = [a_i as u32, b_i as u32, c_i as u32];
+                        let index = [a_i, b_i, c_i];
                         let mut item = vec![];
                         for &(a, wa) in a_list {
                             for &(b, wb) in b_list {
@@ -174,6 +158,100 @@ fn approximate_fbz_samples(
             out
         },
     }
+}
+
+// FIXME The implementation here is so retardedly complex,
+//       and I just don't know how to write it any nicer.
+//       (And this is *without* even taking the voronoi cell into account!!)
+//
+//       I believe (but have not confirmed) that, for our goal of projecting
+//       onto supercell BZs, we really DO need to make sure that each sample
+//       point is associated with the correct (closest) image of the supercell
+//       gamma (we cannot just use points in the half-open interval 0..1 and
+//       call it a day).  We also cannot just generate points and map them
+//       into [-0.5, 0.5] because points that land precisely on boundaries
+//       need to have their contributions split up.
+fn gamma_centered_1d_kdivs(
+    sc_dim: u32,
+    k_divs: u32,
+) -> WeightMap<f64, u32>
+{
+    // FIXME
+    // even k-divs cause one of the k-points in each BZ
+    // to be split across the boundary.
+    // This is on top of the already existing edge case of
+    // even numbers in the *supercell*.
+    assert!(k_divs % 2 == 1,
+        "even numbers with Gamma-centered not supported (yet)");
+
+    // in the common case there will be k_divs[k] equally weighted
+    //  points with offsets of  -0.5 < x < 0.5.  However, if sc_dims[k]
+    //  is even then one of the BZs is split across the boundary.
+    //  Worse yet, the split occurs directly on top of that BZ's gamma.
+    //
+    // encode this possible splitting into two sets of weights which may or may
+    // not be used from the same reference point.
+    let (lows, highs, easys) = {
+        use ::std::iter::once;
+        let m = (k_divs - 1) as i32 / 2;
+
+        // split case
+        let lows: Vec<_> = ichain!(
+            once((0.0, 0.5)),
+            (-m..-1 + 1).map(|x| (x as f64 / k_divs as f64, 1.0)),
+            // (-m..-1 + 1).map(|x| (1.0 / x as f64, 1.0)),
+        ).collect();
+
+        let highs: Vec<_> = ichain!(
+            ( 1..m + 1).map(|x| (x as f64 / k_divs as f64, 1.0)),
+            // ( 1..m + 1).map(|x| (1.0 / x as f64, 1.0)),
+            once((0.0, 0.5)),
+        ).collect();
+
+        // contiguous case
+        let easys: Vec<_> = ichain!(
+            (-m..m + 1).map(|x| (x as f64 / k_divs as f64, 1.0)),
+            // (-m..m + 1).map(|x| (match x { 0 => 0.0, x => 1.0 / x as f64 }, 1.0)),
+        ).collect();
+
+        (lows, highs, easys)
+    };
+
+    // contiguous BZs are those with gammas located at
+    //  -easy_max, -easy_max+1, ..., easy_max.
+    // This expression was simply worked out by case analysis.
+    let easy_max = ((sc_dim / 2) + (sc_dim % 2)) as i32 - 1;
+
+    let mut out = vec![];
+    // origin and BZs that lie entirely right of it
+    for n in 0..easy_max + 1 {
+        out.push(
+            easys.iter().map(|&(off, w)| (n as f64 + off, w)).collect()
+        );
+    }
+
+    match sc_dim % 2 {
+        // even supercell; handle the split BZ
+        0 => {
+            let d = (sc_dim / 2) as f64;
+            out.push(ichain!(
+                lows.iter().map(|&(off, w)| (d + off, w)),
+                highs.iter().map(|&(off, w)| (-d + off, w)),
+            ).collect());
+        },
+        1 => { },
+        _ => unreachable!(),
+    }
+
+    // BZs entirely left of the origin
+    for n in -easy_max..-1 + 1 {
+        out.push(
+            easys.iter().map(|&(off, w)| (n as f64 + off, w)).collect()
+        )
+    }
+
+    // (add indices for WeightMap)
+    out.into_iter().enumerate().map(|(i, val)| (i as u32, val)).collect()
 }
 
 /// Decompose the eigenvector into a direct sum over
@@ -211,36 +289,68 @@ struct DirectSumItem {
     eigenvector: Ket,
 }
 
+#[cfg(test)]
+#[deny(dead_code)]
 mod tests {
     use super::*;
     use rsp2_structure::{Coords, Lattice};
+    use ::std::fmt::Debug;
+
+    // trait for tests of absolute tolerance
+    trait AlmostEq: Sized {
+        fn almost_eq(tol: f64, a: &Self, b: &Self) -> bool;
+    }
+
+    impl AlmostEq for f64 {
+        fn almost_eq(tol: f64, a: &Self, b: &Self) -> bool
+        { (a - b).abs() <= tol }
+    }
+
+    impl AlmostEq for [f64; 3] {
+        fn almost_eq(tol: f64, a: &Self, b: &Self) -> bool
+        { izip!(a, b).all(|(a, b)| AlmostEq::almost_eq(tol, a, b)) }
+    }
+
+    fn assert_weight_maps_almost_eq<K:, V: >(
+        tol: f64,
+        mut a: WeightMap<K, V>,
+        mut b: WeightMap<K, V>,
+    ) where
+        K: Debug + AlmostEq + PartialOrd,
+        V: Debug + Ord,
+    {
+        a.sort_by(|x, y| x.0.cmp(&y.0));
+        b.sort_by(|x, y| x.0.cmp(&y.0));
+        for x in &mut a { x.1.sort_by(|x, y| x.partial_cmp(y).unwrap()) }
+        for x in &mut b { x.1.sort_by(|x, y| x.partial_cmp(y).unwrap()) }
+
+        let (full_a, full_b) = (a, b);
+        for (ref a, ref b) in izip!(&full_a, &full_b) {
+            assert_eq!(a.0, b.0, "\n{:?}\n{:?}", full_a, full_b);
+            for (a, b) in izip!(&a.1, &b.1) {
+                assert!(
+                    AlmostEq::almost_eq(tol, &a.0, &b.0)
+                    && AlmostEq::almost_eq(tol, &a.1, &b.1),
+                    "\n{:?}\n{:?}", full_a, full_b);
+            }
+        }
+    }
 
     #[test]
     fn test_approximate_fbz_samples()
     {
-        use super::config::IntegralType;
-
-        fn sorted_call(sc_dim: &[u32; 3], sampling: IntegralType)
-        -> WeightMap<[f64; 3], [u32; 3]>
-        {
-            let mut v = approximate_fbz_samples(&sc_dim, &sampling);
-            for &mut (_, ref mut el) in &mut v {
-                el.sort_by(|a, b| a.partial_cmp(b).unwrap());
-            }
-            v.sort_by(|a, b| a.partial_cmp(b).unwrap());
-            v
-        };
+        use super::config::IntegralType::{GammaCentered};
 
         // is our hair not on fire
-        assert_eq!(
-            sorted_call(&[1, 1, 1], IntegralType::Gamma),
+        assert_weight_maps_almost_eq(0.0,
+            approximate_fbz_samples(&[1, 1, 1], &GammaCentered([1, 1, 1])),
             vec![
                 ([0, 0, 0], vec![([0.0, 0.0, 0.0], 1.0)]),
             ]);
 
         // even dim
-        assert_eq!(
-            sorted_call(&[1, 2, 1], IntegralType::Gamma),
+        assert_weight_maps_almost_eq(0.0,
+            approximate_fbz_samples(&[1, 2, 1], &GammaCentered([1, 1, 1])),
             vec![
                 ([0, 0, 0], vec![([0.0,  0.0, 0.0], 1.0)]),
                 ([0, 1, 0], vec![
@@ -250,8 +360,8 @@ mod tests {
             ]);
 
         // odd dim
-        assert_eq!(
-            sorted_call(&[1, 3, 1], IntegralType::Gamma),
+        assert_weight_maps_almost_eq(0.0,
+            approximate_fbz_samples(&[1, 3, 1], &GammaCentered([1, 1, 1])),
             vec![
                 ([0, 0, 0], vec![([0.0,  0.0, 0.0], 1.0)]),
                 ([0, 1, 0], vec![([0.0,  1.0, 0.0], 1.0)]),
@@ -259,8 +369,8 @@ mod tests {
             ]);
 
         // multiple nontrivial dims
-        assert_eq!(
-            sorted_call(&[1, 2, 2], IntegralType::Gamma),
+        assert_weight_maps_almost_eq(0.0,
+            approximate_fbz_samples(&[1, 2, 2], &GammaCentered([1, 1, 1])),
             vec![
                 ([0, 0, 0], vec![
                     ([0.0,  0.0, 0.0], 1.0),
@@ -280,19 +390,69 @@ mod tests {
                     ([0.0,  1.0,  1.0], 0.25),
                 ]),
             ]);
+
+        // odd kdivs, odd supercell
+        let t = 1./3.;
+        assert_weight_maps_almost_eq(1e-11,
+            approximate_fbz_samples(&[1, 1, 3], &GammaCentered([1, 1, 3])),
+            vec![
+                ([0, 0, 0], vec![
+                    ([0.0, 0.0, 0.0 -   t], 1.0),
+                    ([0.0, 0.0, 0.0 + 0.0], 1.0),
+                    ([0.0, 0.0, 0.0 +   t], 1.0),
+                ]),
+                ([0, 0, 1], vec![
+                    ([0.0, 0.0, 1.0 -   t], 1.0),
+                    ([0.0, 0.0, 1.0 + 0.0], 1.0),
+                    ([0.0, 0.0, 1.0 +   t], 1.0),
+                ]),
+                ([0, 0, 2], vec![
+                    ([0.0, 0.0, -1.0 -   t], 1.0),
+                    ([0.0, 0.0, -1.0 + 0.0], 1.0),
+                    ([0.0, 0.0, -1.0 +   t], 1.0),
+                ]),
+            ]);
+
+        // odd kdivs, even supercell
+        let t = 1./3.;
+        assert_weight_maps_almost_eq(1e-11,
+            // NOTE: a supercell of 2 is not large enough to exercise all
+            //        of the code paths that add points to the output.
+            approximate_fbz_samples(&[1, 1, 4], &GammaCentered([1, 1, 3])),
+            vec![
+                ([0, 0, 0], vec![
+                    ([0.0, 0.0,  0.0 -   t], 1.0),
+                    ([0.0, 0.0,  0.0 + 0.0], 1.0),
+                    ([0.0, 0.0,  0.0 +   t], 1.0),
+                ]),
+                ([0, 0, 1], vec![
+                    ([0.0, 0.0,  1.0 -   t], 1.0),
+                    ([0.0, 0.0,  1.0 + 0.0], 1.0),
+                    ([0.0, 0.0,  1.0 +   t], 1.0),
+                ]),
+                ([0, 0, 2], vec![
+                    ([0.0, 0.0, -2.0 + 0.0], 0.5),
+                    ([0.0, 0.0, -2.0 +   t], 1.0),
+                    ([0.0, 0.0,  2.0 -   t], 1.0),
+                    ([0.0, 0.0,  2.0 - 0.0], 0.5),
+                ]),
+                ([0, 0, 3], vec![
+                    ([0.0, 0.0, -1.0 -   t], 1.0),
+                    ([0.0, 0.0, -1.0 + 0.0], 1.0),
+                    ([0.0, 0.0, -1.0 +   t], 1.0),
+                ]),
+            ]);
     }
 
     #[test]
     fn simple_unfold()
     {
-        use ::itertools::{Itertools, Either};
-
         const GAMMA: [f64; 3] = [0.0, 0.0, 0.0];
 
         fn do_it(structure: &Structure<()>, sc_vec: [i32; 3], expect_index: &[[u32; 3]], eigenvector: Vec<[f64; 3]>) {
             let config = from_json!({
                 "fbz": "approximate",
-                "sampling": "gamma",
+                "sampling": { "gamma-centered": [9, 9, 9] },
             });
             let eigenvector: Ket = eigenvector.flat().iter().map(|&r| Rect::from(r)).collect();
             let sc_mat = [[sc_vec[0], 0, 0], [0, sc_vec[1], 0], [0, 0, sc_vec[2]]];

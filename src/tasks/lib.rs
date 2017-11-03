@@ -24,6 +24,13 @@ extern crate serde_yaml;
 #[macro_use] extern crate log;
 #[macro_use] extern crate itertools;
 
+
+macro_rules! ichain {
+    ($e:expr,) => { $e.into_iter() };
+    ($e:expr, $($es:expr,)+)
+    => { $e.into_iter().chain(ichain!($($es,)+)) };
+}
+
 mod color;
 mod util;
 mod config;
