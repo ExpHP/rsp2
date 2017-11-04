@@ -11,14 +11,23 @@ pub enum Coords {
     Fracs(Vec<[f64; 3]>),
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) enum Tag { Cart, Frac }
+
 impl Coords {
     pub fn len(&self) -> usize
-    { self.as_slice().len() }
+    { self.as_slice().1.len() }
 
-    pub fn as_slice(&self) -> &[[f64; 3]]
+    pub(crate) fn as_slice(&self) -> (Tag, &[[f64; 3]])
     { match *self {
-        Coords::Carts(ref c) => c,
-        Coords::Fracs(ref c) => c,
+        Coords::Carts(ref c) => (Tag::Cart, c),
+        Coords::Fracs(ref c) => (Tag::Frac, c),
+    }}
+
+    pub(crate) fn as_mut_vec(&mut self) -> (Tag, &mut Vec<[f64; 3]>)
+    { match *self {
+        Coords::Carts(ref mut c) => (Tag::Cart, c),
+        Coords::Fracs(ref mut c) => (Tag::Frac, c),
     }}
 }
 
@@ -45,6 +54,18 @@ impl Coords {
     { match *self {
         Coords::Carts(ref c) => ::util::dot_n3_33(c, &lattice.inverse_matrix()),
         Coords::Fracs(ref c) => c.clone(),
+    }}
+
+    pub(crate) fn into_tag(self, tag: Tag, lattice: &Lattice) -> Vec<[f64; 3]>
+    { match tag {
+        Tag::Cart => self.into_carts(lattice),
+        Tag::Frac => self.into_fracs(lattice),
+    }}
+
+    pub(crate) fn to_tag(&self, tag: Tag, lattice: &Lattice) -> Vec<[f64; 3]>
+    { match tag {
+        Tag::Cart => self.to_carts(lattice),
+        Tag::Frac => self.to_fracs(lattice),
     }}
 }
 

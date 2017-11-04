@@ -32,7 +32,10 @@ impl CoordStructure {
 }
 
 impl<M> Structure<M> {
-    pub fn new(lattice: Lattice, coords: Coords, meta: Vec<M>) -> Self {
+    pub fn new<Ms>(lattice: Lattice, coords: Coords, meta: Ms) -> Self
+    where Ms: IntoIterator<Item=M>,
+    {
+        let meta: Vec<_> = meta.into_iter().collect();
         assert_eq!(coords.len(), meta.len());
         Self { lattice, coords, meta }
     }
@@ -60,6 +63,35 @@ impl<M> Structure<M> {
         let meta = self.meta.iter().map(f).collect();
         Structure { lattice, coords, meta }
     }
+
+    /// Move all data out by value.
+    ///
+    /// This operation is not guaranteed to be zero-cost.
+    pub fn into_parts(self) -> Parts<M>
+    { Parts {
+        lattice: self.lattice,
+        coords: self.coords,
+        metadata: self.meta,
+    }}
+
+    pub fn extend<Ms>(&mut self, coords: Coords, meta: Ms)
+    where Ms: IntoIterator<Item=M>,
+    {
+        let meta = meta.into_iter().collect::<Vec<_>>();
+        assert_eq!(meta.len(), coords.len());
+
+        let (my_tag, my_coords) = self.coords.as_mut_vec();
+        my_coords.extend(coords.into_tag(my_tag, &self.lattice));
+        self.meta.extend(meta);
+    }
+}
+
+/// Data moved by value out of a structure.
+#[derive(Debug, Clone)]
+pub struct Parts<M> {
+    pub lattice: Lattice,
+    pub coords: Coords,
+    pub metadata: Vec<M>,
 }
 
 /// Functions for rescaling the structure.
