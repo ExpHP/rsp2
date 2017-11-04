@@ -24,7 +24,7 @@ pub fn try_vec_from_fn<V, E, F>(f: F) -> Result<V, E>
 /// (you hear the author mumble something incomprehensible about monads)
 pub fn opt_vec_from_fn<V, F>(f: F) -> Option<V>
   where
-    V: ArrayFromFunctionExt,  
+    V: ArrayFromFunctionExt,
     F: FnMut(usize) -> Option<V::Element>,
 { V::opt_from_fn(f) }
 
@@ -130,22 +130,10 @@ impl<V: IsArray> ArrayFoldExt for V
 { }
 
 #[cfg(test)]
+#[deny(dead_code)]
 mod tests {
+    use ::test_util::PushDrop;
     use std::cell::RefCell;
-
-    /// Pushes an element to a vector when dropped.
-    #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-    struct PushDrop<'a, T: 'a>(Option<T>, &'a RefCell<Vec<T>>);
-    impl<'a, T> PushDrop<'a, T> {
-        fn new(x: T, cell: &'a RefCell<Vec<T>>) -> Self { PushDrop(Some(x), cell) }
-    }
-
-    impl<'a, T> Drop for PushDrop<'a, T> {
-        fn drop(&mut self) {
-            let x = self.0.take().unwrap();
-            self.1.borrow_mut().push(x)
-        }
-    }
 
     #[test]
     fn try_vec_from_fn_drop() {

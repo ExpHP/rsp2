@@ -30,11 +30,17 @@ pub fn mat_from_fn<V, F>(mut f: F) -> V
 { V::from_fn(|r| V::Element::from_fn(|c| f(r, c))) }
 
 /// Extension trait for `<[[T; n]; m]>::determinant()`
+///
+/// This trait is largely an implementation detail.
+/// Prefer the free function `det` instead.
 pub trait MatrixDeterminantExt: IsSquare
   where Self::Element2d: Ring
 { fn determinant(&self) -> Self::Element2d; }
 
 /// Extension trait for `<[[T; n]; m]>::inverse()`
+///
+/// This trait is largely an implementation detail.
+/// Prefer the free function `inv` instead.
 pub trait MatrixInverseExt: IsSquare
   where Self::Element2d: Field
 { fn inverse(&self) -> Self; }
@@ -51,12 +57,12 @@ where T: PrimitiveRing,
 impl<T: Ring> MatrixDeterminantExt for nd![T; 3; 3]
 where T: PrimitiveRing,
 {
-    fn determinant(&self) -> T { 
+    fn determinant(&self) -> T {
         let destructure = |v: &[T; 3]| { (v[0], v[1], v[2]) };
         let (a0, a1, a2) = destructure(&self[0]);
         let (b0, b1, b2) = destructure(&self[1]);
         let (c0, c1, c2) = destructure(&self[2]);
-        
+
         T::zero()
         + a0 * b1 * c2
         + a1 * b2 * c0
@@ -129,3 +135,13 @@ mod tests {
         }
     }
 }
+
+/// Matrix determinant.
+pub fn det<M: MatrixDeterminantExt>(mat: &M) -> M::Element2d
+where M::Element2d: Ring,
+{ mat.determinant() }
+
+/// Matrix inverse.
+pub fn inv<M: MatrixInverseExt>(mat: &M) -> M
+where M::Element2d: Field,
+{ mat.inverse() }

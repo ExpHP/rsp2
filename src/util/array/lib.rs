@@ -8,6 +8,8 @@ mod traits;
 mod small_vec;
 mod small_mat;
 mod dot;
+mod iter;
+mod test_util;
 
 // FIXME actually put thought into the public API layout.
 
@@ -15,9 +17,10 @@ pub mod prelude {
     pub use ::MatrixDeterminantExt;
     pub use ::MatrixInverseExt;
     pub use ::ArrayFoldExt;
+    pub use ::ArrayMoveIterExt;
 }
 
-// TODO expose mat() and inv() free functions instead
+// TODO expose det() and inv() free functions instead
 pub use ::small_mat::MatrixDeterminantExt;
 pub use ::small_mat::MatrixInverseExt;
 pub use ::small_vec::ArrayFoldExt;
@@ -31,3 +34,6 @@ pub use ::small_vec::vec_from_fn;
 pub use ::small_vec::try_vec_from_fn;
 pub use ::small_vec::opt_vec_from_fn;
 pub use ::small_mat::mat_from_fn;
+
+// Iterators on arrays
+pub use ::iter::ArrayMoveIterExt;
