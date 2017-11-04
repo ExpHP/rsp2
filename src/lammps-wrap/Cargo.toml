@@ -12,7 +12,7 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 path = "lib.rs"
 
 [dependencies]
-rsp2-structure = { path = "../util/structure" }
+rsp2-structure = { path = "../structure/types" }
 lammps-sys = { version = "0.1", git = "https://github.com/ExpHP/lammps-sys" } 
 
 log = "0.3"

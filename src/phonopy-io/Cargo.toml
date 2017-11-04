@@ -21,7 +21,7 @@ slice-of-array = "0.1"
 log = "0.3"
 
 rsp2-tempdir = { path = "../util/tempdir" }
-rsp2-structure = { path = "../util/structure" }
+rsp2-structure = { path = "../structure/types" }
 rsp2-structure-io = { path = "../util/structure-io" }
 rsp2-byte-tools-plus-float = { path = "../util/byte-tools-plus-float" }
 
