@@ -110,11 +110,21 @@ class Gen:
             for (name, version) in preferred_versions.items():
                 lookup_put(name, gen_constant('{} = {}'.format(name, inline_toml(version))))
 
+            # Make all target directories symlinks to the root package's target,
+            # to help reduce duplicate build artefacts in spite of the fact that
+            # we are not a true workspace.
+            root_package_name = get_root_package(parser.error)
+
+            ensure_not_symlink(os.path.join(crates[root_package_name], 'target'))
+            for (name, path) in crates.items():
+                if name != root_package_name:
+                    maybe_ensure_target_link('.', path)
+
             # generate modified forms of each Cargo.toml
             for (name, path) in crates.items():
+
                 src_path = os.path.join(root_rel_src_toml_path(name))
                 dest_path = os.path.join(path, 'Cargo.toml')
-
                 with open(src_path) as f:
                     lines = list(f)
 
@@ -171,6 +181,31 @@ def line_as_macro(line):
 
 def format_macro(name):
     return '!!' + name
+
+# tries to have a crate's target symlink back to the root crate's target,
+# but may fail. (no big deal)
+def maybe_ensure_target_link(root_path, crate_path):
+    path = os.path.join(crate_path, 'target')
+    dest = os.path.relpath(os.path.join(root_path, 'target'), crate_path)
+
+    # don't remove existing links unless we have to.
+    if os.path.islink(path) and os.readlink(path) == dest:
+        return
+
+    # As soon as we destroy the existing contents, we are in a race
+    #  against the RLS to recreate the directory the way WE want it.
+    rm_rf(path)
+
+    # gogogogogogogogo!!!!!!
+    try: os.symlink(dest, path)
+    except FileExistsError:
+        # Damn, the RLS probably beat us.
+        # Let it win; maybe we'll have better luck next time.
+        pass
+
+def ensure_not_symlink(path):
+    if os.path.islink(path):
+        os.unlink(path)
 
 #------------
 
@@ -540,6 +575,16 @@ def find_all_indices_of_any(needles, haystack):
     for (i, x) in enumerate(haystack):
         if x in needles:
             yield i
+
+def rm_rf(path):
+    import shutil
+    try:
+        if os.path.isdir(path):
+            shutil.rmtree(path)
+        else:
+            os.unlink(path)
+    except FileNotFoundError as e:
+        pass
 
 iife = lambda f: f()
 
