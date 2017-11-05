@@ -45,32 +45,46 @@ macro_rules! assert_matches {
     };
 }
 
-pub mod supercell;
+pub mod supercell {
+    pub use ::algo::supercell::{
+        diagonal,
+        diagonal_with,
+        OwnedMetas,
+        SupercellToken,
+    };
+}
 
-pub use lattice::Lattice;
-pub use lattice::Sent as SentLattice;
-pub use structure::Sent as SentStructure;
-pub use coords::Coords;
-pub use element::Element;
-pub use structure::{Structure, CoordStructure, ElementStructure};
+mod core;
+mod algo;
+mod oper;
+mod util;
+mod element;
+
+//---------------------------
+// private reexports
+
+// reexported for helpers like argsort and shuffle.
+use ::oper::perm;
+use ::oper::perm::{Perm, Permute};
+
+//---------------------------
+// public reexports; API
+
+pub use ::core::lattice::Lattice;
+pub use ::core::lattice::Sent as SentLattice;
+pub use ::core::structure::Sent as SentStructure;
+pub use ::core::coords::Coords;
+pub use ::core::structure::{Structure, CoordStructure, ElementStructure};
+
+pub use ::element::Element;
 
 pub use algo::layer::Layer;
 pub use algo::layer::assign_layers;
 
 // yuck. would rather not expose this yet
-pub use symmops::{FracRot, FracTrans, FracOp};
+pub use ::oper::symmops::{FracRot, FracTrans, FracOp};
 
-mod coords;
-mod structure;
-mod lattice;
-mod util;
-mod algo;
-mod symmops;
-mod element;
-
-pub use algo::perm::dumb_symmetry_test;
+pub use ::algo::find_perm::dumb_symmetry_test;
 
 pub use element::consts as consts;
 
-#[cfg(test)]
-mod octo;

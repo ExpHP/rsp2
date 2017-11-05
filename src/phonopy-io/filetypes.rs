@@ -65,7 +65,7 @@ pub mod disp_yaml {
 
         let RawDispYaml { displacements, lattice, points } = ::serde_yaml::from_reader(r)?;
 
-        let (carts, meta) =
+        let (carts, meta): (_, Vec<_>) =
             points.into_iter()
             .map(|Point { symbol, coordinates, mass }|
                 (coordinates, Meta { symbol, mass }))

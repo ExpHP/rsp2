@@ -1,5 +1,5 @@
-use ::{Lattice, Coords, Element};
-use ::util::perm::{Perm, Permute};
+use ::{Lattice, Coords, Element, SentLattice};
+use ::oper::{Perm, Permute};
 
 /// Pairs [`Coords`] together with their [`Lattice`], and metadata.
 ///
@@ -191,7 +191,7 @@ impl<M> Permute for Structure<M> {
 /// A Structure rendered into a form sendable across threads.
 #[derive(Debug, Clone)]
 pub struct Sent<M> {
-    pub(crate) lattice: ::lattice::Sent,
+    pub(crate) lattice: SentLattice,
     pub(crate) coords: Coords,
     pub(crate) meta: Vec<M>,
 }

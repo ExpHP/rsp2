@@ -58,5 +58,3 @@ pub fn __is_close(a: f64, b: f64, abs: f64, rel: f64) -> bool {
     // case for general values and NaN.
     (a - b).abs() < abs.max(rel * a.abs()).max(rel * b.abs())
 }
-
-fn main() {}

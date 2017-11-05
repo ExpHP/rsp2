@@ -1,3 +1,8 @@
+// TODO I feel this belongs in a separate crate from
+//      the structure types, where it can serve as a sort
+//      of element database. However, currently, it's not
+//      large enough to justify the effort.
+
 use ::std::collections::HashMap;
 use ::std::fmt;
 

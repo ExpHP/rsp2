@@ -17,7 +17,7 @@ rsp2-minimize = { path = "src/minimize" }
 rsp2-phonopy-io = { path = "src/phonopy-io" }
 rsp2-array-utils = { path = "src/util/array" }
 rsp2-assert-close = { path = "src/util/assert-close" }
-rsp2-structure = { path = "src/structure/types" }
+rsp2-structure = { path = "src/structure" }
 rsp2-structure-io = { path = "src/util/structure-io" }
 rsp2-slice-math = { path = "src/util/slice-math" }
 rsp2-byte-tools-plus-float = { path = "src/util/byte-tools-plus-float" }

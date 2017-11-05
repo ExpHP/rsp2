@@ -137,7 +137,7 @@ where R: Read,
         n = kounts.iter().sum();
         elements = izip!(kounts, kinds)
             .flat_map(|(c, sym)| ::std::iter::repeat(sym).take(c))
-            .collect();
+            .collect::<Vec<_>>();
     };
 
 

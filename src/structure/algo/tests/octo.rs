@@ -24,8 +24,9 @@
 //!   See https://github.com/ExpHP/rsp2/issues/1#issuecomment-340279243
 
 use ::rsp2_array_utils::{dot, vec_from_fn, mat_from_fn};
-use ::util::perm::Perm;
-use ::FracRot;
+use ::{Perm, FracRot};
+#[allow(unused)]
+use ::Permute; // FIXME I do not know why this 
 
 /// Type of positions being acted upon.
 type X = Vec<[f64; 3]>;
@@ -213,16 +214,11 @@ lazy_static! {
 
 mod tests {
     use super::*;
-    use ::util::perm::Permute;
     use ::algo::group::generate_finite_group;
 
     use ::std::fmt::Debug;
     use ::std::hash::Hash;
     use ::std::collections::HashSet;
-
-
-    #[derive(Debug)]
-    enum Never {}
 
     fn random_x() -> X
     {
@@ -527,10 +523,10 @@ mod tests {
         let perms = GroupTree::from_all_members(
             ROTATION_DATA.members.clone(),
             ROTATION_DATA.compose,
-        ).try_compute_homomorphism(
-            |g| Ok::<_, Never>(vertex_perm_from_rot(g)),
-            |a, b| Ok::<_, Never>(VERTEX_PERM_OP_DATA.compose(a, b)),
-        ).unwrap();
+        ).compute_homomorphism(
+            |g| vertex_perm_from_rot(g),
+            |a, b| VERTEX_PERM_OP_DATA.compose(a, b),
+        );
 
         // Do they correctly describe the rotations?
         for (rot, perm) in izip!(&ROTATION_DATA.members, &perms) {

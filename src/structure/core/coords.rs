@@ -1,5 +1,5 @@
 use ::Lattice;
-use ::util::perm::{Perm, Permute};
+use ::oper::{Perm, Permute};
 
 /// Wrapper type for coordinates used as input to some APIs.
 ///
@@ -62,6 +62,7 @@ impl Coords {
         Tag::Frac => self.into_fracs(lattice),
     }}
 
+    #[allow(unused)]
     pub(crate) fn to_tag(&self, tag: Tag, lattice: &Lattice) -> Vec<[f64; 3]>
     { match tag {
         Tag::Cart => self.to_carts(lattice),
