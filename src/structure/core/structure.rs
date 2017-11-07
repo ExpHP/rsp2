@@ -78,6 +78,7 @@ impl<M> Structure<M> {
     pub fn extend<Ms>(&mut self, coords: Coords, meta: Ms)
     where Ms: IntoIterator<Item=M>,
     {
+        warn!("Untested code path: 0f3b98e1-203b-4632-af21-db8a6dcb479d");
         let meta = meta.into_iter().collect::<Vec<_>>();
         assert_eq!(meta.len(), coords.len());
 
@@ -220,6 +221,7 @@ impl<M> Structure<M> {
     /// Panics if `abs(det(m)) != 1`.
     pub fn apply_unimodular(&mut self, m: &[[i32; 3]; 3])
     {
+        warn!("Untested code path: 1e58907e-ae0b-4af8-8653-f003d88c262d");
         use ::rsp2_array_utils::det;
 
         // Cartesian - not fractional - coords are preserved under unimodular transforms.
@@ -241,16 +243,14 @@ impl<M> Structure<M> {
     /// causes less of a disturbance to the positions of sites which
     /// are distant to the origin, in the case where one wishes to reduce
     /// the sites into the new unit cell afterwards.
-    pub fn use_equivalent_cell(&mut self, tol: f64, m: &[[f64; 3]; 3]) -> Result<()>
+    pub fn use_equivalent_cell(&mut self, tol: f64, target_lattice: &Lattice) -> Result<()>
     {Ok({
-        use ::rsp2_array_utils::{inv, map_mat};
-
-        // (would be nice if this test gave us the unimodular matrix...)
-        ensure!(self.lattice.is_equivalent_to(tol, &Lattice::new(m)),
-            ErrorKind::NonEquivalentLattice);
-
-        let unimodular = &self.lattice * &inv(m);
-        let unimodular = map_mat(*unimodular.matrix(), |x| x.round() as i32);
+        warn!("Untested code path: 1650857f-42df-47e4-8ff0-cdd9dcb85020");
+        let unimodular = &self.lattice * target_lattice.inverse_matrix();
+        let unimodular = match ::util::Tol(tol).unfloat_33(unimodular.matrix()) {
+            Ok(m) => m,
+            Err(_) => bail!(ErrorKind::NonEquivalentLattice(*unimodular.matrix()))
+        };
         self.apply_unimodular(&unimodular);
     })}
 

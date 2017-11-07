@@ -74,6 +74,7 @@ impl Lattice {
     //        form of my own notes on the matter somewhere. - ML
     pub fn is_equivalent_to(&self, tol: f64, other: &Lattice) -> bool
     {
+        warn!("Untested code path: ee755063-5bc7-4a44-b049-ea0b923a73c8");
         let m = dot(self.matrix(), other.inverse_matrix());
         match ::util::Tol(tol).unfloat_33(&m) {
             Ok(m) => det(&m).abs() == 1,

@@ -2,6 +2,7 @@ extern crate rsp2_array_utils;
 
 extern crate ordered_float;
 extern crate slice_of_array;
+#[macro_use] extern crate log;
 #[macro_use] extern crate itertools;
 #[macro_use] extern crate error_chain;
 #[macro_use] extern crate lazy_static;
@@ -21,9 +22,9 @@ error_chain!{
             description("Poor precision for float approximation of integer."),
             display("Not nearly an integer: {}", d),
         }
-        NonEquivalentLattice {
+        NonEquivalentLattice(a_binv: [[f64; 3]; 3]) {
             description("The new lattice is not equivalent to the original."),
-            display("The new lattice is not equivalent to the original."),
+            display("The new lattice is not equivalent to the original. (A B^-1 = {:?})", a_binv),
         }
     }
 }
