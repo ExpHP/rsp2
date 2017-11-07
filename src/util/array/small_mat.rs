@@ -1,11 +1,12 @@
-use ::traits::{Field, Ring, IsSquare};
+use ::traits::{Field, Ring, IsSquare, IsArray, WithElement};
 use ::traits::internal::{PrimitiveRing, PrimitiveFloat};
-use ::small_vec::ArrayFromFunctionExt;
+use ::small_vec::{ArrayFromFunctionExt, ArrayMapExt};
+use ::small_vec::{map_arr, try_map_arr, opt_map_arr};
 
 /// Construct a fixed-size matrix from a function on indices.
 ///
 /// Don't stare at the trait bounds for too long, just know that
-/// `V` should be a 2D array type, like `[[T; n]; m]`, and the
+/// `M` should be a 2D array type, like `[[T; n]; m]`, and the
 /// function must have the signature `fn(row: usize, col: usize) -> T`.
 ///
 /// # Examples
@@ -21,13 +22,97 @@ use ::small_vec::ArrayFromFunctionExt;
 ///     [1, 3, 9, 27],
 /// ]);
 /// ```
-pub fn mat_from_fn<V, F>(mut f: F) -> V
+pub fn mat_from_fn<M, F>(mut f: F) -> M
   where
-    // FIXME: terrible bounds for public API
-    V: ArrayFromFunctionExt + Default,
-    V::Element: ArrayFromFunctionExt + Default,
-    F: FnMut(usize, usize) -> <V::Element as ::traits::IsArray>::Element,
-{ V::from_fn(|r| V::Element::from_fn(|c| f(r, c))) }
+    // FIXME: terrible bounds for public API.
+    // (a possible fix is to make another trait, so that we can use as many type
+    //  parameters as we want in the impl, using equality constraints.)
+    M: ArrayFromFunctionExt,
+    M::Element: ArrayFromFunctionExt,
+    F: FnMut(usize, usize) -> MatrixElement!{M},
+{ M::from_fn(|r| M::Element::from_fn(|c| f(r, c))) }
+
+/// Fallibly construct a fixed-size matrix from a function on indices.
+///
+/// `M` should be a 2D array type, like `[[T; n]; m]`, and the
+/// function must have the signature `fn(row: usize, col: usize) -> Result<T, E>`.
+pub fn try_mat_from_fn<M, E, F>(mut f: F) -> Result<M, E>
+  where
+    M: ArrayFromFunctionExt,
+    M::Element: ArrayFromFunctionExt,
+    F: FnMut(usize, usize) -> Result<MatrixElement!{M}, E>,
+{ M::try_from_fn(|r| M::Element::try_from_fn(|c| f(r, c))) }
+
+/// Fallibly construct a fixed-size matrix from a function on indices.
+///
+/// `M` should be a 2D array type, like `[[T; n]; m]`, and the
+/// function must have the signature `fn(row: usize, col: usize) -> Option<T>`.
+pub fn opt_mat_from_fn<M, E, F>(mut f: F) -> Option<M>
+  where
+    M: ArrayFromFunctionExt,
+    M::Element: ArrayFromFunctionExt,
+    F: FnMut(usize, usize) -> Option<MatrixElement!{M}>,
+{ M::opt_from_fn(|r| M::Element::opt_from_fn(|c| f(r, c))) }
+
+/// Map a 2D array by value.
+///
+/// Don't look at the signature too hard, okay? Look at me.
+/// ...heyheyhey, I said *look at me!* Everything will be okay,
+/// alright? Everything will be okay.
+///
+/// `M` should be a 2D array type, like `[[A; n]; m]`,
+/// and the function must have the signature `fn(A) -> B`.
+/// It will produce a value of type `[[B; n]; m]`.
+/// Elements are mapped in row major order.
+///
+/// # Examples
+///
+/// ```
+/// use ::rsp2_array_utils::map_mat;
+///
+/// let x = [[1, 0], [0, 1]];
+///
+/// let mat = map_mat(|x| 2 * x);
+/// assert_eq!(mat, [
+///     [2, 0],
+///     [0, 2],
+/// ]);
+/// ```
+pub fn map_mat<B, M, F>(m: M, mut f: F) -> Brother!{M, Brother!{M::Element, B}}
+  where
+    // FIXME: terrible bounds for public API.
+    // (a possible fix is to make another trait, so that we can use as many type
+    //  parameters as we want in the impl, using equality constraints.)
+    M: ArrayMapExt<Brother!{<M as IsArray>::Element, B}>,
+    M::Element: ArrayMapExt<B> + WithElement<B>,
+    F: FnMut(MatrixElement!{M}) -> B,
+{ map_arr(m, |row| map_arr(row, |x| f(x))) }
+
+/// Fallibly map elements of an array, short-circuiting on the first `Err(_)`
+///
+/// `M` should be a 2D array type, like `[[A; n]; m]`,
+/// and the function must have the signature `fn(A) -> Result<B, E>`.
+/// It will produce a value of type `Result<[[B; n]; m], E>`.
+/// Elements are mapped in row major order.
+pub fn try_map_mat<B, M, E, F>(m: M, mut f: F) -> Result<Brother!{M, Brother!{M::Element, B}}, E>
+where
+    M: ArrayMapExt<Brother!{<M as IsArray>::Element, B}>,
+    M::Element: ArrayMapExt<B> + WithElement<B>,
+    F: FnMut(MatrixElement!{M}) -> Result<B, E>,
+{ try_map_arr(m, |row| try_map_arr(row, |x| f(x))) }
+
+/// Fallibly map elements of an array, short circuiting on the first `None`.
+///
+/// `M` should be a 2D array type, like `[[A; n]; m]`,
+/// and the function must have the signature `fn(A) -> Option<B>`.
+/// It will produce a value of type `Option<[[B; n]; m]>`.
+/// Elements are mapped in row major order.
+pub fn opt_map_mat<B, M, E, F>(m: M, mut f: F) -> Option<Brother!{M, Brother!{M::Element, B}}>
+where
+    M: ArrayMapExt<Brother!{<M as IsArray>::Element, B}>,
+    M::Element: ArrayMapExt<B> + WithElement<B>,
+    F: FnMut(MatrixElement!{M}) -> Option<B>,
+{ opt_map_arr(m, |row| opt_map_arr(row, |x| f(x))) }
 
 /// Extension trait for `<[[T; n]; m]>::determinant()`
 ///
@@ -44,7 +129,6 @@ pub trait MatrixDeterminantExt: IsSquare
 pub trait MatrixInverseExt: IsSquare
   where Self::Element2d: Field
 { fn inverse(&self) -> Self; }
-
 
 impl<T: Ring> MatrixDeterminantExt for nd![T; 2; 2]
 where T: PrimitiveRing,
@@ -75,7 +159,7 @@ where T: PrimitiveRing,
 
 
 impl<T: Field> MatrixInverseExt for nd![T; 2; 2]
-  where T: PrimitiveFloat,
+where T: PrimitiveFloat,
 {
     fn inverse(&self) -> Self {
         let rdet = T::one() / self.determinant();
@@ -86,7 +170,7 @@ impl<T: Field> MatrixInverseExt for nd![T; 2; 2]
 }
 
 impl<T: Field> MatrixInverseExt for nd![T; 3; 3]
-  where T: PrimitiveFloat,
+where T: PrimitiveFloat,
 {
     fn inverse(&self) -> Self {
         let cofactors: nd![_; 3; 3] = mat_from_fn(|r, c|

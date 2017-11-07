@@ -200,13 +200,20 @@ pub unsafe trait IsArray: Sized
 {
     /// `T` from the array type `[T; n]`.
     type Element;
+
     /// `n` from the array type `[T; n]`.
     fn array_len() -> usize;
-
     /// Perform the `&[T; n] -> &[T]` coercion.
     fn array_as_slice(&self) -> &[Self::Element];
     /// Perform the `&mut [T; n] -> &mut [T]` coercion.
     fn array_as_mut_slice(&mut self) -> &mut [Self::Element];
+}
+
+/// A poor-man's type family that can be used to construct
+/// the type `[B; n]` from `[A; n]`.
+pub trait WithElement<B>: IsArray {
+    /// The type `[B; n]`.
+    type Type: IsArray<Element=B> + WithElement<Self::Element, Type=Self>;
 }
 
 gen_each!{
@@ -220,13 +227,20 @@ gen_each!{
             #[inline(always)] fn array_as_slice(&self) -> &[T] { self }
             #[inline(always)] fn array_as_mut_slice(&mut self) -> &mut [T] { self }
         }
+
+        impl<A, B> WithElement<B> for [A; $n] {
+            type Type = [B; $n];
+        }
     };
 }
 
-pub unsafe trait Is2dArray: IsArray
+pub trait Is2dArray: IsArray
 { type Element2d; }
 
-unsafe impl<T, R: IsArray<Element=T>, M: IsArray<Element=R>> Is2dArray for M
+impl<M, R, T> Is2dArray for M
+where
+    R: IsArray<Element=T>,
+    M: IsArray<Element=R>,
 { type Element2d = T; }
 
 pub trait IsSquare: Is2dArray { }

@@ -7,6 +7,17 @@ macro_rules! nd {
     => { $T };
 }
 
+// Brother!{ItsBeen, TooLong}
+macro_rules! Brother {
+    ($Array: ty, $E: ty)
+    => { <$Array as WithElement<$E>>::Type };
+}
+
+macro_rules! MatrixElement {
+    ($Mat: ty)
+    => { <<$Mat>::Element as IsArray>::Element };
+}
+
 /// Higher-order macro that iterates over a cartesian product.
 ///
 /// Useful for generating impls involving opaque traits of the sort
