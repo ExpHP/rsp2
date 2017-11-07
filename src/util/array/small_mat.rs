@@ -1,7 +1,7 @@
 use ::traits::{Field, Ring, IsSquare, IsArray, WithElement};
 use ::traits::internal::{PrimitiveRing, PrimitiveFloat};
-use ::small_vec::{ArrayFromFunctionExt, ArrayMapExt};
-use ::small_vec::{map_arr, try_map_arr, opt_map_arr};
+use ::small_arr::{ArrayFromFunctionExt, ArrayMapExt};
+use ::small_arr::{map_arr, try_map_arr, opt_map_arr};
 
 /// Construct a fixed-size matrix from a function on indices.
 ///
@@ -70,9 +70,9 @@ pub fn opt_mat_from_fn<M, E, F>(mut f: F) -> Option<M>
 /// ```
 /// use ::rsp2_array_utils::map_mat;
 ///
-/// let x = [[1, 0], [0, 1]];
+/// let m = [[1, 0], [0, 1]];
 ///
-/// let mat = map_mat(|x| 2 * x);
+/// let mat = map_mat(m, |x| 2 * x);
 /// assert_eq!(mat, [
 ///     [2, 0],
 ///     [0, 2],
@@ -88,7 +88,7 @@ pub fn map_mat<B, M, F>(m: M, mut f: F) -> Brother!{M, Brother!{M::Element, B}}
     F: FnMut(MatrixElement!{M}) -> B,
 { map_arr(m, |row| map_arr(row, |x| f(x))) }
 
-/// Fallibly map elements of an array, short-circuiting on the first `Err(_)`
+/// Fallibly map elements of a matrix, short-circuiting on the first `Err(_)`
 ///
 /// `M` should be a 2D array type, like `[[A; n]; m]`,
 /// and the function must have the signature `fn(A) -> Result<B, E>`.
@@ -101,7 +101,7 @@ where
     F: FnMut(MatrixElement!{M}) -> Result<B, E>,
 { try_map_arr(m, |row| try_map_arr(row, |x| f(x))) }
 
-/// Fallibly map elements of an array, short circuiting on the first `None`.
+/// Fallibly map elements of a matrix, short circuiting on the first `None`.
 ///
 /// `M` should be a 2D array type, like `[[A; n]; m]`,
 /// and the function must have the signature `fn(A) -> Option<B>`.

@@ -1,5 +1,5 @@
 use ::rsp2_array_utils::{dot, det};
-use ::rsp2_array_utils::{vec_from_fn, try_vec_from_fn, mat_from_fn, map_mat};
+use ::rsp2_array_utils::{vec_from_fn, try_map_arr, mat_from_fn, map_mat};
 use ::errors::*;
 use ::std::rc::Rc;
 
@@ -113,7 +113,7 @@ impl FracTrans {
 
     pub fn from_floats(xs: &[f64; 3]) -> Result<FracTrans>
     {Ok({
-        FracTrans(try_vec_from_fn(|k| round_checked(xs[k] * 12.0, 1e-4))?)
+        FracTrans(try_map_arr(*xs, |x| round_checked(x * 12.0, 1e-4))?)
     })}
 
     fn float(&self) -> [f64; 3]

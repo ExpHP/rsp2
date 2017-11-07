@@ -37,7 +37,7 @@ pub fn vec_from_fn<V, F>(f: F) -> V
 { V::from_fn(f) }
 
 /// Construct an array fallibly, short-circuiting on the first Error.
-pub fn try_vec_from_fn<V, E, F>(f: F) -> Result<V, E>
+pub fn try_arr_from_fn<V, E, F>(f: F) -> Result<V, E>
   where
     V: ArrayFromFunctionExt,
     F: FnMut(usize) -> Result<V::Element, E>,
@@ -46,7 +46,7 @@ pub fn try_vec_from_fn<V, E, F>(f: F) -> Result<V, E>
 /// Construct an array fallibly, short-circuiting on the first None.
 ///
 /// (you hear the author mumble something incomprehensible about monads)
-pub fn opt_vec_from_fn<V, F>(f: F) -> Option<V>
+pub fn opt_arr_from_fn<V, F>(f: F) -> Option<V>
   where
     V: ArrayFromFunctionExt,
     F: FnMut(usize) -> Option<V::Element>,
@@ -208,13 +208,13 @@ mod tests {
 
     #[test]
     fn try_vec_from_fn_drop() {
-        use super::try_vec_from_fn;
+        use super::try_arr_from_fn;
 
         let vec = RefCell::new(vec![3, 4, 2]);
 
         // Completely construct something;
         // nothing should get dropped.
-        let arr: Result<[PushDrop<i32>; 5], ()> = try_vec_from_fn(
+        let arr: Result<[PushDrop<i32>; 5], ()> = try_arr_from_fn(
             |i| Ok(PushDrop::new(i as i32, &vec))
         );
         assert_eq!(*vec.borrow(), vec![3, 4, 2]);
@@ -222,7 +222,7 @@ mod tests {
 
         // Interrupt construction with an Err.
         // The successfully added elements should be dropped in reverse.
-        let ret: Result<[PushDrop<i32>; 5], _> = try_vec_from_fn(
+        let ret: Result<[PushDrop<i32>; 5], _> = try_arr_from_fn(
             |i| match i {
                 3 => Err("lol!"),
                 i => Ok(PushDrop::new(i as i32, &vec)),
@@ -235,7 +235,6 @@ mod tests {
     #[test]
     fn try_map_arr_drop() {
         use super::{try_map_arr, vec_from_fn};
-
 
         let vec = RefCell::new(vec![]);
         let make_arr = || -> [PushDrop<i32>; 5] {

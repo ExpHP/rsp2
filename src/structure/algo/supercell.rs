@@ -2,7 +2,7 @@ use ::{Structure, Lattice, Coords};
 use ::{Result, Error, ErrorKind};
 
 use ::ordered_float::NotNaN;
-use ::rsp2_array_utils::{dot, try_vec_from_fn};
+use ::rsp2_array_utils::{dot, try_arr_from_fn};
 
 pub fn diagonal<M>(dims: (u32,u32,u32), structure: Structure<M>)
 -> (Structure<M>, SupercellToken)
@@ -140,7 +140,7 @@ impl SupercellToken {
 
                 ::util::translate_mut_n3_n3(&mut image_carts, &neg_offsets);
 
-                out_carts.push(try_vec_from_fn(|k| {
+                out_carts.push(try_arr_from_fn(|k| {
                     // sigh
                     let not_nans = image_carts.iter().map(|v| NotNaN::new(v[k]).unwrap()).collect::<Vec<_>>();
 

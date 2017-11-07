@@ -505,6 +505,7 @@ mod tests {
         [av, bv, cv]
     }
 
+    #[cfg(nope)]
     #[test]
     fn gk_2004_test_2()
     {
