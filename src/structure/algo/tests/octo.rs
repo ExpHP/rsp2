@@ -23,7 +23,7 @@
 //!   *G*<sup>op</sup>, where the operations compose in reverse.
 //!   See https://github.com/ExpHP/rsp2/issues/1#issuecomment-340279243
 
-use ::rsp2_array_utils::{dot, map_arr, mat_from_fn};
+use ::rsp2_array_utils::{dot, map_arr};
 use ::{Perm, FracRot};
 #[allow(unused)]
 use ::Permute; // FIXME I do not know why this
@@ -87,8 +87,7 @@ impl SignedPerm {
 
     pub fn from_rot(rot: &FracRot) -> Self
     {
-        let m_t = rot.float_t();
-        let m: [[_; 3]; 3] = mat_from_fn(|r, c| m_t[c][r]);
+        let m = ::util::transpose_33(&rot.float_t());
 
         // (stupid hat trick...)
         let v: [f64; 3] = dot(&m, &[1.0, 2.0, 3.0]);

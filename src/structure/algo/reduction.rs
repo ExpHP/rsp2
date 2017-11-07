@@ -115,12 +115,7 @@ mod unimodular {
             // FIXME it feels cleaner to compute the inverse alongside
             //       the matrix rather than to do a float inversion at the end
             let floats_inv = inv(&map_mat(self.0, |x| x as f64));
-            let inverse = map_mat(floats_inv, |x| {
-                assert!((x - x.round()).abs() < 1e-6,
-                    "suspiciously non-integral value in unimodular inverse: {}", x);
-
-                x.round() as i32
-            });
+            let inverse = ::util::Tol(1e-6).unfloat_33(&floats_inv).expect("bug!");
 
             Unimodular { matrix: self.0, inverse }
         }

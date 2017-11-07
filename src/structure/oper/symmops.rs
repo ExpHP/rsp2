@@ -113,7 +113,7 @@ impl FracTrans {
 
     pub fn from_floats(xs: &[f64; 3]) -> Result<FracTrans>
     {Ok({
-        FracTrans(try_map_arr(*xs, |x| round_checked(x * 12.0, 1e-4))?)
+        FracTrans(try_map_arr(*xs, |x| ::util::Tol(1e-4).unfloat(x * 12.0))?)
     })}
 
     fn float(&self) -> [f64; 3]
@@ -203,13 +203,6 @@ impl FracOp {
         out
     }
 }
-
-fn round_checked(x: f64, tol: f64) -> Result<i32>
-{Ok({
-    let r = x.round();
-    ensure!((r - x).abs() < tol, ErrorKind::IntPrecisionError(x));
-    r as i32
-})}
 
 #[cfg(test)]
 #[deny(unused)]

@@ -1,4 +1,5 @@
 use ::{Lattice, Coords, Element, SentLattice};
+use ::errors::*;
 use ::oper::{Perm, Permute};
 
 /// Pairs [`Coords`] together with their [`Lattice`], and metadata.
@@ -185,6 +186,92 @@ impl<M> Permute for Structure<M> {
         let coords = self.coords.permuted_by(perm);
         let meta = self.meta.permuted_by(perm);
         Structure { lattice, coords, meta }
+    }
+}
+
+impl<M> Structure<M> {
+    pub fn translate_frac(&mut self, v: &[f64; 3])
+    { ::util::translate_mut_n3_3(self.fracs_mut(), v); }
+
+    pub fn translate_cart(&mut self, v: &[f64; 3])
+    { ::util::translate_mut_n3_3(self.carts_mut(), v); }
+
+    /// Applies a cartesian transformation matrix.
+    ///
+    /// This will keep fractional positions fixed
+    /// by rotating the lattice instead.
+    pub fn transform(&mut self, m: &[[f64; 3]; 3])
+    {
+        self.ensure_only_fracs();
+        self.lattice = self.lattice.transformed_by(m);
+    }
+
+    /// Take a linear combination of the lattice vectors to produce
+    /// an identical structure with a different choice of primitive cell.
+    ///
+    /// Each row of the input are integer coefficients of a lattice vector
+    /// to be used in the output.  The absolute value of the matrix
+    /// determinant must be 1.
+    ///
+    /// Cartesian coordinates are preserved.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `abs(det(m)) != 1`.
+    pub fn apply_unimodular(&mut self, m: &[[i32; 3]; 3])
+    {
+        use ::rsp2_array_utils::det;
+
+        // Cartesian - not fractional - coords are preserved under unimodular transforms.
+        self.ensure_only_carts();
+
+        assert_eq!(det(m).abs(), 1, "Matrix is not unimodular: {:?}", m);
+        self.lattice = self.lattice.linear_combination(&m);
+    }
+
+    /// Produce an identical structure (up to precision loss) represented
+    /// in terms of a different unit cell.
+    ///
+    /// The new cell is required to be equivalent to the original cell.
+    /// Otherwise, it fails with `NonEquivalentLattice.`
+    ///
+    /// Numerically speaking, the input cell will not be used exactly;
+    /// instead, the new lattice is recomputed as a linear combination of
+    /// the original lattice vectors. The expectation is that this
+    /// causes less of a disturbance to the positions of sites which
+    /// are distant to the origin, in the case where one wishes to reduce
+    /// the sites into the new unit cell afterwards.
+    pub fn use_equivalent_cell(&mut self, tol: f64, m: &[[f64; 3]; 3]) -> Result<()>
+    {Ok({
+        use ::rsp2_array_utils::{inv, map_mat};
+
+        // (would be nice if this test gave us the unimodular matrix...)
+        ensure!(self.lattice.is_equivalent_to(tol, &Lattice::new(m)),
+            ErrorKind::NonEquivalentLattice);
+
+        let unimodular = &self.lattice * &inv(m);
+        let unimodular = map_mat(*unimodular.matrix(), |x| x.round() as i32);
+        self.apply_unimodular(&unimodular);
+    })}
+
+    /// Reduces all fractional coordinates into [0.0, 1.0).
+    pub fn reduce_positions(&mut self)
+    {
+        self.reduce_positions_fast(); // -> [0.0, 1.0]
+        self.reduce_positions_fast(); // -> [0.0, 1.0)
+    }
+
+    /// Reduces all fractional coordinates into [0.0, 1.0].
+    ///
+    /// Yes, that is a doubly inclusive range.
+    /// If a coordinate is initially very small and negative,
+    /// (say, -1e-20), it will map to 1.0.
+    fn reduce_positions_fast(&mut self)
+    {
+        use ::slice_of_array::prelude::*;
+        for x in self.fracs_mut().flat_mut() {
+            *x -= x.floor();
+        }
     }
 }
 

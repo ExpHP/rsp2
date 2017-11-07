@@ -5,6 +5,7 @@ use ::{Result, ErrorKind};
 pub(crate) struct Perm(Vec<u32>);
 
 impl Perm {
+    #[allow(unused)]
     pub fn eye(n: u32) -> Perm
     { Perm((0..n).collect()) }
 
@@ -46,6 +47,7 @@ impl Perm {
     /// The inserted elements will be shifted by this permutation's length,
     /// so that they operate on an entirely independent set of data from
     /// the existing elements.
+    #[allow(unused)] // FIXME test
     pub fn append_mut(&mut self, other: &Perm)
     {
         let n = self.0.len() as u32;
@@ -73,6 +75,7 @@ impl Perm {
     }
 }
 
+#[allow(unused)]
 impl Perm {
     /// Flipped group operator.
     ///

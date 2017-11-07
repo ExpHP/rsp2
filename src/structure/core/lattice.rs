@@ -1,4 +1,4 @@
-use ::rsp2_array_utils::{inv, det, dot, map_arr};
+use ::rsp2_array_utils::{inv, det, dot, map_arr, map_mat};
 use ::std::ops::Mul;
 use ::std::rc::Rc;
 
@@ -51,6 +51,35 @@ impl Lattice {
     /// Get the (positive) volume of the lattice cell.
     pub fn volume(&self) -> f64
     { det(self.matrix()).abs() }
+
+    /// Apply a cartesian transformation to the lattice.
+    pub fn transformed_by(&self, m: &[[f64; 3]; 3]) -> Lattice
+    { self * &::util::transpose_33(m) }
+
+    /// Take an integer linear combination of the lattice vectors.
+    pub fn linear_combination(&self, coeffs: &[[i32; 3]; 3]) -> Lattice
+    { &map_mat(*coeffs, |x| x as f64) * self }
+
+    /// Test if two Lattices represent the same Bravais lattice,
+    /// in the mathematical sense. This is to say that they each
+    /// generate the same infinite set of displacement vectors.
+    ///
+    /// The row-based matrices A and B both represent the same
+    /// Bravais lattice if and only if A B^-1 is unimodular.
+    ///
+    /// tol is an absolute tolerance used to test integerness
+    /// of a float.
+    // FIXME: should probably find a source to cite for the
+    //        unimodular fact, or maybe put up some condensed
+    //        form of my own notes on the matter somewhere. - ML
+    pub fn is_equivalent_to(&self, tol: f64, other: &Lattice) -> bool
+    {
+        let m = dot(self.matrix(), other.inverse_matrix());
+        match ::util::Tol(tol).unfloat_33(&m) {
+            Ok(m) => det(&m).abs() == 1,
+            Err(_) => false,
+        }
+    }
 }
 
 /// Helper constructors

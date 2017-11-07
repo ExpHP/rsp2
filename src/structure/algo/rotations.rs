@@ -110,13 +110,8 @@ impl Context {
         unimodulars.into_iter()
             .map(move |u| map_mat(u, |x| x as f64))
             .map(|u| dot(l_inv, &dot(&u, l_mat)))
-            .map(|u| map_mat(u, |x| {
-                let rnd = x.round();
-                assert!((rnd - x).abs() > 1e-3,
-                    "suspiciously non-integral value in rotation: {}", x);
-
-                rnd as i32
-            }))
+            // FIXME: when might this fail? (bug? user error?)
+            .map(|u| ::util::Tol(1e-3).unfloat_33(&u).unwrap())
             .collect()
     }
 

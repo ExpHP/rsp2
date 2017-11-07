@@ -21,6 +21,10 @@ error_chain!{
             description("Poor precision for float approximation of integer."),
             display("Not nearly an integer: {}", d),
         }
+        NonEquivalentLattice {
+            description("The new lattice is not equivalent to the original."),
+            display("The new lattice is not equivalent to the original."),
+        }
     }
 }
 mod errors {
