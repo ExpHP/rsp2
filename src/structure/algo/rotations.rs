@@ -1,5 +1,5 @@
 use ::{Lattice, Coords};
-use ::rsp2_array_utils::{dot, det, vec_from_fn, mat_from_fn};
+use ::rsp2_array_utils::{dot, det, vec_from_fn, map_mat};
 use super::reduction::LatticeReduction;
 
 pub fn lattice_point_group(
@@ -108,12 +108,12 @@ impl Context {
         let l_mat = self.lattice.reduced().matrix();
 
         unimodulars.into_iter()
-            .map(move |u| mat_from_fn(|r, c| u[r][c] as f64))
-            .map(|u: [[_; 3]; 3]| dot(l_inv, &dot(&u, l_mat)))
-            .map(|u: [[f64; 3]; 3]| mat_from_fn(|r, c| {
-                let rnd = u[r][c].round();
-                assert!((rnd - u[r][c]).abs() > 1e-3,
-                    "suspiciously non-integral value in rotation: {}", u[r][c]);
+            .map(move |u| map_mat(u, |x| x as f64))
+            .map(|u| dot(l_inv, &dot(&u, l_mat)))
+            .map(|u| map_mat(u, |x| {
+                let rnd = x.round();
+                assert!((rnd - x).abs() > 1e-3,
+                    "suspiciously non-integral value in rotation: {}", x);
 
                 rnd as i32
             }))

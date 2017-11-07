@@ -1,4 +1,5 @@
-use ::rsp2_array_utils::{dot, vec_from_fn, try_vec_from_fn, mat_from_fn, det};
+use ::rsp2_array_utils::{dot, det};
+use ::rsp2_array_utils::{vec_from_fn, try_vec_from_fn, mat_from_fn, map_mat};
 use ::errors::*;
 use ::std::rc::Rc;
 
@@ -87,7 +88,7 @@ impl FracRot {
 
     // transposed float matrix
     pub(crate) fn float_t(&self) -> [[f64; 3]; 3]
-    { mat_from_fn(|r, c| self.t[r][c].into()) }
+    { map_mat(self.t, Into::into) }
 }
 
 impl FracRot {

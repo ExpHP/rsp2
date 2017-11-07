@@ -14,7 +14,7 @@
 
 use ::{Lattice};
 
-use ::rsp2_array_utils::{dot, det, inv, vec_from_fn, mat_from_fn, map_mat};
+use ::rsp2_array_utils::{dot, det, inv, vec_from_fn, map_mat};
 
 use ::std::cmp::Ordering;
 
@@ -115,8 +115,7 @@ mod unimodular {
             // FIXME it feels cleaner to compute the inverse alongside
             //       the matrix rather than to do a float inversion at the end
             let floats_inv = inv(&map_mat(self.0, |x| x as f64));
-            let inverse = mat_from_fn(|r, c| {
-                let x = floats_inv[r][c];
+            let inverse = map_mat(floats_inv, |x| {
                 assert!((x - x.round()).abs() < 1e-6,
                     "suspiciously non-integral value in unimodular inverse: {}", x);
 
@@ -161,8 +160,8 @@ mod state {
             let original = original.clone();
             let unimodular = unimodular.clone();
 
-            let unimodular_float: [[f64; 3]; 3] = mat_from_fn(|r, c| unimodular.0[r][c].into());
-            let lattice: [[f64; 3]; 3] = dot(&unimodular_float, original.matrix());
+            let unimodular_float = map_mat(unimodular.0, Into::into);
+            let lattice = dot(&unimodular_float, original.matrix());
 
             let abc = vec_from_fn(|k| dot(&lattice[k], &lattice[k]));
             let xyz = vec_from_fn(|k| 2.0 * dot(&lattice[(k + 1) % 3], &lattice[(k + 2) % 3]));
