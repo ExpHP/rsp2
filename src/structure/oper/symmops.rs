@@ -1,4 +1,4 @@
-use ::rsp2_array_utils::{dot, vec_from_fn, try_vec_from_fn, mat_from_fn, MatrixDeterminantExt};
+use ::rsp2_array_utils::{dot, vec_from_fn, try_vec_from_fn, mat_from_fn, det};
 use ::errors::*;
 use ::std::rc::Rc;
 
@@ -81,7 +81,7 @@ impl FracRot {
     /// where the rows of `X` are fractional positions.
     pub fn new(mat: &[[i32; 3]; 3]) -> FracRot
     {
-        assert_eq!(mat.determinant().abs(), 1);
+        assert_eq!(det(mat).abs(), 1);
         FracRot { t: mat_from_fn(|r, c| mat[c][r]) }
     }
 

@@ -14,8 +14,7 @@
 
 use ::{Lattice};
 
-use ::rsp2_array_utils::{dot, vec_from_fn, mat_from_fn};
-use ::rsp2_array_utils::{MatrixDeterminantExt, MatrixInverseExt};
+use ::rsp2_array_utils::{dot, det, inv, vec_from_fn, mat_from_fn, map_mat};
 
 use ::std::cmp::Ordering;
 
@@ -115,8 +114,7 @@ mod unimodular {
         {
             // FIXME it feels cleaner to compute the inverse alongside
             //       the matrix rather than to do a float inversion at the end
-            let floats: [[f64; 3]; 3] = mat_from_fn(|r, c| self.0[r][c] as f64);
-            let floats_inv = floats.inverse();
+            let floats_inv = inv(&map_mat(self.0, |x| x as f64));
             let inverse = mat_from_fn(|r, c| {
                 let x = floats_inv[r][c];
                 assert!((x - x.round()).abs() < 1e-6,
@@ -389,7 +387,7 @@ pub fn algorithm_b(lattice: &Lattice) -> LatticeReduction
     // Grosse-Kunstleve (2004) kept determinant positive by negating
     //  some matrices to fix the signs, which works since the dimension
     //  of 3 is odd. We'll just negate the final result instead.
-    match state.unimodular_matrix().determinant() {
+    match det(state.unimodular_matrix()) {
         1 => {},
         -1 => {
             state.change_basis(|u| {

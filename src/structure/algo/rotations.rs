@@ -1,5 +1,5 @@
 use ::{Lattice, Coords};
-use ::rsp2_array_utils::{dot, vec_from_fn, mat_from_fn, MatrixDeterminantExt};
+use ::rsp2_array_utils::{dot, det, vec_from_fn, mat_from_fn};
 use super::reduction::LatticeReduction;
 
 pub fn lattice_point_group(
@@ -82,7 +82,7 @@ impl Context {
 
                     // Most of these matrices won't be unimodular; filter them out.
                     let unimodular = [frac_0, frac_1, frac_2];
-                    if unimodular.determinant().abs() != 1 {
+                    if det(&unimodular).abs() != 1 {
                         continue;
                     }
 

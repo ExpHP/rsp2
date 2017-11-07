@@ -9,26 +9,17 @@ mod small_vec;
 mod small_mat;
 mod dot;
 mod iter;
+#[cfg(test)]
 mod test_util;
 
 // FIXME actually put thought into the public API layout.
 
-pub mod prelude {
-    pub use ::MatrixDeterminantExt;
-    pub use ::MatrixInverseExt;
-    pub use ::ArrayFoldExt;
-    pub use ::ArrayMoveIterExt;
-}
-
-// TODO expose det() and inv() free functions instead
-pub use ::small_mat::MatrixDeterminantExt;
-pub use ::small_mat::MatrixInverseExt;
 pub use ::small_mat::det;
 pub use ::small_mat::inv;
 pub use ::small_vec::ArrayFoldExt;
 
 // Matrix and vector operations on fixed-size array types.
-pub use ::traits::{Field,Ring,Semiring};
+pub use ::traits::{Field, Ring, Semiring};
 pub use ::dot::dot;
 
 // Functional operations on arrays.

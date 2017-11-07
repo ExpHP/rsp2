@@ -1,5 +1,4 @@
-use ::rsp2_array_utils::{MatrixInverseExt, MatrixDeterminantExt};
-use ::rsp2_array_utils::{dot, vec_from_fn};
+use ::rsp2_array_utils::{inv, det, dot, vec_from_fn};
 use ::std::ops::Mul;
 use ::std::rc::Rc;
 
@@ -22,7 +21,7 @@ impl PartialEq<Lattice> for Lattice {
 impl Lattice {
     /// Create a lattice from a matrix where the rows are lattice vectors.
     pub fn new(matrix: &[[f64; 3]; 3]) -> Self {
-        let inverse = Rc::new(matrix.inverse());
+        let inverse = Rc::new(inv(matrix));
         let matrix = Rc::new(*matrix);
         Self { matrix, inverse }
     }
@@ -54,7 +53,7 @@ impl Lattice {
 
     /// Get the (positive) volume of the lattice cell.
     pub fn volume(&self) -> f64
-    { self.matrix.determinant().abs() }
+    { det(self.matrix()).abs() }
 }
 
 /// Helper constructors
