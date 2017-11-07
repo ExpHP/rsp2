@@ -102,10 +102,10 @@ mod tests {
 
     #[test]
     fn drop_behavior() {
-        use ::vec_from_fn;
+        use ::arr_from_fn;
         let vec = RefCell::new(vec![]);
 
-        let arr: [PushDrop<i32>; 6] = vec_from_fn(
+        let arr: [PushDrop<i32>; 6] = arr_from_fn(
             |i| PushDrop::new(i as i32, &vec)
         );
         assert_eq!(*vec.borrow(), vec![]);

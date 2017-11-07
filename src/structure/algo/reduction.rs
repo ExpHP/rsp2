@@ -14,7 +14,7 @@
 
 use ::{Lattice};
 
-use ::rsp2_array_utils::{dot, det, inv, vec_from_fn, map_mat};
+use ::rsp2_array_utils::{dot, det, inv, arr_from_fn, map_mat};
 
 use ::std::cmp::Ordering;
 
@@ -163,8 +163,8 @@ mod state {
             let unimodular_float = map_mat(unimodular.0, Into::into);
             let lattice = dot(&unimodular_float, original.matrix());
 
-            let abc = vec_from_fn(|k| dot(&lattice[k], &lattice[k]));
-            let xyz = vec_from_fn(|k| 2.0 * dot(&lattice[(k + 1) % 3], &lattice[(k + 2) % 3]));
+            let abc = arr_from_fn(|k| dot(&lattice[k], &lattice[k]));
+            let xyz = arr_from_fn(|k| 2.0 * dot(&lattice[(k + 1) % 3], &lattice[(k + 2) % 3]));
             State { original, unimodular, lattice, abc, xyz, fuzz }
         }
 

@@ -1,4 +1,4 @@
-use ::rsp2_array_utils::{inv, det, dot, vec_from_fn};
+use ::rsp2_array_utils::{inv, det, dot, map_arr};
 use ::std::ops::Mul;
 use ::std::rc::Rc;
 
@@ -43,13 +43,10 @@ impl Lattice {
     pub fn inverse_matrix(&self) -> &[[f64; 3]; 3] { &self.inverse }
 
     pub fn lengths(&self) -> [f64; 3]
-    {
-        let quadrances = self.quadrances();
-        vec_from_fn(|k| quadrances[k].sqrt())
-    }
+    { map_arr(self.quadrances(), |x| x.sqrt()) }
 
     pub fn quadrances(&self) -> [f64; 3]
-    { vec_from_fn(|k| dot(&self.matrix[k], &self.matrix[k])) }
+    { map_arr(*self.matrix, |ref row| dot(row, row)) }
 
     /// Get the (positive) volume of the lattice cell.
     pub fn volume(&self) -> f64

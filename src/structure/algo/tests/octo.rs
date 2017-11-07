@@ -23,10 +23,10 @@
 //!   *G*<sup>op</sup>, where the operations compose in reverse.
 //!   See https://github.com/ExpHP/rsp2/issues/1#issuecomment-340279243
 
-use ::rsp2_array_utils::{dot, vec_from_fn, mat_from_fn};
+use ::rsp2_array_utils::{dot, map_arr, mat_from_fn};
 use ::{Perm, FracRot};
 #[allow(unused)]
-use ::Permute; // FIXME I do not know why this 
+use ::Permute; // FIXME I do not know why this
 
 /// Type of positions being acted upon.
 type X = Vec<[f64; 3]>;
@@ -93,8 +93,8 @@ impl SignedPerm {
         // (stupid hat trick...)
         let v: [f64; 3] = dot(&m, &[1.0, 2.0, 3.0]);
         SignedPerm {
-            signs: vec_from_fn(|k| v[k].signum() as i32),
-            perm: vec_from_fn(|k| v[k].abs() as i32 - 1),
+            signs: map_arr(v, |x| x.signum() as i32),
+            perm: map_arr(v, |x| x.abs() as i32 - 1),
         }
     }
 

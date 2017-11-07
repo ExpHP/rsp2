@@ -3,7 +3,7 @@
 //    number of generated impls.
 //  When editing this file you MUST benchmark compilation time before/after.
 
-use ::{vec_from_fn, mat_from_fn};
+use ::{arr_from_fn, mat_from_fn};
 use ::traits::{IsArray, Semiring};
 use ::traits::internal::PrimitiveSemiring;
 
@@ -51,7 +51,7 @@ gen_each!{
         {
             type Output = nd![T; $n];
             fn dot(a: &Self, b: &nd![T; $k]) -> nd![T; $n] {
-                vec_from_fn(|r| (0..$k).map(|i| a[r][i] * b[i]).sum())
+                arr_from_fn(|r| (0..$k).map(|i| a[r][i] * b[i]).sum())
             }
         }
 
@@ -61,7 +61,7 @@ gen_each!{
         {
             type Output = nd![T; $n];
             fn dot(a: &Self, b: &nd![T; $k; $n]) -> nd![T; $n] {
-                vec_from_fn(|c| (0..$k).map(|i| a[i] * b[i][c]).sum())
+                arr_from_fn(|c| (0..$k).map(|i| a[i] * b[i][c]).sum())
             }
         }
     };

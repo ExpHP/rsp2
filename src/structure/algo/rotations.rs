@@ -1,5 +1,5 @@
 use ::{Lattice, Coords};
-use ::rsp2_array_utils::{dot, det, vec_from_fn, map_mat};
+use ::rsp2_array_utils::{dot, det, map_arr, map_mat};
 use super::reduction::LatticeReduction;
 
 pub fn lattice_point_group(
@@ -58,9 +58,9 @@ impl Context {
         //
         // This gives us an *extremely* small search space for valid rotations.
         let lengths = self.lattice.reduced().lengths();
-        let choices_frac: [Vec<[i32; 3]>; 3] = vec_from_fn(|k| self.lattice_points_of_length(lengths[k]));
-        let choices_cart: [Vec<[f64; 3]>; 3] = vec_from_fn(|k| {
-                Coords::Fracs(floatify(&choices_frac[k]))
+        let choices_frac = map_arr(lengths, |x| self.lattice_points_of_length(x));
+        let choices_cart = map_arr(choices_frac.clone(), |ref choices| {
+                Coords::Fracs(floatify(choices))
                     .to_carts(self.lattice.reduced())
         });
 

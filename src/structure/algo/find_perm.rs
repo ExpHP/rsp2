@@ -37,10 +37,10 @@ fn dumb_nearest_distance(
     frac_b: &[f64; 3],
 ) -> f64
 {
-    use ::rsp2_array_utils::{vec_from_fn, dot};
+    use ::rsp2_array_utils::{arr_from_fn, dot};
     use ::Coords;
-    let diff: [_; 3] = vec_from_fn(|k| frac_a[k] - frac_b[k]);
-    let diff: [_; 3] = vec_from_fn(|k| diff[k] - diff[k].round());
+    let diff: [_; 3] = arr_from_fn(|k| frac_a[k] - frac_b[k]);
+    let diff: [_; 3] = arr_from_fn(|k| diff[k] - diff[k].round());
 
     let mut diffs = vec![];
     for &a in &[-1., 0., 1.] {
@@ -229,9 +229,9 @@ fn brute_force_near_identity(
             }
 
             let distance2 = {
-                use ::rsp2_array_utils::{vec_from_fn, dot};
-                let diff: [_; 3] = vec_from_fn(|k| from_fracs[from][k] - to_fracs[to][k]);
-                let diff: [_; 3] = vec_from_fn(|k| diff[k] - diff[k].round());
+                use ::rsp2_array_utils::{arr_from_fn, dot};
+                let diff: [_; 3] = arr_from_fn(|k| from_fracs[from][k] - to_fracs[to][k]);
+                let diff: [_; 3] = arr_from_fn(|k| diff[k] - diff[k].round());
 
                 let cart = dot(&diff, lattice.matrix());
                 dot(&cart, &cart)

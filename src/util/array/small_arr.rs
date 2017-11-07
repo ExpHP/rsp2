@@ -30,7 +30,7 @@ pub fn opt_map_arr<B, V, F>(v: V, f: F) -> Option<Brother!{V, B}>
 /// Construct an array from a function on indices.
 ///
 /// `V` should be an array type, like `[T; n]`.
-pub fn vec_from_fn<V, F>(f: F) -> V
+pub fn arr_from_fn<V, F>(f: F) -> V
   where
     V: ArrayFromFunctionExt,
     F: FnMut(usize) -> V::Element,
@@ -234,11 +234,11 @@ mod tests {
 
     #[test]
     fn try_map_arr_drop() {
-        use super::{try_map_arr, vec_from_fn};
+        use super::{try_map_arr, arr_from_fn};
 
         let vec = RefCell::new(vec![]);
         let make_arr = || -> [PushDrop<i32>; 5] {
-            vec_from_fn(|i| PushDrop::new(i as i32, &vec))
+            arr_from_fn(|i| PushDrop::new(i as i32, &vec))
         };
 
         // Completely map something;

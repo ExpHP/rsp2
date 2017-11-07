@@ -25,7 +25,7 @@ pub use ::dot::dot;
 // Functional operations on arrays.
 pub use ::small_arr::{map_arr, try_map_arr, opt_map_arr};
 pub use ::small_mat::{map_mat, try_map_mat, opt_map_mat};
-pub use ::small_arr::{vec_from_fn, try_arr_from_fn, opt_arr_from_fn};
+pub use ::small_arr::{arr_from_fn, try_arr_from_fn, opt_arr_from_fn};
 pub use ::small_mat::{mat_from_fn, try_mat_from_fn, opt_mat_from_fn};
 
 // Iterators on arrays

@@ -14,7 +14,7 @@ extern crate env_logger;
 extern crate slice_of_array;
 #[macro_use] extern crate serde_json;
 
-use ::rsp2_array_utils::vec_from_fn;
+use ::rsp2_array_utils::arr_from_fn;
 use ::slice_of_array::prelude::*;
 use ::rsp2_slice_math::{v,vnorm};
 use ::rsp2_lammps_wrap::{Lammps, Error as LmpError};
@@ -26,7 +26,7 @@ fn init_logger() {
 fn array_sum(arrs: &[[f64; 3]]) -> [f64; 3] {
     let mut acc = [0.0, 0.0, 0.0];
     for arr in arrs {
-        acc = vec_from_fn(|k| acc[k] + arr[k]);
+        acc = arr_from_fn(|k| acc[k] + arr[k]);
     }
     acc
 }
@@ -34,14 +34,14 @@ fn array_sum(arrs: &[[f64; 3]]) -> [f64; 3] {
 fn array_mean(arrs: &[[f64; 3]]) -> [f64; 3] {
     assert!(arrs.len() > 0);
     let out = array_sum(arrs);
-    vec_from_fn(|k| out[k] / arrs.len() as f64)
+    arr_from_fn(|k| out[k] / arrs.len() as f64)
 }
 
 fn remove_mean_shift(a: &mut [[f64; 3]], b: &[[f64; 3]]) {
     let shifts = v(a.flat()) - v(b.flat());
     let mean = array_mean(shifts.nest());
     for row in a {
-        *row = vec_from_fn(|k| row[k] - mean[k]);
+        *row = arr_from_fn(|k| row[k] - mean[k]);
     }
 }
 

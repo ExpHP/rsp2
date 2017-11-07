@@ -1,4 +1,4 @@
-use ::rsp2_array_utils::vec_from_fn;
+use ::rsp2_array_utils::arr_from_fn;
 use ::rsp2_structure::Lattice;
 
 pub use ::rsp2_minimize::acgsd::Settings as Acgsd;
@@ -66,7 +66,7 @@ impl SupercellSpec {
             SupercellSpec::Dim(d) => d,
             SupercellSpec::Target(targets) => {
                 let unit_lengths = prim.lengths();
-                vec_from_fn(|k| {
+                arr_from_fn(|k| {
                     (targets[k] / unit_lengths[k]).ceil().max(1.0) as u32
                 })
             },

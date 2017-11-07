@@ -1,5 +1,5 @@
 use ::rsp2_array_utils::{dot, det};
-use ::rsp2_array_utils::{vec_from_fn, try_map_arr, mat_from_fn, map_mat};
+use ::rsp2_array_utils::{map_arr, try_map_arr, mat_from_fn, map_mat};
 use ::errors::*;
 use ::std::rc::Rc;
 
@@ -117,7 +117,7 @@ impl FracTrans {
     })}
 
     fn float(&self) -> [f64; 3]
-    { vec_from_fn(|k| f64::from(self.0[k]) / 12f64) }
+    { map_arr(self.0, |x| f64::from(x) / 12f64) }
 }
 
 const FRAC_OP_EYE: [[i32; 4]; 4] = [

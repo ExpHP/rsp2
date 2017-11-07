@@ -1,6 +1,6 @@
 
 use ::rsp2_structure::Structure;
-use ::rsp2_array_utils::{vec_from_fn, dot};
+use ::rsp2_array_utils::{arr_from_fn, dot};
 use ::rsp2_kets::{Ket, KetRef, Rect};
 use ::slice_of_array::prelude::*;
 
@@ -58,7 +58,7 @@ pub fn unfold_phonon<M: Eq + Hash + Clone>(
         assert_eq!(supercell_matrix[i][j], 0, "non-diagonal supercells not supported (yet)")
     }
 
-    let sc_dim = vec_from_fn(|k| {
+    let sc_dim = arr_from_fn(|k| {
         assert!(supercell_matrix[k][k] > 0, "negative supercell not supported (yet)");
         supercell_matrix[k][k] as u32
     });
@@ -132,7 +132,7 @@ fn approximate_fbz_samples(
         config::IntegralType::GammaCentered(k_divs) => {
 
             let by_axis: [_; 3] =
-                vec_from_fn(|k| gamma_centered_1d_kdivs(sc_dim[k], k_divs[k]));
+                arr_from_fn(|k| gamma_centered_1d_kdivs(sc_dim[k], k_divs[k]));
 
             // Behold, The Great Pyramid
             let mut out = vec![];

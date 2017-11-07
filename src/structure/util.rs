@@ -18,9 +18,9 @@ pub(crate) fn dot_n3_33(coords: &[[f64; 3]], mat: &[[f64; 3]; 3]) -> Vec<[f64; 3
 #[allow(unused)]
 pub(crate) fn dot_n3_33T(coords: &[[f64; 3]], mat: &[[f64; 3]; 3]) -> Vec<[f64; 3]>
 {
-    use ::rsp2_array_utils::vec_from_fn;
+    use ::rsp2_array_utils::arr_from_fn;
     coords.iter().map(|v|
-        vec_from_fn(|c| (0..3).map(|k| v[k] * mat[c][k]).sum())
+        arr_from_fn(|c| (0..3).map(|k| v[k] * mat[c][k]).sum())
     ).collect()
 }
 
