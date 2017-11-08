@@ -29,5 +29,5 @@ fn main() {
 
     let settings = ::serde_yaml::from_reader(::std::fs::File::open(config).unwrap()).unwrap();
 
-    let _ = ::rsp2_tasks::run_relax_with_eigenvectors(&settings, &input, &outdir);
+    ::rsp2_tasks::run_relax_with_eigenvectors(&settings, &input, &outdir).unwrap();
 }

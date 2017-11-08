@@ -16,6 +16,7 @@ rsp2-lammps-wrap = { path = "../lammps-wrap" }
 rsp2-minimize = { path = "../minimize" }
 rsp2-structure = { path = "../structure" }
 rsp2-structure-io = { path = "../util/structure-io" }
+rsp2-structure-gen = { path = "../structure-gen" }
 rsp2-phonopy-io = { path = "../phonopy-io" }
 rsp2-array-utils = { path = "../util/array" }
 rsp2-slice-math = { path = "../util/slice-math" }
@@ -35,3 +36,4 @@ fern = "0.4"
 itertools = "0.7"
 ansi_term = "0.10"
 rayon = "0.8"
+error-chain = "0.11"

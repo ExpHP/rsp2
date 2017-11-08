@@ -5,12 +5,10 @@
 use ::Result;
 
 use ::rsp2_structure::{Coords, Lattice, CoordStructure};
-use ::std::path::Path;
+use ::std::io::Read;
 
-pub fn load_layers_yaml<P: AsRef<Path>>(path: P)
--> Result<Assemble>
+pub fn load_layers_yaml<R: Read>(file: R) -> Result<Assemble>
 {
-    let file = ::std::fs::File::open(path.as_ref())?;
     let cereal = ::serde_yaml::from_reader(file)?;
     assemble_from_cereal(cereal).map(|a| a)
 }
@@ -82,6 +80,7 @@ mod cereal {
         pub a: f64,
         pub lattice: [[f64; 2]; 2],
         pub layer: Vec<Layer>,
+        #[serde(default = "defaults::layer_sep")]
         pub layer_sep: Either<f64, Vec<f64>>,
         #[serde(default = "defaults::vacuum_sep")]
         pub vacuum_sep: f64,
@@ -115,8 +114,10 @@ mod cereal {
     }
 
     mod defaults {
+        use super::*;
         pub fn a() -> f64 { 1.0 }
         pub fn vacuum_sep() -> f64 { 10.0 }
+        pub fn layer_sep() -> Either<f64, Vec<f64>> { Either::A(1.0) }
         pub mod layer {
             pub fn transform() -> [[f64; 2]; 2] { [[1.0, 0.0], [0.0, 1.0]] }
             pub fn repeat() -> [i32; 2] { [1, 1] }

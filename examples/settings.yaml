@@ -1,10 +1,12 @@
 potential:
   supercell: {target: [1, 1, 1]}
-# coarse linear search gives this for all AB structures
-hack-scale:
- - 0.9833333333333333
- - 0.9833333333333333
- - 1
+scale-ranges:
+  parameter:
+    guess: 2.46
+    range: [2.38, 2.54]
+  layer-sep:
+    guess: 3.38
+    range: [3.25, 3.45]
 cg:
   stop-condition:
     any:

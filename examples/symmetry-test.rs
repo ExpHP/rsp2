@@ -13,5 +13,5 @@ fn main() {
     ).get_matches();
     let input = matches.value_of("INPUT").unwrap();
 
-    let _ = ::rsp2_tasks::run_symmetry_test(input.as_ref());
+    ::rsp2_tasks::run_symmetry_test(input.as_ref()).unwrap();
 }

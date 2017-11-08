@@ -14,3 +14,4 @@ error_chain! {
 
 mod assemble;
 pub use assemble::load_layers_yaml;
+pub use assemble::Assemble;

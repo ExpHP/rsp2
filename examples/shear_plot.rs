@@ -29,5 +29,5 @@ fn main() {
 
     let settings = ::serde_yaml::from_reader(::std::fs::File::open(config).unwrap()).unwrap();
 
-    let _ = ::rsp2_tasks::get_energy_surface(&settings, &input, &outdir);
+    ::rsp2_tasks::get_energy_surface(&settings, &input, &outdir).unwrap();
 }

@@ -4,6 +4,7 @@ extern crate rsp2_lammps_wrap;
 extern crate rsp2_minimize;
 extern crate rsp2_structure;
 extern crate rsp2_structure_io;
+extern crate rsp2_structure_gen;
 extern crate rsp2_phonopy_io;
 extern crate rsp2_array_utils;
 extern crate rsp2_slice_math;
@@ -23,6 +24,7 @@ extern crate serde_yaml;
 #[macro_use] extern crate serde_derive;
 #[macro_use] extern crate log;
 #[macro_use] extern crate itertools;
+#[macro_use] extern crate error_chain;
 
 
 macro_rules! ichain {
@@ -46,14 +48,22 @@ pub use ::cmd::get_energy_surface;
 
 pub use ::bands::unfold_phonon;
 
-// make `?` panic by default.
-// This is only a good idea for very high level code,
-//  which is exactly what this crate is supposed to be.
-pub enum Never {}
-impl<E: ::std::fmt::Display> From<E> for Never {
-    fn from(e: E) -> Never {
-        panic!("{}", e);
+error_chain! {
+    foreign_links {
+        Io(::std::io::Error);
+        Yaml(::serde_yaml::Error);
+        Json(::serde_json::Error);
+        SetLogger(::log::SetLoggerError);
+    }
+
+    links {
+        Structure(::rsp2_structure::Error, ::rsp2_structure::ErrorKind);
+        StructureIo(::rsp2_structure_io::Error, ::rsp2_structure_io::ErrorKind);
+        StructureGen(::rsp2_structure_gen::Error, ::rsp2_structure_gen::ErrorKind);
+        LammpsWrap(::rsp2_lammps_wrap::Error, ::rsp2_lammps_wrap::ErrorKind);
+        Phonopy(::rsp2_phonopy_io::Error, ::rsp2_phonopy_io::ErrorKind);
+        ExactLs(::rsp2_minimize::exact_ls::Error, ::rsp2_minimize::exact_ls::ErrorKind);
     }
 }
+
 pub type StdResult<T, E> = ::std::result::Result<T, E>;
-pub type Result<T> = StdResult<T, Never>;

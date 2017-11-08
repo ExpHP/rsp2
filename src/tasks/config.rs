@@ -9,11 +9,29 @@ pub use ::rsp2_minimize::acgsd::Settings as Acgsd;
 pub struct Settings {
     pub threading: Threading,
     pub potential: Potential,
-    pub hack_scale: [f64; 3], // HACK
+    pub scale_ranges: ScaleRanges,
     pub layers: Option<u32>, // Number of layers, when known in advance
     pub cg: Acgsd,
     pub phonons: Phonons,
     pub ev_chase: EigenvectorChase,
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub struct ScaleRanges {
+    pub parameter: ScaleRange,
+    pub layer_sep: ScaleRange,
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub struct ScaleRange {
+    pub range: (f64, f64),
+    /// A "reasonable value" that might be used while another
+    ///  parameter is optimized.
+    pub guess: Option<f64>,
 }
 
 #[derive(Serialize, Deserialize)]

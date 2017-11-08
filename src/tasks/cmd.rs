@@ -2,7 +2,7 @@
 
 const THZ_TO_WAVENUMBER: f64 = 33.35641;
 
-use ::{Never, StdResult, Result};
+use ::{StdResult, Result, Error};
 use ::config::Settings;
 use ::util::push_dir;
 use ::logging::setup_global_logger;
@@ -14,6 +14,7 @@ use ::slice_of_array::prelude::*;
 use ::rsp2_structure::supercell::{self, SupercellToken};
 use ::rsp2_structure::{Coords, CoordStructure};
 use ::rsp2_structure::{Structure, ElementStructure};
+use ::rsp2_structure_gen::Assemble;
 use ::rsp2_lammps_wrap::Lammps;
 use ::rsp2_lammps_wrap::Builder as LammpsBuilder;
 use ::rsp2_phonopy_io::cmd::Builder as PhonopyBuilder;
@@ -33,10 +34,6 @@ pub fn run_relax_with_eigenvectors(
     use ::rsp2_structure_io::poscar;
     use ::std::fs::File;
 
-    let mut original = poscar::load(File::open(input)?)?;
-    original.scale_vecs(&settings.hack_scale); // HACK
-    let original = original;
-
     let lmp = make_lammps_builder(&settings.threading);
 
     ::std::fs::create_dir(&outdir)?;
@@ -44,9 +41,22 @@ pub fn run_relax_with_eigenvectors(
         // dumb/lazy solution to ensuring all output files go in the dir
         let cwd_guard = push_dir(outdir)?;
 
-        poscar::dump(File::create("./initial.vasp")?, "", &original)?;
-
         setup_global_logger(Some(&"rsp2.log"))?;
+
+        // let mut original = poscar::load(File::open(input)?)?;
+        // original.scale_vecs(&settings.hack_scale);
+        let original = {
+            use ::rsp2_structure_gen::load_layers_yaml;
+            let builder = load_layers_yaml(File::open(input)?)?;
+            let builder = optimize_layer_parameters(
+                &settings.scale_ranges,
+                &lmp,
+                builder,
+            )?;
+            carbon(&builder.assemble())
+        };
+
+        poscar::dump(File::create("./initial.vasp")?, "", &original)?;
 
         let mut from_structure = original.clone();
         let mut iteration = 1;
@@ -80,7 +90,7 @@ pub fn run_relax_with_eigenvectors(
                 let mut file = File::create(format!("eigenvalues.{:02}", iteration))?;
                 write_eigen_info(&einfos, &mut |s| writeln!(file, "{}", s).map_err(Into::into))?;
             }
-            write_eigen_info(&einfos, &mut |s| Ok::<_, Never>(info!("{}", s)))?;
+            write_eigen_info(&einfos, &mut |s| Ok::<_, Error>(info!("{}", s)))?;
 
             let mut structure = structure;
             let bad_evs: Vec<_> = izip!(1.., &einfos, &evecs)
@@ -149,11 +159,11 @@ pub fn run_relax_with_eigenvectors(
             let modes = Modes { acoustic, shear, layer_breathing };
 
             let energy_per_atom = {
-                let f = |structure: ElementStructure| {Ok::<_, Never>({
+                let f = |structure: ElementStructure| {Ok::<_, Error>({
                     let na = structure.num_atoms() as f64;
                     lmp.initialize_carbon(uncarbon(&structure))?.compute_value()? / na
                 })};
-                let f_path = |s: &AsRef<Path>| Ok::<_, Never>(f(poscar::load(File::open(s)?)?)?);
+                let f_path = |s: &AsRef<Path>| Ok::<_, Error>(f(poscar::load(File::open(s)?)?)?);
 
                 let initial = f(original.clone())?;
                 let final_ = f(structure)?;
@@ -420,6 +430,79 @@ fn write_eigen_info(
 
 //-----------------------------------
 
+pub fn optimize_layer_parameters(
+    settings: &::config::ScaleRanges,
+    lmp: &LammpsBuilder,
+    mut builder: Assemble,
+) -> Result<Assemble>
+{Ok({
+    pub use ::rsp2_minimize::exact_ls::{Value, golden};
+    use ::config::{ScaleRanges, ScaleRange};
+    use ::std::cell::RefCell;
+
+    // full destructure so we don't miss anything
+    let ScaleRanges {
+        parameter: ScaleRange { guess: parameter_guess, range: parameter_range },
+        layer_sep: ScaleRange { guess: layer_sep_guess, range: layer_sep_range },
+    } = *settings;
+
+    let n_seps = builder.layer_seps().len();
+
+    // abuse RefCell for some DRYness
+    let builder = RefCell::new(builder);
+    {
+        let builder = &builder;
+
+        let get_value = || Ok::<_, Error>({
+            lmp.initialize_carbon(builder.borrow().assemble())?.compute_value()?
+        });
+
+        let optimizables = {
+            let mut optimizables: Vec<(_, Box<Fn(f64)>)> = vec![];
+            optimizables.push((
+                (format!("lattice parameter"), parameter_guess, parameter_range),
+                Box::new(|s| {
+                    builder.borrow_mut().scale = s;
+                }),
+            ));
+
+            for i in 0..n_seps {
+                optimizables.push((
+                    (format!("layer sep {}", i), layer_sep_guess, layer_sep_range),
+                    Box::new(move |s| {
+                        builder.borrow_mut().layer_seps()[i] = s;
+                    }),
+                ));
+            }
+            optimizables
+        };
+
+        // try to start with reasonable defaults ('guess' in config)
+        for &((_, guess, _), ref setter) in &optimizables {
+            if let Some(guess) = guess {
+                setter(guess);
+            }
+        }
+
+        // optimize them one-by-one.
+        for &((ref name, _, range), ref setter) in &optimizables {
+            trace!("Optimizing {}", name);
+
+            let best = golden(range, |a| {
+                setter(a);
+                get_value().map(Value)
+            })??; // ?!??!!!?
+
+            info!("Optimized {}: {} (from {:?})", name, best, range);
+            setter(best);
+        }
+    }
+
+    builder.into_inner()
+})}
+
+//-----------------------------------
+
 pub type EigenInfo = Vec<eigen_info::Item>;
 
 pub fn get_eigensystem_info<L: Eq + Clone + Hash>(
@@ -633,7 +716,7 @@ pub fn get_energy_surface(
         trace!("Computing eigensystem info");
         let einfos = get_eigensystem_info(&evals, &evecs, &layers);
 
-        write_eigen_info(&einfos, &mut |s| Ok::<_, Never>(info!("{}", s)))?;
+        write_eigen_info(&einfos, &mut |s| Ok::<_, Error>(info!("{}", s)))?;
 
         let shear_evecs = {
             let mut iter = einfos
@@ -652,7 +735,7 @@ pub fn get_energy_surface(
         let data = {
             let mut lmp = lmp.initialize_carbon(uncarbon(&structure))?;
 
-            ::integrate_2d::integrate_two_eigenvectors::<Never,_>(
+            ::integrate_2d::integrate_two_eigenvectors::<Error,_>(
                 (W, H),
                 &structure.to_carts(),
                 (-10.0..10.0, -10.0..10.0),
