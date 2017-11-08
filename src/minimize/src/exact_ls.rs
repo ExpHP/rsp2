@@ -142,77 +142,198 @@ fn bisect<E>(
     }
 }
 
-// Revelations:
-//  1. In common implementations of the algorithm (such as those on wikipedia)
-//     the values of the function at the endpoints are never used.
-//     Hence **it is only necessary to save one y value.**
-//     However, we save more because we don't trust the function's accuracy.
-//  2. TECHNICALLY the step function doesn't even even need to use phi;
-//      one could record 'b' and derive the second endpoint as 'c = d - b + a'.
-//     But I don't know if that is numerically stable, so we will do what
-//     the wikipedia implementations do and recompute b and c every iter.
-pub fn golden<E, F>(
-    interval: (f64, f64),
-    mut compute: F,
-// NOTE: cannot return a bound due to issue mentioned in body
-) -> LsResult<Result<f64, E>>
-where F: FnMut(f64) -> Result<Value, E>
-{
-    nest_err(|| {
-        // early wrapping:
-        //  - ValueBound for internal use
-        //  - Result<Value, Result<TheirError, OurError>> for easy short-circuiting
-        let mut compute = move |alpha| {
-            let value = compute(alpha).map_err(Ok)?;
-            ensure!(value.0.is_finite(), Err(ErrorKind::FunctionOutput(value.0).into()));
-            trace!("GS-iter:  a: {:<23e}  v: {:<23e}", alpha, value.0);
-            Ok(ValueBound { alpha, value: value.0 })
-        };
 
-        let phi: f64 = (1.0 + 5f64.sqrt()) / 2.0;
-        let get_mid_xs = |a, d| {
-            let dist = (d - a) / (1.0 + phi);
-            (a + dist, d - dist)
-        };
+pub mod golden {
+    pub use self::stop_condition::Rpn as StopCondition;
 
-        let (mut state, mut history) = {
-            // endpoints. (note: we allow d.alpha < a.alpha)
-            let a = compute(interval.0)?;
-            let d = compute(interval.1)?;
+    pub(crate) use self::stop_condition::Objectives;
 
-            // inner point closer to a
-            let b = compute(get_mid_xs(a.alpha, d.alpha).0)?;
+    pub mod stop_condition {
+        use ::stop_condition::prelude::*;
 
-            let history = vec![a, d, b];
-            ((a, b, d), history)
-        };
+        #[derive(Debug, Clone, PartialEq)]
+        pub(crate) struct Objectives {
+            /// x values at a, b, and d
+            pub alphas: (f64, f64, f64),
+            /// The number of full iterations that have occurred.
+            pub iterations: u32,
+        }
 
-        loop {
-            let (a, mut b, d) = state;
+        #[derive(Serialize, Deserialize)]
+        #[derive(Debug, Copy, Clone, PartialEq)]
+        pub enum Simple {
+            #[serde(rename = "interval-size")] IntervalSize(f64),
+            #[serde(rename =    "iterations")] Iterations(u32),
+        }
 
-            // Stop when it is dead obvious that the value is no longer numerically reliable.
-            if b.value > a.value.min(d.value) { break; }
-
-            // re-adjust b, purportedly to avoid systematic issues with precision
-            // that can cause infinite loops. (I dunno. ask whoever edits wikipedia)
-            //
-            // NOTE: Technically this desynchronizes the alpha of our Bounds from
-            //  the values, so at the end we cannot return a bound.
-            let (b_alpha, c_alpha) = get_mid_xs(a.alpha, d.alpha);
-            b.alpha = b_alpha;
-
-            let c = compute(c_alpha)?;
-
-            history.push(c);
-            state = match b.value < c.value {
-                true => (c, b, a),
-                false => (b, c, d),
+        impl ShouldStop<Objectives> for Simple {
+            fn should_stop(&self, objs: &Objectives) -> bool {
+                let Objectives { iterations, alphas: (a, _b, d) } = *objs;
+                match *self {
+                    Simple::IntervalSize(tol) => (a - d).abs() <= tol,
+                    Simple::Iterations(n) => iterations >= n,
+                }
             }
         }
-        //history.sort_on_key(|bound| NotNaN::new(bound.alpha).unwrap());
-        let (_a, b, _d) = state;
-        Ok(b.alpha)
-    })
+
+        impl Default for Cereal {
+            fn default() -> Self {
+                // always false. (Even with this, `golden` will always terminate)
+                from_json!({"any": []})
+            }
+        }
+
+        pub type Cereal = ::stop_condition::Cereal<Simple>;
+        pub type Rpn = ::stop_condition::Rpn<Simple>;
+
+        mod tests {
+            #[test]
+            fn test_serialized_repr() {
+                use super::Simple::Iterations;
+                use ::stop_condition::Cereal::{Simple,Logical};
+                use ::stop_condition::LogicalExpression::All;
+                use ::serde_json::to_value;
+                assert_eq!(
+                    to_value(Simple(Iterations(5))).unwrap(),
+                    json!({"iterations": 5})
+                );
+                assert_eq!(
+                    to_value(Logical(All(vec![Simple(Iterations(5))]))).unwrap(),
+                    json!({"all": [{"iterations": 5}]})
+                );
+            }
+        }
+    }
+}
+
+/// Builder for golden search
+#[derive(Debug, Clone)]
+pub struct Golden {
+    stop_condition: golden::StopCondition,
+}
+
+impl Golden {
+    pub fn new() -> Self
+    {
+        let stop_condition = golden::StopCondition::from_cereal(&Default::default());
+        Golden { stop_condition }
+    }
+
+    pub fn stop_condition(&mut self, cereal: &golden::stop_condition::Cereal) -> &mut Self
+    { self.stop_condition = golden::StopCondition::from_cereal(cereal); self }
+
+    // Revelations:
+    //  1. In common implementations of the algorithm (such as those on wikipedia)
+    //     the values of the function at the endpoints are never used.
+    //     Hence **it is only necessary to save one y value.**
+    //     However, we save more because we don't trust the function's accuracy.
+    //  2. TECHNICALLY the step function doesn't even even need to use phi;
+    //      one could record 'b' and derive the second endpoint as 'c = d - b + a'.
+    //     But I don't know if that is numerically stable, so we will do what
+    //     the wikipedia implementations do and recompute b and c every iter.
+    pub fn run<E, F>(
+        &self,
+        interval: (f64, f64),
+        mut compute: F,
+    // NOTE: cannot return a bound due to issue mentioned in body
+    ) -> LsResult<Result<f64, E>>
+    where F: FnMut(f64) -> Result<Value, E>
+    {
+        nest_err(|| {
+            // early wrapping:
+            //  - ValueBound for internal use
+            //  - Result<Value, Result<TheirError, OurError>> for easy short-circuiting
+            let mut compute = move |alpha| {
+                let value = compute(alpha).map_err(Ok)?;
+                ensure!(value.0.is_finite(), Err(ErrorKind::FunctionOutput(value.0).into()));
+                trace!("GS-iter:  a: {:<23e}  v: {:<23e}", alpha, value.0);
+                Ok(ValueBound { alpha, value: value.0 })
+            };
+
+            let phi: f64 = (1.0 + 5f64.sqrt()) / 2.0;
+            let get_mid_xs = |a, d| {
+                let dist = (d - a) / (1.0 + phi);
+                (a + dist, d - dist)
+            };
+
+            let (mut state, mut history) = {
+                // endpoints. (note: we allow d.alpha < a.alpha)
+                let a = compute(interval.0)?;
+                let d = compute(interval.1)?;
+
+                // inner point closer to a
+                let b = compute(get_mid_xs(a.alpha, d.alpha).0)?;
+
+                let history = vec![a, d, b];
+                ((a, b, d), history)
+            };
+
+            let mut iterations = 0;
+            let stop_reason = loop {
+                // Golden search will usually stop long before this,
+                // after squeezing every last bit out of the f64 mantissa.
+                if iterations > 300 { panic!("GS never stopped!"); }
+
+                let (a, mut b, d) = state;
+
+                // user-supplied stop condition
+                {
+                    use ::stop_condition::ShouldStop;
+                    let objectives = golden::Objectives {
+                        alphas: (a.alpha, b.alpha, d.alpha),
+                        iterations: iterations,
+                    };
+
+                    if self.stop_condition.should_stop(&objectives) {
+                        break "met user-supplied stop condition";
+                    }
+                }
+
+                // Forcibly stop when it is obvious that the value is no longer numerically reliable.
+                // (our interval looks like it has the wrong curvature)
+                if b.value > a.value.max(d.value) {
+                    break "noise > signal, or wrong curvature";
+                }
+
+                // re-adjust b, purportedly to avoid systematic issues with precision
+                // that can cause infinite loops. (I dunno. ask whoever edits wikipedia)
+                //
+                // NOTE: Technically this desynchronizes the alpha of our Bounds from
+                //  the values, so at the end we cannot return a bound.
+                let (b_alpha, c_alpha) = get_mid_xs(a.alpha, d.alpha);
+                b.alpha = b_alpha;
+
+                // Forcibly stop if the interval has shrunk to nothing.
+                {
+                    let mut test = false;
+                    // Has b crossed c?
+                    test = test || (c_alpha - b.alpha) * (d.alpha - a.alpha) <= 0.0;
+                    // Are any two alphas equal?
+                    test = test || a.alpha == b_alpha;
+                    test = test || c_alpha == d.alpha;
+                    if test {
+                        break "empty interval";
+                    }
+                }
+
+                let c = compute(c_alpha)?;
+
+                history.push(c);
+                state = match b.value < c.value {
+                    true => (c, b, a),
+                    false => (b, c, d),
+                };
+
+                iterations += 1;
+            }; // let stop_reason = { ... }
+
+            //history.sort_on_key(|bound| NotNaN::new(bound.alpha).unwrap());
+            let (_a, b, _d) = state;
+            trace!("GS-stop:  a: {:<23e}  ({})", b.alpha, stop_reason);
+            Ok(b.alpha)
+        })
+
+    }
 }
 
 // (NOTE: takes an IIFE so that ? can be used inside of it)

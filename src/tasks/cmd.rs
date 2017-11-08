@@ -436,7 +436,7 @@ pub fn optimize_layer_parameters(
     mut builder: Assemble,
 ) -> Result<Assemble>
 {Ok({
-    pub use ::rsp2_minimize::exact_ls::{Value, golden};
+    pub use ::rsp2_minimize::exact_ls::{Value, Golden};
     use ::config::{ScaleRanges, ScaleRange};
     use ::std::cell::RefCell;
 
@@ -452,10 +452,6 @@ pub fn optimize_layer_parameters(
     let builder = RefCell::new(builder);
     {
         let builder = &builder;
-
-        let get_value = || Ok::<_, Error>({
-            lmp.initialize_carbon(builder.borrow().assemble())?.compute_value()?
-        });
 
         let optimizables = {
             let mut optimizables: Vec<(_, Box<Fn(f64)>)> = vec![];
@@ -484,17 +480,27 @@ pub fn optimize_layer_parameters(
             }
         }
 
+        //let mut lmp = lmp.initialize_carbon(builder.borrow().assemble())?;
+        let get_value = || Ok::<_, Error>({
+            // use ::std::hash::{Hash, Hasher};
+            lmp.initialize_carbon(builder.borrow().assemble())?.compute_value()?
+        });
+
         // optimize them one-by-one.
-        for &((ref name, _, range), ref setter) in &optimizables {
-            trace!("Optimizing {}", name);
+        for _ in 0..2 {
+            for &((ref name, _, range), ref setter) in &optimizables {
+                trace!("Optimizing {}", name);
 
-            let best = golden(range, |a| {
-                setter(a);
-                get_value().map(Value)
-            })??; // ?!??!!!?
+                let best = Golden::new()
+                    .stop_condition(&from_json!({"interval-size": 1e-7}))
+                    .run(range, |a| {
+                        setter(a);
+                        get_value().map(Value)
+                    })??; // ?!??!!!?
 
-            info!("Optimized {}: {} (from {:?})", name, best, range);
-            setter(best);
+                info!("Optimized {}: {} (from {:?})", name, best, range);
+                setter(best);
+            }
         }
     }
 

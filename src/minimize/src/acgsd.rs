@@ -246,9 +246,7 @@ pub mod stop_condition {
         pub grad_norm: f64,
         /// Norm of force, rescaled as an intensive property.
         pub grad_rms: f64,
-        /// The iteration that is about to occur.
-        /// This index is 1-based since we're counting the fence segments,
-        ///  not the fenceposts.
+        /// The number of full iterations that have occurred.
         pub iterations: u32,
     }
 

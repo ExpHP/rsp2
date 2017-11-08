@@ -149,7 +149,7 @@ fn assemble_from_cereal(cereal: self::cereal::Root) -> Result<Assemble>
     let full_lattice = mat_22_to_33(&full_lattice);
 
     let layer_seps = match layer_sep {
-        self::cereal::Either::A(x) => vec![x; layers.len()],
+        self::cereal::Either::A(x) => vec![x; layers.len() - 1],
         self::cereal::Either::B(xs) => {
             ensure!(xs.len() == layers.len() - 1, "wrong number of layer seps");
             xs
