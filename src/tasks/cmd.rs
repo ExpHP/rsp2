@@ -63,6 +63,17 @@ pub fn run_relax_with_eigenvectors(
         // HACK to stop one iteration AFTER all non-acoustics are positive
         let mut all_ok_count = 0;
         let (structure, einfos, _evecs) = loop { // NOTE: we use break with value
+
+            let original = {
+                use ::rsp2_structure_gen::load_layers_yaml;
+                let builder = load_layers_yaml(File::open(input)?)?;
+                let builder = optimize_layer_parameters(
+                    &settings.scale_ranges,
+                    &lmp,
+                    builder,
+                )?;
+                carbon(&builder.assemble())
+            };
             let structure = do_relax(&lmp, &settings.cg, &settings.potential, from_structure)?;
             let (evals, evecs) = do_diagonalize(&lmp, &settings.phonons, structure.clone())?;
 
@@ -118,6 +129,31 @@ pub fn run_relax_with_eigenvectors(
                     File::create(fname)?,
                     &format!("Structure after eigenmode-chasing round {}", iteration),
                     &structure)?;
+            }
+
+            {
+                const SCALE_AMT: f64 = 1e-6;
+                let mut lmp = lmp.initialize_carbon(uncarbon(&structure))?;
+                let center_value = lmp.compute_value()?;
+
+                let shrink_value = {
+                    let mut structure = structure.clone();
+                    structure.scale_vecs(&[1.0 - SCALE_AMT, 1.0 - SCALE_AMT, 1.0]);
+                    lmp.set_structure(uncarbon(&structure))?;
+                    lmp.compute_value()?
+                };
+
+                let enlarge_value = {
+                    let mut structure = structure.clone();
+                    structure.scale_vecs(&[1.0 + SCALE_AMT, 1.0 + SCALE_AMT, 1.0]);
+                    lmp.set_structure(uncarbon(&structure))?;
+                    lmp.compute_value()?
+                };
+
+                if shrink_value.min(enlarge_value) < center_value {
+                    warn!("Better value found at nearby lattice parameter: {:?}",
+                        (shrink_value, center_value, enlarge_value))
+                }
             }
 
             if bad_evs.is_empty() {
@@ -487,20 +523,18 @@ pub fn optimize_layer_parameters(
         });
 
         // optimize them one-by-one.
-        for _ in 0..2 {
-            for &((ref name, _, range), ref setter) in &optimizables {
-                trace!("Optimizing {}", name);
+        for &((ref name, _, range), ref setter) in &optimizables {
+            trace!("Optimizing {}", name);
 
-                let best = Golden::new()
-                    .stop_condition(&from_json!({"interval-size": 1e-7}))
-                    .run(range, |a| {
-                        setter(a);
-                        get_value().map(Value)
-                    })??; // ?!??!!!?
+            let best = Golden::new()
+                .stop_condition(&from_json!({"interval-size": 1e-7}))
+                .run(range, |a| {
+                    setter(a);
+                    get_value().map(Value)
+                })??; // ?!??!!!?
 
-                info!("Optimized {}: {} (from {:?})", name, best, range);
-                setter(best);
-            }
+            info!("Optimized {}: {} (from {:?})", name, best, range);
+            setter(best);
         }
     }
 

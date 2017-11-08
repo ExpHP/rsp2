@@ -475,11 +475,13 @@ impl Lammps {
             "atom_modify sort 0 0.0",       // don't reorder atoms during simulation
         ])?;
 
-        // garbage initial lattice
+        // (mostly) garbage initial lattice
         me.ptr.borrow_mut().commands(&[
             "boundary p p p",               // (p)eriodic, (f)ixed, (s)hrinkwrap
             "box tilt small",               // triclinic
-            "region sim prism 0 2 0 2 0 2 1 1 1", // garbage garbage garbage
+            // NOTE: Initial skew factors must be zero to simplify
+            //       reasoning about order in send_lmp_lattice.
+            "region sim prism 0 2 0 2 0 2 0 0 0", // garbage garbage garbage
         ])?;
 
         {
@@ -578,19 +580,108 @@ impl Lammps {
 
     fn send_lmp_lattice(&mut self) -> Result<()>
     {Ok({
-        let lattice = self.structure.get().lattice().matrix();
-        assert_eq!(0f64, lattice[0][1], "non-triangular lattices not yet supported");
-        assert_eq!(0f64, lattice[0][2], "non-triangular lattices not yet supported");
-        assert_eq!(0f64, lattice[1][2], "non-triangular lattices not yet supported");
 
-        self.ptr.borrow_mut().commands(&[
-            &format!("change_box all x final 0 {}", lattice[0][0]),
-            &format!("change_box all y final 0 {}", lattice[1][1]),
-            &format!("change_box all z final 0 {}", lattice[2][2]),
-            &format!("change_box all xy final {}", lattice[1][0]),
-            &format!("change_box all xz final {}", lattice[2][0]),
-            &format!("change_box all yz final {}", lattice[2][1]),
-        ])?;
+        // From the documentation on 'change_box command':
+        //
+        //     Because the keywords used in this command are applied one at a time
+        //     to the simulation box and the atoms in it, care must be taken with
+        //     triclinic cells to avoid exceeding the limits on skew after each
+        //     transformation in the sequence. If skew is exceeded before the final
+        //     transformation this can be avoided by changing the order of the sequence,
+        //     or breaking the transformation into two or more smaller transformations.
+        //
+        // There is nothing I can really say here that would not come across
+        // as terribly, terribly rude. - ML
+
+        let cur = self.structure.get().lattice().matrix();
+        assert_eq!(0f64, cur[0][1], "non-triangular lattices not yet supported");
+        assert_eq!(0f64, cur[0][2], "non-triangular lattices not yet supported");
+        assert_eq!(0f64, cur[1][2], "non-triangular lattices not yet supported");
+
+        #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+        enum Elem { Diagonal(&'static str), OffDiag(&'static str) }
+        impl Elem {
+            // tests whether a change to a given lattice matrix element
+            //  could possibly cause us to crash if performed too soon.
+            // This simple scheme allows us to handle MOST cases.
+            pub fn should_defer(&self, old: f64, new: f64) -> bool
+            { match *self {
+                Elem::Diagonal(_) => new < old,
+                Elem::OffDiag(_) => old.abs() < new.abs(),
+            }}
+
+            pub fn format(&self, value: f64) -> String
+            { match *self {
+                Elem::Diagonal(name) => format!("{} final 0 {}", name, value),
+                Elem::OffDiag(name) => format!("{} final {}", name, value),
+            }}
+        }
+
+        // NOTE: The order that these are declared are the order they will
+        //       be set when no previous lattice has been sent.
+        //       This order is safe for the garbage lattice with zero skew.
+        let elems = &[
+            (Elem::Diagonal("x"), (0, 0)),
+            (Elem::Diagonal("y"), (1, 1)),
+            (Elem::Diagonal("z"), (2, 2)),
+            (Elem::OffDiag("xy"), (1, 0)),
+            (Elem::OffDiag("xz"), (2, 0)),
+            (Elem::OffDiag("yz"), (2, 1)),
+        ];
+
+        // Tragically, because we need to recall the last matrix that was set
+        //  in order to determine what operations would cause lammps to crash,
+        // we do need to match on whether or not a lattice has been saved,
+        // which is exactly the sort of thing that MaybeDirty was supposed to
+        // help prevent against.
+        match self.structure.last_clean() {
+            None => {
+                let commands: Vec<_> =
+                    elems.iter().map(|&(elem, (r, c))| {
+                        format!("change_box all {}", elem.format(cur[r][c]))
+                    }).collect();
+                self.ptr.borrow_mut().commands(&commands)?;
+            },
+
+            Some(last) => {
+                let last = last.lattice().matrix();
+                // Look for cases that would defeat our simple ordering scheme.
+                // (these are cases where both a diagonal and an off-diagonal would
+                //   be classified as "defer until later", which is not enough information)
+                // An example would be simultaneously skewing and shrinking a box.
+                for r in 0..3 {
+                    for c in 0..3 {
+                        if Elem::Diagonal("").should_defer(cur[c][c], last[c][c]) &&
+                            Elem::OffDiag("").should_defer(cur[r][c], last[r][c])
+                        {
+                            bail!("Tragically, you cannot simultaneously decrease a lattice \
+                                diagonal element while increasing one of its off-diagonals. \
+                                I'm sorry. You just can't.");
+                        }
+                    }
+                }
+
+                let mut do_early = vec![];
+                let mut do_later = vec![];
+                elems.iter().for_each(|&(elem, (r, c))| {
+                    match elem.should_defer(last[r][c], cur[r][c]) {
+                        true => { do_later.push((elem, (r, c))); },
+                        false => { do_early.push((elem, (r, c))); },
+                    }
+                });
+
+                let commands: Vec<_> =
+                    None.into_iter()
+                    .chain(do_early)
+                    .chain(do_later)
+                    .map(|(elem, (r, c))| {
+                        format!("change_box all {}", elem.format(cur[r][c]))
+                    })
+                    .collect();
+
+                self.ptr.borrow_mut().commands(&commands)?
+            },
+        }
     })}
 
     //-------------------------------------------

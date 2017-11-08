@@ -191,7 +191,7 @@ fn assemble_from_cereal(cereal: self::cereal::Root) -> Result<Assemble>
         };
 
         // cartesian sites
-        let mut sites = match layer.sites {
+        let sites = match layer.sites {
             (Units::Frac, x) => Coords::Fracs(x).into_carts(&lattice),
             (Units::Cart, x) => x,
         };
