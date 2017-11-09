@@ -49,6 +49,34 @@ impl Builder {
         self
     }
 
+    /// Read configuration from a phonopy .conf file,
+    /// overwriting existing values.
+    // FIXME: Result<Self>... oh, THAT's why the general recommendation is for &mut Self
+    pub fn conf_from_file<R: BufRead>(self, file: R) -> Result<Self>
+    {Ok({
+        let mut me = self;
+        for line in file.lines() {
+            let mut line = &line?[..];
+
+            if line.trim().is_empty() {
+                continue;
+            }
+
+            if let Some(i) = line.bytes().position(|c| c == b'#') {
+                line = &line[..i];
+            }
+
+            if let Some(i) = line.bytes().position(|c| c == b'=') {
+                let key = line[..i].trim();
+                let value = line[i + 1..].trim();
+                me = me.conf(key, value);
+            } else {
+                bail!("Can't read conf line: {:?}", line)
+            }
+        }
+        me
+    })}
+
     pub fn supercell_dim<V: As3<u32>>(self, dim: V) -> Self
     {
         self.conf("DIM", {

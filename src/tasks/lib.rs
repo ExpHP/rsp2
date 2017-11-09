@@ -45,6 +45,7 @@ pub use ::config::Settings;
 pub use ::cmd::run_relax_with_eigenvectors;
 pub use ::cmd::run_symmetry_test;
 pub use ::cmd::get_energy_surface;
+pub use ::cmd::make_force_sets;
 
 pub use ::bands::unfold_phonon;
 

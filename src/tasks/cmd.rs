@@ -801,4 +801,62 @@ pub fn get_energy_surface(
 
 //=================================================================
 
+pub fn make_force_sets(
+    conf: Option<&AsRef<Path>>,
+    poscar: &AsRef<Path>,
+    outdir: &AsRef<Path>,
+) -> Result<()>
+{Ok({
+    use ::rsp2_structure_io::poscar;
+    use ::std::fs::File;
+    use ::std::io::BufReader;
+    use ::rsp2_phonopy_io::disp_yaml::apply_displacement;
+
+    let mut phonopy = PhonopyBuilder::new();
+    if let Some(conf) = conf {
+        phonopy = phonopy.conf_from_file(BufReader::new(File::open(conf)?))?;
+    }
+
+    let structure = poscar::load(File::open(poscar)?)?;
+
+    let lmp = make_lammps_builder(&::config::Threading::Lammps);
+
+    ::std::fs::create_dir(&outdir)?;
+    {
+        // dumb/lazy solution to ensuring all output files go in the dir
+        let cwd_guard = push_dir(outdir)?;
+        setup_global_logger(Some(&"rsp2.log"))?;
+
+        poscar::dump(File::create("./input.vasp")?, "", &structure)?;
+
+        let (superstructure, displacements, disp_token) = phonopy.displacements(structure)?;
+
+        trace!("Computing forces at displacements");
+
+        let mut i = 0;
+        let force_sets =
+            displacements.iter()
+            .map(|disp| Ok({
+                use ::std::io::prelude::*;
+                i += 1;
+                eprint!("\rdisp {} of {}", i, displacements.len());
+                ::std::io::stderr().flush().unwrap();
+                let superstructure = apply_displacement(&superstructure, *disp);
+
+                lmp.initialize_carbon(superstructure)?.compute_force()?
+            })).collect::<Result<Vec<_>>>()?;
+
+        ::rsp2_phonopy_io::force_sets::write(
+            File::create("FORCE_SETS")?,
+            &superstructure,
+            &displacements,
+            &force_sets,
+        )?;
+
+        cwd_guard.pop()?;
+    }
+})}
+
+//=================================================================
+
 fn tup3<T:Copy>(arr: [T; 3]) -> (T, T, T) { (arr[0], arr[1], arr[2]) }
