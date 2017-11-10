@@ -13,6 +13,7 @@ fn main() {
         (@arg CONFIG: -c --config +takes_value +required "settings Yaml")
         (@arg INPUT: +required "POSCAR")
         (@arg force: -f --force "replace existing output directories")
+        (@arg save_forces: --("save-forces") "save FORCE_SETS and force_constants.hdf5")
         // (@subcommand test =>
         //     (about: "controls testing features")
         //     (version: "1.3")
@@ -29,5 +30,5 @@ fn main() {
 
     let settings = ::serde_yaml::from_reader(::std::fs::File::open(config).unwrap()).unwrap();
 
-    ::rsp2_tasks::run_relax_with_eigenvectors(&settings, &input, &outdir).unwrap();
+    ::rsp2_tasks::run_relax_with_eigenvectors(&settings, &input, &outdir, matches.is_present("force")).unwrap();
 }

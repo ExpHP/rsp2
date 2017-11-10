@@ -14,6 +14,7 @@ pub struct Settings {
     pub cg: Acgsd,
     pub phonons: Phonons,
     pub ev_chase: EigenvectorChase,
+    pub layer_gamma_threshold: f64,
 }
 
 #[derive(Serialize, Deserialize)]

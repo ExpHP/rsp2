@@ -30,6 +30,8 @@ pub fn run_relax_with_eigenvectors(
     settings: &Settings,
     input: &AsRef<Path>,
     outdir: &AsRef<Path>,
+    // cli args aren't in Settings, so they're just here.
+    save_forces: bool,
 ) -> Result<()>
 {Ok({
     use ::std::io::prelude::*;
@@ -184,6 +186,50 @@ pub fn run_relax_with_eigenvectors(
 
         poscar::dump(File::create("./final.vasp")?, "", &structure)?;
 
+        if save_forces {
+            // FIXME FIXME FIXME
+            // BAD COPYPASTA BAD
+            // FIXME FIXME FIXME
+
+            use ::rsp2_phonopy_io::disp_yaml::apply_displacement;
+            use ::std::io::prelude::*;
+
+            let phonopy = PhonopyBuilder::new()
+                .symmetry_tolerance(settings.phonons.symmetry_tolerance)
+                .conf("DISPLACEMENT_DISTANCE", format!("{:e}", settings.phonons.displacement_distance))
+                .supercell_dim(settings.phonons.supercell.dim_for_unitcell(structure.lattice()))
+                .conf("HDF5", ".TRUE.")
+                .conf("DIAG", ".FALSE.") // maybe?
+                ;
+
+            let (superstructure, displacements, _disp_token) = phonopy.displacements(structure.clone())?;
+
+            trace!("Computing forces at displacements");
+
+            let mut i = 0;
+            let force_sets =
+                displacements.iter()
+                .map(|disp| Ok({
+                    i += 1;
+                    eprint!("\rdisp {} of {}", i, displacements.len());
+                    ::std::io::stderr().flush().unwrap();
+                    let superstructure = apply_displacement(&superstructure, *disp);
+
+                    lmp.initialize_carbon(superstructure)?.compute_force()?
+                })).collect::<Result<Vec<_>>>()?;
+
+            ::rsp2_phonopy_io::force_sets::write(
+                File::create("FORCE_SETS")?,
+                &superstructure,
+                &displacements,
+                &force_sets,
+            )?;
+
+            // FIXME FIXME FIXME
+            // BAD COPYPASTA BAD
+            // FIXME FIXME FIXME
+        }
+
         { // write summary file
             use self::summary::{Modes, Summary, EnergyPerAtom};
             use self::eigen_info::Item;
@@ -191,7 +237,13 @@ pub fn run_relax_with_eigenvectors(
             let acoustic = einfos.iter().filter(|x| x.is_acoustic()).map(Item::frequency).collect();
             let shear = einfos.iter().filter(|x| x.is_shear()).map(Item::frequency).collect();
             let layer_breathing = einfos.iter().filter(|x| x.is_layer_breathing()).map(Item::frequency).collect();
-            let modes = Modes { acoustic, shear, layer_breathing };
+            let layer_gammas = einfos.iter().next().unwrap().layer_gamma_probs.as_ref().map(|_| {
+                einfos.iter().enumerate()
+                    .filter(|&(_,x)| x.layer_gamma_probs.as_ref().unwrap()[0] > settings.layer_gamma_threshold)
+                    .map(|(i,x)| (i, x.frequency()))
+                    .collect()
+            });
+            let modes = Modes { acoustic, shear, layer_breathing, layer_gammas };
 
             let energy_per_atom = {
                 let f = |structure: ElementStructure| {Ok::<_, Error>({
@@ -205,6 +257,7 @@ pub fn run_relax_with_eigenvectors(
                 let before_ev_chasing = f_path(&"structure-01.1.vasp")?;
                 EnergyPerAtom { initial, final_, before_ev_chasing }
             };
+
 
             let summary = Summary { modes, energy_per_atom };
 
@@ -657,6 +710,7 @@ mod summary {
         pub acoustic: Vec<f64>,
         pub shear: Vec<f64>,
         pub layer_breathing: Vec<f64>,
+        pub layer_gammas: Option<Vec<(usize, f64)>>,
     }
 }
 
