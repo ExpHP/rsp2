@@ -12,6 +12,7 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 path = "lib.rs"
 
 [dependencies]
+rsp2-array-utils = { path = "../util/array" }
 rsp2-structure = { path = "../structure" }
 
 log = "0.3"

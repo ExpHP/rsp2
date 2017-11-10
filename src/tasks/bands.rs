@@ -1,10 +1,9 @@
 
-use ::rsp2_structure::Structure;
+use ::rsp2_structure::CoordStructure;
 use ::rsp2_array_utils::{dot, map_arr};
 use ::rsp2_kets::{Ket, KetRef, Rect};
 
 use ::std::f64::consts::PI;
-use ::std::hash::Hash;
 use ::itertools::Itertools;
 
 pub use self::config::Config;
@@ -81,6 +80,29 @@ impl self::config::SampleType {
     }
 }
 
+/// A supercell matrix which is not necessarily diagonal,
+/// but for which it is already known how many images are
+/// needed along each axis in order to uniquely describe
+/// all images of the primitive cell.
+///
+/// This only exists for now because I am still too lazy to
+/// properly incorporate an HNF search into this codebase...
+pub struct ScMatrix {
+    matrix: [[i32; 3]; 3],
+    periods: [u32; 3],
+}
+
+impl ScMatrix {
+    pub fn new(matrix: &[[i32; 3]; 3], periods: &[u32; 3]) -> Self
+    {
+        use ::rsp2_array_utils::det;
+        // sanity check
+        // (NOTE: this condition is neccessary, but not sufficient)
+        assert_eq!(det(matrix).abs() as u32, periods[0] * periods[1] * periods[2]);
+        ScMatrix { matrix: *matrix, periods: *periods }
+    }
+}
+
 /// # Output
 ///
 /// Probabilities associated with each image of `eigenvector_q` under the supercell
@@ -94,12 +116,16 @@ impl self::config::SampleType {
 /// This code is largely based on Zheng, Fawei; Zhang, Ping (2017),
 /// “Phonon Unfolding: A program for unfolding phonon dispersions of materials”,
 ///   Mendeley Data, v1 http://dx.doi.org/10.17632/3hpx6zmxhg.1
-pub fn unfold_phonon<M: Eq + Hash + Clone>(
+pub fn unfold_phonon(
     config: &Config,
-    superstructure: &Structure<M>,
+    // Takes CoordStructure because I think there might be a case for
+    // supporting <M: Eq + Hash>, with the semantics that atoms with
+    // non-equal metadata are "distinct" and contributions between
+    // them to a projection cannot cancel.
+    superstructure: &CoordStructure,
     eigenvector_q: &SuperFracQ,
     eigenvector: KetRef,
-    supercell_matrix: &[[i32; 3]; 3],
+    supercell_matrix: &ScMatrix,
 ) -> Vec<([u32; 3], f64)>
 {
     use ::rsp2_array_utils::{inv, map_mat, mat_from_fn, arr_from_fn};
@@ -107,14 +133,7 @@ pub fn unfold_phonon<M: Eq + Hash + Clone>(
     // non-diagonal supercells would require an HNF decomposition (or search)
     // to correctly identify a valid number of images for each axis
     assert_eq!(eigenvector.len(), 3 * superstructure.num_atoms());
-    for (i, j) in vec![(0, 1), (0, 2), (1, 2), (1, 0), (2, 0), (2, 1)] {
-        assert_eq!(supercell_matrix[i][j], 0, "non-diagonal supercells not supported (yet)")
-    }
 
-    let sc_dim = arr_from_fn(|k| {
-        assert!(supercell_matrix[k][k] > 0, "negative supercell not supported (yet)");
-        supercell_matrix[k][k] as u32
-    });
 
     match config.fbz {
         config::FbzType::Voronoi => {
@@ -124,17 +143,19 @@ pub fn unfold_phonon<M: Eq + Hash + Clone>(
         config::FbzType::ReciprocalCell => {
             let sc_lattice = superstructure.lattice().matrix();
             let sc_inverse = superstructure.lattice().inverse_matrix();
-            let pc_lattice = dot(&inv(&map_mat(*supercell_matrix, |x| x as f64)), sc_lattice);
+            let pc_lattice = dot(&inv(&map_mat(supercell_matrix.matrix, |x| x as f64)), sc_lattice);
             let pc_inverse = inv(&pc_lattice);
             let sc_recip = mat_from_fn(|r, c| sc_inverse[c][r]);
             let pc_recip = mat_from_fn(|r, c| pc_inverse[c][r]);
 
             // lattice points of interest
-            let quotient_sample_spec = self::config::SampleType::Plain(sc_dim);
+            let sc_periods = supercell_matrix.periods;
+
+            let quotient_sample_spec = self::config::SampleType::Plain(sc_periods);
             let quotient_indices: Vec<_> =
                     quotient_sample_spec.signed_indices()
                     .into_iter().map(|v| {
-                        arr_from_fn(|k| (v[k] + sc_dim[k] as i32) as u32 % sc_dim[k])
+                        arr_from_fn(|k| (v[k] + sc_periods[k] as i32) as u32 % sc_periods[k])
                     }).collect();
             assert!(quotient_indices.len() > 0, "no points to sample against");
 
@@ -194,7 +215,13 @@ mod tests {
     {
         const GAMMA: [f64; 3] = [0.0, 0.0, 0.0];
 
-        fn do_it(structure: &Structure<()>, sc_vec: [i32; 3], expect_index: &[[u32; 3]], eigenvector: Vec<[f64; 3]>) {
+        fn do_it(
+            structure: &CoordStructure,
+            sc_vec: [i32; 3],
+            expect_index: &[[u32; 3]],
+            eigenvector: Vec<[f64; 3]>,
+        ) {
+
             let configs = vec![
                 from_json!({
                     "fbz": "reciprocal-cell",
@@ -206,7 +233,10 @@ mod tests {
                 }),
             ];
             let eigenvector: Ket = eigenvector.flat().iter().map(|&r| Rect::from(r)).collect();
-            let sc_mat = [[sc_vec[0], 0, 0], [0, sc_vec[1], 0], [0, 0, sc_vec[2]]];
+            let sc_mat = ScMatrix::new(
+                &[[sc_vec[0], 0, 0], [0, sc_vec[1], 0], [0, 0, sc_vec[2]]],
+                &map_arr(sc_vec, |x| x as u32),
+            );
             for config in &configs {
                 let unfolded = unfold_phonon(config, structure, &GAMMA, eigenvector.as_ref(), &sc_mat);
 
@@ -228,7 +258,7 @@ mod tests {
         //--------------------------------------------
         // easy 1D case
         // 1 atom per primitive cell
-        let structure = Structure::new_coords(
+        let structure = CoordStructure::new_coords(
             Lattice::diagonal(&[1.0, 1.0, 4.0]),
             Coords::Carts(vec![
                 [0.0, 0.0, 0.0],
@@ -270,7 +300,7 @@ mod tests {
         //--------------------------------------------
         // supercell along multiple dimensions
         // 1 atom per primitive cell
-        let structure = Structure::new_coords(
+        let structure = CoordStructure::new_coords(
             Lattice::diagonal(&[2.0, 2.0, 1.0]),
             Coords::Carts(vec![
                 [0.0, 0.0, 0.0],
@@ -316,7 +346,7 @@ mod tests {
         // hopefully, this will catch bugs involving incorrect
         //   usage of matrices vs their transpose.
         // 1 atom per primitive cell
-        let structure = Structure::new_coords(
+        let structure = CoordStructure::new_coords(
             Lattice::new(&[
                 [1.0, 0.0, 0.0],
                 [-0.5, 0.5 * 3_f64.sqrt(), 0.0],
@@ -343,7 +373,7 @@ mod tests {
 
         //--------------------------------------------
         // primitive structure with more than one atom
-        let structure = Structure::new_coords(
+        let structure = CoordStructure::new_coords(
             Lattice::new(&[
                 // graphene cell (2 atoms per primitive),
                 // doubled along b (4 atoms per supercell)
@@ -396,5 +426,6 @@ mod tests {
 
         // TODO: Test with non-perfect supercell
         // TODO: Test with eigenvector_q not at gamma
+        // TODO: Test with non-diagonal supercell
     }
 }
