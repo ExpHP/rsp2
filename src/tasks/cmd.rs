@@ -22,6 +22,8 @@ use ::rsp2_phonopy_io::cmd::Builder as PhonopyBuilder;
 use ::std::path::Path;
 use ::std::hash::Hash;
 
+use ::itertools::Itertools;
+
 type LmpError = ::rsp2_lammps_wrap::Error;
 
 pub fn run_relax_with_eigenvectors(
@@ -45,23 +47,20 @@ pub fn run_relax_with_eigenvectors(
 
         // let mut original = poscar::load(File::open(input)?)?;
         // original.scale_vecs(&settings.hack_scale);
-        let (original, layer_1_sc_mat) = {
+        let (original, layer_sc_mats) = {
             use ::rsp2_structure_gen::load_layers_yaml;
             use ::rsp2_structure_gen::layer_sc_info_from_layers_yaml;
 
             let builder = load_layers_yaml(File::open(input)?)?;
-            let builder = optimize_layer_parameters(
-                &settings.scale_ranges,
-                &lmp,
-                builder,
-            )?;
+            let builder = optimize_layer_parameters(&settings.scale_ranges, &lmp, builder)?;
             let structure = carbon(&builder.assemble());
 
             let layer_sc_info = layer_sc_info_from_layers_yaml(File::open(input)?)?;
-            let (matrix, periods) = layer_sc_info[0];
-            let layer_1_sc_mat = ::bands::ScMatrix::new(&matrix, &periods);
+            let layer_sc_mats = layer_sc_info
+                .into_iter().map(|(matrix, periods, _)| ::bands::ScMatrix::new(&matrix, &periods))
+                .collect_vec();
 
-            (structure, layer_1_sc_mat)
+            (structure, layer_sc_mats)
         };
 
         poscar::dump(File::create("./initial.vasp")?, "", &original)?;
@@ -95,7 +94,7 @@ pub fn run_relax_with_eigenvectors(
 
             trace!("Computing eigensystem info");
             let einfos = get_eigensystem_info(
-                &evals, &evecs, &layers[..], Some(&structure), Some(&layer_1_sc_mat),
+                &evals, &evecs, &layers[..], Some(&structure), Some(&layer_sc_mats),
             );
             {
                 let mut file = File::create(format!("eigenvalues.{:02}", iteration))?;
@@ -452,20 +451,20 @@ fn write_eigen_info(
     let dp = |x: f64| color_range.paint_as(&x, DisplayProb(x));
     let pol = |x: f64| color_range.paint(x);
 
-    writeln(&format_args!("{:27}  {:^7}  {:^7}  {:^7} [{:^4}, {:^4}, {:^4}]",
+    let nlayer = einfos.iter().next().unwrap().layer_gamma_probs.as_ref().map(|v| v.len()).unwrap_or(0);
+    writeln(&format_args!("{:27}  {:^7}  {:^7}  {} [{:^4}, {:^4}, {:^4}]",
         "# Frequency (cm^-1)", "Acoustc", "Layer",
-        "GammaL1", "X", "Y", "Z"))?;
+        (1..nlayer+1).map(|i| format!("GammaL{}", i)).join(" "),
+        "X", "Y", "Z"))?;
     for item in einfos.iter() {
         let eval = item.frequency;
         let acou = dp(item.acousticness);
         let layer = dp(item.layer_acousticness);
         let (x, y, z) = tup3(item.polarization);
-        let gamma: Box<::std::fmt::Display> = match item.layer_1_gamma_prob {
-            Some(prob) => Box::new(dp(prob)),
-            None => Box::new("-------"),
-        };
+        let gammas = item.layer_gamma_probs.as_ref().unwrap_or(&vec![]).iter().map(|&p| dp(p)).join(" ");
+
         writeln(&format_args!("{:27}  {}  {}  {} [{:4.2}, {:4.2}, {:4.2}]",
-            eval, acou, layer, gamma, pol(x), pol(y), pol(z)))?;
+            eval, acou, layer, gammas, pol(x), pol(y), pol(z)))?;
     }
 })}
 
@@ -556,7 +555,7 @@ pub fn get_eigensystem_info<L: Eq + Clone + Hash>(
     evecs: &[Vec<[f64; 3]>],
     layers: &[L],
     structure: Option<&ElementStructure>,
-    layer_1_supercell_matrix: Option<&::bands::ScMatrix>,
+    layer_supercell_matrices: Option<&[::bands::ScMatrix]>,
 ) -> EigenInfo
 {
     use ::rsp2_eigenvector_classify::{keyed_acoustic_basis, polarization};
@@ -568,23 +567,25 @@ pub fn get_eigensystem_info<L: Eq + Clone + Hash>(
     let mut out = vec![];
     for (&eval, evec) in izip!(evals, evecs) {
 
-        let gamma_prob = match (structure, layer_1_supercell_matrix) {
-            (Some(structure), Some(layer_1_supercell_matrix)) => {Some({
+        let gamma_probs = match (structure, layer_supercell_matrices) {
+            (Some(structure), Some(layer_supercell_matrices)) => {Some({
                 use ::rsp2_kets::{Rect, Ket};
                 let ket: Ket = evec.flat().iter().cloned().map(Rect::from).collect();
 
-                ::bands::unfold_phonon(
-                    &from_json!({
-                        "fbz": "reciprocal-cell",
-                        "sampling": { "plain": [4, 4, 1] },
-                    }),
-                    &structure.map_metadata_to(|_| ()),
-                    &[0.0, 0.0, 0.0], // eigenvector q
-                    ket.as_ref(),
-                    layer_1_supercell_matrix,
-                ).iter()
-                    .find(|&&(idx, _)| idx == [0, 0, 0])
-                    .unwrap().1
+                layer_supercell_matrices.iter().map(|sc_mat| {
+                    ::bands::unfold_phonon(
+                        &from_json!({
+                            "fbz": "reciprocal-cell",
+                            "sampling": { "plain": [4, 4, 1] },
+                        }),
+                        &structure.map_metadata_to(|_| ()),
+                        &[0.0, 0.0, 0.0], // eigenvector q
+                        ket.as_ref(),
+                        sc_mat,
+                    ).iter()
+                        .find(|&&(idx, _)| idx == [0, 0, 0])
+                        .unwrap().1
+                }).collect()
             })},
             _ => None,
         };
@@ -594,7 +595,7 @@ pub fn get_eigensystem_info<L: Eq + Clone + Hash>(
             acousticness: acoustics.probability(&evec),
             layer_acousticness: layer_acoustics.probability(&evec),
             polarization: polarization(&evec[..]),
-            layer_1_gamma_prob: gamma_prob,
+            layer_gamma_probs: gamma_probs,
         })
     }
     out
@@ -606,7 +607,7 @@ pub mod eigen_info {
         pub acousticness: f64,
         pub layer_acousticness: f64,
         pub polarization: [f64; 3],
-        pub layer_1_gamma_prob: Option<f64>,
+        pub layer_gamma_probs: Option<Vec<f64>>,
     }
 
     impl Item {

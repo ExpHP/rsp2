@@ -15,7 +15,7 @@ pub fn load_layers_yaml<R: Read>(file: R) -> Result<Assemble>
 }
 
 // FIXME this really doesn't belong here, but it's the easiest reuse of code
-pub fn layer_sc_info_from_layers_yaml<R: Read>(file: R) -> Result<Vec<([[i32; 3]; 3], [u32; 3])>>
+pub fn layer_sc_info_from_layers_yaml<R: Read>(file: R) -> Result<Vec<([[i32; 3]; 3], [u32; 3], usize)>>
 {
     let cereal = ::serde_yaml::from_reader(file)?;
     layer_sc_info_from_cereal(cereal).map(|a| a)
@@ -258,7 +258,7 @@ fn assemble_from_cereal(cereal: self::cereal::Root) -> Result<Assemble>
 })}
 
 // FIXME this really doesn't belong here, but it's the easiest reuse of code
-fn layer_sc_info_from_cereal(cereal: cereal::Root) -> Result<Vec<([[i32; 3]; 3], [u32; 3])>>
+fn layer_sc_info_from_cereal(cereal: cereal::Root) -> Result<Vec<([[i32; 3]; 3], [u32; 3], usize)>>
 {Ok({
 
     let middle::Layers {
@@ -276,8 +276,9 @@ fn layer_sc_info_from_cereal(cereal: cereal::Root) -> Result<Vec<([[i32; 3]; 3],
             r as i32
         }))?;
         let periods = layer.repeat;
+        let primitive_atom_count = layer.cart_sites.len();
 
-        (matrix, periods)
+        (matrix, periods, primitive_atom_count)
     })).collect::<Result<Vec<_>>>()?
 })}
 
