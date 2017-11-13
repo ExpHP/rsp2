@@ -563,36 +563,44 @@ pub fn get_eigensystem_info<L: Eq + Clone + Hash>(
 ) -> EigenInfo
 {
     use ::rsp2_eigenvector_classify::{keyed_acoustic_basis, polarization};
+    use ::bands::UnfolderAtQ;
 
+    // precomputed data applicable to all kets
     let layers: Vec<_> = layers.iter().cloned().map(Some).collect();
     let layer_acoustics = keyed_acoustic_basis(&layers[..], &[1,1,1]);
     let acoustics = keyed_acoustic_basis(&vec![Some(()); evecs[0].len()], &[1,1,1]);
-
-    let mut out = vec![];
-    for (&eval, evec) in izip!(evals, evecs) {
-
-        let gamma_probs = match (structure, layer_supercell_matrices) {
-            (Some(structure), Some(layer_supercell_matrices)) => {Some({
-                use ::rsp2_kets::{Rect, Ket};
-                let ket: Ket = evec.flat().iter().cloned().map(Rect::from).collect();
-
+    let layer_gamma_unfolders: Option<Vec<UnfolderAtQ>> =
+        match (structure, layer_supercell_matrices) {
+            (Some(structure), Some(layer_supercell_matrices)) => Some({
                 layer_supercell_matrices.iter().map(|sc_mat| {
-                    ::bands::unfold_phonon(
+                    UnfolderAtQ::from_config(
                         &from_json!({
                             "fbz": "reciprocal-cell",
                             "sampling": { "plain": [4, 4, 1] },
                         }),
                         &structure.map_metadata_to(|_| ()),
-                        &[0.0, 0.0, 0.0], // eigenvector q
-                        ket.as_ref(),
                         sc_mat,
-                    ).iter()
-                        .find(|&&(idx, _)| idx == [0, 0, 0])
-                        .unwrap().1
+                        &[0.0, 0.0, 0.0], // eigenvector q
+                    )
                 }).collect()
-            })},
+            }),
             _ => None,
         };
+
+    // now do each ket
+    let mut out = vec![];
+    for (&eval, evec) in izip!(evals, evecs) {
+        use ::rsp2_kets::{Rect, Ket};
+        let ket: Ket = evec.flat().iter().cloned().map(Rect::from).collect();
+
+        let gamma_probs = layer_gamma_unfolders.as_ref().map(|unfolders| {
+            unfolders.iter().map(|unfolder| {
+                unfolder.unfold_phonon(ket.as_ref())
+                    .iter()
+                    .find(|&&(idx, _)| idx == [0, 0, 0])
+                    .unwrap().1
+            }).collect()
+        });
 
         out.push(eigen_info::Item {
             frequency: eval,

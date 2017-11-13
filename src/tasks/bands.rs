@@ -128,72 +128,115 @@ pub fn unfold_phonon(
     supercell_matrix: &ScMatrix,
 ) -> Vec<([u32; 3], f64)>
 {
-    use ::rsp2_array_utils::{inv, map_mat, mat_from_fn, arr_from_fn};
+    UnfolderAtQ::from_config(config, superstructure, supercell_matrix, eigenvector_q)
+        .unfold_phonon(eigenvector)
+}
 
-    // non-diagonal supercells would require an HNF decomposition (or search)
-    // to correctly identify a valid number of images for each axis
-    assert_eq!(eigenvector.len(), 3 * superstructure.num_atoms());
+/// Contains precomputed information derived from the
+/// q-points at which integration will be performed;
+///
+/// This speeds up the unfolding of many eigenvectors computed
+/// at the same q point.
+pub struct UnfolderAtQ {
+    /// 3D indices of supercell reciprocal lattice points
+    sc_indices: Vec<[u32; 3]>,
+    /// [pc_recip_index][sc_recip_index] -> q_ket
+    q_kets_by_pc_sc: Vec<Vec<Ket>>,
+}
 
+impl UnfolderAtQ {
+    pub fn from_config(
+        config: &Config,
+        superstructure: &CoordStructure,
+        supercell_matrix: &ScMatrix,
+        eigenvector_q: &[f64; 3],
+    ) -> UnfolderAtQ
+    {
+        use ::rsp2_array_utils::{inv, map_mat, mat_from_fn, arr_from_fn};
 
-    match config.fbz {
-        config::FbzType::Voronoi => {
-            panic!("fbz type Voronoi not supported (yet) (or possibly ever)")
-        },
+        match config.fbz {
+            config::FbzType::Voronoi => {
+                panic!("fbz type Voronoi not supported (yet) (or possibly ever)")
+            },
 
-        config::FbzType::ReciprocalCell => {
-            let sc_lattice = superstructure.lattice().matrix();
-            let sc_inverse = superstructure.lattice().inverse_matrix();
-            let pc_lattice = dot(&inv(&map_mat(supercell_matrix.matrix, |x| x as f64)), sc_lattice);
-            let pc_inverse = inv(&pc_lattice);
-            let sc_recip = mat_from_fn(|r, c| sc_inverse[c][r]);
-            let pc_recip = mat_from_fn(|r, c| pc_inverse[c][r]);
+            config::FbzType::ReciprocalCell => {
+                // Generate a bunch of q points indexed by:
+                //  - primitive reciprocal lattice vectors (which all contribute)
+                //  - supercell reciprocal lattice vectors (which we are trying to project onto)
+                let sc_lattice = superstructure.lattice().matrix();
+                let sc_inverse = superstructure.lattice().inverse_matrix();
+                let pc_lattice = dot(&inv(&map_mat(supercell_matrix.matrix, |x| x as f64)), sc_lattice);
+                let pc_inverse = inv(&pc_lattice);
+                let sc_recip = mat_from_fn(|r, c| sc_inverse[c][r]);
+                let pc_recip = mat_from_fn(|r, c| pc_inverse[c][r]);
 
-            // lattice points of interest
-            let sc_periods = supercell_matrix.periods;
+                // lattice points of interest
+                let sc_periods = supercell_matrix.periods;
 
-            let quotient_sample_spec = self::config::SampleType::Plain(sc_periods);
-            let quotient_indices: Vec<_> =
-                    quotient_sample_spec.signed_indices()
-                    .into_iter().map(|v| {
-                        arr_from_fn(|k| (v[k] + sc_periods[k] as i32) as u32 % sc_periods[k])
-                    }).collect();
-            assert!(quotient_indices.len() > 0, "no points to sample against");
+                let quotient_sample_spec = self::config::SampleType::Plain(sc_periods);
+                let quotient_indices: Vec<_> =
+                        quotient_sample_spec.signed_indices()
+                        .into_iter().map(|v| {
+                            arr_from_fn(|k| (v[k] + sc_periods[k] as i32) as u32 % sc_periods[k])
+                        }).collect();
+                assert!(quotient_indices.len() > 0, "no points to sample against");
 
-            let quotient_vecs = quotient_sample_spec.points(&sc_recip);
-            let pc_recip_vecs = config.sampling.points(&pc_recip);
+                let quotient_vecs = quotient_sample_spec.points(&sc_recip);
+                let pc_recip_vecs = config.sampling.points(&pc_recip);
 
-            // into recip cartesian space
-            let eigenvector_q = dot(eigenvector_q, &sc_recip);
-            if eigenvector_q.iter().any(|&x| x != 0.0) {
-                // (I currently always run this code on gamma eigenvectors...)
-                warn!("Untested code path: 9fc15058-7199-45d2-80ec-630ceb575d3d")
-            }
+                // into recip cartesian space
+                let eigenvector_q = dot(eigenvector_q, &sc_recip);
+                if eigenvector_q.iter().any(|&x| x != 0.0) {
+                    // (I currently always run this code on gamma eigenvectors...)
+                    warn!("Untested code path: 9fc15058-7199-45d2-80ec-630ceb575d3d");
+                }
 
-            // separate kets for each polarization axis (they don't cancel each other)
-            let axis_evs: [Ket; 3] = arr_from_fn(|axis| {
-                eigenvector.iter().tuples()
-                    .map(|(x, y, z)| [x, y, z][axis])
-                    .collect()
-            });
+                UnfolderAtQ {
+                    sc_indices: quotient_indices,
+                    q_kets_by_pc_sc: pc_recip_vecs.iter().map(|sample_q| {
+                        quotient_vecs.iter().map(|quotient_q| {
+                            q_ket(
+                                &superstructure.to_carts(),
+                                &arr_from_fn(|k| eigenvector_q[k] + sample_q[k] + quotient_q[k]),
+                            )
+                        }).collect()
+                    }).collect(),
+                }
+            },
+        }
+    }
 
-            // different SC reciprocal lattice vectors compete with each other.
-            // different PC reciprocal lattice vectors work together.
-            let mut probs = vec![0.0; quotient_vecs.len()];
-            for sample_q in pc_recip_vecs {
-                for (prob, quotient_q) in izip!(&mut probs, &quotient_vecs) {
-                    let q: [_; 3] = arr_from_fn(|k| eigenvector_q[k] + sample_q[k] + quotient_q[k]);
-                    let q_ket = q_ket(&superstructure.to_carts(), &q);
+    pub fn unfold_phonon(&self, eigenvector: KetRef)
+    -> Vec<([u32; 3], f64)>
+    {
+        use ::rsp2_array_utils::{arr_from_fn};
 
-                    for k in 0..3 {
-                        *prob += q_ket.as_ref().overlap(&axis_evs[k]);
-                    }
+        assert_eq!(eigenvector.len(), 3 * self.q_kets_by_pc_sc[0][0].len());
+
+        // separate kets for each polarization axis (they don't cancel each other)
+        let axis_evs: [Ket; 3] = arr_from_fn(|axis| {
+            eigenvector.iter().tuples()
+                .map(|(x, y, z)| [x, y, z][axis])
+                .collect()
+        });
+
+        let num_sc_recip_vecs = self.sc_indices.len();
+
+        // different SC reciprocal lattice vectors compete with each other.
+        // different PC reciprocal lattice vectors work together.
+        let mut probs = vec![0.0; num_sc_recip_vecs];
+        for q_kets_by_sc in &self.q_kets_by_pc_sc {
+            assert_eq!(probs.len(), q_kets_by_sc.len());
+            for (prob, q_ket) in izip!(&mut probs, q_kets_by_sc) {
+                for k in 0..3 {
+                    *prob += q_ket.as_ref().overlap(&axis_evs[k]);
                 }
             }
-            let total: f64 = probs.iter().sum();
-            probs.iter_mut().for_each(|p| *p /= total);
+        }
+        let total: f64 = probs.iter().sum();
+        probs.iter_mut().for_each(|p| *p /= total);
 
-            izip!(quotient_indices, probs).collect()
-        },
+        izip!(self.sc_indices.clone(), probs).collect()
     }
 }
 
