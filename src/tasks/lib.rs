@@ -49,7 +49,6 @@ pub use ::cmd::make_force_sets;
 
 pub use ::bands::unfold_phonon;
 
-use errors::ok;
 pub use errors::{Result, ResultExt, Error, ErrorKind, StdResult};
 mod errors {
     error_chain! {

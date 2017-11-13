@@ -9,21 +9,27 @@ extern crate slice_of_array;
 #[macro_use] extern crate log;
 #[macro_use] extern crate serde_derive;
 extern crate serde_yaml;
+extern crate serde_json;
 extern crate rsp2_tempdir as tempdir;
 
 pub type IoError = ::std::io::Error;
 pub type YamlError = ::serde_yaml::Error;
 pub type Shareable = Send + Sync + 'static;
 
-pub(crate) use self::filetypes::{Displacements, DispYaml};
 pub use self::filetypes::{disp_yaml, force_sets, symmetry_yaml};
 
-pub mod cmd;
+pub use self::filebased::{DirWithDisps, DirWithForces, DirWithBands};
+pub use self::filebased::BandsBuilder;
+pub use self::filebased::Builder;
+
 mod filetypes;
 mod npy;
+mod filebased;
+mod fs_util;
 
 pub use errors::*;
 pub(crate) mod errors {
+    pub type IoResult<T> = ::std::io::Result<T>;
     error_chain!{
         links {
             Structure(::rsp2_structure::Error, ::rsp2_structure::ErrorKind);
@@ -32,6 +38,7 @@ pub(crate) mod errors {
 
         foreign_links {
             Io(::std::io::Error);
+            Json(::serde_json::Error);
             Yaml(::serde_yaml::Error);
         }
 

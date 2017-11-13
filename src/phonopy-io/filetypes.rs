@@ -1,10 +1,13 @@
-pub(crate) type Displacements = Vec<(usize, [f64; 3])>;
-pub(crate) use self::disp_yaml::DispYaml;
-pub mod disp_yaml {
-    use ::Error;
-    use super::Displacements;
+use ::{Result};
+use ::std::io::prelude::*;
+use ::std::collections::HashMap;
 
-    use ::std::io::prelude::*;
+
+// why is this pub(crate)? I don't remember...
+pub(crate) type Displacements = Vec<(usize, [f64; 3])>;
+pub mod disp_yaml {
+    use super::*;
+
     use ::rsp2_structure::{Structure};
 
     mod cereal {
@@ -58,7 +61,7 @@ pub mod disp_yaml {
         structure
     }
 
-    pub fn read<R: Read>(r: R) -> Result<DispYaml, Error>
+    pub fn read<R: Read>(r: R) -> Result<DispYaml>
     {
         use ::rsp2_structure::{Coords, Lattice};
         use self::cereal::{Point, Displacement, DispYaml as RawDispYaml};
@@ -81,6 +84,83 @@ pub mod disp_yaml {
 
         Ok(DispYaml { structure, displacements })
     }
+}
+
+/// Type representing a phonopy conf file.
+///
+/// In reality, valid conf files are only a subset of this.
+/// For instance, I would be wary of inserting a value that contains
+///   a `'#'` (the comment delimiter).
+pub type Conf = HashMap<String, String>;
+pub mod conf {
+    use super::*;
+
+    pub fn read<R: BufRead>(file: R) -> Result<Conf>
+    {Ok({
+        // NOTE: This was just thrown together based on what I assume
+        //       the format of phonopy's `conf` files is.
+        //       I haven't bothered to look at phonopy's own source for
+        //       reading the files, nor have I looked to see if there
+        //       is clear and unambiguous documentation somewhere for the spec.
+        //         - ML
+        let mut out = HashMap::new();
+        for line in file.lines() {
+            let mut line = &line?[..];
+
+            if line.trim().is_empty() {
+                continue;
+            }
+
+            if let Some(i) = line.bytes().position(|c| c == b'#') {
+                line = &line[..i];
+            }
+
+            if let Some(i) = line.bytes().position(|c| c == b'=') {
+                let key = line[..i].trim();
+                let value = line[i + 1..].trim();
+                out.insert(key.to_string(), value.to_string());
+            } else {
+                bail!("Can't read conf line: {:?}", line)
+            }
+        }
+        out
+    })}
+
+    pub fn write<W: Write>(mut w: W, conf: &Conf) -> Result<()>
+    {Ok({
+        for (key, val) in conf {
+            ensure!(key.bytes().all(|c| c != b'='), "'=' in conf key");
+            writeln!(w, "{} = {}", key, val)?
+        }
+    })}
+}
+
+/// Type representing extra CLI arguments.
+///
+/// Used internally to store things that must be preserved between
+/// runs but cannot be set in conf files, like e.g. `--tolerance`
+pub(crate) type Args = Vec<String>;
+pub(crate) mod args {
+    use super::*;
+
+    pub fn read<R: Read>(file: R) -> Result<Args>
+    { Ok(::serde_json::from_reader(file)?) }
+
+    pub fn write<W: Write, S: AsRef<str>>(w: W, args: &[S]) -> Result<()>
+    {Ok({
+        let args: Vec<_> = args.iter().map(|s: &_| s.as_ref()).collect();
+        ::serde_json::to_writer(w, &args)?;
+    })}
+}
+
+pub(crate) mod q_positions {
+    use super::*;
+
+    pub fn read<R: Read>(file: R) -> Result<Vec<[f64; 3]>>
+    { Ok(::serde_json::from_reader(file)?) }
+
+    pub fn write<W: Write>(w: W, data: &[[f64; 3]]) -> Result<()>
+    { Ok(::serde_json::to_writer(w, data)?) }
 }
 
 pub mod symmetry_yaml {
@@ -118,12 +198,6 @@ pub mod symmetry_yaml {
 
     pub fn read<R: Read>(r: R) -> Result<SymmetryYaml>
     {Ok({
-        parse(::serde_yaml::from_reader(r)?)?
-    })}
-
-    // monomorphic
-    fn parse(yaml: cereal::SymmetryYaml) -> Result<SymmetryYaml>
-    {Ok({
         use self::cereal::SymmetryYaml as RawYaml;
 
         let RawYaml {
@@ -131,7 +205,7 @@ pub mod symmetry_yaml {
             space_group_number,
             point_group_type,
             space_group_operations,
-        } = yaml;
+        } = ::serde_yaml::from_reader(r)?;
 
         SymmetryYaml {
             space_group_type,
@@ -160,7 +234,7 @@ pub mod force_sets {
     ) -> Result<()>
     where
         W: Write,
-        V: ::std::borrow::Borrow<[[f64; 3]]>,
+        V: AsRef<[[f64; 3]]>,
     {
         assert_eq!(force_sets.len(), displacements.len());
         writeln!(w, "{}", structure.num_atoms())?;
@@ -171,8 +245,8 @@ pub mod force_sets {
             writeln!(w, "{}", atom + 1)?; // NOTE: phonopy indexes atoms from 1
             writeln!(w, "{:e} {:e} {:e}", disp[0], disp[1], disp[2])?;
 
-            assert_eq!(force.borrow().len(), structure.num_atoms());
-            for row in force.borrow() {
+            assert_eq!(force.as_ref().len(), structure.num_atoms());
+            for row in force.as_ref() {
                 writeln!(w, "{:e} {:e} {:e}", row[0], row[1], row[2])?;
             }
 

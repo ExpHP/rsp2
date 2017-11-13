@@ -12,16 +12,16 @@ use ::rsp2_slice_math::{v, V, vdot};
 
 use ::slice_of_array::prelude::*;
 use ::rsp2_structure::supercell::{self, SupercellToken};
-use ::rsp2_structure::{Coords, CoordStructure};
-use ::rsp2_structure::{ElementStructure};
+use ::rsp2_structure::{Coords, CoordStructure, Structure, ElementStructure};
 use ::rsp2_structure_gen::Assemble;
 use ::rsp2_lammps_wrap::Lammps;
 use ::rsp2_lammps_wrap::Builder as LammpsBuilder;
-use ::rsp2_phonopy_io::cmd::Builder as PhonopyBuilder;
+use ::rsp2_phonopy_io::Builder as PhonopyBuilder;
 
-use ::std::path::Path;
+use ::std::io::{BufReader};
+use ::std::path::{Path, PathBuf};
 use ::std::hash::Hash;
-use ::std::fs::File;
+use ::std::fs::{self, File};
 
 use ::itertools::Itertools;
 
@@ -37,11 +37,9 @@ pub fn run_relax_with_eigenvectors(
     use ::rsp2_structure_io::poscar;
 
     let lmp = make_lammps_builder(&settings.threading);
+    let input = canonicalize(input.as_ref())?;
 
-    let input = ::std::env::current_dir()?.join(input);
-    let input = &input;
-
-    ::std::fs::create_dir(&outdir)?;
+    create_dir(&outdir)?;
     {
         // dumb/lazy solution to ensuring all output files go in the dir
         let cwd_guard = push_dir(outdir)?;
@@ -54,11 +52,11 @@ pub fn run_relax_with_eigenvectors(
             use ::rsp2_structure_gen::load_layers_yaml;
             use ::rsp2_structure_gen::layer_sc_info_from_layers_yaml;
 
-            let builder = load_layers_yaml(open(input)?)?;
+            let builder = load_layers_yaml(open(&input)?)?;
             let builder = optimize_layer_parameters(&settings.scale_ranges, &lmp, builder)?;
             let structure = carbon(&builder.assemble());
 
-            let layer_sc_info = layer_sc_info_from_layers_yaml(open(input)?)?;
+            let layer_sc_info = layer_sc_info_from_layers_yaml(open(&input)?)?;
             let layer_sc_mats = layer_sc_info
                 .into_iter().map(|(matrix, periods, _)| ::bands::ScMatrix::new(&matrix, &periods))
                 .collect_vec();
@@ -67,6 +65,7 @@ pub fn run_relax_with_eigenvectors(
         };
 
         poscar::dump(create("./initial.vasp")?, "", &original)?;
+        let phonopy = phonopy_builder_from_settings(&settings.phonons, &original);
 
         let mut from_structure = original.clone();
         let mut iteration = 1;
@@ -75,7 +74,7 @@ pub fn run_relax_with_eigenvectors(
         let (structure, einfos, _evecs) = loop { // NOTE: we use break with value
 
             let structure = do_relax(&lmp, &settings.cg, &settings.potential, from_structure)?;
-            let (evals, evecs) = do_diagonalize(&lmp, &settings.phonons, structure.clone())?;
+            let (evals, evecs) = do_diagonalize(&lmp, &phonopy, &structure)?;
 
             trace!("============================");
             trace!("Finished relaxation # {}", iteration);
@@ -188,47 +187,10 @@ pub fn run_relax_with_eigenvectors(
         poscar::dump(create("./final.vasp")?, "", &structure)?;
 
         if save_forces {
-            // FIXME FIXME FIXME
-            // BAD COPYPASTA BAD
-            // FIXME FIXME FIXME
-
-            use ::rsp2_phonopy_io::disp_yaml::apply_displacement;
-            use ::std::io::prelude::*;
-
-            let phonopy = PhonopyBuilder::new()
-                .symmetry_tolerance(settings.phonons.symmetry_tolerance)
-                .conf("DISPLACEMENT_DISTANCE", format!("{:e}", settings.phonons.displacement_distance))
-                .supercell_dim(settings.phonons.supercell.dim_for_unitcell(structure.lattice()))
-                .conf("HDF5", ".TRUE.")
-                .conf("DIAG", ".FALSE.") // maybe?
-                ;
-
-            let (superstructure, displacements, _disp_token) = phonopy.displacements(structure.clone())?;
-
-            trace!("Computing forces at displacements");
-
-            let mut i = 0;
-            let force_sets =
-                displacements.iter()
-                .map(|disp| ok({
-                    i += 1;
-                    eprint!("\rdisp {} of {}", i, displacements.len());
-                    ::std::io::stderr().flush().unwrap();
-                    let superstructure = apply_displacement(&superstructure, *disp);
-
-                    lmp.initialize_carbon(superstructure)?.compute_force()?
-                })).collect::<Result<Vec<_>>>()?;
-
-            ::rsp2_phonopy_io::force_sets::write(
-                create("FORCE_SETS")?,
-                &superstructure,
-                &displacements,
-                &force_sets,
-            )?;
-
-            // FIXME FIXME FIXME
-            // BAD COPYPASTA BAD
-            // FIXME FIXME FIXME
+            let disp_dir = phonopy.displacements(&structure)?;
+            let force_sets = do_force_sets_at_disps(&lmp, &disp_dir)?;
+            let force_dir = disp_dir.make_force_dir(&force_sets)?;
+            copy(force_dir.path().join("FORCE_SETS"), "FORCE_SETS")?;
         }
 
         { // write summary file
@@ -291,76 +253,26 @@ fn do_relax(
 
 fn do_diagonalize(
     lmp: &LammpsBuilder,
-    settings: &::config::Phonons,
-    structure: ElementStructure,
+    phonopy: &PhonopyBuilder,
+    structure: &ElementStructure,
 ) -> Result<(Vec<f64>, Vec<Vec<[f64; 3]>>)>
 {ok({
-    use ::rsp2_phonopy_io::disp_yaml::apply_displacement;
-    use ::std::io::prelude::*;
+    let disp_dir = phonopy.displacements(&structure)?;
+    let force_sets = do_force_sets_at_disps(&lmp, &disp_dir)?;
 
-    let phonopy = PhonopyBuilder::new()
-        .symmetry_tolerance(settings.symmetry_tolerance)
-        .conf("DISPLACEMENT_DISTANCE", format!("{:e}", settings.displacement_distance))
-        .supercell_dim(settings.supercell.dim_for_unitcell(structure.lattice()))
-        .conf("HDF5", ".TRUE.")
-        .conf("DIAG", ".FALSE.") // maybe?
-        ;
-
-    let (superstructure, displacements, disp_token) = phonopy.displacements(structure)?;
-
-    trace!("Computing forces at displacements");
-
-    let mut i = 0;
-    let force_sets =
-        displacements.iter()
-        .map(|disp| ok({
-            i += 1;
-            eprint!("\rdisp {} of {}", i, displacements.len());
-            ::std::io::stderr().flush().unwrap();
-            let superstructure = apply_displacement(&superstructure, *disp);
-
-            lmp.initialize_carbon(superstructure)?.compute_force()?
-        })).collect::<Result<Vec<_>>>()?;
-
-    // NOTE: Here's how you *could* do them in parallel,
-    //       but attempting to do so with lammps leads to segfaults.
-    #[cfg(nope)]
+    match disp_dir
+        .make_force_dir(&force_sets)?
+        .build_bands()
+        .eigenvectors(true)
+        .compute(&[[0.0; 3]])?
+        .gamma_eigensystem()?
     {
-        // bigger chunks = fewer opportunities for starved worker threads
-        // smaller chunks = more frequent visual feedback
-        const CHUNK_SIZE: usize = 100;
-        let superstructure = superstructure.send();
-        let force_sets =
-            displacements
-            .chunks(CHUNK_SIZE)
-            .enumerate()
-            .map(|(chunk_index, chunk)| {ok({
-                let buf: Vec<_> =
-                    chunk.par_iter()
-                    .map(|&disp| {ok({
-                        let superstructure = superstructure.clone().recv();
-                        let superstructure = apply_displacement(&superstructure, disp);
-                        lmp.initialize_carbon(superstructure.clone())?.compute_force()?
-                    })})
-                    .collect::<Result<_>>()?;
-
-                eprintln!(
-                    "Completed {:>6} displacements (of {})",
-                    CHUNK_SIZE * (chunk_index + 1), displacements.len());
-
-                buf
-            })})
-            .collect::<Result<Vec<_>>>()?
-            .into_iter()
-            .fold(
-                Vec::with_capacity(displacements.len()),
-                |mut acc, chunk| { acc.extend(chunk); acc }
-            );
+        Some((eval, Some(evec))) => {
+            let V(eval) = THZ_TO_WAVENUMBER * v(eval);
+            (eval, evec)
+        },
+        _ => unreachable!(),
     }
-
-    let (eval, evec) = phonopy.gamma_eigensystem(force_sets, &disp_token)?;
-    let V(eval) = THZ_TO_WAVENUMBER * v(eval);
-    (eval, evec)
 })}
 
 fn do_eigenvector_chase(
@@ -519,6 +431,41 @@ fn write_eigen_info(
         writeln(&format_args!("{:27}  {}  {}  {} [{:4.2}, {:4.2}, {:4.2}]",
             eval, acou, layer, gammas, pol(x), pol(y), pol(z)))?;
     }
+})}
+
+fn phonopy_builder_from_settings<M>(
+    settings: &::config::Phonons,
+    // the structure is needed to resolve the correct supercell size
+    structure: &Structure<M>,
+) -> PhonopyBuilder
+{
+    PhonopyBuilder::new()
+        .symmetry_tolerance(settings.symmetry_tolerance)
+        .conf("DISPLACEMENT_DISTANCE", format!("{:e}", settings.displacement_distance))
+        .supercell_dim(settings.supercell.dim_for_unitcell(structure.lattice()))
+        .conf("DIAG", ".FALSE.")
+}
+
+fn do_force_sets_at_disps<P: AsRef<Path>>(
+    lmp: &LammpsBuilder,
+    disp_dir: &::rsp2_phonopy_io::DirWithDisps<P>,
+) -> Result<Vec<Vec<[f64; 3]>>>
+{ok({
+    use ::std::io::prelude::*;
+
+    trace!("Computing forces at displacements");
+
+    let mut i = 0;
+    let force_sets = disp_dir.displaced_structures()
+        .map(|structure| ok({
+            i += 1;
+            eprint!("\rdisp {} of {}", i, disp_dir.displacements().len());
+            ::std::io::stderr().flush().unwrap();
+
+            lmp.initialize_carbon(structure)?.compute_force()?
+        })).collect::<Result<Vec<_>>>()?;
+    eprintln!();
+    force_sets
 })}
 
 //-----------------------------------
@@ -823,8 +770,9 @@ pub fn get_energy_surface(
     let structure = &poscar::load(open(input)?)?;
 
     let lmp = make_lammps_builder(&settings.threading);
+    let phonopy = phonopy_builder_from_settings(&settings.phonons, &structure);
 
-    ::std::fs::create_dir(&outdir)?;
+    create_dir(&outdir)?;
     {
         // dumb/lazy solution to ensuring all output files go in the dir
         let cwd_guard = push_dir(outdir)?;
@@ -832,7 +780,7 @@ pub fn get_energy_surface(
 
         poscar::dump(create("./input.vasp")?, "", &structure)?;
 
-        let (evals, evecs) = do_diagonalize(&lmp, &settings.phonons, structure.clone())?;
+        let (evals, evecs) = do_diagonalize(&lmp, &phonopy, &structure)?;
 
         trace!("Finding layers");
         let (layers, nlayer) = ::rsp2_structure::assign_layers(&structure, &[0, 0, 1], 0.25)?;
@@ -894,7 +842,6 @@ pub fn make_force_sets(
 {ok({
     use ::rsp2_structure_io::poscar;
     use ::std::io::BufReader;
-    use ::rsp2_phonopy_io::disp_yaml::apply_displacement;
 
     let mut phonopy = PhonopyBuilder::new();
     if let Some(conf) = conf {
@@ -905,7 +852,7 @@ pub fn make_force_sets(
 
     let lmp = make_lammps_builder(&::config::Threading::Lammps);
 
-    ::std::fs::create_dir(&outdir)?;
+    create_dir(&outdir)?;
     {
         // dumb/lazy solution to ensuring all output files go in the dir
         let cwd_guard = push_dir(outdir)?;
@@ -913,29 +860,9 @@ pub fn make_force_sets(
 
         poscar::dump(create("./input.vasp")?, "", &structure)?;
 
-        let (superstructure, displacements, _disp_token) = phonopy.displacements(structure)?;
-
-        trace!("Computing forces at displacements");
-
-        let mut i = 0;
-        let force_sets =
-            displacements.iter()
-            .map(|disp| ok({
-                use ::std::io::prelude::*;
-                i += 1;
-                eprint!("\rdisp {} of {}", i, displacements.len());
-                ::std::io::stderr().flush().unwrap();
-                let superstructure = apply_displacement(&superstructure, *disp);
-
-                lmp.initialize_carbon(superstructure)?.compute_force()?
-            })).collect::<Result<Vec<_>>>()?;
-
-        ::rsp2_phonopy_io::force_sets::write(
-            create("FORCE_SETS")?,
-            &superstructure,
-            &displacements,
-            &force_sets,
-        )?;
+        let disp_dir = phonopy.displacements(&structure)?;
+        let force_sets = do_force_sets_at_disps(&lmp, &disp_dir)?;
+        disp_dir.make_force_dir_in_dir(&force_sets, ".")?;
 
         cwd_guard.pop()?;
     }
@@ -944,16 +871,42 @@ pub fn make_force_sets(
 //=================================================================
 // error chaining helpers that tell us what file had a problem
 
-fn open<P: AsRef<Path>>(path: P) -> Result<File>
+pub(crate) fn open<P: AsRef<Path>>(path: P) -> Result<File>
 {
     File::open(path.as_ref())
-        .chain_err(|| format!("Could not open file: '{}'", path.as_ref().display()))
+        .chain_err(|| format!("while opening file: '{}'", path.as_ref().display()))
 }
 
-fn create<P: AsRef<Path>>(path: P) -> Result<File>
+pub(crate) fn create<P: AsRef<Path>>(path: P) -> Result<File>
 {
     File::create(path.as_ref())
-        .chain_err(|| format!("Could not create file: '{}'", path.as_ref().display()))
+        .chain_err(|| format!("while creating file: '{}'", path.as_ref().display()))
+}
+
+#[allow(unused)]
+pub(crate) fn open_text<P: AsRef<Path>>(path: P) -> Result<BufReader<File>>
+{ open(path).map(BufReader::new) }
+
+pub(crate) fn copy<P: AsRef<Path>, Q: AsRef<Path>>(src: P, dest: Q) -> Result<()>
+{
+    let (src, dest) = (src.as_ref(), dest.as_ref());
+    fs::copy(src, dest)
+        .map(|_| ()) // number of bytes; don't care
+        .chain_err(||
+            format!("while copying '{}' to '{}'",
+                src.display(), dest.display()))
+}
+
+pub(crate) fn create_dir<P: AsRef<Path>>(dir: P) -> Result<()>
+{
+    fs::create_dir(dir.as_ref())
+        .chain_err(|| format!("while creating directory '{}'", dir.as_ref().display()))
+}
+
+pub(crate) fn canonicalize<P: AsRef<Path>>(dir: P) -> Result<PathBuf>
+{
+    fs::canonicalize(dir.as_ref())
+        .chain_err(|| format!("while looking for '{}'", dir.as_ref().display()))
 }
 
 //=================================================================
