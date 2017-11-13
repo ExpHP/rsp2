@@ -73,6 +73,13 @@ pub fn run_relax_with_eigenvectors(
         let mut all_ok_count = 0;
         let (structure, einfos, _evecs) = loop { // NOTE: we use break with value
 
+            // Hard failure on too many iterations
+            // (we don't want to continue with negative non-acoustics)
+            if iteration > 15 {
+                error!("Too many relaxation steps!");
+                bail!("Too many relaxation steps!");
+            }
+
             let structure = do_relax(&lmp, &settings.cg, &settings.potential, from_structure)?;
             let (evals, evecs) = do_diagonalize(&lmp, &phonopy, &structure)?;
 
@@ -331,24 +338,21 @@ fn _do_cg_along_evecs(
 ) -> Result<ElementStructure>
 {ok({
     let sc_dims = tup3(potential_settings.supercell.dim_for_unitcell(structure.lattice()));
-    let (supercell, sc_token) = supercell::diagonal(sc_dims, structure);
+    let (mut supercell, sc_token) = supercell::diagonal(sc_dims, structure);
     let evecs: Vec<_> = evecs.iter().map(|ev| sc_token.replicate(ev)).collect();
 
     let flat_evecs: Vec<_> = evecs.iter().map(|ev| ev.flat()).collect();
     let init_pos = supercell.to_carts();
 
     let mut lmp = lmp.clone().threaded(true).initialize_carbon(uncarbon(&supercell))?;
-    let relaxed_flat = ::rsp2_minimize::acgsd(
+    let relaxed_coeffs = ::rsp2_minimize::acgsd(
         cg_settings,
         &vec![0.0; evecs.len()],
-        &mut *lammps_constrained_diff_fn(
-            &mut lmp,
-            init_pos.flat(),
-            &flat_evecs,
-            ),
+        &mut *lammps_constrained_diff_fn(&mut lmp, init_pos.flat(), &flat_evecs),
     ).unwrap().position;
 
-    let supercell = supercell.with_coords(Coords::Carts(relaxed_flat.nest().to_vec()));
+    let final_flat_pos = flat_constrained_position(init_pos.flat(), &relaxed_coeffs, &flat_evecs);
+    supercell.carts_mut().copy_from_slice(final_flat_pos.nest());
     multi_threshold_deconstruct(sc_token, 1e-10, 1e-3, supercell)?
 })}
 
@@ -696,6 +700,17 @@ fn lammps_flat_diff_fn<'a>(lmp: &'a mut Lammps)
     }))
 }
 
+fn flat_constrained_position(
+    flat_init_pos: &[f64],
+    coeffs: &[f64],
+    flat_evecs: &[&[f64]],
+) -> Vec<f64>
+{
+    let flat_d_pos = dot_vec_mat_dumb(coeffs, flat_evecs);
+    let V(flat_pos): V<Vec<_>> = v(flat_init_pos) + v(flat_d_pos);
+    flat_pos
+}
+
 // cg differential function along a restricted set of eigenvectors.
 //
 // There will be one coordinate for each eigenvector.
@@ -717,8 +732,7 @@ fn lammps_constrained_diff_fn<'a>(
         // These relationships have a simple expression in terms of
         //   the matrix whose columns are the selected eigenvectors.
         // (though the following is transposed for our row-centric formalism)
-        let flat_d_pos = dot_vec_mat_dumb(coeffs, flat_evs);
-        let V(flat_pos): V<Vec<_>> = v(flat_init_pos) + v(flat_d_pos);
+        let flat_pos = flat_constrained_position(flat_init_pos, coeffs, flat_evs);
 
         let (value, flat_grad) = compute_from_3n_flat(&flat_pos)?;
 
@@ -732,9 +746,6 @@ fn lammps_constrained_diff_fn<'a>(
 // but hey; what works, works
 
 fn dot_vec_mat_dumb(vec: &[f64], mat: &[&[f64]]) -> Vec<f64>
-{ mat.iter().map(|row| vdot(vec, row)).collect() }
-
-fn dot_mat_vec_dumb(mat: &[&[f64]], vec: &[f64]) -> Vec<f64>
 {
     assert_eq!(mat.len(), vec.len());
     assert_ne!(mat.len(), 0, "cannot determine width of matrix with no rows");
@@ -743,6 +754,9 @@ fn dot_mat_vec_dumb(mat: &[&[f64]], vec: &[f64]) -> Vec<f64>
         .fold(init, |acc, (&row, &alpha)| acc + alpha * v(row));
     out
 }
+
+fn dot_mat_vec_dumb(mat: &[&[f64]], vec: &[f64]) -> Vec<f64>
+{ mat.iter().map(|row| vdot(vec, row)).collect() }
 
 //=================================================================
 

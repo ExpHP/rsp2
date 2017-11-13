@@ -498,7 +498,7 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
     let mut last_saved = {
         let point = compute_point(initial_position)?;
         let Point { position, value, gradient } = point;
-        Saved { alpha: 1.0, position, value, gradient }
+        Saved { alpha: settings.alpha_guess_first, position, value, gradient }
     };
 
     // Remembers all values.
