@@ -49,22 +49,28 @@ pub use ::cmd::make_force_sets;
 
 pub use ::bands::unfold_phonon;
 
-error_chain! {
-    foreign_links {
-        Io(::std::io::Error);
-        Yaml(::serde_yaml::Error);
-        Json(::serde_json::Error);
-        SetLogger(::log::SetLoggerError);
-    }
+use errors::ok;
+pub use errors::{Result, ResultExt, Error, ErrorKind, StdResult};
+mod errors {
+    error_chain! {
+        foreign_links {
+            Io(::std::io::Error);
+            Yaml(::serde_yaml::Error);
+            Json(::serde_json::Error);
+            SetLogger(::log::SetLoggerError);
+        }
 
-    links {
-        Structure(::rsp2_structure::Error, ::rsp2_structure::ErrorKind);
-        StructureIo(::rsp2_structure_io::Error, ::rsp2_structure_io::ErrorKind);
-        StructureGen(::rsp2_structure_gen::Error, ::rsp2_structure_gen::ErrorKind);
-        LammpsWrap(::rsp2_lammps_wrap::Error, ::rsp2_lammps_wrap::ErrorKind);
-        Phonopy(::rsp2_phonopy_io::Error, ::rsp2_phonopy_io::ErrorKind);
-        ExactLs(::rsp2_minimize::exact_ls::Error, ::rsp2_minimize::exact_ls::ErrorKind);
+        links {
+            Structure(::rsp2_structure::Error, ::rsp2_structure::ErrorKind);
+            StructureIo(::rsp2_structure_io::Error, ::rsp2_structure_io::ErrorKind);
+            StructureGen(::rsp2_structure_gen::Error, ::rsp2_structure_gen::ErrorKind);
+            LammpsWrap(::rsp2_lammps_wrap::Error, ::rsp2_lammps_wrap::ErrorKind);
+            Phonopy(::rsp2_phonopy_io::Error, ::rsp2_phonopy_io::ErrorKind);
+            ExactLs(::rsp2_minimize::exact_ls::Error, ::rsp2_minimize::exact_ls::ErrorKind);
+        }
     }
+    // fewer type annotations...
+    pub fn ok<T>(x: T) -> Result<T> { Ok(x) }
+    pub type StdResult<T, E> = ::std::result::Result<T, E>;
 }
 
-pub type StdResult<T, E> = ::std::result::Result<T, E>;

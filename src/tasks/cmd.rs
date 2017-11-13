@@ -2,7 +2,7 @@
 
 const THZ_TO_WAVENUMBER: f64 = 33.35641;
 
-use ::{StdResult, Result, Error};
+use ::errors::{Result, ResultExt, ok};
 use ::config::Settings;
 use ::util::push_dir;
 use ::logging::setup_global_logger;
@@ -21,10 +21,9 @@ use ::rsp2_phonopy_io::cmd::Builder as PhonopyBuilder;
 
 use ::std::path::Path;
 use ::std::hash::Hash;
+use ::std::fs::File;
 
 use ::itertools::Itertools;
-
-type LmpError = ::rsp2_lammps_wrap::Error;
 
 pub fn run_relax_with_eigenvectors(
     settings: &Settings,
@@ -33,12 +32,14 @@ pub fn run_relax_with_eigenvectors(
     // cli args aren't in Settings, so they're just here.
     save_forces: bool,
 ) -> Result<()>
-{Ok({
+{ok({
     use ::std::io::prelude::*;
     use ::rsp2_structure_io::poscar;
-    use ::std::fs::File;
 
     let lmp = make_lammps_builder(&settings.threading);
+
+    let input = ::std::env::current_dir()?.join(input);
+    let input = &input;
 
     ::std::fs::create_dir(&outdir)?;
     {
@@ -47,17 +48,17 @@ pub fn run_relax_with_eigenvectors(
 
         setup_global_logger(Some(&"rsp2.log"))?;
 
-        // let mut original = poscar::load(File::open(input)?)?;
+        // let mut original = poscar::load(open(input)?)?;
         // original.scale_vecs(&settings.hack_scale);
         let (original, layer_sc_mats) = {
             use ::rsp2_structure_gen::load_layers_yaml;
             use ::rsp2_structure_gen::layer_sc_info_from_layers_yaml;
 
-            let builder = load_layers_yaml(File::open(input)?)?;
+            let builder = load_layers_yaml(open(input)?)?;
             let builder = optimize_layer_parameters(&settings.scale_ranges, &lmp, builder)?;
             let structure = carbon(&builder.assemble());
 
-            let layer_sc_info = layer_sc_info_from_layers_yaml(File::open(input)?)?;
+            let layer_sc_info = layer_sc_info_from_layers_yaml(open(input)?)?;
             let layer_sc_mats = layer_sc_info
                 .into_iter().map(|(matrix, periods, _)| ::bands::ScMatrix::new(&matrix, &periods))
                 .collect_vec();
@@ -65,7 +66,7 @@ pub fn run_relax_with_eigenvectors(
             (structure, layer_sc_mats)
         };
 
-        poscar::dump(File::create("./initial.vasp")?, "", &original)?;
+        poscar::dump(create("./initial.vasp")?, "", &original)?;
 
         let mut from_structure = original.clone();
         let mut iteration = 1;
@@ -89,7 +90,7 @@ pub fn run_relax_with_eigenvectors(
                 let fname = format!("./structure-{:02}.1.vasp", iteration);
                 trace!("Writing '{}'", &fname);
                 poscar::dump(
-                    File::create(fname)?,
+                    create(fname)?,
                     &format!("Structure after CG round {}", iteration),
                     &structure)?;
             }
@@ -99,10 +100,10 @@ pub fn run_relax_with_eigenvectors(
                 &evals, &evecs, &layers[..], Some(&structure), Some(&layer_sc_mats),
             );
             {
-                let mut file = File::create(format!("eigenvalues.{:02}", iteration))?;
+                let mut file = create(format!("eigenvalues.{:02}", iteration))?;
                 write_eigen_info(&einfos, &mut |s| writeln!(file, "{}", s).map_err(Into::into))?;
             }
-            write_eigen_info(&einfos, &mut |s| Ok::<_, Error>(info!("{}", s)))?;
+            write_eigen_info(&einfos, &mut |s| ok(info!("{}", s)))?;
 
             let mut structure = structure;
             let bad_evs: Vec<_> = izip!(1.., &einfos, &evecs)
@@ -127,7 +128,7 @@ pub fn run_relax_with_eigenvectors(
                 let fname = format!("./structure-{:02}.2.vasp", iteration);
                 trace!("Writing '{}'", &fname);
                 poscar::dump(
-                    File::create(fname)?,
+                    create(fname)?,
                     &format!("Structure after eigenmode-chasing round {}", iteration),
                     &structure)?;
             }
@@ -170,7 +171,7 @@ pub fn run_relax_with_eigenvectors(
         }; // (structure, einfos, evecs)
 
         {
-            let mut f = File::create("eigenvalues.final")?;
+            let mut f = create("eigenvalues.final")?;
             writeln!(f, "{:27}  {:4}  {:4}  {:^4} {:^4} {:^4}",
                 "# Frequency (cm^-1)", "Acou", "Layr", "X", "Y", "Z")?;
             for item in einfos.iter() {
@@ -184,7 +185,7 @@ pub fn run_relax_with_eigenvectors(
             }
         }
 
-        poscar::dump(File::create("./final.vasp")?, "", &structure)?;
+        poscar::dump(create("./final.vasp")?, "", &structure)?;
 
         if save_forces {
             // FIXME FIXME FIXME
@@ -209,7 +210,7 @@ pub fn run_relax_with_eigenvectors(
             let mut i = 0;
             let force_sets =
                 displacements.iter()
-                .map(|disp| Ok({
+                .map(|disp| ok({
                     i += 1;
                     eprint!("\rdisp {} of {}", i, displacements.len());
                     ::std::io::stderr().flush().unwrap();
@@ -219,7 +220,7 @@ pub fn run_relax_with_eigenvectors(
                 })).collect::<Result<Vec<_>>>()?;
 
             ::rsp2_phonopy_io::force_sets::write(
-                File::create("FORCE_SETS")?,
+                create("FORCE_SETS")?,
                 &superstructure,
                 &displacements,
                 &force_sets,
@@ -246,11 +247,11 @@ pub fn run_relax_with_eigenvectors(
             let modes = Modes { acoustic, shear, layer_breathing, layer_gammas };
 
             let energy_per_atom = {
-                let f = |structure: ElementStructure| {Ok::<_, Error>({
+                let f = |structure: ElementStructure| ok({
                     let na = structure.num_atoms() as f64;
                     lmp.initialize_carbon(uncarbon(&structure))?.compute_value()? / na
-                })};
-                let f_path = |s: &AsRef<Path>| Ok::<_, Error>(f(poscar::load(File::open(s)?)?)?);
+                });
+                let f_path = |s: &AsRef<Path>| ok(f(poscar::load(open(s)?)?)?);
 
                 let initial = f(original.clone())?;
                 let final_ = f(structure)?;
@@ -258,10 +259,9 @@ pub fn run_relax_with_eigenvectors(
                 EnergyPerAtom { initial, final_, before_ev_chasing }
             };
 
-
             let summary = Summary { modes, energy_per_atom };
 
-            ::serde_yaml::to_writer(File::create("summary.yaml")?, &summary)?;
+            ::serde_yaml::to_writer(create("summary.yaml")?, &summary)?;
         }
 
         cwd_guard.pop()?;
@@ -274,7 +274,7 @@ fn do_relax(
     potential_settings: &::config::Potential,
     structure: ElementStructure,
 ) -> Result<ElementStructure>
-{Ok({
+{ok({
     let sc_dims = tup3(potential_settings.supercell.dim_for_unitcell(structure.lattice()));
     let (supercell, sc_token) = supercell::diagonal(sc_dims, structure);
 
@@ -294,7 +294,7 @@ fn do_diagonalize(
     settings: &::config::Phonons,
     structure: ElementStructure,
 ) -> Result<(Vec<f64>, Vec<Vec<[f64; 3]>>)>
-{Ok({
+{ok({
     use ::rsp2_phonopy_io::disp_yaml::apply_displacement;
     use ::std::io::prelude::*;
 
@@ -313,7 +313,7 @@ fn do_diagonalize(
     let mut i = 0;
     let force_sets =
         displacements.iter()
-        .map(|disp| Ok({
+        .map(|disp| ok({
             i += 1;
             eprint!("\rdisp {} of {}", i, displacements.len());
             ::std::io::stderr().flush().unwrap();
@@ -334,10 +334,10 @@ fn do_diagonalize(
             displacements
             .chunks(CHUNK_SIZE)
             .enumerate()
-            .map(|(chunk_index, chunk)| {Ok({
+            .map(|(chunk_index, chunk)| {ok({
                 let buf: Vec<_> =
                     chunk.par_iter()
-                    .map(|&disp| {Ok({
+                    .map(|&disp| {ok({
                         let superstructure = superstructure.clone().recv();
                         let superstructure = apply_displacement(&superstructure, disp);
                         lmp.initialize_carbon(superstructure.clone())?.compute_force()?
@@ -370,7 +370,7 @@ fn do_eigenvector_chase(
     mut structure: ElementStructure,
     bad_evecs: &[(String, &[[f64; 3]])],
 ) -> Result<ElementStructure>
-{Ok({
+{ok({
     match *chase_settings {
         ::config::EigenvectorChase::OneByOne => {
             for &(ref name, evec) in bad_evecs {
@@ -404,7 +404,7 @@ fn do_cg_along_evecs<V, I>(
 where
     V: AsRef<[[f64; 3]]>,
     I: IntoIterator<Item=V>,
-{Ok({
+{ok({
     let evecs: Vec<_> = evecs.into_iter().collect();
     let refs: Vec<_> = evecs.iter().map(|x| x.as_ref()).collect();
     _do_cg_along_evecs(lmp, cg_settings, potential_settings, structure, &refs)?
@@ -417,7 +417,7 @@ fn _do_cg_along_evecs(
     structure: ElementStructure,
     evecs: &[&[[f64; 3]]],
 ) -> Result<ElementStructure>
-{Ok({
+{ok({
     let sc_dims = tup3(potential_settings.supercell.dim_for_unitcell(structure.lattice()));
     let (supercell, sc_token) = supercell::diagonal(sc_dims, structure);
     let evecs: Vec<_> = evecs.iter().map(|ev| sc_token.replicate(ev)).collect();
@@ -446,7 +446,7 @@ fn do_minimize_along_evec(
     structure: ElementStructure,
     evec: &[[f64; 3]],
 ) -> Result<(f64, ElementStructure)>
-{Ok({
+{ok({
     let sc_dims = tup3(settings.supercell.dim_for_unitcell(structure.lattice()));
     let (structure, sc_token) = supercell::diagonal(sc_dims, structure);
     let evec = sc_token.replicate(evec);
@@ -459,10 +459,10 @@ fn do_minimize_along_evec(
         let V(pos) = v(from_pos.flat()) + alpha * v(direction.flat());
         pos
     };
-    let alpha = ::rsp2_minimize::exact_ls::<LmpError, _>(0.0, 1e-4, |alpha| {
+    let alpha = ::rsp2_minimize::exact_ls(0.0, 1e-4, |alpha| {
         let gradient = lammps_flat_diff_fn(&mut lmp)(&pos_at_alpha(alpha))?.1;
         let slope = vdot(&gradient[..], direction.flat());
-        Ok(::rsp2_minimize::exact_ls::Slope(slope))
+        ok(::rsp2_minimize::exact_ls::Slope(slope))
     })??.alpha;
     let pos = pos_at_alpha(alpha);
     let structure = from_structure.with_coords(Coords::Carts(pos.nest().to_vec()));
@@ -475,8 +475,8 @@ fn multi_threshold_deconstruct(
     warn: f64,
     fail: f64,
     supercell: ElementStructure,
-) -> StdResult<ElementStructure, ::rsp2_structure::Error>
-{Ok({
+) -> Result<ElementStructure>
+{ok({
     match sc_token.deconstruct(warn, supercell.clone()) {
         Ok(x) => x,
         Err(e) => {
@@ -490,7 +490,7 @@ fn write_eigen_info(
     einfos: &EigenInfo,
     writeln: &mut FnMut(&::std::fmt::Display) -> Result<()>,
 ) -> Result<()>
-{Ok({
+{ok({
     use ::ansi_term::Colour::{Red, Cyan, Yellow, Black};
     use ::color::{ColorByRange, DisplayProb};
 
@@ -528,7 +528,7 @@ pub fn optimize_layer_parameters(
     lmp: &LammpsBuilder,
     mut builder: Assemble,
 ) -> Result<Assemble>
-{Ok({
+{ok({
     pub use ::rsp2_minimize::exact_ls::{Value, Golden};
     use ::config::{ScaleRanges, ScaleRange};
     use ::std::cell::RefCell;
@@ -574,7 +574,7 @@ pub fn optimize_layer_parameters(
         }
 
         //let mut lmp = lmp.initialize_carbon(builder.borrow().assemble())?;
-        let get_value = || Ok::<_, Error>({
+        let get_value = || ok({
             // use ::std::hash::{Hash, Hasher};
             lmp.initialize_carbon(builder.borrow().assemble())?.compute_value()?
         });
@@ -741,12 +741,12 @@ fn make_lammps_builder(threading: &::config::Threading) -> LammpsBuilder
 }
 
 fn lammps_flat_diff_fn<'a>(lmp: &'a mut Lammps)
--> Box<FnMut(&[f64]) -> StdResult<(f64, Vec<f64>), LmpError> + 'a>
+-> Box<FnMut(&[f64]) -> Result<(f64, Vec<f64>)> + 'a>
 {
-    Box::new(move |pos| {
+    Box::new(move |pos| ok({
         lmp.set_carts(pos.nest())?;
-        lmp.compute().map(|(v,g)| (v, g.flat().to_vec()))
-    })
+        lmp.compute().map(|(v,g)| (v, g.flat().to_vec()))?
+    }))
 }
 
 // cg differential function along a restricted set of eigenvectors.
@@ -757,11 +757,11 @@ fn lammps_constrained_diff_fn<'a>(
     flat_init_pos: &'a [f64],
     flat_evs: &'a [&[f64]],
 )
--> Box<FnMut(&[f64]) -> StdResult<(f64, Vec<f64>), LmpError> + 'a>
+-> Box<FnMut(&[f64]) -> Result<(f64, Vec<f64>)> + 'a>
 {
     let mut compute_from_3n_flat = lammps_flat_diff_fn(lmp);
 
-    Box::new(move |coeffs| {Ok({
+    Box::new(move |coeffs| ok({
         assert_eq!(coeffs.len(), flat_evs.len());
 
         // This is dead simple.
@@ -777,7 +777,7 @@ fn lammps_constrained_diff_fn<'a>(
 
         let grad = dot_mat_vec_dumb(flat_evs, &flat_grad);
         (value, grad)
-    })})
+    }))
 }
 
 //----------------------
@@ -800,13 +800,12 @@ fn dot_mat_vec_dumb(mat: &[&[f64]], vec: &[f64]) -> Vec<f64>
 //=================================================================
 
 pub fn run_symmetry_test(input: &Path) -> Result<()>
-{Ok({
+{ok({
     use ::rsp2_structure_io::poscar;
-    use ::std::fs::File;
 
     setup_global_logger(None)?;
 
-    let poscar = poscar::load(File::open(input)?)?;
+    let poscar = poscar::load(open(input)?)?;
     let symmops = PhonopyBuilder::new().symmetry(&poscar)?;
     ::rsp2_structure::dumb_symmetry_test(&poscar.map_metadata_to(|_| ()), &symmops, 1e-6)?;
 })}
@@ -818,11 +817,10 @@ pub fn get_energy_surface(
     input: &AsRef<Path>,
     outdir: &AsRef<Path>,
 ) -> Result<()>
-{Ok({
+{ok({
     use ::rsp2_structure_io::poscar;
-    use ::std::fs::File;
 
-    let structure = &poscar::load(File::open(input)?)?;
+    let structure = &poscar::load(open(input)?)?;
 
     let lmp = make_lammps_builder(&settings.threading);
 
@@ -832,7 +830,7 @@ pub fn get_energy_surface(
         let cwd_guard = push_dir(outdir)?;
         setup_global_logger(Some(&"rsp2.log"))?;
 
-        poscar::dump(File::create("./input.vasp")?, "", &structure)?;
+        poscar::dump(create("./input.vasp")?, "", &structure)?;
 
         let (evals, evecs) = do_diagonalize(&lmp, &settings.phonons, structure.clone())?;
 
@@ -843,7 +841,7 @@ pub fn get_energy_surface(
         trace!("Computing eigensystem info");
         let einfos = get_eigensystem_info(&evals, &evecs, &layers, None, None);
 
-        write_eigen_info(&einfos, &mut |s| Ok::<_, Error>(info!("{}", s)))?;
+        write_eigen_info(&einfos, &mut |s| ok(info!("{}", s)))?;
 
         let shear_evecs = {
             let mut iter = einfos
@@ -862,14 +860,14 @@ pub fn get_energy_surface(
         let data = {
             let mut lmp = lmp.initialize_carbon(uncarbon(&structure))?;
 
-            ::integrate_2d::integrate_two_eigenvectors::<Error,_>(
+            ::integrate_2d::integrate_two_eigenvectors(
                 (W, H),
                 &structure.to_carts(),
                 (-10.0..10.0, -10.0..10.0),
                 (&shear_evecs.0, &shear_evecs.1),
                 {
                     let mut i = 0;
-                    move |pos| {Ok({
+                    move |pos| {ok({
                         i += 1;
                         eprint!("\rdatapoint {:>6} of {}", i, W * H);
                         lmp.set_carts(&pos)?;
@@ -879,7 +877,7 @@ pub fn get_energy_surface(
             )?
         };
         let chunked: Vec<_> = data.chunks(W).collect();
-        ::serde_json::to_writer_pretty(File::create("out.json")?, &chunked)?;
+        ::serde_json::to_writer_pretty(create("out.json")?, &chunked)?;
         cwd_guard.pop()?;
     }
 
@@ -893,18 +891,17 @@ pub fn make_force_sets(
     poscar: &AsRef<Path>,
     outdir: &AsRef<Path>,
 ) -> Result<()>
-{Ok({
+{ok({
     use ::rsp2_structure_io::poscar;
-    use ::std::fs::File;
     use ::std::io::BufReader;
     use ::rsp2_phonopy_io::disp_yaml::apply_displacement;
 
     let mut phonopy = PhonopyBuilder::new();
     if let Some(conf) = conf {
-        phonopy = phonopy.conf_from_file(BufReader::new(File::open(conf)?))?;
+        phonopy = phonopy.conf_from_file(BufReader::new(open(conf)?))?;
     }
 
-    let structure = poscar::load(File::open(poscar)?)?;
+    let structure = poscar::load(open(poscar)?)?;
 
     let lmp = make_lammps_builder(&::config::Threading::Lammps);
 
@@ -914,7 +911,7 @@ pub fn make_force_sets(
         let cwd_guard = push_dir(outdir)?;
         setup_global_logger(Some(&"rsp2.log"))?;
 
-        poscar::dump(File::create("./input.vasp")?, "", &structure)?;
+        poscar::dump(create("./input.vasp")?, "", &structure)?;
 
         let (superstructure, displacements, _disp_token) = phonopy.displacements(structure)?;
 
@@ -923,7 +920,7 @@ pub fn make_force_sets(
         let mut i = 0;
         let force_sets =
             displacements.iter()
-            .map(|disp| Ok({
+            .map(|disp| ok({
                 use ::std::io::prelude::*;
                 i += 1;
                 eprint!("\rdisp {} of {}", i, displacements.len());
@@ -934,7 +931,7 @@ pub fn make_force_sets(
             })).collect::<Result<Vec<_>>>()?;
 
         ::rsp2_phonopy_io::force_sets::write(
-            File::create("FORCE_SETS")?,
+            create("FORCE_SETS")?,
             &superstructure,
             &displacements,
             &force_sets,
@@ -943,6 +940,21 @@ pub fn make_force_sets(
         cwd_guard.pop()?;
     }
 })}
+
+//=================================================================
+// error chaining helpers that tell us what file had a problem
+
+fn open<P: AsRef<Path>>(path: P) -> Result<File>
+{
+    File::open(path.as_ref())
+        .chain_err(|| format!("Could not open file: '{}'", path.as_ref().display()))
+}
+
+fn create<P: AsRef<Path>>(path: P) -> Result<File>
+{
+    File::create(path.as_ref())
+        .chain_err(|| format!("Could not create file: '{}'", path.as_ref().display()))
+}
 
 //=================================================================
 

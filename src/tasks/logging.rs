@@ -1,11 +1,11 @@
-use ::Result;
+use ::errors::{Result, ok};
 
 use ::std::fmt;
 use ::std::path::Path;
 use ::log::LogLevel;
 
 pub(crate) fn setup_global_logger(path: Option<&AsRef<Path>>) -> Result<()>
-{Ok({
+{ok({
     use ::std::time::Instant;
 
     let start = Instant::now();
