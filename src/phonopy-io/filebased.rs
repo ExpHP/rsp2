@@ -14,9 +14,13 @@
 //! things was the biggest limitation of the previous API, which never
 //! exposed its own temporary directories.
 
-use ::{Result, IoResult, ErrorKind};
+use ::{StdResult, Result, Error, IoResult, ErrorKind};
 use ::As3;
 
+use ::filetypes::{conf, args, q_positions};
+use ::filetypes::{symmetry_yaml, disp_yaml, force_sets};
+
+use ::rsp2_structure_io::poscar;
 use ::std::io::prelude::BufRead;
 use ::std::process::Command;
 use ::std::path::{Path, PathBuf};
@@ -83,9 +87,6 @@ impl Builder {
         structure: &ElementStructure,
     ) -> Result<DirWithDisps<TempDir>>
     {Ok({
-        use ::rsp2_structure_io::poscar;
-        use ::filetypes::{conf, args};
-
         let dir = TempDir::new("rsp2")?;
         {
             let dir = dir.path();
@@ -118,9 +119,6 @@ impl Builder {
         structure: &ElementStructure,
     ) -> Result<(Vec<FracOp>)>
     {Ok({
-        use ::rsp2_structure_io::poscar;
-        use ::filetypes::{symmetry_yaml, conf};
-
         let tmp = TempDir::new("rsp2")?;
         let tmp = tmp.path();
         trace!("Entered '{}'...", tmp.display());
@@ -226,7 +224,7 @@ macro_rules! declare_poison_pair {
 /// As a result, some circumstances which probably should return `Error`
 /// may instead cause a panic, or may not be detected as early as possible.
 #[derive(Debug, Clone)]
-pub struct DirWithDisps<P: AsRef<Path>> {
+pub struct DirWithDisps<P: AsPath> {
     pub(crate) dir: P,
     // These are cached in memory from `disp.yaml` due to the likelihood
     // that code using `DirWithDisps` will need them.
@@ -238,26 +236,24 @@ pub struct DirWithDisps<P: AsRef<Path>> {
     pub(crate) displacements: Vec<(usize, [f64; 3])>,
 }
 
-impl<P: AsRef<Path>> DirWithDisps<P> {
+impl<P: AsPath> DirWithDisps<P> {
     pub fn from_existing(dir: P) -> Result<Self>
     {Ok({
-        use ::filetypes::disp_yaml;
         for name in &[
             "POSCAR",
             "disp.yaml",
             "disp.conf",
             "disp.args",
         ] {
-            let path = dir.as_ref().join(name);
-            if !path.exists() {
-                bail!("Missing file for DirWithForces: '{}'", path.display());
-            }
+            let path = dir.as_path().join(name);
+            ensure!(path.exists(),
+                ErrorKind::MissingFile("DirWithDisps", dir.as_path().to_owned(), name.to_string()));
         }
 
         trace!("Parsing disp.yaml...");
         let disp_yaml::DispYaml {
             displacements, structure: superstructure
-        } = disp_yaml::read(open(dir.as_ref().join("disp.yaml"))?)?;
+        } = disp_yaml::read(open(dir.as_path().join("disp.yaml"))?)?;
         let superstructure = superstructure.map_metadata_into(|_| ());
 
         DirWithDisps { dir, superstructure, displacements }
@@ -303,18 +299,16 @@ impl<P: AsRef<Path>> DirWithDisps<P> {
     pub fn make_force_dir_in_dir<V, Q>(self, forces: &[V], path: Q) -> Result<DirWithForces<Q>>
     where
         V: AsRef<[[f64; 3]]>,
-        Q: AsRef<Path>,
+        Q: AsPath,
     {Ok({
         let forces: Vec<_> = forces.iter().map(|x: &_| x.as_ref()).collect();
-        self.prepare_force_dir(&forces, path.as_ref())?;
+        self.prepare_force_dir(&forces, path.as_path())?;
         DirWithForces::from_existing(path)?
     })}
 
     fn prepare_force_dir(self, forces: &[&[[f64; 3]]], path: &Path) -> Result<()>
     {Ok({
-        use ::filetypes::force_sets;
-
-        let disp_dir = self.dir.as_ref();
+        let disp_dir = self.path();
 
         for name in &["POSCAR", "disp.yaml", "disp.conf", "disp.args"] {
             copy(disp_dir.join(name), path.join(name))?;
@@ -348,12 +342,12 @@ impl<P: AsRef<Path>> DirWithDisps<P> {
 /// As a result, some circumstances which probably should return `Error`
 /// may instead cause a panic, or may not be detected as early as possible.
 #[derive(Debug, Clone)]
-pub struct DirWithForces<P: AsRef<Path>> {
+pub struct DirWithForces<P: AsPath> {
     dir: P,
     cache_force_constants: bool,
 }
 
-impl<P: AsRef<Path>> DirWithForces<P> {
+impl<P: AsPath> DirWithForces<P> {
     pub fn from_existing(dir: P) -> Result<Self>
     {Ok({
         // Sanity check
@@ -363,13 +357,17 @@ impl<P: AsRef<Path>> DirWithForces<P> {
             "disp.args",
             "disp.conf",
         ] {
-            let path = dir.as_ref().join(name);
+            let path = dir.as_path().join(name);
             if !path.exists() {
-                bail!("Missing file for DirWithForces: '{}'", path.display());
+                ensure!(path.exists(),
+                    ErrorKind::MissingFile("DirWithForces", dir.as_path().to_owned(), name.to_string()));
             }
         }
         DirWithForces { dir, cache_force_constants: true }
     })}
+
+    pub fn structure(&self) -> Result<ElementStructure>
+    { Ok(poscar::load(open_text(self.path().join("POSCAR"))?)?) }
 
     /// Enable/disable caching of force constants.
     ///
@@ -385,12 +383,13 @@ impl<P: AsRef<Path>> DirWithForces<P> {
     pub fn build_bands(&self) -> BandsBuilder<P, TempDir>
     { BandsBuilder::init(self, MaybeDeferred::Deferred(make_temp_bands_dir)) }
 
+    // FIXME experimental API, but `relocate` may be safer/saner
     /// Compute bands, running in a given directory.
     ///
     /// Returns an object used to configure the computation.
     ///
     /// Beware! Existing files in the given directory may be overwritten.
-    pub fn build_bands_in_dir<Q: AsRef<Path>>(&self, dir: Q) -> BandsBuilder<P, Q>
+    pub fn build_bands_in_dir<Q: AsPath>(&self, dir: Q) -> BandsBuilder<P, Q>
     { BandsBuilder::init(self, MaybeDeferred::Value(dir)) }
 }
 
@@ -410,8 +409,8 @@ fn make_temp_bands_dir() -> Result<TempDir>
 declare_poison_pair! {
     generics: {'p, P, Q}
     where: {
-        P: AsRef<Path> + 'p,
-        Q: AsRef<Path>,
+        P: AsPath + 'p,
+        Q: AsPath,
     }
     type: {
         #[derive(Debug, Clone)]
@@ -425,7 +424,7 @@ declare_poison_pair! {
     poisoned: { panic!("This BandsBuilder has already been used!"); }
 }
 
-impl<'p, P: AsRef<Path>, Q: AsRef<Path>> BandsBuilder<'p, P, Q> {
+impl<'p, P: AsPath, Q: AsPath> BandsBuilder<'p, P, Q> {
     // Q must be provided in advance to dodge issues with type inference
     fn init(dir_with_forces: &'p DirWithForces<P>, directory: MaybeDeferred<Q>) -> Self
     { BandsBuilder(Some(BandsBuilderImpl {
@@ -439,7 +438,6 @@ impl<'p, P: AsRef<Path>, Q: AsRef<Path>> BandsBuilder<'p, P, Q> {
 
     pub fn compute(&mut self, q_points: &[[f64; 3]]) -> Result<DirWithBands<Q>>
     {Ok({
-        use ::filetypes::{conf, args, q_positions};
         let me = self.into_inner();
         let dir = match me.directory {
             MaybeDeferred::Value(d) => d,
@@ -448,8 +446,8 @@ impl<'p, P: AsRef<Path>, Q: AsRef<Path>> BandsBuilder<'p, P, Q> {
 
         let fc_filename = "force_constants.hdf5";
         {
-            let src = me.dir_with_forces.as_ref();
-            let dir = dir.as_ref();
+            let src = me.dir_with_forces.as_path();
+            let dir = dir.as_path();
 
             copy(src.join("POSCAR"), dir.join("POSCAR"))?;
             copy(src.join("disp.conf"), dir.join("disp.conf"))?;
@@ -518,11 +516,11 @@ impl<'p, P: AsRef<Path>, Q: AsRef<Path>> BandsBuilder<'p, P, Q> {
 /// As a result, some circumstances which probably should return `Error`
 /// may instead cause a panic, or may not be detected as early as possible.
 #[derive(Debug, Clone)]
-pub struct DirWithBands<P: AsRef<Path>> {
+pub struct DirWithBands<P: AsPath> {
     dir: P,
 }
 
-impl<P: AsRef<Path>> DirWithBands<P> {
+impl<P: AsPath> DirWithBands<P> {
     pub fn from_existing(dir: P) -> Result<Self>
     {Ok({
         // Sanity check
@@ -532,26 +530,27 @@ impl<P: AsRef<Path>> DirWithBands<P> {
             "eigenvalue.npy",
             "q-positions.json",
         ] {
-            let path = dir.as_ref().join(name);
+            let path = dir.as_path().join(name);
             if !path.exists() {
-                bail!("Missing file for DirWithBands: '{}'", path.display());
+                ensure!(path.exists(),
+                    ErrorKind::MissingFile("DirWithBands", dir.as_path().to_owned(), name.to_string()));
             }
         }
 
         DirWithBands { dir }
     })}
 
+    pub fn structure(&self) -> Result<ElementStructure>
+    { Ok(poscar::load(open_text(self.path().join("POSCAR"))?)?) }
+
     pub fn q_positions(&self) -> Result<Vec<[f64; 3]>>
-    {Ok({
-        use ::filetypes::q_positions;
-        q_positions::read(open(self.path().join("q-positions.json"))?)?
-    })}
+    { Ok(q_positions::read(open(self.path().join("q-positions.json"))?)? )}
 
     /// This will be `None` if `.eigenvectors(true)` was not set prior
     /// to the band computation.
     pub fn eigenvectors(&self) -> Result<Option<Vec<Basis>>>
     {Ok({
-        let path = self.dir.as_ref().join("eigenvector.npy");
+        let path = self.path().join("eigenvector.npy");
         if path.exists() {
             trace!("Reading eigenvectors...");
             Some(::npy::read_eigenvector_npy(open(path)?)?)
@@ -561,7 +560,7 @@ impl<P: AsRef<Path>> DirWithBands<P> {
     pub fn eigenvalues(&self) -> Result<Vec<Vec<f64>>>
     {
         trace!("Reading eigenvectors...");
-        let file = open(self.dir.as_ref().join("eigenvalue.npy"))?;
+        let file = open(self.path().join("eigenvalue.npy"))?;
         ::npy::read_eigenvalue_npy(file)
     }
 
@@ -665,6 +664,57 @@ fn check_status(status: ::std::process::ExitStatus) -> Result<()>
 
 //-----------------------------
 
+/// AsRef<Path> with more general impls on smart pointer types.
+///
+/// (for instance, `Box<AsPath>` and `Rc<TempDir>` both implement
+///  the trait)
+pub trait AsPath {
+    fn as_path(&self) -> &Path;
+}
+
+macro_rules! as_path_impl {
+    (@AsRef [$($generics:tt)*] $Type:ty)
+    => {
+        impl<$($generics)*> AsPath for $Type {
+            fn as_path(&self) -> &Path { self.as_ref() }
+        }
+    };
+    (@Deref [$($generics:tt)*] $Type:ty)
+    => {
+        impl<$($generics)*> AsPath for $Type {
+            fn as_path(&self) -> &Path { (&**self).as_path() }
+        }
+    };
+    ( $(
+        (by $tag:tt) [$($generics:tt)*] $Type:ty;
+    )+ )
+    => {
+        $( as_path_impl!{@$tag [$($generics)*] $Type} )*
+    };
+}
+
+as_path_impl!{
+    (by AsRef) [] Path;
+    (by AsRef) [] PathBuf;
+    (by AsRef) [] TempDir;
+    (by AsRef) [] ::std::ffi::OsString;
+    (by AsRef) [] ::std::ffi::OsStr;
+    (by AsRef) [] str;
+    (by AsRef) [] String;
+    (by AsRef) ['a] ::std::path::Iter<'a>;
+    (by AsRef) ['a] ::std::path::Components<'a>;
+    (by Deref) ['p, P: AsPath + ?Sized] &'p mut P;
+    (by Deref) [P: AsPath + ?Sized] Box<P>;
+    (by Deref) [P: AsPath + ?Sized] ::std::rc::Rc<P>;
+    (by Deref) [P: AsPath + ?Sized] ::std::sync::Arc<P>;
+    (by Deref) ['p, P: AsPath + ToOwned + ?Sized] ::std::borrow::Cow<'p, P>;
+}
+
+impl<'p, P: AsPath + ?Sized> AsPath for &'p P
+{ fn as_path(&self) -> &Path { P::as_path(self) } }
+
+
+
 /// Trait for types that own a temporary directory, which can be
 /// released (to prevent automatic deletion) or explicitly closed
 /// to catch IO errors (which would be ignored on drop).
@@ -673,7 +723,7 @@ fn check_status(status: ::std::process::ExitStatus) -> Result<()>
 /// worry about it. All types that implement this expose it through
 /// the `close()` and `into_path()` inherent methods, so you do not
 /// need to import it.
-pub trait HasTempDir: AsRef<Path> {
+pub trait HasTempDir: AsPath {
     /// Provides `close()` in generic contexts
     fn temp_dir_close(self) -> IoResult<()>;
     /// Provides `into_path()` in generic contexts
@@ -695,13 +745,13 @@ macro_rules! impl_dirlike_boilerplate {
             { self.$member.temp_dir_into_path() }
         }
 
-        // all dir-likes implement AsRef<Path>
-        impl<P: AsRef<Path>> AsRef<Path> for $Type<P> {
-            fn as_ref(&self) -> &Path { self.dir.as_ref() }
+        // all dir-likes implement AsPath
+        impl<P: AsPath> AsPath for $Type<P> {
+            fn as_path(&self) -> &Path { self.dir.as_path() }
         }
 
         // all dir-likes expose inherent methods that are aliases
-        // for the HasTempDir and AsRef<Path> methods
+        // for the HasTempDir and AsPath methods
         impl<P: HasTempDir> $Type<P> {
             /// Explicitly close the temporary directory, deleting it.
             ///
@@ -715,21 +765,21 @@ macro_rules! impl_dirlike_boilerplate {
             /// see the `keep()` method.
             pub fn into_path(self) -> PathBuf { self.temp_dir_into_path() }
 
-            /// Convert the contained temporary directory into a `PathBuf`,
-            /// so that it is not deleted when this object is dropped.
-            pub fn keep(self) -> $Type<PathBuf>
+            ///
+            pub fn relocate<Q: AsPath>(self, path: P)
+            -> StdResult<$Type<PathBuf>, ($Type<P>, Error)>
             { self.map_dir(HasTempDir::temp_dir_into_path) }
         }
 
-        impl<P: AsRef<Path>> $Type<P> {
-            pub fn path(&self) -> &Path { self.as_ref() }
+        impl<P: AsPath> $Type<P> {
+            pub fn path(&self) -> &Path { self.as_path() }
 
             /// Apply a function to change the type of the directory.
             /// For example, when `P = TempDir`, one could use `.map_dir(Rc::new)`
             ///  to enable cloning of the object.
             pub fn map_dir<Q, F>(self, f: F) -> $Type<Q>
             where
-                Q: AsRef<Path>,
+                Q: AsPath,
                 F: FnOnce(P) -> Q,
             {
                 let $member = f(self.$member);
@@ -761,4 +811,31 @@ impl_dirlike_boilerplate!{
     type: {DirWithBands<_>}
     member: self.dir
     other_members: []
+}
+
+#[cfg(test)]
+#[deny(unused)]
+mod tests {
+    use super::*;
+
+    // check use cases I need to work
+    #[allow(unused)]
+    fn things_expected_to_impl_aspath() {
+        use ::std::rc::Rc;
+        use ::std::sync::Arc;
+        panic!("This is a compiletest; it should not be executed.");
+
+        // clonable TempDirs
+        let x: DirWithBands<TempDir> = panic!();
+        let x = x.map_dir(Rc::new);
+        let _ = x.clone();
+
+        // sharable TempDirs
+        let x: DirWithBands<TempDir> = panic!();
+        let x = x.map_dir(Arc::new);
+        let _: &(Send + Sync) = &x;
+
+        // erased types, for conditional deletion
+        let _: DirWithBands<Box<AsPath>> = x.map_dir(|e| Box::new(e) as _);
+    }
 }

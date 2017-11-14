@@ -7,6 +7,7 @@ pub use ::rsp2_minimize::acgsd::Settings as Acgsd;
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub struct Settings {
+    #[serde(default)]
     pub threading: Threading,
     pub potential: Potential,
     pub scale_ranges: ScaleRanges,
@@ -39,8 +40,21 @@ pub struct ScaleRange {
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub struct EnergyPlotSettings {
+    #[serde(default)]
     pub threading: Threading,
-    pub phonons: Phonons,
+    pub xlim: [f64; 2],
+    pub ylim: [f64; 2],
+    pub dim: [usize; 2],
+    pub ev_indices: EnergyPlotEvIndices,
+    //pub phonons: Phonons,
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum EnergyPlotEvIndices {
+    Shear,
+    These(usize, usize),
 }
 
 #[derive(Serialize, Deserialize)]
@@ -93,10 +107,15 @@ impl SupercellSpec {
     }
 }
 
+// FIXME delete
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all="kebab-case")]
 pub enum Threading {
     Lammps,
     Rayon,
+}
+
+impl Default for Threading {
+    fn default() -> Self { Threading::Lammps }
 }

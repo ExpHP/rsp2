@@ -2,7 +2,7 @@
 
 const THZ_TO_WAVENUMBER: f64 = 33.35641;
 
-use ::errors::{Result, ResultExt, ok};
+use ::errors::{Result, ResultExt, Error, ok};
 use ::config::Settings;
 use ::util::push_dir;
 use ::logging::setup_global_logger;
@@ -18,12 +18,14 @@ use ::rsp2_lammps_wrap::Lammps;
 use ::rsp2_lammps_wrap::Builder as LammpsBuilder;
 use ::rsp2_phonopy_io::Builder as PhonopyBuilder;
 
-use ::std::io::{BufReader};
+use ::std::io::{BufReader, Write, Read};
 use ::std::path::{Path, PathBuf};
 use ::std::hash::Hash;
 use ::std::fs::{self, File};
 
 use ::itertools::Itertools;
+
+const SAVE_FORCES_DIR: &'static str = "last-phonopy-dir";
 
 pub fn run_relax_with_eigenvectors(
     settings: &Settings,
@@ -33,7 +35,6 @@ pub fn run_relax_with_eigenvectors(
     save_forces: bool,
 ) -> Result<()>
 {ok({
-    use ::std::io::prelude::*;
     use ::rsp2_structure_io::poscar;
 
     let lmp = make_lammps_builder(&settings.threading);
@@ -81,7 +82,15 @@ pub fn run_relax_with_eigenvectors(
             }
 
             let structure = do_relax(&lmp, &settings.cg, &settings.potential, from_structure)?;
-            let (evals, evecs) = do_diagonalize(&lmp, &phonopy, &structure)?;
+            let force_dest = match save_forces {
+                true => {
+                    rm_rf(SAVE_FORCES_DIR)?;
+                    create_dir(SAVE_FORCES_DIR)?;
+                    Some(Box::new(SAVE_FORCES_DIR) as _)
+                },
+                false => None,
+            };
+            let (evals, evecs) = do_diagonalize(&lmp, &phonopy, &structure, force_dest)?;
 
             trace!("============================");
             trace!("Finished relaxation # {}", iteration);
@@ -105,11 +114,8 @@ pub fn run_relax_with_eigenvectors(
             let einfos = get_eigensystem_info(
                 &evals, &evecs, &layers[..], Some(&structure), Some(&layer_sc_mats),
             );
-            {
-                let mut file = create(format!("eigenvalues.{:02}", iteration))?;
-                write_eigen_info(&einfos, &mut |s| writeln!(file, "{}", s).map_err(Into::into))?;
-            }
-            write_eigen_info(&einfos, &mut |s| ok(info!("{}", s)))?;
+            write_eigen_info_for_machines(&einfos, create(format!("eigenvalues.{:02}", iteration))?)?;
+            write_eigen_info_for_humans(&einfos, &mut |s| ok(info!("{}", s)))?;
 
             let mut structure = structure;
             let bad_evs: Vec<_> = izip!(1.., &einfos, &evecs)
@@ -139,30 +145,7 @@ pub fn run_relax_with_eigenvectors(
                     &structure)?;
             }
 
-            {
-                const SCALE_AMT: f64 = 1e-6;
-                let mut lmp = lmp.initialize_carbon(uncarbon(&structure))?;
-                let center_value = lmp.compute_value()?;
-
-                let shrink_value = {
-                    let mut structure = structure.clone();
-                    structure.scale_vecs(&[1.0 - SCALE_AMT, 1.0 - SCALE_AMT, 1.0]);
-                    lmp.set_structure(uncarbon(&structure))?;
-                    lmp.compute_value()?
-                };
-
-                let enlarge_value = {
-                    let mut structure = structure.clone();
-                    structure.scale_vecs(&[1.0 + SCALE_AMT, 1.0 + SCALE_AMT, 1.0]);
-                    lmp.set_structure(uncarbon(&structure))?;
-                    lmp.compute_value()?
-                };
-
-                if shrink_value.min(enlarge_value) < center_value {
-                    warn!("Better value found at nearby lattice parameter: {:?}",
-                        (shrink_value, center_value, enlarge_value))
-                }
-            }
+            warn_on_improvable_lattice_params(&lmp, &structure)?;
 
             if bad_evs.is_empty() {
                 all_ok_count += 1;
@@ -176,62 +159,20 @@ pub fn run_relax_with_eigenvectors(
             iteration += 1; // NOTE: not a for loop due to 'break value;'
         }; // (structure, einfos, evecs)
 
-        {
-            let mut f = create("eigenvalues.final")?;
-            writeln!(f, "{:27}  {:4}  {:4}  {:^4} {:^4} {:^4}",
-                "# Frequency (cm^-1)", "Acou", "Layr", "X", "Y", "Z")?;
-            for item in einfos.iter() {
-                // don't use DisplayProb, keep things readible
-                let eval = item.frequency;
-                let acou = item.acousticness;
-                let layer = item.layer_acousticness;
-                let (x, y, z) = tup3(item.polarization);
-                writeln!(f, "{:27}  {:4.2}  {:4.2}  {:4.2} {:4.2} {:4.2}",
-                    eval, acou, layer, x, y, z)?;
-            }
-        }
+        write_eigen_info_for_machines(&einfos, create("eigenvalues.final")?)?;
 
         poscar::dump(create("./final.vasp")?, "", &structure)?;
 
         if save_forces {
+            rm_rf(SAVE_FORCES_DIR)?;
+            create_dir(SAVE_FORCES_DIR)?;
+
             let disp_dir = phonopy.displacements(&structure)?;
             let force_sets = do_force_sets_at_disps(&lmp, &disp_dir)?;
-            let force_dir = disp_dir.make_force_dir(&force_sets)?;
-            copy(force_dir.path().join("FORCE_SETS"), "FORCE_SETS")?;
+            disp_dir.make_force_dir_in_dir(&force_sets, SAVE_FORCES_DIR)?;
         }
 
-        { // write summary file
-            use self::summary::{Modes, Summary, EnergyPerAtom};
-            use self::eigen_info::Item;
-
-            let acoustic = einfos.iter().filter(|x| x.is_acoustic()).map(Item::frequency).collect();
-            let shear = einfos.iter().filter(|x| x.is_shear()).map(Item::frequency).collect();
-            let layer_breathing = einfos.iter().filter(|x| x.is_layer_breathing()).map(Item::frequency).collect();
-            let layer_gammas = einfos.iter().next().unwrap().layer_gamma_probs.as_ref().map(|_| {
-                einfos.iter().enumerate()
-                    .filter(|&(_,x)| x.layer_gamma_probs.as_ref().unwrap()[0] > settings.layer_gamma_threshold)
-                    .map(|(i,x)| (i, x.frequency()))
-                    .collect()
-            });
-            let modes = Modes { acoustic, shear, layer_breathing, layer_gammas };
-
-            let energy_per_atom = {
-                let f = |structure: ElementStructure| ok({
-                    let na = structure.num_atoms() as f64;
-                    lmp.initialize_carbon(uncarbon(&structure))?.compute_value()? / na
-                });
-                let f_path = |s: &AsRef<Path>| ok(f(poscar::load(open(s)?)?)?);
-
-                let initial = f(original.clone())?;
-                let final_ = f(structure)?;
-                let before_ev_chasing = f_path(&"structure-01.1.vasp")?;
-                EnergyPerAtom { initial, final_, before_ev_chasing }
-            };
-
-            let summary = Summary { modes, energy_per_atom };
-
-            ::serde_yaml::to_writer(create("summary.yaml")?, &summary)?;
-        }
+        write_summary_file(settings, &lmp, &einfos)?;
 
         cwd_guard.pop()?;
     }
@@ -262,13 +203,18 @@ fn do_diagonalize(
     lmp: &LammpsBuilder,
     phonopy: &PhonopyBuilder,
     structure: &ElementStructure,
+    in_this_dir: Option<Box<::rsp2_phonopy_io::AsPath>>,
 ) -> Result<(Vec<f64>, Vec<Vec<[f64; 3]>>)>
 {ok({
     let disp_dir = phonopy.displacements(&structure)?;
     let force_sets = do_force_sets_at_disps(&lmp, &disp_dir)?;
 
-    match disp_dir
-        .make_force_dir(&force_sets)?
+    let force_dir = match in_this_dir {
+        Some(dest) => disp_dir.make_force_dir_in_dir(&force_sets, dest)?,
+        None => disp_dir.make_force_dir(&force_sets)?.map_dir(|x| Box::new(x) as _),
+    };
+
+    match force_dir
         .build_bands()
         .eigenvectors(true)
         .compute(&[[0.0; 3]])?
@@ -386,6 +332,35 @@ fn do_minimize_along_evec(
     (alpha, multi_threshold_deconstruct(sc_token, 1e-10, 1e-3, structure)?)
 })}
 
+fn warn_on_improvable_lattice_params(
+    lmp: &LammpsBuilder,
+    structure: &ElementStructure,
+) -> Result<()>
+{Ok({
+    const SCALE_AMT: f64 = 1e-6;
+    let mut lmp = lmp.initialize_carbon(uncarbon(structure))?;
+    let center_value = lmp.compute_value()?;
+
+    let shrink_value = {
+        let mut structure = structure.clone();
+        structure.scale_vecs(&[1.0 - SCALE_AMT, 1.0 - SCALE_AMT, 1.0]);
+        lmp.set_structure(uncarbon(&structure))?;
+        lmp.compute_value()?
+    };
+
+    let enlarge_value = {
+        let mut structure = structure.clone();
+        structure.scale_vecs(&[1.0 + SCALE_AMT, 1.0 + SCALE_AMT, 1.0]);
+        lmp.set_structure(uncarbon(&structure))?;
+        lmp.compute_value()?
+    };
+
+    if shrink_value.min(enlarge_value) < center_value {
+        warn!("Better value found at nearby lattice parameter: {:?}",
+            (shrink_value, center_value, enlarge_value));
+    }
+})}
+
 fn multi_threshold_deconstruct(
     sc_token: SupercellToken,
     warn: f64,
@@ -402,7 +377,7 @@ fn multi_threshold_deconstruct(
     }
 })}
 
-fn write_eigen_info(
+fn write_eigen_info_for_humans(
     einfos: &EigenInfo,
     writeln: &mut FnMut(&::std::fmt::Display) -> Result<()>,
 ) -> Result<()>
@@ -437,6 +412,63 @@ fn write_eigen_info(
     }
 })}
 
+fn write_eigen_info_for_machines<W: Write>(
+    einfos: &EigenInfo,
+    mut file: W,
+) -> Result<()>
+{ok({
+    writeln!(file, "{:27}  {:4}  {:4}  {:^4} {:^4} {:^4}",
+        "# Frequency (cm^-1)", "Acou", "Layr", "X", "Y", "Z")?;
+    for item in einfos.iter() {
+        // don't use DisplayProb, keep things parsable
+        let eval = item.frequency;
+        let acou = item.acousticness;
+        let layer = item.layer_acousticness;
+        let (x, y, z) = tup3(item.polarization);
+        writeln!(file, "{:27}  {:4.2}  {:4.2}  {:4.2} {:4.2} {:4.2}",
+            eval, acou, layer, x, y, z)?;
+    }
+})}
+
+fn write_summary_file(
+    settings: &Settings,
+    lmp: &LammpsBuilder,
+    einfos: &EigenInfo,
+) -> Result<()>
+{Ok({
+    use self::summary::{Modes, Summary, EnergyPerAtom};
+    use self::eigen_info::Item;
+    use ::rsp2_structure_io::poscar;
+
+    let acoustic = einfos.iter().filter(|x| x.is_acoustic()).map(Item::frequency).collect();
+    let shear = einfos.iter().filter(|x| x.is_shear()).map(Item::frequency).collect();
+    let layer_breathing = einfos.iter().filter(|x| x.is_layer_breathing()).map(Item::frequency).collect();
+    let layer_gammas = einfos.iter().next().unwrap().layer_gamma_probs.as_ref().map(|_| {
+        einfos.iter().enumerate()
+            .filter(|&(_,x)| x.layer_gamma_probs.as_ref().unwrap()[0] > settings.layer_gamma_threshold)
+            .map(|(i,x)| (i, x.frequency()))
+            .collect()
+    });
+    let modes = Modes { acoustic, shear, layer_breathing, layer_gammas };
+
+    let energy_per_atom = {
+        let f = |structure: ElementStructure| ok({
+            let na = structure.num_atoms() as f64;
+            lmp.initialize_carbon(uncarbon(&structure))?.compute_value()? / na
+        });
+        let f_path = |s: &AsRef<Path>| ok(f(poscar::load(open(s)?)?)?);
+
+        let initial = f_path(&"initial.vasp")?;
+        let final_ = f_path(&"final.vasp")?;
+        let before_ev_chasing = f_path(&"structure-01.1.vasp")?;
+        EnergyPerAtom { initial, final_, before_ev_chasing }
+    };
+
+    let summary = Summary { modes, energy_per_atom };
+
+    ::serde_yaml::to_writer(create("summary.yaml")?, &summary)?;
+})}
+
 fn phonopy_builder_from_settings<M>(
     settings: &::config::Phonons,
     // the structure is needed to resolve the correct supercell size
@@ -450,7 +482,7 @@ fn phonopy_builder_from_settings<M>(
         .conf("DIAG", ".FALSE.")
 }
 
-fn do_force_sets_at_disps<P: AsRef<Path>>(
+fn do_force_sets_at_disps<P: ::rsp2_phonopy_io::AsPath>(
     lmp: &LammpsBuilder,
     disp_dir: &::rsp2_phonopy_io::DirWithDisps<P>,
 ) -> Result<Vec<Vec<[f64; 3]>>>
@@ -787,12 +819,8 @@ pub fn get_energy_surface(
     outdir: &AsRef<Path>,
 ) -> Result<()>
 {ok({
-    use ::rsp2_structure_io::poscar;
-
-    let structure = &poscar::load(open(input)?)?;
-
+    let input = canonicalize(input)?;
     let lmp = make_lammps_builder(&settings.threading);
-    let phonopy = phonopy_builder_from_settings(&settings.phonons, &structure);
 
     create_dir(&outdir)?;
     {
@@ -800,53 +828,72 @@ pub fn get_energy_surface(
         let cwd_guard = push_dir(outdir)?;
         setup_global_logger(Some(&"rsp2.log"))?;
 
-        poscar::dump(create("./input.vasp")?, "", &structure)?;
+        let bands_dir = ::rsp2_phonopy_io::DirWithBands::from_existing(input)?;
+        let structure = bands_dir.structure()?;
 
-        let (evals, evecs) = do_diagonalize(&lmp, &phonopy, &structure)?;
-
-        trace!("Finding layers");
-        let (layers, nlayer) = ::rsp2_structure::assign_layers(&structure, &[0, 0, 1], 0.25)?;
-        assert_eq!(nlayer, 2);
-
-        trace!("Computing eigensystem info");
-        let einfos = get_eigensystem_info(&evals, &evecs, &layers, None, None);
-
-        write_eigen_info(&einfos, &mut |s| ok(info!("{}", s)))?;
-
-        let shear_evecs = {
-            let mut iter = einfos
-                .iter().enumerate()
-                .filter(|&(_, info)| info.is_shear())
-                .map(|(i, _)| evecs[i].clone());
-
-            match (iter.next(), iter.next()) {
-                (Some(a), Some(b)) => (a, b),
-                _ => panic!("Expected at least two shear modes"),
-            }
+        let (evals, evecs) = match bands_dir.gamma_eigensystem()? {
+            None => bail!("Bands do not include gamma point: {}", bands_dir.path().display()),
+            Some((_, None)) => bail!("Directory has no eigenvectors: {}", bands_dir.path().display()),
+            Some((evals, Some(evecs))) => (evals, evecs),
         };
 
-        const W: usize = 200;
-        const H: usize = 200;
+
+        let plot_ev_indices = {
+            use ::config::EnergyPlotEvIndices::*;
+
+            let (i, j) = match settings.ev_indices {
+                Shear => {
+                    trace!("Finding layers");
+                    let (layers, nlayer) = ::rsp2_structure::assign_layers(&structure, &[0, 0, 1], 0.25)?;
+                    assert!(nlayer >= 2);
+
+                    trace!("Computing eigensystem info");
+                    let einfos = get_eigensystem_info(&evals, &evecs, &layers, None, None);
+
+                    write_eigen_info_for_humans(&einfos, &mut |s| ok(info!("{}", s)))?;
+
+                    let mut iter = einfos
+                        .iter().enumerate()
+                        .filter(|&(_, info)| info.is_shear())
+                        .map(|(i, _)| i);
+
+                    match (iter.next(), iter.next()) {
+                        (Some(a), Some(b)) => (a, b),
+                        _ => panic!("Expected at least two shear modes"),
+                    }
+                },
+                These(i, j) => (i, j),
+            };
+
+            // (in case of confusion about 0-based/1-based indices)
+            trace!("X: Eigensolution {:>3}, frequency {}", i, evals[i] * THZ_TO_WAVENUMBER);
+            trace!("Y: Eigensolution {:>3}, frequency {}", j, evals[j] * THZ_TO_WAVENUMBER);
+            (i, j)
+        };
+
+        let (xmin, xmax) = tup2(settings.xlim);
+        let (ymin, ymax) = tup2(settings.ylim);
+        let (w, h) = tup2(settings.dim);
         let data = {
             let mut lmp = lmp.initialize_carbon(uncarbon(&structure))?;
 
             ::integrate_2d::integrate_two_eigenvectors(
-                (W, H),
+                (w, h),
                 &structure.to_carts(),
-                (-10.0..10.0, -10.0..10.0),
-                (&shear_evecs.0, &shear_evecs.1),
+                (-xmin..xmax, -ymin..ymax),
+                (&evecs[plot_ev_indices.0], &evecs[plot_ev_indices.1]),
                 {
                     let mut i = 0;
                     move |pos| {ok({
                         i += 1;
-                        eprint!("\rdatapoint {:>6} of {}", i, W * H);
+                        eprint!("\rdatapoint {:>6} of {}", i, w * h);
                         lmp.set_carts(&pos)?;
                         lmp.compute_grad()?
                     })}
                 }
             )?
         };
-        let chunked: Vec<_> = data.chunks(W).collect();
+        let chunked: Vec<_> = data.chunks(w).collect();
         ::serde_json::to_writer_pretty(create("out.json")?, &chunked)?;
         cwd_guard.pop()?;
     }
@@ -899,6 +946,38 @@ pub(crate) fn open<P: AsRef<Path>>(path: P) -> Result<File>
         .chain_err(|| format!("while opening file: '{}'", path.as_ref().display()))
 }
 
+pub(crate) fn rm_rf<P: AsRef<Path>>(path: P) -> Result<()>
+{
+    use ::std::io::ErrorKind;
+
+    let path = path.as_ref();
+
+    // directoryness is only checked *after* failed deletion, to reduce race conditions
+    match fs::remove_file(path) {
+        Ok(()) => { return Ok(()); },
+        Err(e) => {
+            match (e.kind(), path.is_dir()) {
+                (ErrorKind::NotFound, _) => { return Ok(()); },
+                (ErrorKind::Other, true) => {},
+                _ => return Err(e).chain_err(|| format!("while deleting: {}", path.display())),
+            }
+        }
+    }
+
+    match fs::remove_dir_all(path) {
+        Ok(()) => { return Ok(()); },
+        Err(e) => {
+            match (e.kind(), path.is_file()) {
+                (ErrorKind::NotFound, _) => { return Ok(()); },
+                (ErrorKind::Other, true) => {
+                    bail!("unable to delete '{}'; we're being trolled", path.display());
+                },
+                _ => return Err(e).chain_err(|| format!("while deleting: {}", path.display())),
+            }
+        }
+    }
+}
+
 pub(crate) fn create<P: AsRef<Path>>(path: P) -> Result<File>
 {
     File::create(path.as_ref())
@@ -909,6 +988,7 @@ pub(crate) fn create<P: AsRef<Path>>(path: P) -> Result<File>
 pub(crate) fn open_text<P: AsRef<Path>>(path: P) -> Result<BufReader<File>>
 { open(path).map(BufReader::new) }
 
+#[allow(unused)]
 pub(crate) fn copy<P: AsRef<Path>, Q: AsRef<Path>>(src: P, dest: Q) -> Result<()>
 {
     let (src, dest) = (src.as_ref(), dest.as_ref());
@@ -918,6 +998,40 @@ pub(crate) fn copy<P: AsRef<Path>, Q: AsRef<Path>>(src: P, dest: Q) -> Result<()
             format!("while copying '{}' to '{}'",
                 src.display(), dest.display()))
 }
+
+// Move a file or directory, possibly across filesystems.
+pub(crate) fn fs_move<P: AsRef<Path>, Q: AsRef<Path>>(src: P, dest: Q)
+-> Result<()>
+{Ok({
+    use ::error_chain::ChainedError;
+    use ::std::process::{Command, Stdio};
+
+    let (src, dest) = (src.as_ref(), dest.as_ref());
+
+    // We don't want to do this ourselves.
+    // Who knew so much complexity was secretly hiding in /usr/bin/mv?
+    // (moving across filesystems is at least as complex as cp -a...
+    //  and then mv is still O(1) for same-filesystem moves...)
+    let mut child = Command::new("mv")
+        .arg("--no-clobber")
+        .arg("--no-target-directory")
+        .arg(src).arg(dest)
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()?;
+
+    let stderr = {
+        let mut stderr = child.stderr.take().unwrap();
+        let mut s = String::new();
+        stderr.read_to_string(&mut s);
+        s
+    };
+
+    if !child.wait()?.success() {
+        bail!("'/usr/bin/mv {} {}' failed with message: {}",
+            src.display(), dest.display(), stderr);
+    }
+})}
 
 pub(crate) fn create_dir<P: AsRef<Path>>(dir: P) -> Result<()>
 {
@@ -933,4 +1047,5 @@ pub(crate) fn canonicalize<P: AsRef<Path>>(dir: P) -> Result<PathBuf>
 
 //=================================================================
 
+fn tup2<T:Copy>(arr: [T; 2]) -> (T, T) { (arr[0], arr[1]) }
 fn tup3<T:Copy>(arr: [T; 3]) -> (T, T, T) { (arr[0], arr[1], arr[2]) }

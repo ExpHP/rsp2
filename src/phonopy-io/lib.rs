@@ -18,6 +18,7 @@ pub type Shareable = Send + Sync + 'static;
 
 pub use self::filetypes::{disp_yaml, force_sets, symmetry_yaml};
 
+pub use self::filebased::{AsPath, HasTempDir};
 pub use self::filebased::{DirWithDisps, DirWithForces, DirWithBands};
 pub use self::filebased::BandsBuilder;
 pub use self::filebased::Builder;
@@ -29,6 +30,8 @@ mod fs_util;
 
 pub use errors::*;
 pub(crate) mod errors {
+    use ::std::path::PathBuf;
+
     pub type IoResult<T> = ::std::io::Result<T>;
     error_chain!{
         links {
@@ -43,6 +46,12 @@ pub(crate) mod errors {
         }
 
         errors {
+            /// Returned by the `from_existing()` methods of various Dir types.
+            MissingFile(ty: &'static str, dir: PathBuf, filename: String) {
+                description("Directory is missing a required file"),
+                display("Directory '{}' is missing required file '{}' for '{}'",
+                    dir.display(), &filename, ty),
+            }
             PhonopyFailed(status: ::std::process::ExitStatus) {
                 description("phonopy exited unsuccessfully"),
                 display("phonopy exited unsuccessfully ({})", status),
@@ -52,6 +61,15 @@ pub(crate) mod errors {
                 display("attempted to compute symmetry of a supercell"),
             }
         }
+    }
+
+    impl Error
+    {
+        pub fn is_missing_file(&self) -> bool
+        { match *self {
+            Error(ErrorKind::MissingFile(_, _, _), _) => true,
+            _ => false,
+        }}
     }
 }
 

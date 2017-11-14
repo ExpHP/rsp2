@@ -11,7 +11,7 @@ fn main() {
         (about: "blah")
         (@arg OUTDIR: -o --output +takes_value +required "output directory")
         (@arg CONFIG: -c --config +takes_value +required "settings Yaml")
-        (@arg INPUT: +required "POSCAR")
+        (@arg INPUT: +required "phonopy force dir (try --save-forces in main script)")
         (@arg force: -f --force "replace existing output directories")
         // (@subcommand test =>
         //     (about: "controls testing features")
