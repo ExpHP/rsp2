@@ -2,3 +2,6 @@
 **/*.rs.bk
 **/.vscode/
 **/Cargo.lock
+perf.data*
+
+.secret-test-dir
