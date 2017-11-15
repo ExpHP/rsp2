@@ -79,5 +79,5 @@ tempdir = "0.3"
 ansi_term = "0.10"
 slice-of-array = "0.1"
 rsp2-kets = { version = "0.3.6", git = "https://github.com/ExpHP/rsp2-kets", features = ["serde"] }
-lammps-sys = { version = "0.1.1", git = "https://github.com/ExpHP/lammps-sys" }
+lammps-sys = { tag = "v0.2.0", git = "https://github.com/ExpHP/lammps-sys" }
 rayon = "0.8"

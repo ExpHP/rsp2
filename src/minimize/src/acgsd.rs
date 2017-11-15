@@ -27,9 +27,25 @@ pub mod settings {
         #[serde()] pub(super) stop_condition: StopCondition,
         #[serde(default)] pub(super) beta: Beta,
         #[serde(default)] pub(super) linesearch: Linesearch,
+        #[serde(default)] pub(super) on_ls_failure: OnLsFailure,
         #[serde(default="defaults::alpha_guess_first")]
         pub(super) alpha_guess_first: f64,
         #[serde(default)] pub(super) alpha_guess_max: Option<f64>,
+    }
+
+    /// Behavior when a linesearch along the steepest descent direction fails.
+    /// (this is phenomenally rare for the Hager linesearch method, and when it
+    ///  does occur it may very well be due to exceptionally good convergence,
+    ///  rather than any sort of actual failure)
+    #[derive(Serialize, Deserialize)]
+    #[derive(Debug, Clone, PartialEq)]
+    #[serde(rename_all="kebab-case")]
+    pub enum OnLsFailure {
+        /// Treat a second linesearch failure as a successful stop condition.
+        Succeed,
+        /// Succeed, but log a warning.
+        Warn,
+        Fail,
     }
 
     #[derive(Serialize, Deserialize)]
@@ -84,12 +100,18 @@ pub mod settings {
     impl Default for Beta {
         fn default() -> Self { from_json!({"hager": {}}) }
     }
-    #[test] fn test_beta_default() { Beta::default(); }
 
     impl Default for Linesearch {
         fn default() -> Self { from_json!({"hager": {}}) }
     }
+
+    // test for errors in our json
+    #[test] fn test_beta_default() { Beta::default(); }
     #[test] fn test_linesearch_default() { Linesearch::default(); }
+
+    impl Default for OnLsFailure {
+        fn default() -> Self { OnLsFailure::Warn }
+    }
 
     // Default functions, since literals aren't supported (serde gh #368)
     mod defaults {
@@ -548,6 +570,12 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
             // return point.position;
         };
 
+        // use as 'return success(...);'
+        // Constructs a successful return value.
+        let success = |Point { position, value, gradient }| {
+            Ok(Output { iterations, position, value, gradient, __no_full_destructure: () })
+        };
+
 // /////////////////////////////////////////////////////////////////////////////
 // Per-iteration output                                                       //
 // /////////////////////////////////////////////////////////////////////////////
@@ -608,8 +636,7 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
                 info!(" Grad Norm: {:e}", objectives.grad_norm);
                 info!("  Grad Max: {:e}", objectives.grad_max);
 
-                let Point { position, value, gradient } = saved.to_point();
-                return Ok(Output { iterations, position, value, gradient, __no_full_destructure: () });
+                return success(saved.to_point());
             }
         } // scope
 
@@ -754,7 +781,18 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
         let ls_failed = next_alpha == 0.0;
         if ls_failed {
             if let Some(Last { ls_failed: true, .. }) = last {
-                return fatal("linesearch failure (second)", saved.alpha, saved.to_point());
+                match settings.on_ls_failure {
+                    settings::OnLsFailure::Succeed => {
+                        return success(saved.to_point());
+                    },
+                    settings::OnLsFailure::Warn => {
+                        warning("linesearch failure (second)", saved.alpha, saved.to_point());
+                        return success(saved.to_point());
+                    },
+                    settings::OnLsFailure::Fail => {
+                        return fatal("linesearch failure (second)", saved.alpha, saved.to_point());
+                    },
+                }
             } else {
                 warning(
                     "Linesearch failure, switching to steepest descent",
