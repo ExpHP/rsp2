@@ -11,6 +11,7 @@ extern crate slice_of_array;
 extern crate serde_yaml;
 extern crate serde_json;
 extern crate rsp2_tempdir as tempdir;
+extern crate rsp2_fs_util;
 
 pub type IoError = ::std::io::Error;
 pub type YamlError = ::serde_yaml::Error;
@@ -26,7 +27,6 @@ pub use self::filebased::Builder;
 mod filetypes;
 mod npy;
 mod filebased;
-mod fs_util;
 
 pub use errors::*;
 pub(crate) mod errors {
@@ -35,6 +35,7 @@ pub(crate) mod errors {
     pub type IoResult<T> = ::std::io::Result<T>;
     error_chain!{
         links {
+            Fs(::rsp2_fs_util::Error, ::rsp2_fs_util::ErrorKind);
             Structure(::rsp2_structure::Error, ::rsp2_structure::ErrorKind);
             StructureIo(::rsp2_structure_io::Error, ::rsp2_structure_io::ErrorKind);
         }

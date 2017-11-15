@@ -1,0 +1,17 @@
+[package]
+name = "rsp2-structure-gen"
+version = "0.1.0"
+authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+!!rsp2-array-utils
+!!rsp2-structure
+
+!!log
+!!serde
+!!serde-derive
+!!serde-yaml
+!!error-chain

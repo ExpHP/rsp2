@@ -4,6 +4,7 @@ extern crate clap;
 extern crate serde_yaml;
 
 fn main() {
+    use ::rsp2_tasks::relax_with_eigenvectors;
 
     let matches = clap_app!(myapp =>
         (version: "negative 0.00.3-734.bubbles")
@@ -13,7 +14,7 @@ fn main() {
         (@arg CONFIG: -c --config +takes_value +required "settings Yaml")
         (@arg INPUT: +required "POSCAR")
         (@arg force: -f --force "replace existing output directories")
-        (@arg save_forces: --("save-forces") "save FORCE_SETS and force_constants.hdf5")
+        (@arg save_bands: --("save-bands") "save phonopy directory with bands at gamma")
         // (@subcommand test =>
         //     (about: "controls testing features")
         //     (version: "1.3")
@@ -29,6 +30,11 @@ fn main() {
     }
 
     let settings = ::serde_yaml::from_reader(::std::fs::File::open(config).unwrap()).unwrap();
+    let args = relax_with_eigenvectors::CliArgs {
+        save_bands: matches.is_present("save_bands"),
+    };
 
-    ::rsp2_tasks::run_relax_with_eigenvectors(&settings, &input, &outdir, matches.is_present("force")).unwrap();
+    if let Err(e) = relax_with_eigenvectors::run(&settings, &input, &outdir, args) {
+        panic!("{}", e.display_chain());
+    };
 }

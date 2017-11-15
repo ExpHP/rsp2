@@ -10,6 +10,7 @@ extern crate rsp2_array_utils;
 extern crate rsp2_slice_math;
 extern crate rsp2_tempdir;
 extern crate rsp2_eigenvector_classify;
+extern crate rsp2_fs_util;
 #[macro_use] extern crate rsp2_util_macros;
 
 extern crate rayon;
@@ -26,7 +27,6 @@ extern crate serde_yaml;
 #[macro_use] extern crate itertools;
 #[macro_use] extern crate error_chain;
 
-
 macro_rules! ichain {
     ($e:expr,) => { $e.into_iter() };
     ($e:expr, $($es:expr,)+)
@@ -42,10 +42,14 @@ mod integrate_2d;
 mod bands;
 
 pub use ::config::Settings;
-pub use ::cmd::run_relax_with_eigenvectors;
+pub mod relax_with_eigenvectors {
+    pub use ::cmd::run_relax_with_eigenvectors as run;
+    pub use ::cmd::CliArgs;
+}
 pub use ::cmd::run_symmetry_test;
 pub use ::cmd::get_energy_surface;
 pub use ::cmd::make_force_sets;
+
 
 pub use ::bands::unfold_phonon;
 
@@ -60,6 +64,7 @@ mod errors {
         }
 
         links {
+            Fsx(::rsp2_fs_util::Error, ::rsp2_fs_util::ErrorKind);
             Structure(::rsp2_structure::Error, ::rsp2_structure::ErrorKind);
             StructureIo(::rsp2_structure_io::Error, ::rsp2_structure_io::ErrorKind);
             StructureGen(::rsp2_structure_gen::Error, ::rsp2_structure_gen::ErrorKind);
@@ -71,5 +76,14 @@ mod errors {
     // fewer type annotations...
     pub fn ok<T>(x: T) -> Result<T> { Ok(x) }
     pub type StdResult<T, E> = ::std::result::Result<T, E>;
+
+    // so that CLI stubs don't need to import traits from error_chain
+    // (why doesn't error_chain generate inherent method wrappers around this trait?)
+    use error_chain::ChainedError;
+    pub use error_chain::DisplayChain;
+    impl Error {
+        pub fn display_chain(&self) -> DisplayChain<Self>
+        { ChainedError::display_chain(self) }
+    }
 }
 

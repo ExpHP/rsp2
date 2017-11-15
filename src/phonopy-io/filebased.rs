@@ -14,7 +14,7 @@
 //! things was the biggest limitation of the previous API, which never
 //! exposed its own temporary directories.
 
-use ::{StdResult, Result, Error, IoResult, ErrorKind};
+use ::{Result, IoResult, ErrorKind};
 use ::As3;
 
 use ::filetypes::{conf, args, q_positions};
@@ -24,7 +24,7 @@ use ::rsp2_structure_io::poscar;
 use ::std::io::prelude::BufRead;
 use ::std::process::Command;
 use ::std::path::{Path, PathBuf};
-use ::fs_util::{open, open_text, create, copy, smart_link};
+use ::rsp2_fs_util::{open, open_text, create, copy, hard_link, mv, rm_rf};
 use ::tempdir::TempDir;
 use ::std::collections::HashMap;
 
@@ -452,9 +452,17 @@ impl<'p, P: AsPath, Q: AsPath> BandsBuilder<'p, P, Q> {
             copy(src.join("POSCAR"), dir.join("POSCAR"))?;
             copy(src.join("disp.conf"), dir.join("disp.conf"))?;
             copy(src.join("disp.args"), dir.join("disp.args"))?;
-            smart_link(src.join("FORCE_SETS"), dir.join("FORCE_SETS"))?;
-            // NOTE an explicit `exists()` check would just lead to race conditions here
-            let _: Result<_> = smart_link(src.join(fc_filename), dir.join(fc_filename));
+
+            // NOTE: this rm_rf carries with it the limitation
+            //        limitation that the force dir cannot be the band dir.
+            //       Not sure whether that's a reasonable use case or not...
+            rm_rf(dir.join("FORCE_SETS"))?;
+            hard_link(src.join("FORCE_SETS"), dir.join("FORCE_SETS"))?;
+
+            if dir.join(fc_filename).exists() {
+                rm_rf(dir.join(fc_filename))?;
+                hard_link(src.join(fc_filename), dir.join(fc_filename))?;
+            }
 
             q_positions::write(create(dir.join("q-positions.json"))?, q_points)?;
 
@@ -495,8 +503,7 @@ impl<'p, P: AsPath, Q: AsPath> BandsBuilder<'p, P, Q> {
             }
 
             if me.dir_with_forces.cache_force_constants {
-                // NOTE an explicit `exists()` check would just lead to race conditions here
-                let _: Result<_> = smart_link(dir.join(fc_filename), src.join(fc_filename));
+                cache_link(dir.join(fc_filename), src.join(fc_filename))?;
             }
         }
 
@@ -662,6 +669,32 @@ fn check_status(status: ::std::process::ExitStatus) -> Result<()>
     ensure!(status.success(), ErrorKind::PhonopyFailed(status));
 })}
 
+// Wrapper around `hard_link` which:
+// - falls back to copying if the destination is on another filesystem.
+// - does not fail if the destination exists (it is simply left behind)
+//
+// The use case is where this may be used on many identical source files
+// for the same destination, possibly concurrently, in order to cache the
+// file for further reuse.
+pub fn cache_link<P: AsRef<Path>, Q: AsRef<Path>>(src: P, dest: Q) -> Result<()>
+{
+    let (src, dest) = (src.as_ref(), dest.as_ref());
+    hard_link(src, dest)
+        .map(|_| ())
+        .or_else(|_| Ok({
+            // if the file already existed, the link will have failed.
+            // Check this before continuing because we don't want to
+            //   potentially overwrite a link with a copy.
+            if dest.exists() {
+                return Ok(());
+            }
+
+            // assume the error was due to being on a different filesystem.
+            // (Even if not, we will probably just get the same error)
+            copy(src, dest)?;
+        }))
+}
+
 //-----------------------------
 
 /// AsRef<Path> with more general impls on smart pointer types.
@@ -765,10 +798,24 @@ macro_rules! impl_dirlike_boilerplate {
             /// see the `keep()` method.
             pub fn into_path(self) -> PathBuf { self.temp_dir_into_path() }
 
+            /// Move the directory to the given path, which must not exist.
             ///
-            pub fn relocate<Q: AsPath>(self, path: P)
-            -> StdResult<$Type<PathBuf>, ($Type<P>, Error)>
-            { self.map_dir(HasTempDir::temp_dir_into_path) }
+            /// Currently, there is no recourse if the operation fails;
+            /// the directory is simply lost. In the future, this may take
+            /// '&mut self' and poison the object once the move has succeeded.
+            pub fn relocate<Q: AsPath>(self, path: Q)
+            -> Result<$Type<PathBuf>>
+            {Ok({
+                // (use something that supports cross-filesystem moves)
+                mv(self.path(), path.as_path())?;
+
+                self.map_dir(|old| {
+                    // forget the TempDir
+                    let _ = old.temp_dir_into_path();
+                    // store the new path
+                    path.as_path().to_owned()
+                })
+            })}
         }
 
         impl<P: AsPath> $Type<P> {
@@ -839,3 +886,4 @@ mod tests {
         let _: DirWithBands<Box<AsPath>> = x.map_dir(|e| Box::new(e) as _);
     }
 }
+

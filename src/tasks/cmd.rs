@@ -2,7 +2,7 @@
 
 const THZ_TO_WAVENUMBER: f64 = 33.35641;
 
-use ::errors::{Result, ResultExt, Error, ok};
+use ::errors::{Result, ok};
 use ::config::Settings;
 use ::util::push_dir;
 use ::logging::setup_global_logger;
@@ -18,21 +18,26 @@ use ::rsp2_lammps_wrap::Lammps;
 use ::rsp2_lammps_wrap::Builder as LammpsBuilder;
 use ::rsp2_phonopy_io::Builder as PhonopyBuilder;
 
-use ::std::io::{BufReader, Write, Read};
-use ::std::path::{Path, PathBuf};
+use ::rsp2_fs_util::{open, create, canonicalize, create_dir, rm_rf};
+
+use ::std::io::{Write};
+use ::std::path::{Path};
 use ::std::hash::Hash;
-use ::std::fs::{self, File};
 
 use ::itertools::Itertools;
 
-const SAVE_FORCES_DIR: &'static str = "last-phonopy-dir";
+const SAVE_BANDS_DIR: &'static str = "gamma-bands";
+
+// cli args aren't in Settings, so they're just here.
+pub struct CliArgs {
+    pub save_bands: bool,
+}
 
 pub fn run_relax_with_eigenvectors(
     settings: &Settings,
     input: &AsRef<Path>,
     outdir: &AsRef<Path>,
-    // cli args aren't in Settings, so they're just here.
-    save_forces: bool,
+    cli: CliArgs,
 ) -> Result<()>
 {ok({
     use ::rsp2_structure_io::poscar;
@@ -82,12 +87,8 @@ pub fn run_relax_with_eigenvectors(
             }
 
             let structure = do_relax(&lmp, &settings.cg, &settings.potential, from_structure)?;
-            let force_dest = match save_forces {
-                true => {
-                    rm_rf(SAVE_FORCES_DIR)?;
-                    create_dir(SAVE_FORCES_DIR)?;
-                    Some(Box::new(SAVE_FORCES_DIR) as _)
-                },
+            let force_dest = match cli.save_bands {
+                true => Some(SAVE_BANDS_DIR.as_ref()),
                 false => None,
             };
             let (evals, evecs) = do_diagonalize(&lmp, &phonopy, &structure, force_dest)?;
@@ -163,13 +164,8 @@ pub fn run_relax_with_eigenvectors(
 
         poscar::dump(create("./final.vasp")?, "", &structure)?;
 
-        if save_forces {
-            rm_rf(SAVE_FORCES_DIR)?;
-            create_dir(SAVE_FORCES_DIR)?;
-
-            let disp_dir = phonopy.displacements(&structure)?;
-            let force_sets = do_force_sets_at_disps(&lmp, &disp_dir)?;
-            disp_dir.make_force_dir_in_dir(&force_sets, SAVE_FORCES_DIR)?;
+        if cli.save_bands {
+            let _ = do_diagonalize(&lmp, &phonopy, &structure, Some(SAVE_BANDS_DIR.as_ref()))?;
         }
 
         write_summary_file(settings, &lmp, &einfos)?;
@@ -203,29 +199,32 @@ fn do_diagonalize(
     lmp: &LammpsBuilder,
     phonopy: &PhonopyBuilder,
     structure: &ElementStructure,
-    in_this_dir: Option<Box<::rsp2_phonopy_io::AsPath>>,
+    save_bands: Option<&Path>,
 ) -> Result<(Vec<f64>, Vec<Vec<[f64; 3]>>)>
 {ok({
     let disp_dir = phonopy.displacements(&structure)?;
     let force_sets = do_force_sets_at_disps(&lmp, &disp_dir)?;
 
-    let force_dir = match in_this_dir {
-        Some(dest) => disp_dir.make_force_dir_in_dir(&force_sets, dest)?,
-        None => disp_dir.make_force_dir(&force_sets)?.map_dir(|x| Box::new(x) as _),
-    };
-
-    match force_dir
+    let bands_dir = disp_dir
+        .make_force_dir(&force_sets)?
         .build_bands()
         .eigenvectors(true)
-        .compute(&[[0.0; 3]])?
-        .gamma_eigensystem()?
-    {
+        .compute(&[[0.0; 3]])?;
+
+    let out = match bands_dir.gamma_eigensystem()? {
         Some((eval, Some(evec))) => {
             let V(eval) = THZ_TO_WAVENUMBER * v(eval);
             (eval, evec)
         },
         _ => unreachable!(),
+    };
+
+    if let Some(save_dir) = save_bands {
+        rm_rf(save_dir)?;
+        bands_dir.relocate(save_dir)?;
     }
+
+    out
 })}
 
 fn do_eigenvector_chase(
@@ -936,114 +935,6 @@ pub fn make_force_sets(
         cwd_guard.pop()?;
     }
 })}
-
-//=================================================================
-// error chaining helpers that tell us what file had a problem
-
-pub(crate) fn open<P: AsRef<Path>>(path: P) -> Result<File>
-{
-    File::open(path.as_ref())
-        .chain_err(|| format!("while opening file: '{}'", path.as_ref().display()))
-}
-
-pub(crate) fn rm_rf<P: AsRef<Path>>(path: P) -> Result<()>
-{
-    use ::std::io::ErrorKind;
-
-    let path = path.as_ref();
-
-    // directoryness is only checked *after* failed deletion, to reduce race conditions
-    match fs::remove_file(path) {
-        Ok(()) => { return Ok(()); },
-        Err(e) => {
-            match (e.kind(), path.is_dir()) {
-                (ErrorKind::NotFound, _) => { return Ok(()); },
-                (ErrorKind::Other, true) => {},
-                _ => return Err(e).chain_err(|| format!("while deleting: {}", path.display())),
-            }
-        }
-    }
-
-    match fs::remove_dir_all(path) {
-        Ok(()) => { return Ok(()); },
-        Err(e) => {
-            match (e.kind(), path.is_file()) {
-                (ErrorKind::NotFound, _) => { return Ok(()); },
-                (ErrorKind::Other, true) => {
-                    bail!("unable to delete '{}'; we're being trolled", path.display());
-                },
-                _ => return Err(e).chain_err(|| format!("while deleting: {}", path.display())),
-            }
-        }
-    }
-}
-
-pub(crate) fn create<P: AsRef<Path>>(path: P) -> Result<File>
-{
-    File::create(path.as_ref())
-        .chain_err(|| format!("while creating file: '{}'", path.as_ref().display()))
-}
-
-#[allow(unused)]
-pub(crate) fn open_text<P: AsRef<Path>>(path: P) -> Result<BufReader<File>>
-{ open(path).map(BufReader::new) }
-
-#[allow(unused)]
-pub(crate) fn copy<P: AsRef<Path>, Q: AsRef<Path>>(src: P, dest: Q) -> Result<()>
-{
-    let (src, dest) = (src.as_ref(), dest.as_ref());
-    fs::copy(src, dest)
-        .map(|_| ()) // number of bytes; don't care
-        .chain_err(||
-            format!("while copying '{}' to '{}'",
-                src.display(), dest.display()))
-}
-
-// Move a file or directory, possibly across filesystems.
-pub(crate) fn fs_move<P: AsRef<Path>, Q: AsRef<Path>>(src: P, dest: Q)
--> Result<()>
-{Ok({
-    use ::error_chain::ChainedError;
-    use ::std::process::{Command, Stdio};
-
-    let (src, dest) = (src.as_ref(), dest.as_ref());
-
-    // We don't want to do this ourselves.
-    // Who knew so much complexity was secretly hiding in /usr/bin/mv?
-    // (moving across filesystems is at least as complex as cp -a...
-    //  and then mv is still O(1) for same-filesystem moves...)
-    let mut child = Command::new("mv")
-        .arg("--no-clobber")
-        .arg("--no-target-directory")
-        .arg(src).arg(dest)
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()?;
-
-    let stderr = {
-        let mut stderr = child.stderr.take().unwrap();
-        let mut s = String::new();
-        stderr.read_to_string(&mut s);
-        s
-    };
-
-    if !child.wait()?.success() {
-        bail!("'/usr/bin/mv {} {}' failed with message: {}",
-            src.display(), dest.display(), stderr);
-    }
-})}
-
-pub(crate) fn create_dir<P: AsRef<Path>>(dir: P) -> Result<()>
-{
-    fs::create_dir(dir.as_ref())
-        .chain_err(|| format!("while creating directory '{}'", dir.as_ref().display()))
-}
-
-pub(crate) fn canonicalize<P: AsRef<Path>>(dir: P) -> Result<PathBuf>
-{
-    fs::canonicalize(dir.as_ref())
-        .chain_err(|| format!("while looking for '{}'", dir.as_ref().display()))
-}
 
 //=================================================================
 

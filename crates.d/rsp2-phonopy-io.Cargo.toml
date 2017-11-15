@@ -20,5 +20,6 @@ path = "lib.rs"
 !!rsp2-structure
 !!rsp2-structure-io
 !!rsp2-byte-tools-plus-float
+!!rsp2-fs-util
 
 !!rsp2-kets
