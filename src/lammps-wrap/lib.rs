@@ -11,9 +11,21 @@ extern crate lammps_sys;
 extern crate chrono;
 
 error_chain! {
-    // stub... currently the library always actually panics.
     foreign_links {
         NulError(::std::ffi::NulError);
+    }
+
+    errors {
+        Lammps(severity: Severity, message: String) {
+            description("LAMMPS threw an exception"),
+            display("LAMMPS threw {}: {}",
+                match *severity {
+                    Severity::Recoverable => "an exception",
+                    Severity::Fatal => "a fatal exception",
+                },
+                message
+            ),
+        }
     }
 }
 
@@ -26,30 +38,64 @@ macro_rules! err {
 
 pub type StdResult<T, E> = ::std::result::Result<T, E>;
 
-use ::std::os::raw::{c_void, c_int, c_double};
+use ::std::os::raw::{c_void, c_char, c_int, c_double};
 use ::std::ffi::CString;
 use ::std::path::{Path, PathBuf};
 use ::slice_of_array::prelude::*;
 use ::rsp2_structure::{CoordStructure, Lattice};
 
-#[derive(Debug,Copy,Clone,PartialEq,Eq,PartialOrd,Ord,Hash)]
-enum ComputeStyle {
-    Global = 0,
-    PerAtom = 1,
-    Local = 2,
+// Lammps exposes no API to obtain the error message length so we have to guess.
+const MAX_ERROR_BYTES: usize = 4096;
+
+macro_rules! c_enums {
+    (
+        $(
+            [$($vis:tt)*] enum $Type:ident {
+                // tt so it can double as expr and pat
+                $($Variant:ident = $value:tt,)+
+            }
+        )+
+    ) => {
+        $(
+            #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+            $($vis)* enum $Type {
+                $($Variant = $value,)+
+            }
+
+            impl $Type {
+                #[allow(unused)]
+                pub fn from_int(x: u32) -> Result<$Type>
+                { match x {
+                    $($value => Ok($Type::$Variant),)+
+                    _ => bail!("Invalid value {} for {}", x, stringify!($Type)),
+                }}
+            }
+        )+
+    };
 }
 
-#[derive(Debug,Copy,Clone,PartialEq,Eq,PartialOrd,Ord,Hash)]
-enum ComputeType {
-    Scalar = 0,
-    Vector = 1,
-    Array = 2, // 2D
-}
+c_enums!{
+    [] enum ComputeStyle {
+        Global = 0,
+        PerAtom = 1,
+        Local = 2,
+    }
 
-#[derive(Debug,Copy,Clone,PartialEq,Eq,PartialOrd,Ord,Hash)]
-enum ScatterGatherDatatype {
-    Integer = 0,
-    Float = 1,
+    [] enum ComputeType {
+        Scalar = 0,
+        Vector = 1,
+        Array = 2, // 2D
+    }
+
+    [] enum ScatterGatherDatatype {
+        Integer = 0,
+        Float = 1,
+    }
+
+    [pub] enum Severity {
+        Recoverable = 1,
+        Fatal = 2,
+    }
 }
 
 macro_rules! derive_into_from_as_cast {
@@ -96,7 +142,8 @@ impl Drop for LammpsOwner {
 }
 
 impl LammpsOwner {
-    pub fn new(argv: &[&str]) -> Result<LammpsOwner> {
+    pub fn new(argv: &[&str]) -> Result<LammpsOwner>
+    {Ok({
         let mut argv = CArgv::from_strs(argv)?;
         let mut ptr: *mut c_void = ::std::ptr::null_mut();
         unsafe {
@@ -107,14 +154,12 @@ impl LammpsOwner {
             );
         }
 
-        Ok(LammpsOwner {
-            argv,
-            ptr: {
-                unsafe { ptr.as_mut() }
-                    .ok_or_else(|| err!("Lammps initialization failed"))?
-            },
-        })
-    }
+        let ptr = unsafe {
+            ptr.as_mut()
+        }.ok_or_else(|| err!("Lammps initialization failed"))?;
+
+        LammpsOwner { argv, ptr }
+    })}
 }
 
 mod cli { // name shows up in log output
@@ -124,6 +169,10 @@ mod cli { // name shows up in log output
 }
 
 impl LammpsOwner {
+
+    //------------------------------
+    // the basics
+
     /// Invokes `lammps_command`.
     ///
     /// # Panics
@@ -144,17 +193,23 @@ impl LammpsOwner {
     pub fn command(&mut self, cmd: &str) -> Result<()>
     {Ok({
         cli::trace(cmd);
-        let cmd = CString::new(cmd)?.into_raw();
-        unsafe {
-            // FIXME: I still don't know if I'm supposed to free the output or not.
-            // NOTE:  This returns "the command name" as a 'char *'.
-            //        I pored over the Lammps source, and I, uh... *think* it's just
-            //        a pointer into our string (which has had a null terminator
-            //        forcefully thrust into it).  But I'm not sure.  - ML
-            let ret = ::lammps_sys::lammps_command(self.ptr, cmd);
-            assert!(!ret.is_null());
-            let _ = CString::from_raw(cmd);
-        }
+
+        // FIXME: I still don't know if I'm supposed to free the output or not.
+        // NOTE:  This returns "the command name" as a 'char *'.
+        //        I pored over the Lammps source, and I, uh... *think* it's just
+        //        a pointer into our string (which has had a null terminator
+        //        forcefully thrust into it).  But I'm not sure.  - ML
+        let ret = unsafe {
+            with_temporary_c_str(cmd, |cmd| {
+                ::lammps_sys::lammps_command(self.ptr, cmd)
+            })? // NulError
+        };
+
+        // NOTE: supposing that ret points into our argument (which has been
+        //       freed), it is no longer safe to dereference.
+        self.pop_error_as_result()?;
+
+        assert!(!ret.is_null(), "lammps_command threw no exception, but returned null?!");
     })}
 
     // convenience wrapper
@@ -165,7 +220,71 @@ impl LammpsOwner {
     })}
 
     pub fn get_natoms(&mut self) -> usize
-    { unsafe { ::lammps_sys::lammps_get_natoms(self.ptr) as usize } }
+    {
+        let out = unsafe { ::lammps_sys::lammps_get_natoms(self.ptr) } as usize;
+        self.assert_no_error();
+        out
+    }
+
+    //------------------------------
+    // error API (used internally)
+
+    // (this is our '?')
+    fn pop_error_as_result(&mut self) -> Result<()>
+    {Ok({
+        match self.pop_error() {
+            None => {},
+            Some((severity, s)) => bail!(ErrorKind::Lammps(severity, s)),
+        }
+    })}
+
+    // (this is our 'unwrap')
+    fn assert_no_error(&mut self)
+    {
+        self.pop_error_as_result().unwrap_or_else(|e| {
+            use ::error_chain::ChainedError;
+            panic!("Unexpected error from LAMMPS: {}", e.display_chain());
+        });
+    }
+
+    // Read an error from the Lammps API if there is one.
+    // (This removes the error, so that a second call will produce None.)
+    fn pop_error(&mut self) -> Option<(Severity, String)>
+    {
+        use ::lammps_sys::{lammps_get_last_error_message, lammps_has_error};
+
+        let has_error = unsafe { lammps_has_error(self.ptr) } != 0;
+        if !has_error {
+            return None;
+        };
+
+        // +1 to guarantee a nul
+        let mut buf = vec![0u8; MAX_ERROR_BYTES + 1];
+
+        let severity_int = unsafe {
+            lammps_get_last_error_message(
+                self.ptr,
+                buf.as_mut_ptr() as *mut c_char,
+                MAX_ERROR_BYTES as c_int,
+            )
+        } as u32;
+        let severity = Severity::from_int(severity_int).expect("lammps-wrap bug!");
+
+        // truncate to written content
+        let nul = buf.iter().position(|&c| c == b'\0').expect("lammps-wrap bug!");
+        buf.truncate(nul);
+
+        // (NOTE: the thought here was: if our guess for a maximum length
+        //        happened to be right in the middle of a character,
+        //        then we should cut off the invalid part...
+        //        ...but now that I think about it, who says the error
+        //        is even encoded in utf8?)
+        let message = string_from_utf8_prefix(buf);
+        Some((severity, message))
+    }
+
+    //------------------------------
+    // scatter/gather
 
     // Gather an integer property across all atoms.
     //
@@ -197,20 +316,24 @@ impl LammpsOwner {
         count: usize,
     ) -> Result<Vec<T>>
     {Ok({
-        let name = CString::new(name)?.into_raw();
         let natoms = self.get_natoms();
-
         let mut out = vec![T::default(); count * natoms];
-        ::lammps_sys::lammps_gather_atoms(
-            self.ptr, name, ty.into(), count as c_int,
-            out.as_mut_ptr() as *mut c_void,
-        );
 
-        let _ = CString::from_raw(name); // free memory
+        with_temporary_c_str(name, |name| {
+            ::lammps_sys::lammps_gather_atoms(
+                self.ptr, name, ty.into(), count as c_int,
+                out.as_mut_ptr() as *mut c_void,
+            );
+        })?;
+
+        // NOTE: Known cases where this is Err:
+        // * None so far.
+        self.pop_error_as_result()?;
 
         // I'm not sure if there is any way at all for us to verify that the operation
         // actually succeeded without screenscraping diagnostic output from LAMMPS.
-        // The function returns nothing, and prints a warning on failure.  - ML
+        // The function only prints a warning on failure and does not set the error state.
+        //   - ML
         let yolo = out;
         yolo
     })}
@@ -243,22 +366,29 @@ impl LammpsOwner {
         data: &mut [T]
     ) -> Result<()>
     {Ok({
-        let name = CString::new(name)?.into_raw();
         let natoms = self.get_natoms();
         assert_eq!(data.len() % natoms, 0);
         let count = data.len() / natoms;
 
-        ::lammps_sys::lammps_scatter_atoms(
-            self.ptr, name, ty.into(), count as c_int,
-            data.as_mut_ptr() as *mut c_void,
-        );
+        with_temporary_c_str(name, |name| {
+            ::lammps_sys::lammps_scatter_atoms(
+                self.ptr, name, ty.into(), count as c_int,
+                data.as_mut_ptr() as *mut c_void,
+            );
+        })?;
 
-        let _ = CString::from_raw(name); // free memory
+        // NOTE: Known cases where this is Err:
+        // * None so far.
+        self.pop_error_as_result()?;
 
         // I'm not sure if there is any way at all for us to verify that the operation
         // actually succeeded without screenscraping diagnostic output from LAMMPS.
-        // The function returns nothing, and prints a warning on failure.  - ML
+        // The function only prints a warning on failure and does not set the error state.
+        //   - ML
     })}
+
+    //------------------------------
+    // computes
 
     // Read a scalar compute, possibly computing it in the process.
     //
@@ -267,14 +397,21 @@ impl LammpsOwner {
     //       like this could possibly actually cause UB; I just have no idea how.
     pub unsafe fn extract_compute_0d(&mut self, name: &str) -> Result<f64>
     {Ok({
-        let id = CString::new(name)?.into_raw();
-        let out_ptr = unsafe { ::lammps_sys::lammps_extract_compute(
-            self.ptr,
-            id,
-            ComputeStyle::Global.into(),
-            ComputeType::Scalar.into(),
-        ) };
-        unsafe { (out_ptr as *mut c_double).as_ref() }
+        let out_ptr = with_temporary_c_str(name, |name| {
+            unsafe { ::lammps_sys::lammps_extract_compute(
+                self.ptr, name,
+                ComputeStyle::Global.into(),
+                ComputeType::Scalar.into(),
+            )}
+        })? as *mut c_double;
+
+        // NOTE: Known cases where this produces Err:
+        // * None so far.
+        self.pop_error_as_result()?;
+
+        // NOTE: Known cases where the pointer is NULL:
+        // * (bug in lammps-wrap) Name provided does not belong to a compute.
+        unsafe { out_ptr.as_ref() }
             .cloned()
             .ok_or_else(|| Error::from(format!("could not extract {:?}", name)))?
     })}
@@ -291,14 +428,16 @@ impl LammpsOwner {
         len: usize,
     ) -> Result<Vec<f64>>
     {Ok({
-        let id = CString::new(name)?.into_raw();
-        let out_ptr = unsafe { ::lammps_sys::lammps_extract_compute(
-            self.ptr,
-            id,
-            style.into(),
-            ComputeType::Vector.into(),
-        ) } as *mut c_double;
+        let out_ptr = with_temporary_c_str(name, |name| {
+            unsafe { ::lammps_sys::lammps_extract_compute(
+                self.ptr, name,
+                style.into(),
+                ComputeType::Vector.into(),
+            )}
+        })? as *mut c_double;
 
+        // NOTE: See extract_compute_0d for a breakdown of the error cases.
+        self.pop_error_as_result()?;
         let p =
             out_ptr.as_ref()
             .ok_or_else(|| err!("Could not extract {:?}", name))?;
@@ -307,6 +446,30 @@ impl LammpsOwner {
             .iter().map(|&c| c as f64).collect()
     })}
 }
+
+// Get the longest valid utf8 prefix as a String.
+// This function never fails.
+fn string_from_utf8_prefix(buf: Vec<u8>) -> String
+{
+    String::from_utf8(buf)
+        .unwrap_or_else(|e| {
+            let valid_len = e.utf8_error().valid_up_to();
+            let mut bytes = e.into_bytes();
+            bytes.truncate(valid_len);
+
+            String::from_utf8(bytes).expect("bug!")
+        })
+}
+
+// Temporarily allocate a c string for the duration of a closure.
+unsafe fn with_temporary_c_str<B, F>(s: &str, f: F) -> Result<B>
+where F: FnOnce(*mut c_char) -> B
+{Ok({
+    let p = CString::new(s)?.into_raw();
+    let out = f(p);
+    let _ = CString::from_raw(p); // free memory
+    out
+})}
 
 pub struct Lammps {
     /// Put Lammps behind a RefCell so we can paper over things like `get_natoms(&mut self)`
@@ -780,6 +943,47 @@ mod memory {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     // NOTE: this is now mostly tested indirectly
     //       through the other crates that use it.
+
+    // get a fresh Lammps instance on which arbitrary functions can be called.
+    fn arbitrary_initialized_lammps() -> Lammps
+    {
+        use ::rsp2_structure::Coords;
+        let structure = CoordStructure::new_coords(
+            Lattice::eye(),
+            Coords::Fracs(vec![[0.0; 3]]),
+        );
+        Builder::new().initialize_carbon(structure).unwrap()
+    }
+
+    macro_rules! assert_matches {
+        ($pat:pat $(if $cond:expr)*, $val:expr $(,)*)
+        => {
+            match $val {
+                $pat $(if $cond)* => {},
+                ref e => {
+                    panic!(
+                        "assert_matches! failed:\nExpected:{}\n  Actual:{:?}",
+                        stringify!($pat), e);
+                },
+            }
+        };
+    }
+
+    #[test]
+    fn exceptions()
+    {
+        let lmp = arbitrary_initialized_lammps();
+        assert_matches!(
+            Err(Error(ErrorKind::Lammps(Severity::Recoverable, _), _)),
+            unsafe { lmp.ptr.borrow_mut().commands(&[
+                // try to change to block with a nonzero skew
+                "change_box all xy final 0.25",
+                "change_box all ortho",
+            ])}
+        );
+    }
 }
