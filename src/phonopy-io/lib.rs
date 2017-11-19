@@ -12,6 +12,7 @@ extern crate serde_yaml;
 extern crate serde_json;
 extern crate rsp2_tempdir as tempdir;
 extern crate rsp2_fs_util;
+#[macro_use] extern crate rsp2_task_traits;
 
 pub type IoError = ::std::io::Error;
 pub type YamlError = ::serde_yaml::Error;
@@ -19,7 +20,6 @@ pub type Shareable = Send + Sync + 'static;
 
 pub use self::filetypes::{disp_yaml, force_sets, symmetry_yaml};
 
-pub use self::filebased::{AsPath, HasTempDir};
 pub use self::filebased::{DirWithDisps, DirWithForces, DirWithBands};
 pub use self::filebased::BandsBuilder;
 pub use self::filebased::Builder;

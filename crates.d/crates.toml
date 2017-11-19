@@ -47,6 +47,7 @@ rsp2-tempdir        = "src/util/tempdir"
 rsp2-linalg         = "src/math/linalg"
 rsp2-eigenvector-classify = "./src/math/eigenvector-classify"
 rsp2-fs-util = "src/util/fs"
+rsp2-task-traits = "src/task-traits"
 #!!INSERTION POINT FOR NEW CRATES!!#
 
 #--------------------------------------------
@@ -81,3 +82,6 @@ slice-of-array = "0.1"
 rsp2-kets = { version = "0.3.6", git = "https://github.com/ExpHP/rsp2-kets", features = ["serde"] }
 lammps-sys = { tag = "v0.2.0", git = "https://github.com/ExpHP/lammps-sys" }
 rayon = "0.8"
+failure = "0.1.0"
+failure_derive = "0.1.0"
+

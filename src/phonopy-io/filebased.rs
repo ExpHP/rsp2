@@ -31,6 +31,7 @@ use ::std::collections::HashMap;
 use ::rsp2_kets::Basis;
 use ::rsp2_structure::{CoordStructure, ElementStructure};
 use ::rsp2_structure::{FracRot, FracTrans, FracOp};
+use ::rsp2_task_traits::{AsPath, HasTempDir};
 
 use ::slice_of_array::prelude::*;
 
@@ -697,164 +698,19 @@ pub fn cache_link<P: AsRef<Path>, Q: AsRef<Path>>(src: P, dest: Q) -> Result<()>
 
 //-----------------------------
 
-/// AsRef<Path> with more general impls on smart pointer types.
-///
-/// (for instance, `Box<AsPath>` and `Rc<TempDir>` both implement
-///  the trait)
-pub trait AsPath {
-    fn as_path(&self) -> &Path;
-}
-
-macro_rules! as_path_impl {
-    (@AsRef [$($generics:tt)*] $Type:ty)
-    => {
-        impl<$($generics)*> AsPath for $Type {
-            fn as_path(&self) -> &Path { self.as_ref() }
-        }
-    };
-    (@Deref [$($generics:tt)*] $Type:ty)
-    => {
-        impl<$($generics)*> AsPath for $Type {
-            fn as_path(&self) -> &Path { (&**self).as_path() }
-        }
-    };
-    ( $(
-        (by $tag:tt) [$($generics:tt)*] $Type:ty;
-    )+ )
-    => {
-        $( as_path_impl!{@$tag [$($generics)*] $Type} )*
-    };
-}
-
-as_path_impl!{
-    (by AsRef) [] Path;
-    (by AsRef) [] PathBuf;
-    (by AsRef) [] TempDir;
-    (by AsRef) [] ::std::ffi::OsString;
-    (by AsRef) [] ::std::ffi::OsStr;
-    (by AsRef) [] str;
-    (by AsRef) [] String;
-    (by AsRef) ['a] ::std::path::Iter<'a>;
-    (by AsRef) ['a] ::std::path::Components<'a>;
-    (by Deref) ['p, P: AsPath + ?Sized] &'p mut P;
-    (by Deref) [P: AsPath + ?Sized] Box<P>;
-    (by Deref) [P: AsPath + ?Sized] ::std::rc::Rc<P>;
-    (by Deref) [P: AsPath + ?Sized] ::std::sync::Arc<P>;
-    (by Deref) ['p, P: AsPath + ToOwned + ?Sized] ::std::borrow::Cow<'p, P>;
-}
-
-impl<'p, P: AsPath + ?Sized> AsPath for &'p P
-{ fn as_path(&self) -> &Path { P::as_path(self) } }
-
-
-
-/// Trait for types that own a temporary directory, which can be
-/// released (to prevent automatic deletion) or explicitly closed
-/// to catch IO errors (which would be ignored on drop).
-///
-/// This is really just an implementation detail, and you should not
-/// worry about it. All types that implement this expose it through
-/// the `close()` and `into_path()` inherent methods, so you do not
-/// need to import it.
-pub trait HasTempDir: AsPath {
-    /// Provides `close()` in generic contexts
-    fn temp_dir_close(self) -> IoResult<()>;
-    /// Provides `into_path()` in generic contexts
-    fn temp_dir_into_path(self) -> PathBuf;
-}
-
-macro_rules! impl_dirlike_boilerplate {
-    (
-        type: {$Type:ident<_>}
-        member: self.$member:ident
-        other_members: [$(self.$other_members:ident),*]
-    ) => {
-        // all dir-likes implement HasTempDir if possible
-        impl<P: HasTempDir> HasTempDir for $Type<P> {
-            fn temp_dir_close(self) -> IoResult<()>
-            { self.$member.temp_dir_close() }
-
-            fn temp_dir_into_path(self) -> PathBuf
-            { self.$member.temp_dir_into_path() }
-        }
-
-        // all dir-likes implement AsPath
-        impl<P: AsPath> AsPath for $Type<P> {
-            fn as_path(&self) -> &Path { self.dir.as_path() }
-        }
-
-        // all dir-likes expose inherent methods that are aliases
-        // for the HasTempDir and AsPath methods
-        impl<P: HasTempDir> $Type<P> {
-            /// Explicitly close the temporary directory, deleting it.
-            ///
-            /// This also happens when the object is dropped, but in that
-            /// case it is not possible to detect errors.
-            pub fn close(self) -> IoResult<()> { self.temp_dir_close() }
-
-            /// Convert into a PathBuf, disabling this object's destructor.
-            ///
-            /// To retain the ability to call the other methods on this type,
-            /// see the `keep()` method.
-            pub fn into_path(self) -> PathBuf { self.temp_dir_into_path() }
-
-            /// Move the directory to the given path, which must not exist.
-            ///
-            /// Currently, there is no recourse if the operation fails;
-            /// the directory is simply lost. In the future, this may take
-            /// '&mut self' and poison the object once the move has succeeded.
-            pub fn relocate<Q: AsPath>(self, path: Q)
-            -> Result<$Type<PathBuf>>
-            {Ok({
-                // (use something that supports cross-filesystem moves)
-                mv(self.path(), path.as_path())?;
-
-                self.map_dir(|old| {
-                    // forget the TempDir
-                    let _ = old.temp_dir_into_path();
-                    // store the new path
-                    path.as_path().to_owned()
-                })
-            })}
-        }
-
-        impl<P: AsPath> $Type<P> {
-            pub fn path(&self) -> &Path { self.as_path() }
-
-            /// Apply a function to change the type of the directory.
-            /// For example, when `P = TempDir`, one could use `.map_dir(Rc::new)`
-            ///  to enable cloning of the object.
-            pub fn map_dir<Q, F>(self, f: F) -> $Type<Q>
-            where
-                Q: AsPath,
-                F: FnOnce(P) -> Q,
-            {
-                let $member = f(self.$member);
-                $(let $other_members = self.$other_members;)*
-                $Type { $member, $($other_members),* }
-            }
-        }
-    };
-}
-
-impl HasTempDir for TempDir {
-    fn temp_dir_close(self) -> IoResult<()> { self.close() }
-    fn temp_dir_into_path(self) -> PathBuf { self.into_path() }
-}
-
-impl_dirlike_boilerplate!{
+rsp2_impl_dirlike_boilerplate!{
     type: {DirWithDisps<_>}
     member: self.dir
     other_members: [self.displacements, self.superstructure]
 }
 
-impl_dirlike_boilerplate!{
+rsp2_impl_dirlike_boilerplate!{
     type: {DirWithForces<_>}
     member: self.dir
     other_members: [self.cache_force_constants]
 }
 
-impl_dirlike_boilerplate!{
+rsp2_impl_dirlike_boilerplate!{
     type: {DirWithBands<_>}
     member: self.dir
     other_members: []

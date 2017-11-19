@@ -33,6 +33,9 @@ macro_rules! ichain {
     => { $e.into_iter().chain(ichain!($($es,)+)) };
 }
 
+#[macro_use]
+mod task_macros;
+mod task;
 mod color;
 mod util;
 mod config;
@@ -40,6 +43,7 @@ mod logging;
 mod cmd;
 mod integrate_2d;
 mod bands;
+pub mod alternate;
 
 pub use ::config::Settings;
 pub mod relax_with_eigenvectors {
