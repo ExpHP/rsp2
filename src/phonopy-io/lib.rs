@@ -12,21 +12,15 @@ extern crate serde_yaml;
 extern crate serde_json;
 extern crate rsp2_tempdir as tempdir;
 extern crate rsp2_fs_util;
-#[macro_use] extern crate rsp2_task_traits;
 
 pub type IoError = ::std::io::Error;
 pub type YamlError = ::serde_yaml::Error;
 pub type Shareable = Send + Sync + 'static;
 
-pub use self::filetypes::{disp_yaml, force_sets, symmetry_yaml};
-
-pub use self::filebased::{DirWithDisps, DirWithForces, DirWithBands};
-pub use self::filebased::BandsBuilder;
-pub use self::filebased::Builder;
+pub use self::filetypes::{conf, disp_yaml, force_sets, symmetry_yaml};
 
 mod filetypes;
-mod npy;
-mod filebased;
+pub mod npy;
 
 pub use errors::*;
 pub(crate) mod errors {
@@ -47,57 +41,6 @@ pub(crate) mod errors {
         }
 
         errors {
-            /// Returned by the `from_existing()` methods of various Dir types.
-            MissingFile(ty: &'static str, dir: PathBuf, filename: String) {
-                description("Directory is missing a required file"),
-                display("Directory '{}' is missing required file '{}' for '{}'",
-                    dir.display(), &filename, ty),
-            }
-            PhonopyFailed(status: ::std::process::ExitStatus) {
-                description("phonopy exited unsuccessfully"),
-                display("phonopy exited unsuccessfully ({})", status),
-            }
-            NonPrimitiveStructure {
-                description("attempted to compute symmetry of a supercell"),
-                display("attempted to compute symmetry of a supercell"),
-            }
         }
     }
-
-    impl Error
-    {
-        pub fn is_missing_file(&self) -> bool
-        { match *self {
-            Error(ErrorKind::MissingFile(_, _, _), _) => true,
-            _ => false,
-        }}
-    }
-}
-
-/// This module only exists to have its name appear in logs.
-/// It marks phonopy's stdout.
-mod stdout {
-    pub fn log(s: &str)
-    { info!("{}", s) }
-}
-
-/// This module only exists to have its name appear in logs.
-/// It marks phonopy's stderr.
-mod stderr {
-    pub fn log(s: &str)
-    { warn!("{}", s) }
-}
-
-pub trait As3<T> {
-    fn as_3(&self) -> (&T, &T, &T);
-}
-
-impl<T> As3<T> for [T; 3] {
-    fn as_3(&self) -> (&T, &T, &T)
-    { (&self[0], &self[1], &self[2]) }
-}
-
-impl<T> As3<T> for (T, T, T) {
-    fn as_3(&self) -> (&T, &T, &T)
-    { (&self.0, &self.1, &self.2) }
 }

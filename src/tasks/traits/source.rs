@@ -1,45 +1,41 @@
-use ::AsPath;
-use ::{Result, StdResult, Error};
-use ::Load;
+use ::{Result};
+use ::traits::AsPath;
+use ::traits::Load;
 use ::alternate;
 
 use ::std::sync::{Arc, Weak};
 
 pub trait Source<T> {
-    type Error;
-
     /// Get the value.
-    fn get(&mut self) -> StdResult<Arc<T>, Self::Error>;
+    fn get(&mut self) -> Result<T>;
 
     /// Get a cached value without performing any potentially dangerous
     /// IO or expensive computations.
     ///
     /// Different sources may have different conditions under which this
     /// returns `Some`, though  The method `ensure_cached` allows .
-    fn get_cached(&self) -> Option<Arc<T>>;
+    fn get_cached(&self) -> Option<T>;
 
     /// Guarantee that future calls to `get_cached()` return `Some`
     /// (barring arbitrary mutation to `self`).
     ///
     /// This does not guarantee that multiple calls to `get_cached()`
     /// will produce `Arc`s tied to the same reference count.
-    fn ensure_cached(&mut self) -> StdResult<(), Self::Error>;
+    fn ensure_cached(&mut self) -> Result<()>;
 }
 
 //-----------------------------------------------------
 
 /// A simple source for a value already loaded in memory.
 #[derive(Debug, Clone)]
-pub struct ValueSource<T>(pub Arc<T>);
+pub struct ValueSource<T>(pub T);
 
-impl<T> Source<T> for ValueSource<T>
+impl<T: Clone> Source<T> for ValueSource<T>
 {
-    type Error = Error;
-
-    fn get(&mut self) -> Result<Arc<T>>
+    fn get(&mut self) -> Result<T>
     { Ok(self.0.clone()) }
 
-    fn get_cached(&self) -> Option<Arc<T>>
+    fn get_cached(&self) -> Option<T>
     { Some(self.0.clone()) }
 
     fn ensure_cached(&mut self) -> Result<()>
@@ -62,8 +58,8 @@ pub struct FnSource<T, F> {
     retainer: Option<Arc<T>>,
 }
 
-impl<T, F, E> FnSource<T, F>
-where F: alternate::FnMut<(), Output=StdResult<T, E>>,
+impl<T, F> FnSource<T, F>
+where F: alternate::FnMut<(), Output=Result<T>>,
 {
     pub fn new(func: F) -> Self
     { FnSource {
@@ -73,12 +69,10 @@ where F: alternate::FnMut<(), Output=StdResult<T, E>>,
     }}
 }
 
-impl<T, F, E> Source<T> for FnSource<T, F>
-where F: alternate::FnMut<(), Output=StdResult<T, E>>,
+impl<T, F> Source<Arc<T>> for FnSource<T, F>
+where F: alternate::FnMut<(), Output=Result<T>>,
 {
-    type Error = E;
-
-    fn get(&mut self) -> StdResult<Arc<T>, E>
+    fn get(&mut self) -> Result<Arc<T>>
     {Ok({
         match self.get_cached() {
             Some(ptr) => ptr,
@@ -93,7 +87,7 @@ where F: alternate::FnMut<(), Output=StdResult<T, E>>,
     fn get_cached(&self) -> Option<Arc<T>>
     { self.cache.as_ref().and_then(Weak::upgrade) }
 
-    fn ensure_cached(&mut self) -> StdResult<(), E>
+    fn ensure_cached(&mut self) -> Result<()>
     {Ok({
         self.retainer = Some(self.get()?.clone());
     })}
@@ -116,19 +110,17 @@ enum OnceSourceImpl<T, F> {
     Done(Arc<T>),
 }
 
-impl<T, F, E> OnceSource<T, F>
-where F: alternate::FnOnce<(), Output=StdResult<T, E>>,
+impl<T, F> OnceSource<T, F>
+where F: alternate::FnOnce<(), Output=Result<T>>,
 {
     pub fn new(func: F) -> Self
     { OnceSource(Some(OnceSourceImpl::Once(func))) }
 }
 
-impl<T, F, E> Source<T> for OnceSource<T, F>
-where F: ::alternate::FnOnce<(), Output=StdResult<T, E>>,
+impl<T, F> Source<Arc<T>> for OnceSource<T, F>
+where F: ::alternate::FnOnce<(), Output=Result<T>>,
 {
-    type Error = E;
-
-    fn get(&mut self) -> StdResult<Arc<T>, E>
+    fn get(&mut self) -> Result<Arc<T>>
     {Ok({
         self.ensure_cached()?;
         self.get_cached().expect("bug!")
@@ -141,7 +133,7 @@ where F: ::alternate::FnOnce<(), Output=StdResult<T, E>>,
         Some(&OnceSourceImpl::Done(ref ptr)) => Some(ptr.clone()),
     }}
 
-    fn ensure_cached(&mut self) -> StdResult<(), E>
+    fn ensure_cached(&mut self) -> Result<()>
     {Ok({
         self.0 = Some(match self.0.take() {
             None => panic!("Called `ensure_cached()` on a poisoned `OnceSource`"),
@@ -154,9 +146,6 @@ where F: ::alternate::FnOnce<(), Output=StdResult<T, E>>,
 }
 
 //-----------------------------------------------------
-
-
-
 
 /// Output type of `path_source`.
 pub type PathSource<T, P> = FnSource<T, unboxed::LoadFromPath<T, P>>;
@@ -181,41 +170,36 @@ where
 //
 // The Helper just packs an additional type parameter to allow
 // selecting the error type.
-pub struct Helper<T, E>(T, ::std::marker::PhantomData<E>);
 macro_rules! derive_tuple_source {
     ($([$a:ident : $A:ident, $s:ident : $S:ident],)*)
     => {
-        impl<$($A,)* $($S,)* E> Source<($(Arc<$A>,)*)> for Helper<($($S,)*), E>
-        where
-            $($S: Source<$A>,)*
-            $(E: From<<$S as Source<$A>>::Error>,)*
+        impl<$($A,)* $($S,)*> Source<($($A,)*)> for ($($S,)*)
+        where $($S: Source<$A>,)*
         {
-            type Error = E;
-
-            fn get(&mut self) -> StdResult<Arc<($(Arc<$A>,)*)>, E>
+            fn get(&mut self) -> Result<($($A,)*)>
             {Ok({
-                let Helper(($(ref mut $s,)*), _) = *self;
+                let ($(ref mut $s,)*) = *self;
                 $(
                     let $a = $s.get()?;
                 )*
-                Arc::new(($($a,)*))
+                ($($a,)*)
             })}
 
-            fn get_cached(&self) -> Option<Arc<($(Arc<$A>,)*)>>
+            fn get_cached(&self) -> Option<($($A,)*)>
             {
-                let Helper(($(ref $s,)*), _) = *self;
+                let ($(ref $s,)*) = *self;
                 $(
                     let $a = match $s.get_cached() {
                         None => return None,
                         Some(x) => x,
                     };
                 )*
-                Some(Arc::new(($($a,)*)))
+                Some(($($a,)*))
             }
 
-            fn ensure_cached(&mut self) -> StdResult<(), E>
+            fn ensure_cached(&mut self) -> Result<()>
             {Ok({
-                let Helper(($(ref mut $s,)*), _) = *self;
+                let ($(ref mut $s,)*) = *self;
                 $(
                     $s.ensure_cached()?;
                 )*

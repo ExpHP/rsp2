@@ -17,21 +17,21 @@
 use ::{Result, IoResult, ErrorKind};
 use ::As3;
 
-use ::filetypes::{conf, args, q_positions};
-use ::filetypes::{symmetry_yaml, disp_yaml, force_sets};
+use ::rsp2_phonopy_io::{conf, symmetry_yaml, disp_yaml, force_sets};
+use ::traits::{AsPath, HasTempDir};
 
 use ::rsp2_structure_io::poscar;
-use ::std::io::prelude::BufRead;
+use ::std::io::{Read, Write, BufRead};
 use ::std::process::Command;
 use ::std::path::{Path, PathBuf};
 use ::rsp2_fs_util::{open, open_text, create, copy, hard_link, mv, rm_rf};
-use ::tempdir::TempDir;
+use ::rsp2_tempdir::TempDir;
 use ::std::collections::HashMap;
 
 use ::rsp2_kets::Basis;
 use ::rsp2_structure::{CoordStructure, ElementStructure};
 use ::rsp2_structure::{FracRot, FracTrans, FracOp};
-use ::rsp2_task_traits::{AsPath, HasTempDir};
+use ::rsp2_phonopy_io::npy;
 
 use ::slice_of_array::prelude::*;
 
@@ -57,7 +57,7 @@ impl Builder {
     pub fn conf_from_file<R: BufRead>(self, file: R) -> Result<Self>
     {Ok({
         let mut me = self;
-        for (key, value) in ::filetypes::conf::read(file)? {
+        for (key, value) in ::rsp2_phonopy_io::conf::read(file)? {
             me = me.conf(key, value);
         }
         me
@@ -274,7 +274,7 @@ impl<P: AsPath> DirWithDisps<P> {
     /// FIXME: This should give ElementStructure.
     pub fn displaced_structures<'a>(&'a self) -> Box<Iterator<Item=CoordStructure> + 'a>
     {Box::new({
-        use ::filetypes::disp_yaml::apply_displacement;
+        use ::rsp2_phonopy_io::disp_yaml::apply_displacement;
         self.displacements
             .iter()
             .map(move |&disp| apply_displacement(&self.superstructure, disp))
@@ -561,16 +561,16 @@ impl<P: AsPath> DirWithBands<P> {
         let path = self.path().join("eigenvector.npy");
         if path.exists() {
             trace!("Reading eigenvectors...");
-            Some(::npy::read_eigenvector_npy(open(path)?)?)
+            Some(npy::read_eigenvector_npy(open(path)?)?)
         } else { None }
     })}
 
     pub fn eigenvalues(&self) -> Result<Vec<Vec<f64>>>
-    {
+    {Ok({
         trace!("Reading eigenvectors...");
         let file = open(self.path().join("eigenvalue.npy"))?;
-        ::npy::read_eigenvalue_npy(file)
-    }
+        npy::read_eigenvalue_npy(file)?
+    })}
 
     // ick. Sloppy design, but it's the best we can do without
     // having a separate directory type just for Gamma computations
@@ -743,3 +743,30 @@ mod tests {
     }
 }
 
+/// Type representing extra CLI arguments.
+///
+/// Used internally to store things that must be preserved between
+/// runs but cannot be set in conf files, like e.g. `--tolerance`
+pub(crate) type Args = Vec<String>;
+pub(crate) mod args {
+    use super::*;
+
+    pub fn read<R: Read>(file: R) -> Result<Args>
+    { Ok(::serde_json::from_reader(file)?) }
+
+    pub fn write<W: Write, S: AsRef<str>>(w: W, args: &[S]) -> Result<()>
+    {Ok({
+        let args: Vec<_> = args.iter().map(|s: &_| s.as_ref()).collect();
+        ::serde_json::to_writer(w, &args)?;
+    })}
+}
+
+pub(crate) mod q_positions {
+    use super::*;
+
+    pub fn read<R: Read>(file: R) -> Result<Vec<[f64; 3]>>
+    { Ok(::serde_json::from_reader(file)?) }
+
+    pub fn write<W: Write>(w: W, data: &[[f64; 3]]) -> Result<()>
+    { Ok(::serde_json::to_writer(w, data)?) }
+}

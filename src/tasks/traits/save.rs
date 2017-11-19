@@ -1,7 +1,7 @@
-use ::AsPath;
+use ::traits::AsPath;
 use ::Result;
 
-use ::util::IsNewtype;
+use ::traits::IsNewtype;
 use ::rsp2_fs_util::{open, create};
 
 pub trait Load: Sized {

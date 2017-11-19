@@ -1,5 +1,7 @@
 // HERE BE DRAGONS
 
+#![recursion_limit="256"] // for error chain...
+
 extern crate rsp2_lammps_wrap;
 extern crate rsp2_minimize;
 extern crate rsp2_structure;
@@ -34,8 +36,7 @@ macro_rules! ichain {
 }
 
 #[macro_use]
-mod task_macros;
-mod task;
+mod traits;
 mod color;
 mod util;
 mod config;
@@ -43,7 +44,8 @@ mod logging;
 mod cmd;
 mod integrate_2d;
 mod bands;
-pub mod alternate;
+mod phonopy;
+pub use traits::alternate;
 
 pub use ::config::Settings;
 pub mod relax_with_eigenvectors {
@@ -57,8 +59,9 @@ pub use ::cmd::make_force_sets;
 
 pub use ::bands::unfold_phonon;
 
-pub use errors::{Result, ResultExt, Error, ErrorKind, StdResult};
+pub use errors::{Result, ResultExt, Error, ErrorKind, StdResult, IoResult};
 mod errors {
+    use ::std::path::PathBuf;
     error_chain! {
         foreign_links {
             Io(::std::io::Error);
@@ -76,10 +79,28 @@ mod errors {
             Phonopy(::rsp2_phonopy_io::Error, ::rsp2_phonopy_io::ErrorKind);
             ExactLs(::rsp2_minimize::exact_ls::Error, ::rsp2_minimize::exact_ls::ErrorKind);
         }
+
+        errors {
+            /// Returned by the `from_existing()` methods of various Dir types.
+            MissingFile(ty: &'static str, dir: PathBuf, filename: String) {
+                description("Directory is missing a required file"),
+                display("Directory '{}' is missing required file '{}' for '{}'",
+                    dir.display(), &filename, ty),
+            }
+            NonPrimitiveStructure {
+                description("attempted to compute symmetry of a supercell"),
+                display("attempted to compute symmetry of a supercell"),
+            }
+            PhonopyFailed(status: ::std::process::ExitStatus) {
+                description("phonopy exited unsuccessfully"),
+                display("phonopy exited unsuccessfully ({})", status),
+            }
+        }
     }
     // fewer type annotations...
     pub fn ok<T>(x: T) -> Result<T> { Ok(x) }
-    pub type StdResult<T, E> = ::std::result::Result<T, E>;
+    pub use ::std::result::Result as StdResult;
+    pub use ::std::io::Result as IoResult;
 
     // so that CLI stubs don't need to import traits from error_chain
     // (why doesn't error_chain generate inherent method wrappers around this trait?)
@@ -88,6 +109,40 @@ mod errors {
     impl Error {
         pub fn display_chain(&self) -> DisplayChain<Self>
         { ChainedError::display_chain(self) }
+
+        pub fn is_missing_file(&self) -> bool
+        { match *self {
+            Error(ErrorKind::MissingFile(_, _, _), _) => true,
+            _ => false,
+        }}
     }
 }
 
+
+/// This module only exists to have its name appear in logs.
+/// It marks a process's stdout.
+mod stdout {
+    pub fn log(s: &str)
+    { info!("{}", s) }
+}
+
+/// This module only exists to have its name appear in logs.
+/// It marks a process's stderr.
+mod stderr {
+    pub fn log(s: &str)
+    { warn!("{}", s) }
+}
+
+pub trait As3<T> {
+    fn as_3(&self) -> (&T, &T, &T);
+}
+
+impl<T> As3<T> for [T; 3] {
+    fn as_3(&self) -> (&T, &T, &T)
+    { (&self[0], &self[1], &self[2]) }
+}
+
+impl<T> As3<T> for (T, T, T) {
+    fn as_3(&self) -> (&T, &T, &T)
+    { (&self.0, &self.1, &self.2) }
+}

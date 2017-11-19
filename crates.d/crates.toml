@@ -47,7 +47,6 @@ rsp2-tempdir        = "src/util/tempdir"
 rsp2-linalg         = "src/math/linalg"
 rsp2-eigenvector-classify = "./src/math/eigenvector-classify"
 rsp2-fs-util = "src/util/fs"
-rsp2-task-traits = "src/task-traits"
 #!!INSERTION POINT FOR NEW CRATES!!#
 
 #--------------------------------------------

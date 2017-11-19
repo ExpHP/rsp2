@@ -16,7 +16,7 @@ use ::rsp2_structure::{Coords, CoordStructure, Structure, ElementStructure};
 use ::rsp2_structure_gen::Assemble;
 use ::rsp2_lammps_wrap::Lammps;
 use ::rsp2_lammps_wrap::Builder as LammpsBuilder;
-use ::rsp2_phonopy_io::Builder as PhonopyBuilder;
+use ::phonopy::Builder as PhonopyBuilder;
 
 use ::rsp2_fs_util::{open, create, canonicalize, create_dir, rm_rf};
 
@@ -481,9 +481,9 @@ fn phonopy_builder_from_settings<M>(
         .conf("DIAG", ".FALSE.")
 }
 
-fn do_force_sets_at_disps<P: ::rsp2_phonopy_io::AsPath>(
+fn do_force_sets_at_disps<P: ::traits::AsPath>(
     lmp: &LammpsBuilder,
-    disp_dir: &::rsp2_phonopy_io::DirWithDisps<P>,
+    disp_dir: &::phonopy::DirWithDisps<P>,
 ) -> Result<Vec<Vec<[f64; 3]>>>
 {ok({
     use ::std::io::prelude::*;
@@ -827,7 +827,7 @@ pub fn get_energy_surface(
         let cwd_guard = push_dir(outdir)?;
         setup_global_logger(Some(&"rsp2.log"))?;
 
-        let bands_dir = ::rsp2_phonopy_io::DirWithBands::from_existing(input)?;
+        let bands_dir = ::phonopy::DirWithBands::from_existing(input)?;
         let structure = bands_dir.structure()?;
 
         let (evals, evecs) = match bands_dir.gamma_eigensystem()? {

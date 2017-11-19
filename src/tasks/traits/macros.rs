@@ -107,6 +107,7 @@ macro_rules! rsp2_impl_dirlike_boilerplate {
         other_members: [$(self.$other_members:ident),*]
     ) => {
         // all dir-likes implement HasTempDir if possible
+        #[allow(dead_code)]
         impl<P: HasTempDir> HasTempDir for $Type<P> {
             fn temp_dir_close(self) -> IoResult<()>
             { self.$member.temp_dir_close() }
@@ -122,6 +123,7 @@ macro_rules! rsp2_impl_dirlike_boilerplate {
 
         // all dir-likes expose inherent methods that are aliases
         // for the HasTempDir and AsPath methods
+        #[allow(dead_code)]
         impl<P: HasTempDir> $Type<P> {
             /// Explicitly close the temporary directory, deleting it.
             ///
@@ -155,6 +157,7 @@ macro_rules! rsp2_impl_dirlike_boilerplate {
             })}
         }
 
+        #[allow(dead_code)]
         impl<P: AsPath> $Type<P> {
             pub fn path(&self) -> &Path { self.as_path() }
 

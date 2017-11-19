@@ -135,34 +135,6 @@ pub mod conf {
     })}
 }
 
-/// Type representing extra CLI arguments.
-///
-/// Used internally to store things that must be preserved between
-/// runs but cannot be set in conf files, like e.g. `--tolerance`
-pub(crate) type Args = Vec<String>;
-pub(crate) mod args {
-    use super::*;
-
-    pub fn read<R: Read>(file: R) -> Result<Args>
-    { Ok(::serde_json::from_reader(file)?) }
-
-    pub fn write<W: Write, S: AsRef<str>>(w: W, args: &[S]) -> Result<()>
-    {Ok({
-        let args: Vec<_> = args.iter().map(|s: &_| s.as_ref()).collect();
-        ::serde_json::to_writer(w, &args)?;
-    })}
-}
-
-pub(crate) mod q_positions {
-    use super::*;
-
-    pub fn read<R: Read>(file: R) -> Result<Vec<[f64; 3]>>
-    { Ok(::serde_json::from_reader(file)?) }
-
-    pub fn write<W: Write>(w: W, data: &[[f64; 3]]) -> Result<()>
-    { Ok(::serde_json::to_writer(w, data)?) }
-}
-
 pub mod symmetry_yaml {
     use ::Result;
 

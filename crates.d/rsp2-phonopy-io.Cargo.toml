@@ -16,7 +16,6 @@ path = "lib.rs"
 !!slice-of-array
 !!log
 
-!!rsp2-task-traits
 !!rsp2-tempdir
 !!rsp2-structure
 !!rsp2-structure-io
