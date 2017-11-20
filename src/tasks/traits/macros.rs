@@ -1,10 +1,10 @@
 /// For deriving Save and Load through
 #[macro_export]
-macro_rules! rsp2_derive_filetype_wrapper {
+macro_rules! derive_filetype_wrapper {
     (impl$par:tt [$($Trait:ty),+] for $Ty:ty as $Wrap:ident $bnd:tt)
     => {
         $(
-            rsp2_derive_filetype_wrapper!{
+            derive_filetype_wrapper!{
                 @one($Wrap, $Trait) impl$par _ for $Ty $bnd
             }
         )+
@@ -30,9 +30,9 @@ macro_rules! rsp2_derive_filetype_wrapper {
 /// Macro to use when implementing `alternate::{Fn, FnMut, FnOnce}`.
 ///
 /// This macro will automatically generate the impls for the traits
-/// lower on the Fn heirarchy.
+/// lower on the Fn hierarchy.
 #[macro_export]
-macro_rules! rsp2_derive_alternate_fn {
+macro_rules! derive_alternate_fn {
     // FnOnce
     (
         impl[$($par:tt)*] FnOnce<$Arg:ty> for $Type:ty
@@ -100,7 +100,7 @@ macro_rules! rsp2_derive_alternate_fn {
 }
 
 #[macro_export]
-macro_rules! rsp2_impl_dirlike_boilerplate {
+macro_rules! impl_dirlike_boilerplate {
     (
         type: {$Type:ident<_>}
         member: self.$member:ident

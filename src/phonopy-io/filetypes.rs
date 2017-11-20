@@ -140,53 +140,27 @@ pub mod symmetry_yaml {
 
     use ::std::io::prelude::*;
 
-    mod cereal {
-        #[derive(Deserialize)]
-        pub(super) struct SymmetryYaml {
-            pub space_group_type: String,
-            pub space_group_number: u32,
-            pub point_group_type: String,
-            pub space_group_operations: Vec<Operation>,
-        }
-
-        #[derive(Deserialize)]
-        pub struct Operation {
-            pub rotation: [[i32; 3]; 3],
-            pub translation: [f64; 3],
-        }
+    /// Spacegroup operator from disp.yaml
+    #[derive(Deserialize)]
+    pub struct Operation {
+        pub rotation: [[i32; 3]; 3],
+        pub translation: [f64; 3],
     }
 
     /// A parsed --sym output
+    #[derive(Deserialize)]
     pub struct SymmetryYaml {
         pub space_group_type: String,
         pub space_group_number: u32,
         pub point_group_type: String,
         pub space_group_operations: Vec<Operation>,
+        #[serde(skip)]
         _more: (),
     }
 
-    /// Spacegroup operator from disp.yaml
-    pub type Operation = self::cereal::Operation;
-
+    // NOTE: this is currently entirely unvalidated.
     pub fn read<R: Read>(r: R) -> Result<SymmetryYaml>
-    {Ok({
-        use self::cereal::SymmetryYaml as RawYaml;
-
-        let RawYaml {
-            space_group_type,
-            space_group_number,
-            point_group_type,
-            space_group_operations,
-        } = ::serde_yaml::from_reader(r)?;
-
-        SymmetryYaml {
-            space_group_type,
-            space_group_number,
-            point_group_type,
-            space_group_operations,
-            _more: (),
-        }
-    })}
+    {Ok({ ::serde_yaml::from_reader(r)? })}
 }
 
 pub mod force_sets {

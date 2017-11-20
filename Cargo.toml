@@ -45,3 +45,4 @@ itertools = "0.7"
 
 # This is NOT a workspace anymore.
 # I don't have time to debug the RLS.
+[workspace]

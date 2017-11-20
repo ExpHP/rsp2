@@ -1,6 +1,5 @@
 // HERE BE DRAGONS
 
-use ::rsp2_slice_math::{vnorm, vdot, V, v, vnormalize};
 use ::stop_condition::prelude::*;
 
 use ::itertools::Itertools;
@@ -10,6 +9,7 @@ use ::std::collections::VecDeque;
 use ::std::fmt;
 
 use ::either::{Either, Left, Right};
+use ::rsp2_slice_math::{vnorm, vdot, V, v, vnormalize};
 
 pub use self::settings::Settings;
 pub mod settings {

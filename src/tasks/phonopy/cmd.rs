@@ -17,8 +17,8 @@
 use ::{Result, IoResult, ErrorKind};
 use ::As3;
 
-use ::rsp2_phonopy_io::{conf, symmetry_yaml, disp_yaml, force_sets};
-use ::traits::{AsPath, HasTempDir};
+use super::{Conf, DispYaml, SymmetryYaml, QPositions, Args};
+use ::traits::{AsPath, HasTempDir, Save, Load};
 
 use ::rsp2_structure_io::poscar;
 use ::std::io::{Read, Write, BufRead};
@@ -38,7 +38,7 @@ use ::slice_of_array::prelude::*;
 #[derive(Debug, Clone, Default)]
 pub struct Builder {
     symprec: Option<f64>,
-    conf: HashMap<String, String>,
+    conf: Conf,
 }
 
 impl Builder {
@@ -49,7 +49,7 @@ impl Builder {
     { self.symprec = Some(x); self }
 
     pub fn conf<K: AsRef<str>, V: AsRef<str>>(mut self, key: K, value: V) -> Self
-    { self.conf.insert(key.as_ref().to_owned(), value.as_ref().to_owned()); self }
+    { self.conf.0.insert(key.as_ref().to_owned(), value.as_ref().to_owned()); self }
 
     /// Read configuration from a phonopy .conf file,
     /// overwriting existing values.
@@ -71,14 +71,14 @@ impl Builder {
         })
     }
 
-    fn args_from_settings(&self) -> Vec<String>
+    fn args_from_settings(&self) -> Args
     {
         let mut out = vec![];
         if let Some(tol) = self.symprec {
             out.push(format!("--tolerance"));
             out.push(format!("{:e}", tol));
         }
-        out
+        out.into()
     }
 }
 
@@ -94,15 +94,15 @@ impl Builder {
             trace!("Displacement dir: '{}'...", dir.display());
 
             let extra_args = self.args_from_settings();
-            conf::write(create(dir.join("disp.conf"))?, &self.conf)?;
+            self.conf.save(dir.join("disp.conf"))?;
             poscar::dump(create(dir.join("POSCAR"))?, "blah", &structure)?;
-            args::write(create(dir.join("disp.args"))?, &extra_args)?;
+            extra_args.save(dir.join("disp.args"))?;
 
             trace!("Calling phonopy for displacements...");
             {
                 let mut command = Command::new("phonopy");
                 command
-                    .args(&extra_args)
+                    .args(&extra_args.0)
                     .arg("disp.conf")
                     .arg("--displacement")
                     .current_dir(&dir);
@@ -124,13 +124,13 @@ impl Builder {
         let tmp = tmp.path();
         trace!("Entered '{}'...", tmp.display());
 
-        conf::write(create(tmp.join("phonopy.conf"))?, &self.conf)?;
+        self.conf.save(tmp.join("phonopy.conf"))?;
 
         poscar::dump(create(tmp.join("POSCAR"))?, "blah", &structure)?;
 
         trace!("Calling phonopy for symmetry...");
         check_status(Command::new("phonopy")
-            .args(self.args_from_settings())
+            .args(self.args_from_settings().0)
             .arg("phonopy.conf")
             .arg("--sym")
             .current_dir(&tmp)
@@ -154,7 +154,7 @@ impl Builder {
             ensure!(ratio == 1, ErrorKind::NonPrimitiveStructure);
         }
 
-        let yaml = symmetry_yaml::read(open(tmp.join("symmetry.yaml"))?)?;
+        let yaml = SymmetryYaml::load(tmp.join("symmetry.yaml"))?;
         yaml.space_group_operations.into_iter()
             .map(|op| Ok({
                 let rotation = FracRot::new(&op.rotation);
@@ -252,9 +252,9 @@ impl<P: AsPath> DirWithDisps<P> {
         }
 
         trace!("Parsing disp.yaml...");
-        let disp_yaml::DispYaml {
+        let DispYaml {
             displacements, structure: superstructure
-        } = disp_yaml::read(open(dir.as_path().join("disp.yaml"))?)?;
+        } = Load::load(dir.as_path().join("disp.yaml"))?;
         let superstructure = superstructure.map_metadata_into(|_| ());
 
         DirWithDisps { dir, superstructure, displacements }
@@ -316,7 +316,7 @@ impl<P: AsPath> DirWithDisps<P> {
         }
 
         trace!("Writing FORCE_SETS...");
-        force_sets::write(
+        ::rsp2_phonopy_io::force_sets::write(
             create(path.join("FORCE_SETS"))?,
             &self.superstructure,
             &self.displacements,
@@ -465,12 +465,12 @@ impl<'p, P: AsPath, Q: AsPath> BandsBuilder<'p, P, Q> {
                 hard_link(src.join(fc_filename), dir.join(fc_filename))?;
             }
 
-            q_positions::write(create(dir.join("q-positions.json"))?, q_points)?;
+            QPositions(q_points.into()).save(dir.join("q-positions.json"))?;
 
             // band.conf
             {
                 // Carry over settings from displacements.
-                let mut conf = conf::read(open_text(dir.join("disp.conf"))?)?;
+                let Conf(mut conf) = Load::load(dir.join("disp.conf"))?;
 
                 // Append a dummy qpoint so that each of our points begin a line segment.
                 conf.insert("BAND".to_string(), band_string(q_points) + " 0 0 0");
@@ -483,14 +483,14 @@ impl<'p, P: AsPath, Q: AsPath> BandsBuilder<'p, P, Q> {
                     true => ".TRUE.".to_string(),
                     false => ".FALSE.".to_string(),
                 });
-                conf::write(create(dir.join("band.conf"))?, &conf)?;
+                Conf(conf).save(dir.join("band.conf"))?;
             }
 
             trace!("Calling phonopy for bands...");
             {
                 let mut command = Command::new("phonopy");
                 command
-                    .args(args::read(open(dir.join("disp.args"))?)?)
+                    .args(Args::load(dir.join("disp.args"))?.0)
                     .arg("band.conf")
                     .arg("--hdf5")
                     .arg(match dir.join(fc_filename).exists() {
@@ -528,6 +528,7 @@ pub struct DirWithBands<P: AsPath> {
     dir: P,
 }
 
+
 impl<P: AsPath> DirWithBands<P> {
     pub fn from_existing(dir: P) -> Result<Self>
     {Ok({
@@ -552,7 +553,7 @@ impl<P: AsPath> DirWithBands<P> {
     { Ok(poscar::load(open_text(self.path().join("POSCAR"))?)?) }
 
     pub fn q_positions(&self) -> Result<Vec<[f64; 3]>>
-    { Ok(q_positions::read(open(self.path().join("q-positions.json"))?)? )}
+    { Ok(QPositions::load(self.path().join("q-positions.json"))?.0) }
 
     /// This will be `None` if `.eigenvectors(true)` was not set prior
     /// to the band computation.
@@ -698,19 +699,19 @@ pub fn cache_link<P: AsRef<Path>, Q: AsRef<Path>>(src: P, dest: Q) -> Result<()>
 
 //-----------------------------
 
-rsp2_impl_dirlike_boilerplate!{
+impl_dirlike_boilerplate!{
     type: {DirWithDisps<_>}
     member: self.dir
     other_members: [self.displacements, self.superstructure]
 }
 
-rsp2_impl_dirlike_boilerplate!{
+impl_dirlike_boilerplate!{
     type: {DirWithForces<_>}
     member: self.dir
     other_members: [self.cache_force_constants]
 }
 
-rsp2_impl_dirlike_boilerplate!{
+impl_dirlike_boilerplate!{
     type: {DirWithBands<_>}
     member: self.dir
     other_members: []
@@ -741,32 +742,4 @@ mod tests {
         // erased types, for conditional deletion
         let _: DirWithBands<Box<AsPath>> = x.map_dir(|e| Box::new(e) as _);
     }
-}
-
-/// Type representing extra CLI arguments.
-///
-/// Used internally to store things that must be preserved between
-/// runs but cannot be set in conf files, like e.g. `--tolerance`
-pub(crate) type Args = Vec<String>;
-pub(crate) mod args {
-    use super::*;
-
-    pub fn read<R: Read>(file: R) -> Result<Args>
-    { Ok(::serde_json::from_reader(file)?) }
-
-    pub fn write<W: Write, S: AsRef<str>>(w: W, args: &[S]) -> Result<()>
-    {Ok({
-        let args: Vec<_> = args.iter().map(|s: &_| s.as_ref()).collect();
-        ::serde_json::to_writer(w, &args)?;
-    })}
-}
-
-pub(crate) mod q_positions {
-    use super::*;
-
-    pub fn read<R: Read>(file: R) -> Result<Vec<[f64; 3]>>
-    { Ok(::serde_json::from_reader(file)?) }
-
-    pub fn write<W: Write>(w: W, data: &[[f64; 3]]) -> Result<()>
-    { Ok(::serde_json::to_writer(w, data)?) }
 }

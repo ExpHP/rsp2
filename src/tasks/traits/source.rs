@@ -13,7 +13,7 @@ pub trait Source<T> {
     /// IO or expensive computations.
     ///
     /// Different sources may have different conditions under which this
-    /// returns `Some`, though  The method `ensure_cached` allows .
+    /// returns `Some`.
     fn get_cached(&self) -> Option<T>;
 
     /// Guarantee that future calls to `get_cached()` return `Some`
@@ -162,14 +162,6 @@ where
 
 // NOTE: Experimental.
 // Product type combinator.
-//
-// A tuple of Sources `(S1, S2, S3, S4)` is a Source of
-// `(Arc<A1>, Arc<A2>, Arc<A3>, Arc<A4>)`, which of course
-// gets wrapped in another `Arc`, resulting in...
-// a lot of Arcs.
-//
-// The Helper just packs an additional type parameter to allow
-// selecting the error type.
 macro_rules! derive_tuple_source {
     ($([$a:ident : $A:ident, $s:ident : $S:ident],)*)
     => {
@@ -250,7 +242,7 @@ mod unboxed {
         pub(crate) _markers: ::std::marker::PhantomData<T>,
     }
 
-    rsp2_derive_alternate_fn!{
+    derive_alternate_fn!{
         impl[P, T] Fn<()> for LoadFromPath<T, P>
         [ where
             P: AsPath,
