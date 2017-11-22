@@ -56,7 +56,7 @@ impl<M> Structure<M> {
         Structure { lattice, coords, meta }
     }
     // This variant can be useful when using the by-value variant
-    // would require the user to clone() first, uneccessarily
+    // would require the user to clone() first, needlessly
     // cloning the entire metadata.
     pub fn map_metadata_to<M2, F>(&self, f: F) -> Structure<M2>
     where F: FnMut(&M) -> M2
@@ -64,6 +64,15 @@ impl<M> Structure<M> {
         let lattice = self.lattice.clone();
         let coords = self.coords.clone();
         let meta = self.meta.iter().map(f).collect();
+        Structure { lattice, coords, meta }
+    }
+
+    /// Use the given vector as the metadata.
+    /// No cost other than the destruction of the old metadata.
+    pub fn with_metadata<M2>(self, meta: Vec<M2>) -> Structure<M2>
+    {
+        assert_eq!(meta.len(), self.meta.len());
+        let Structure { lattice, coords, .. } = self;
         Structure { lattice, coords, meta }
     }
 

@@ -3,9 +3,9 @@ pub use ::std::result::Result as StdResult;
 #[macro_use]
 mod macros;
 mod pathlike;
-mod save;
 mod source;
 mod util;
+pub(crate) mod save;
 
 pub mod alternate; // Fn traits
 pub use self::pathlike::{AsPath, HasTempDir};

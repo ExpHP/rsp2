@@ -21,7 +21,7 @@ use super::{Conf, DispYaml, SymmetryYaml, QPositions, Args};
 use ::traits::{AsPath, HasTempDir, Save, Load};
 
 use ::rsp2_structure_io::poscar;
-use ::std::io::{Read, Write, BufRead};
+use ::std::io::prelude::*;
 use ::std::process::Command;
 use ::std::path::{Path, PathBuf};
 use ::rsp2_fs_util::{open, open_text, create, copy, hard_link, mv, rm_rf};
@@ -34,6 +34,8 @@ use ::rsp2_structure::{FracRot, FracTrans, FracOp};
 use ::rsp2_phonopy_io::npy;
 
 use ::slice_of_array::prelude::*;
+
+const THZ_TO_WAVENUMBER: f64 = 33.35641;
 
 #[derive(Debug, Clone, Default)]
 pub struct Builder {
@@ -589,18 +591,20 @@ impl<P: AsPath> DirWithBands<P> {
 
     pub fn eigenvalues(&self) -> Result<Vec<Vec<f64>>>
     {Ok({
+        use ::rsp2_slice_math::{v, V};
         trace!("Reading eigenvectors...");
         let file = open(self.path().join("eigenvalue.npy"))?;
         npy::read_eigenvalue_npy(file)?
+            .into_iter()
+            .map(|evs| (v(evs) * THZ_TO_WAVENUMBER).0)
+            .collect()
     })}
 }
 
 //-----------------------------
 
 fn band_string(ks: &[[f64; 3]]) -> String
-{
-    ks.flat().iter().map(|x| x.to_string()).collect::<Vec<_>>().join(" ")
-}
+{ ks.flat().iter().map(|x| x.to_string()).collect::<Vec<_>>().join(" ") }
 
 fn round_checked(x: f64, tol: f64) -> Result<i32>
 {Ok({

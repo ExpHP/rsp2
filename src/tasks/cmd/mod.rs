@@ -2,12 +2,12 @@
 
 pub(crate) mod integrate_2d;
 
-const THZ_TO_WAVENUMBER: f64 = 33.35641;
-
 use ::errors::{Result, ok};
 use ::config::Settings;
 use ::util::push_dir;
 use ::ui::logging::setup_global_logger;
+use ::traits::AsPath;
+use ::phonopy::{DirWithBands, DirWithDisps};
 
 use ::types::{Ket3, Basis3};
 
@@ -67,8 +67,8 @@ pub fn run_relax_with_eigenvectors(
             let builder = optimize_layer_parameters(&settings.scale_ranges, &lmp, builder)?;
             let structure = carbon(&builder.assemble());
 
-            let layer_sc_info = layer_sc_info_from_layers_yaml(open(&input)?)?;
-            let layer_sc_mats = layer_sc_info.into_iter()
+            let layer_sc_mats =
+                layer_sc_info_from_layers_yaml(open(&input)?)?.into_iter()
                 .map(|(matrix, periods, _)| ::math::bands::ScMatrix::new(&matrix, &periods))
                 .collect_vec();
 
@@ -78,11 +78,18 @@ pub fn run_relax_with_eigenvectors(
         poscar::dump(create("./initial.vasp")?, "", &original)?;
         let phonopy = phonopy_builder_from_settings(&settings.phonons, &original);
 
+        // (we can expect that the layers assignments will not change...)
+        trace!("Finding layers");
+        let (layers, nlayer) = ::rsp2_structure::assign_layers(&original, &[0, 0, 1], 0.25)?;
+        if let Some(expected) = settings.layers {
+            assert_eq!(nlayer, expected);
+        }
+
         let mut from_structure = original.clone();
         let mut iteration = 1;
         // HACK to stop one iteration AFTER all non-acoustics are positive
         let mut all_ok_count = 0;
-        let (structure, einfos, _evecs) = loop { // NOTE: we use break with value
+        let (structure, einfos, bands_dir) = loop { // NOTE: we use break with value
 
             // Hard failure on too many iterations
             // (we don't want to continue with negative non-acoustics)
@@ -92,20 +99,19 @@ pub fn run_relax_with_eigenvectors(
             }
 
             let structure = do_relax(&lmp, &settings.cg, &settings.potential, from_structure)?;
-            let force_dest = match cli.save_bands {
-                true => Some(SAVE_BANDS_DIR.as_ref()),
-                false => None,
-            };
-            let (evals, evecs) = do_diagonalize(&lmp, &phonopy, &structure, force_dest)?;
+            let bands_dir = do_diagonalize(
+                &lmp, &phonopy, &structure,
+                match cli.save_bands {
+                    true => Some(SAVE_BANDS_DIR.as_ref()),
+                    false => None,
+                },
+                &[Q_GAMMA, Q_K],
+            )?;
+
+            let (evals, evecs) = read_eigensystem(&bands_dir, &Q_GAMMA)?;
 
             trace!("============================");
             trace!("Finished relaxation # {}", iteration);
-
-            trace!("Finding layers");
-            let (layers, nlayer) = ::rsp2_structure::assign_layers(&structure, &[0, 0, 1], 0.25)?;
-            if let Some(expected) = settings.layers {
-                assert_eq!(nlayer, expected);
-            }
 
             {
                 let fname = format!("./structure-{:02}.1.vasp", iteration);
@@ -118,7 +124,7 @@ pub fn run_relax_with_eigenvectors(
 
             trace!("Computing eigensystem info");
             let einfos = get_eigensystem_info(
-                &evals, &evecs, &layers[..], Some(&structure), Some(&layer_sc_mats),
+                &evals, &evecs, &layers[..], &structure, Some(&layer_sc_mats),
             );
             write_eigen_info_for_machines(&einfos, create(format!("eigenvalues.{:02}", iteration))?)?;
             write_eigen_info_for_humans(&einfos, &mut |s| ok(info!("{}", s)))?;
@@ -156,24 +162,25 @@ pub fn run_relax_with_eigenvectors(
             if bad_evs.is_empty() {
                 all_ok_count += 1;
                 if all_ok_count >= 3 {
-                    // (clone is HACK because bad_evs borrows from evecs)
-                    break (structure, einfos, evecs.clone());
+                    break (structure, einfos, bands_dir);
                 }
             }
 
             from_structure = structure;
             iteration += 1; // NOTE: not a for loop due to 'break value;'
-        }; // (structure, einfos, evecs)
+        }; // (structure, einfos, final_bands_dir)
 
-        write_eigen_info_for_machines(&einfos, create("eigenvalues.final")?)?;
 
         poscar::dump(create("./final.vasp")?, "", &structure)?;
 
-        if cli.save_bands {
-            let _ = do_diagonalize(&lmp, &phonopy, &structure, Some(SAVE_BANDS_DIR.as_ref()))?;
-        }
+        write_eigen_info_for_machines(&einfos, create("eigenvalues.final")?)?;
 
-        write_summary_file(settings, &lmp, &einfos)?;
+        let (k_evals, k_evecs) = read_eigensystem(&bands_dir, &Q_K)?;
+        let kinfos = get_k_eigensystem_info(
+            &k_evals, &k_evecs, &layers[..], &structure, Some(&layer_sc_mats),
+        );
+
+        write_summary_file(settings, &lmp, &einfos, &kinfos)?;
 
         cwd_guard.pop()?;
     }
@@ -200,12 +207,24 @@ fn do_relax(
     multi_threshold_deconstruct(sc_token, 1e-10, 1e-3, supercell)?
 })}
 
-fn do_diagonalize(
+fn do_diagonalize_at_gamma(
     lmp: &LammpsBuilder,
     phonopy: &PhonopyBuilder,
     structure: &ElementStructure,
     save_bands: Option<&Path>,
 ) -> Result<(Vec<f64>, Basis3)>
+{Ok({
+    let dir = do_diagonalize(lmp, phonopy, structure, save_bands, &[Q_GAMMA])?;
+    read_eigensystem(&dir, &Q_GAMMA)?
+})}
+
+fn do_diagonalize(
+    lmp: &LammpsBuilder,
+    phonopy: &PhonopyBuilder,
+    structure: &ElementStructure,
+    save_bands: Option<&Path>,
+    points: &[[f64; 3]],
+) -> Result<DirWithBands<Box<AsPath>>>
 {ok({
     let disp_dir = phonopy.displacements(&structure)?;
     let force_sets = do_force_sets_at_disps(&lmp, &disp_dir)?;
@@ -214,20 +233,14 @@ fn do_diagonalize(
         .make_force_dir(&force_sets)?
         .build_bands()
         .eigenvectors(true)
-        .compute(&[[0.0; 3]])?;
-
-    let evals = bands_dir.eigenvalues()?.pop().unwrap();
-    let V(evals) = THZ_TO_WAVENUMBER * v(evals);
-
-    let evecs = bands_dir.eigenvectors()?.unwrap().pop().unwrap();
-    let evecs = Basis3::from_basis(evecs);
+        .compute(&points)?;
 
     if let Some(save_dir) = save_bands {
         rm_rf(save_dir)?;
-        bands_dir.relocate(save_dir)?;
+        bands_dir.relocate(save_dir)?.boxed()
+    } else {
+        bands_dir.boxed()
     }
-
-    (evals, evecs)
 })}
 
 fn do_eigenvector_chase(
@@ -379,8 +392,9 @@ fn multi_threshold_deconstruct(
     }
 })}
 
+// FIXME write_gamma_info
 fn write_eigen_info_for_humans(
-    einfos: &EigenInfo,
+    einfos: &[GammaInfo],
     writeln: &mut FnMut(&::std::fmt::Display) -> Result<()>,
 ) -> Result<()>
 {ok({
@@ -415,7 +429,7 @@ fn write_eigen_info_for_humans(
 })}
 
 fn write_eigen_info_for_machines<W: Write>(
-    einfos: &EigenInfo,
+    einfos: &[GammaInfo],
     mut file: W,
 ) -> Result<()>
 {ok({
@@ -435,23 +449,37 @@ fn write_eigen_info_for_machines<W: Write>(
 fn write_summary_file(
     settings: &Settings,
     lmp: &LammpsBuilder,
-    einfos: &EigenInfo,
+    ginfos: &[GammaInfo],
+    kinfos: &[KInfo],
 ) -> Result<()>
 {Ok({
-    use self::summary::{Modes, Summary, EnergyPerAtom};
-    use self::eigen_info::Item;
+    use self::summary::{Modes, GammaModes, KModes, Summary, EnergyPerAtom};
+    use self::eigen_info::GammaInfo;
     use ::rsp2_structure_io::poscar;
 
-    let acoustic = einfos.iter().filter(|x| x.is_acoustic()).map(Item::frequency).collect();
-    let shear = einfos.iter().filter(|x| x.is_shear()).map(Item::frequency).collect();
-    let layer_breathing = einfos.iter().filter(|x| x.is_layer_breathing()).map(Item::frequency).collect();
-    let layer_gammas = einfos.iter().next().unwrap().layer_gamma_probs.as_ref().map(|_| {
-        einfos.iter().enumerate()
+    let acoustic = ginfos.iter().filter(|x| x.is_acoustic()).map(GammaInfo::frequency).collect();
+    let shear = ginfos.iter().filter(|x| x.is_shear()).map(GammaInfo::frequency).collect();
+    let layer_breathing = ginfos.iter().filter(|x| x.is_layer_breathing()).map(GammaInfo::frequency).collect();
+    let layer_gammas = ginfos.iter().next().unwrap().layer_gamma_probs.as_ref().map(|_| { // all this to check if they're present
+        ginfos.iter().enumerate()
             .filter(|&(_,x)| x.layer_gamma_probs.as_ref().unwrap()[0] > settings.layer_gamma_threshold)
             .map(|(i,x)| (i, x.frequency()))
             .collect()
     });
-    let modes = Modes { acoustic, shear, layer_breathing, layer_gammas };
+    let gamma_modes = GammaModes { acoustic, shear, layer_breathing, layer_gammas };
+
+    let layer_ks = kinfos.iter().next().unwrap().layer_k_probs.as_ref().map(|_| {  // all this to check if they're present
+        kinfos.iter().enumerate()
+            .filter(|&(_,x)| x.layer_k_probs.as_ref().unwrap()[0] > settings.layer_gamma_threshold)
+            .map(|(i,x)| (i, x.frequency()))
+            .collect()
+    });
+    let k_modes = KModes { layer_ks };
+
+    let modes = Modes {
+        gamma: gamma_modes,
+        k: k_modes,
+    };
 
     let energy_per_atom = {
         let f = |structure: ElementStructure| ok({
@@ -484,9 +512,9 @@ fn phonopy_builder_from_settings<M>(
         .conf("DIAG", ".FALSE.")
 }
 
-fn do_force_sets_at_disps<P: ::traits::AsPath>(
+fn do_force_sets_at_disps<P: AsPath>(
     lmp: &LammpsBuilder,
-    disp_dir: &::phonopy::DirWithDisps<P>,
+    disp_dir: &DirWithDisps<P>,
 ) -> Result<Vec<Vec<[f64; 3]>>>
 {ok({
     use ::std::io::prelude::*;
@@ -504,6 +532,27 @@ fn do_force_sets_at_disps<P: ::traits::AsPath>(
         })).collect::<Result<Vec<_>>>()?;
     eprintln!();
     force_sets
+})}
+
+fn read_eigensystem<P: AsPath>(
+    bands_dir: &DirWithBands<P>,
+    q: &[f64; 3],
+) -> Result<(Vec<f64>, Basis3)>
+{Ok({
+    let index = ::util::index_of_nearest(&bands_dir.q_positions()?, q, 1e-4);
+    let index = match index {
+        Some(i) => i,
+        None => bail!("Bands do not include kpoint:\n  dir: {}\npoint: {:?}",
+            bands_dir.path().display(), q),
+    };
+
+    let evals = bands_dir.eigenvalues()?.remove(index);
+    let evecs = match bands_dir.eigenvectors()? {
+        None => bail!("Directory has no eigenvectors: {}", bands_dir.path().display()),
+        Some(mut evs) => Basis3::from_basis(evs.remove(index)),
+    };
+
+    (evals, evecs)
 })}
 
 //-----------------------------------
@@ -586,42 +635,42 @@ pub fn optimize_layer_parameters(
 
 //-----------------------------------
 
-pub type EigenInfo = Vec<eigen_info::Item>;
 
-pub fn get_eigensystem_info<L: Ord + Clone>(
+pub fn get_eigensystem_info<L: Ord + Clone, M>(
     evals: &[f64],
     evecs: &Basis3,
     layers: &[L],
-    structure: Option<&ElementStructure>,
+    // (M gets tossed out, but we don't take Structure<L> because it could
+    //  unintentionally accept Element as our layer type)
+    structure: &Structure<M>,
+    // unfolding is only done when this is provided
     layer_supercell_matrices: Option<&[::math::bands::ScMatrix]>,
-) -> EigenInfo
+) -> Vec<GammaInfo>
 {
     use ::math::bands::UnfolderAtQ;
 
     let part = Part::from_ord_keys(layers);
+    let layer_structures = structure
+            .map_metadata_to(|_| ())
+            .into_unlabeled_partitions(&part)
+            .collect_vec();
 
     // precomputed data applicable to all kets
     let layer_gamma_unfolders: Option<Vec<UnfolderAtQ>> =
-        match (structure, layer_supercell_matrices) {
-            (Some(structure), Some(layer_supercell_matrices)) => Some({
-                structure
-                    .map_metadata_to(|_| ())
-                    .into_unlabeled_partitions(&part)
-                    .zip(layer_supercell_matrices)
-                    .map(|(layer_structure, layer_sc_mat)| {
-                        UnfolderAtQ::from_config(
-                            &from_json!({
-                                "fbz": "reciprocal-cell",
-                                "sampling": { "plain": [4, 4, 1] },
-                            }),
-                            &layer_structure,
-                            layer_sc_mat,
-                            &[0.0, 0.0, 0.0], // eigenvector q
-                        )
-                    }).collect()
-            }),
-            _ => None,
-        };
+        layer_supercell_matrices.map(|layer_supercell_matrices| {
+            izip!(&layer_structures, layer_supercell_matrices)
+                .map(|(layer_structure, layer_sc_mat)| {
+                    UnfolderAtQ::from_config(
+                        &from_json!({
+                            "fbz": "reciprocal-cell",
+                            "sampling": { "plain": [4, 4, 1] },
+                        }),
+                        &layer_structure,
+                        layer_sc_mat,
+                        &Q_GAMMA, // eigenvector q
+                    )
+                }).collect()
+        });
 
     // now do each ket
     let mut out = vec![];
@@ -634,23 +683,104 @@ pub fn get_eigensystem_info<L: Ord + Clone>(
         let polarization = evec.polarization();
 
         let layer_gamma_probs = layer_gamma_unfolders.as_ref().map(|unfolders| {
-            unfolders.iter().zip(&layer_evecs).map(|(unfolder, ket)| {
-                unfolder.unfold_phonon(ket.to_ket().as_ref())
-                    .iter()
-                    .find(|&&(idx, _)| idx == [0, 0, 0])
-                    .unwrap().1
-            }).collect()
+            izip!(&unfolders[..], &layer_evecs)
+                .map(|(unfolder, ket)| {
+                    let probs = unfolder.unfold_phonon(ket.to_ket().as_ref());
+                    izip!(unfolder.q_indices(), probs)
+                        .find(|&(idx, _)| idx == &[0, 0, 0])
+                        .unwrap().1
+                }).collect()
         });
 
-        out.push(eigen_info::Item {
+        out.push(GammaInfo {
             frequency, acousticness, layer_acousticness, polarization, layer_gamma_probs,
         })
     }
     out
 }
 
+// HACK:
+// These are only valid for a hexagonal system represented
+// with the [[a, 0], [-a/2, a sqrt(3)/2]] lattice convention
+const Q_GAMMA: [f64; 3] = [0.0, 0.0, 0.0];
+const Q_K: [f64; 3] = [1f64/3.0, 1.0/3.0, 0.0];
+const Q_K_PRIME: [f64; 3] = [2.0 / 3f64, 2.0 / 3f64, 0.0];
+
+// FIXME not sure how to generalize
+pub fn get_k_eigensystem_info<L: Ord + Clone, M>(
+    evals: &[f64],
+    evecs: &Basis3,
+    layers: &[L],
+    // (M gets tossed out, but we don't take Structure<L> because it could
+    //  unintentionally accept Element as our layer type)
+    structure: &Structure<M>,
+    // unfolding is only done when this is provided
+    layer_supercell_matrices: Option<&[::math::bands::ScMatrix]>,
+) -> Vec<KInfo>
+{
+    use ::math::bands::UnfolderAtQ;
+
+    let part = Part::from_ord_keys(layers);
+    let layer_structures = structure
+            .map_metadata_to(|_| ())
+            .into_unlabeled_partitions(&part)
+            .collect_vec();
+
+    struct LayerKData {
+        unfolder: UnfolderAtQ,
+        k_equiv_indices: Vec<usize>,
+    }
+
+    // precomputed data applicable to all kets
+    let layer_k_data: Option<Vec<LayerKData>> =
+        layer_supercell_matrices.map(|layer_supercell_matrices| {
+            izip!(&layer_structures, layer_supercell_matrices)
+                .map(|(layer_structure, layer_sc_mat)| {
+                    let unfolder = UnfolderAtQ::from_config(
+                        &from_json!({
+                                "fbz": "reciprocal-cell",
+                                "sampling": { "plain": [4, 4, 1] },
+                            }),
+                        &layer_structure,
+                        layer_sc_mat,
+                        &Q_K, // eigenvector q
+                    );
+                    let k_equiv_indices = vec![
+                        unfolder.lookup_q_index(&Q_K, 1e-4).expect("no Q close to K?"),
+                        unfolder.lookup_q_index(&Q_K_PRIME, 1e-4).expect("no Q close to K'?"),
+                    ];
+
+                    LayerKData { unfolder, k_equiv_indices }
+                }).collect::<Vec<_>>()
+        });
+
+
+    // now do each ket
+    let mut out = vec![];
+    for (&frequency, evec) in izip!(evals, &evecs.0) {
+        // split the evs up by layer (without renormalizing)
+        let layer_evecs: Vec<_> = evec.clone().into_unlabeled_partitions(&part).collect();
+
+        let polarization = evec.polarization();
+
+        let layer_k_probs = layer_k_data.as_ref().map(|layer_k_data| {
+            izip!(&layer_k_data[..], &layer_evecs)
+                .map(|(&LayerKData { ref unfolder, ref k_equiv_indices }, ket)| {
+                    let probs = unfolder.unfold_phonon(ket.to_ket().as_ref());
+                    izip!(0.., probs)
+                        .filter(|&(idx, _)| k_equiv_indices.contains(&idx))
+                        .fold(0.0, |acc, (_, x)| acc + x)
+                }).collect()
+        });
+
+        out.push(KInfo { frequency, polarization, layer_k_probs })
+    }
+    out
+}
+
+use self::eigen_info::{GammaInfo, KInfo};
 pub mod eigen_info {
-    pub struct Item {
+    pub struct GammaInfo {
         pub frequency: f64,
         pub acousticness: f64,
         pub layer_acousticness: f64,
@@ -658,7 +788,7 @@ pub mod eigen_info {
         pub layer_gamma_probs: Option<Vec<f64>>,
     }
 
-    impl Item {
+    impl GammaInfo {
         pub fn frequency(&self) -> f64
         { self.frequency }
 
@@ -679,6 +809,23 @@ pub mod eigen_info {
 
         pub fn is_layer_breathing(&self) -> bool
         { self.is_layer_acoustic() && self.is_z_polarized() }
+    }
+
+    pub struct KInfo {
+        pub frequency: f64,
+        pub polarization: [f64; 3],
+        pub layer_k_probs: Option<Vec<f64>>,
+    }
+
+    impl KInfo {
+        pub fn frequency(&self) -> f64
+        { self.frequency }
+
+        pub fn is_xy_polarized(&self) -> bool
+        { self.polarization[0] + self.polarization[1] > 0.9 }
+
+        pub fn is_z_polarized(&self) -> bool
+        { self.polarization[2] > 0.9 }
     }
 }
 
@@ -702,10 +849,23 @@ mod summary {
     #[derive(Serialize, Deserialize)]
     #[serde(rename_all="kebab-case")]
     pub struct Modes {
+        pub gamma: GammaModes,
+        pub k: KModes,
+    }
+
+    #[derive(Serialize, Deserialize)]
+    #[serde(rename_all="kebab-case")]
+    pub struct GammaModes {
         pub acoustic: Vec<f64>,
         pub shear: Vec<f64>,
         pub layer_breathing: Vec<f64>,
         pub layer_gammas: Option<Vec<(usize, f64)>>,
+    }
+
+    #[derive(Serialize, Deserialize)]
+    #[serde(rename_all="kebab-case")]
+    pub struct KModes {
+        pub layer_ks: Option<Vec<(usize, f64)>>,
     }
 }
 
@@ -832,19 +992,9 @@ pub fn get_energy_surface(
         let cwd_guard = push_dir(outdir)?;
         setup_global_logger(Some(&"rsp2.log"))?;
 
-        let bands_dir = ::phonopy::DirWithBands::from_existing(input)?;
+        let bands_dir = DirWithBands::from_existing(input)?;
         let structure = bands_dir.structure()?;
-
-        let gamma_index = match bands_dir.q_positions()?.iter().position(|&x| x == [0_f64; 3]) {
-            None => bail!("Bands do not include gamma point: {}", bands_dir.path().display()),
-            Some(x) => x,
-        };
-
-        let evals = bands_dir.eigenvalues()?.remove(gamma_index);
-        let evecs = match bands_dir.eigenvectors()? {
-            None => bail!("Directory has no eigenvectors: {}", bands_dir.path().display()),
-            Some(mut evs) => Basis3::from_basis(evs.remove(gamma_index)),
-        };
+        let (evals, evecs) = read_eigensystem(&bands_dir, &Q_GAMMA)?;
 
         let plot_ev_indices = {
             use ::config::EnergyPlotEvIndices::*;
@@ -856,7 +1006,7 @@ pub fn get_energy_surface(
                     assert!(nlayer >= 2);
 
                     trace!("Computing eigensystem info");
-                    let einfos = get_eigensystem_info(&evals, &evecs, &layers, None, None);
+                    let einfos = get_eigensystem_info(&evals, &evecs, &layers, &structure, None);
 
                     write_eigen_info_for_humans(&einfos, &mut |s| ok(info!("{}", s)))?;
 
@@ -874,8 +1024,8 @@ pub fn get_energy_surface(
             };
 
             // (in case of confusion about 0-based/1-based indices)
-            trace!("X: Eigensolution {:>3}, frequency {}", i, evals[i] * THZ_TO_WAVENUMBER);
-            trace!("Y: Eigensolution {:>3}, frequency {}", j, evals[j] * THZ_TO_WAVENUMBER);
+            trace!("X: Eigensolution {:>3}, frequency {}", i, evals[i]);
+            trace!("Y: Eigensolution {:>3}, frequency {}", j, evals[j]);
             (i, j)
         };
 
