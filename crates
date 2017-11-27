@@ -4,6 +4,7 @@
 # I honestly do not care what you do with it.
 
 from contextlib import contextmanager
+from pathlib import Path
 import os
 import sys
 
@@ -16,8 +17,8 @@ import pytoml as toml
 # there's any good round-trip parsers for TOML in python,
 # and I hate to destroy comments and other fine details.
 
-MASTER_CFG_PATH = 'crates.d/crates.toml'
-CARGO_TOMLS_DIR = 'crates.d'
+CARGO_TOMLS_DIR = Path('crates.d')
+MASTER_CFG_PATH = Path('crates.d/crates.toml')
 # something long enough for people to grep and find this script
 INSERTION_POINT_TEXT = "#!!INSERTION POINT FOR NEW CRATES!!#"
 
@@ -72,11 +73,12 @@ class Gen:
 
             # catch some dumb user errors before we get too committed
             for (name, path) in crates.items():
-                if not os.path.isdir(path):
+
+                if not path.is_dir():
                     parser.error('[crates."{}"]: "{}": no such directory'.format(name, path))
 
                 src = root_rel_src_toml_path(name)
-                if not os.path.isfile(src):
+                if not src.is_file():
                     parser.error('{}: no such file'.format(src))
 
             # callbacks that generate substitutions for the line !!some-crate-name,
@@ -85,16 +87,19 @@ class Gen:
                 return lambda _: s
 
             def gen_relpath_to(crate_name, dep_dir):
-                from os.path import normpath, relpath
                 def inner(d):
-                    rel = normpath(relpath(dep_dir, start=d))
+                    # Don't use Path for this because:
+                    # - It has no normpath equivalent that doesn't follow links (wtf?)
+                    # - Its relpath equivalent is too strict
+                    rel = os.path.normpath(os.path.relpath(dep_dir, d))
                     return f'{crate_name} = {{ path = "{rel}" }}'
                 return inner
 
             def gen_members_as_pathdeps(_):
+                root = get_root_package(parser.error)
                 lines = []
                 for (name, path) in crates.items():
-                    if path != ".":
+                    if name != root:
                         lines.append(f'{name} = {{ path = "{path}" }}')
                 return '\n'.join(lines)
 
@@ -111,20 +116,26 @@ class Gen:
                 lookup_put(name, gen_constant('{} = {}'.format(name, inline_toml(version))))
 
             # Make all target directories symlinks to the root package's target,
-            # to help reduce duplicate build artefacts in spite of the fact that
-            # we are not a true workspace.
+            # to help reduce duplicate build artefacts even if we are not a
+            # true workspace.
+            #
+            # Also link together configuration directories for subcrates.
             root_package_name = get_root_package(parser.error)
 
-            ensure_not_symlink(os.path.join(crates[root_package_name], 'target'))
+            ensure_not_symlink('target')
+            (Path('.subcrate-cfg') / '.idea').mkdir(parents=True, exist_ok=True)
+            (Path('.subcrate-cfg') / '.vscode').mkdir(parents=True, exist_ok=True)
             for (name, path) in crates.items():
                 if name != root_package_name:
                     maybe_ensure_target_link('.', path)
+                    maybe_ensure_target_link('.subcrate-cfg', path, filename='.idea')
+                    maybe_ensure_target_link('.subcrate-cfg', path, filename='.vscode')
 
             # generate modified forms of each Cargo.toml
             for (name, path) in crates.items():
 
-                src_path = os.path.join(root_rel_src_toml_path(name))
-                dest_path = os.path.join(path, 'Cargo.toml')
+                src_path = Path(root_rel_src_toml_path(name))
+                dest_path = path / 'Cargo.toml'
                 with open(src_path) as f:
                     lines = list(f)
 
@@ -184,12 +195,18 @@ def format_macro(name):
 
 # tries to have a crate's target symlink back to the root crate's target,
 # but may fail. (no big deal)
-def maybe_ensure_target_link(root_path, crate_path):
-    path = os.path.join(crate_path, 'target')
-    dest = os.path.relpath(os.path.join(root_path, 'target'), crate_path)
+#
+# The logic here was really intended for just the target directory,
+#  but 'name' can be specified to reuse this for files where the logic
+#  for target is probably good enough
+# (the theme is: "a symlink to a directory that an IDE is very likely
+#                 to attempt to regenerate the moment it vanishes")
+def maybe_ensure_target_link(root_path, crate_path, filename='target'):
+    path = Path(crate_path) / filename
+    dest = os.path.relpath(Path(root_path) / filename, crate_path)
 
     # don't remove existing links unless we have to.
-    if os.path.islink(path) and os.readlink(path) == dest:
+    if path.is_symlink() and os.readlink(path) == str(dest):
         return
 
     # As soon as we destroy the existing contents, we are in a race
@@ -240,11 +257,11 @@ class New:
             parser.error("The 'new' subcommand must be run from the root.")
 
         name = args.CRATENAME
-        path = args.DIR
+        path = Path(args.DIR)
 
-        if os.path.exists(path):
+        if path.exists():
             parser.error(f'"{path}": path already exists')
-        if os.path.exists(root_rel_src_toml_path(name)):
+        if (path / root_rel_src_toml_path(name)).exists():
             parser.error(f'crate "{name}" already exists')
 
         # Insert a line to crates.toml without destroying formatting
@@ -254,12 +271,12 @@ class New:
         lines = master_config_textual_add(lines, f'{name} = "{path}"\n', fail=parser.error)
 
         # make the directory
-        os.mkdir(path)
+        path.mkdir()
         with open(root_rel_src_toml_path(name), 'w') as f:
             f.write(CARGO_TOML_TEMPLATE.format(name))
-        with open(os.path.join(path, "Cargo.toml"), 'w') as f:
+        with open(path / "Cargo.toml", 'w') as f:
             f.write(CARGO_TOML_TEMPLATE.format(name))
-        with open(os.path.join(path, 'lib.rs'), 'w') as f:
+        with open(path / 'lib.rs', 'w') as f:
             f.write('''
 #[test]
 fn it_works() { }
@@ -291,11 +308,11 @@ class Mv:
             # to be written to crates.toml)
             parser.error("The 'mv' subcommand must be run from the root.")
 
-        curdir = args.CURDIR
-        destdir = args.DESTDIR
-        if os.path.exists(destdir):
+        curdir = Path(args.CURDIR)
+        destdir = Path(args.DESTDIR)
+        if destdir.exists():
             parser.error(f'"{destdir}": path already exists')
-        if not os.path.exists(curdir):
+        if not curdir.exists():
             parser.error(f'"{curdir}": path does not exist')
 
         crate = crate_name_from_path(curdir)
@@ -307,7 +324,7 @@ class Mv:
         lines = master_config_textual_set_path(lines, crate, destdir, fail=parser.error)
 
         # move the directory
-        os.rename(curdir, destdir)
+        curdir.rename(destdir)
 
         with open_tmp(MASTER_CFG_PATH) as f:
             f.writelines(lines)
@@ -351,16 +368,17 @@ class Test:
 
 def ensure_test_replica_exists(test_root):
     import shutil
+    test_root = Path(test_root)
 
-    if not os.path.exists(test_root):
-        os.mkdir(test_root)
+    if not test_root.exists():
+        test_root.mkdir()
 
-    for path in ['src', 'tests', 'examples']:
-        test_path = os.path.join(test_root, path)
-        if not os.path.exists(test_path):
-            os.symlink('../' + path, test_path)
+    for path in map(Path, ['src', 'tests', 'examples']):
+        test_path = test_root / path
+        if not test_path.exists():
+            test_path.symlink_to('..' / path)
 
-    test_cargo = os.path.join(test_root, 'Cargo.toml')
+    test_cargo = test_root / 'Cargo.toml'
     shutil.copyfile('Cargo.toml', test_cargo)
     with open(test_cargo, 'a') as f:
         f.write('\n')
@@ -398,7 +416,7 @@ class Dot:
             g = nx.DiGraph()
             crates = get_internal_crates_and_root_rel_paths(parser.error)
             for (crate, path) in crates.items():
-                with open(os.path.join(path, 'Cargo.toml')) as f:
+                with open(path / 'Cargo.toml') as f:
                     d = toml.load(f)
                 for dep in d['dependencies']:
                     if dep in crates:
@@ -438,7 +456,7 @@ class Edit:
             crate = crate_name_from_path(args.CRATE_OR_PATH)
 
         root = search_for_root(parser.error)
-        toml_path = os.path.join(root, root_rel_src_toml_path(crate))
+        toml_path = root / root_rel_src_toml_path(crate)
 
         editor = os.environ.get('EDITOR') or 'vim'
         if subprocess.run([editor, toml_path]).returncode != 0:
@@ -453,19 +471,16 @@ class Edit:
 
 def read_master_config(fail):
     root = search_for_root(fail)
-    with open(os.path.join(root, MASTER_CFG_PATH)) as f:
-        return toml.load(f)
+    with open(root / MASTER_CFG_PATH) as f:
+        d = toml.load(f)
+    d['crates'] = {k: Path(v) for (k, v) in d['crates'].items()}
+    return d
 
-@thru(dict)
 def get_internal_crates_and_root_rel_paths(fail):
-    d = read_master_config(fail)
-    d = d['crates']
-    for (k, v) in d.items():
-        if isinstance(v, dict):
-            yield (k, v['path'])
-        elif isinstance(v, str):
-            yield (k, v)
-        else: assert False
+    # There used to be logic in here that branched on whether each
+    # value in [crates] was a str or a dict... but I think there is
+    # already other code that assumes the values are all paths?
+    return read_master_config(fail)['crates']
 
 def get_internal_crate_names(fail):
     return set(get_internal_crates_and_root_rel_paths(fail))
@@ -474,18 +489,18 @@ def get_root_package(fail):
     return read_master_config(fail)['root']
 
 def crate_name_from_path(path):
-    with open(os.path.join(path, "Cargo.toml")) as f:
+    with open(Path(path) / "Cargo.toml") as f:
         return toml.load(f)['package']['name']
 
 def is_root(path):
-    return os.path.exists(os.path.join(path, MASTER_CFG_PATH))
+    return (Path(path) / MASTER_CFG_PATH).exists()
 
 def search_for_root(fail):
-    d = '.'
+    d = Path('.')
     for _ in range(20):
         if is_root(d):
-            return os.path.abspath(d)
-        d = os.path.join(d, '..')
+            return d.resolve()
+        d = d / '..'
     fail('Cannot find workspace root!')
 
 # set a path for one of our crates, by plaintext search
@@ -519,7 +534,7 @@ It should ideally look like:
 But at least make sure there are exactly two quotes of the same style.
 """[1:])
 
-            lines[i] = lines[i][:quotes[0]+1] + path + lines[i][quotes[1]:]
+            lines[i] = f'{lines[i][:quotes[0]+1]}{path}{lines[i][quotes[1]:]}'
             return lines
 
     fail(f"{MASTER_CFG_PATH}: Failed to find line for {name}.")
@@ -527,7 +542,7 @@ But at least make sure there are exactly two quotes of the same style.
 #------------
 
 def root_rel_src_toml_path(crate_name):
-    return os.path.join(CARGO_TOMLS_DIR, f'{crate_name}.Cargo.toml')
+    return Path(CARGO_TOMLS_DIR) / f'{crate_name}.Cargo.toml'
 
 # Variant of open(path, 'w') that writes to a temp file,
 # then overwrites the requested file only once the context manager
@@ -578,12 +593,14 @@ def find_all_indices_of_any(needles, haystack):
 
 def rm_rf(path):
     import shutil
+    path = Path(path)
     try:
-        if os.path.isdir(path):
+        # note: cannot call rmtree on a symlink because lolidunno
+        if path.is_dir() and not path.is_symlink():
             shutil.rmtree(path)
         else:
             os.unlink(path)
-    except FileNotFoundError as e:
+    except FileNotFoundError:
         pass
 
 iife = lambda f: f()

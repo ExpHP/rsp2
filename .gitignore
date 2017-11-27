@@ -1,8 +1,10 @@
 **/target
 **/*.rs.bk
-**/.vscode/
-**/.idea/
+**/.vscode
+**/.idea
 **/Cargo.lock
+**/cmake-build-debug
 perf.data*
 
+.subcrate-cfg
 .secret-test-dir
