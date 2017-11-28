@@ -115,6 +115,7 @@ impl Basis<[f64; 3]>
 
 fn keyed_basis<K: Eq + Hash>(keys: &[Option<K>]) -> Basis<f64>
 {
+    // FIXME use Part from rsp2_structure
     // note: map key type is actually &K
     let mut by_key = HashMap::new();
     for (i, key) in keys.iter().enumerate() {

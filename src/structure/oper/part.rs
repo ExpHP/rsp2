@@ -36,6 +36,27 @@ impl<L> Part<L> {
         Self { part, index_limit }
     })}
 
+    /// Construct a Part from a sequence of keys, with one
+    /// partition for each distinct value in the sequence.
+    ///
+    /// The partitions in the output will be sorted by key.
+    pub fn from_ord_keys<Ls>(labels: Ls) -> Self
+    where
+        L: Ord,
+        Ls: IntoIterator<Item=L>,
+    {
+        let mut map = ::std::collections::BTreeMap::new();
+        for (i, key) in labels.into_iter().enumerate() {
+            map.entry(key)
+                .or_insert_with(Vec::new)
+                .push(i);
+        }
+        Self::new(map.into_iter().collect()).expect("bug!")
+    }
+
+    pub fn into_parted_indices(self) -> Vec<(L, Vec<usize>)>
+    { self.part }
+
     fn validate_part(part: &Parted<L, Vec<usize>>, index_limit: usize) -> bool
     {
         let slices: Vec<_> = part.iter().map(|&(_, ref v)| &v[..]).collect();
@@ -143,6 +164,28 @@ mod tests {
 
     #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
     pub enum LetterKind { Vowel, Consonant }
+    impl LetterKind {
+        fn of(c: char) -> Self
+        { match c {
+            'a' | 'e' | 'i' | 'o' | 'u' => LetterKind::Vowel,
+            _ => LetterKind::Consonant,
+        }}
+    }
+
+    #[test]
+    fn from_ord_labels() {
+        let kinds =
+            vec!['a', 'b', 'c', 'd', 'e', 'f'].into_iter()
+            .map(LetterKind::of).collect::<Vec<_>>();
+
+        assert_eq!(
+            Part::from_ord_keys(kinds).into_parted_indices(),
+            vec![
+                (LetterKind::Vowel, vec![0, 4]),
+                (LetterKind::Consonant, vec![1, 2, 3, 5]),
+            ],
+        );
+    }
 
     #[test]
     fn basic() {

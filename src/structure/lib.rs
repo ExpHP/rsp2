@@ -79,6 +79,7 @@ use ::oper::perm::{Perm, Permute};
 //---------------------------
 // public reexports; API
 
+pub use ::oper::part::{Part, Parted, Partition};
 pub use ::core::lattice::Lattice;
 pub use ::core::lattice::Sent as SentLattice;
 pub use ::core::structure::Sent as SentStructure;
