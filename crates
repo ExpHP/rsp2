@@ -27,8 +27,11 @@ def main():
 
     parser = ArgumentParser(description='manage Cargo.tomls in sp2')
 
-    def no_command(*_junk):
-        parser.error("no subcommand specified")
+    class no_command:
+        def __init__(self, *_junk):
+            pass
+        def run(self, *_junk):
+            parser.error("no subcommand specified")
     parser.set_defaults(klass=no_command)
 
     subs = parser.add_subparsers(title='subcommands')
