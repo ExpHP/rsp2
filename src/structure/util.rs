@@ -4,6 +4,9 @@
 use ::ordered_float::NotNaN;
 use ::errors::*;
 
+use ::std::rc::Rc;
+use ::std::cell::RefCell;
+
 // Multiply on the right
 pub(crate) fn dot_n3_33(coords: &[[f64; 3]], mat: &[[f64; 3]; 3]) -> Vec<[f64; 3]>
 {
@@ -85,4 +88,36 @@ impl Tol {
 
     pub(crate) fn unfloat_33(&self, m: &[[f64; 3]; 3]) -> Result<[[i32; 3]; 3]>
     { ::rsp2_array_utils::try_map_mat(*m, |x| self.unfloat(x)) }
+}
+
+pub(crate) fn zip_eq<As, Bs>(a: As, b: Bs) -> ::std::iter::Zip<As::IntoIter, Bs::IntoIter>
+where
+    As: IntoIterator, As::IntoIter: ExactSizeIterator,
+    Bs: IntoIterator, Bs::IntoIter: ExactSizeIterator,
+{
+    let (a, b) = (a.into_iter(), b.into_iter());
+    assert_eq!(a.len(), b.len());
+    a.zip(b)
+}
+
+pub(crate) struct DropPusher<T: Copy>(pub Rc<RefCell<Vec<T>>>, pub T);
+
+impl<T: Copy + 'static> DropPusher<T> {
+    /// Create a shared vector, and a `new` function which constructs
+    /// `DropPushers` tied to that vector.
+    pub fn new_trial() -> (Rc<RefCell<Vec<T>>>, Box<Fn(T) -> DropPusher<T>>)
+    {
+        let history = Rc::new(RefCell::new(vec![]));
+        let new = {
+            let history = history.clone();
+            Box::new(move |x| DropPusher(history.clone(), x))
+        };
+        (history, new)
+    }
+}
+
+impl<T: Copy> Drop for DropPusher<T> {
+    fn drop(&mut self) {
+        self.0.borrow_mut().push(self.1);
+    }
 }

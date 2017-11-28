@@ -1,5 +1,6 @@
 use ::Lattice;
 use ::oper::{Perm, Permute};
+use ::oper::{Part, Parted, Partition};
 
 /// Wrapper type for coordinates used as input to some APIs.
 ///
@@ -28,6 +29,18 @@ impl Coords {
     { match *self {
         Coords::Carts(ref mut c) => (Tag::Cart, c),
         Coords::Fracs(ref mut c) => (Tag::Frac, c),
+    }}
+
+    pub(crate) fn into_vec(self) -> (Tag, Vec<[f64; 3]>)
+    { match self {
+        Coords::Carts(c) => (Tag::Cart, c),
+        Coords::Fracs(c) => (Tag::Frac, c),
+    }}
+
+    pub(crate) fn from_vec(tag: Tag, c: Vec<[f64; 3]>) -> Self
+    { match tag {
+        Tag::Cart => Coords::Carts(c),
+        Tag::Frac => Coords::Fracs(c),
     }}
 }
 
@@ -71,11 +84,20 @@ impl Coords {
 }
 
 impl Permute for Coords {
-    fn permuted_by(self, perm: &Perm) -> Coords {
-        match self {
-            Coords::Carts(c) => Coords::Carts(c.permuted_by(perm)),
-            Coords::Fracs(c) => Coords::Fracs(c.permuted_by(perm)),
-        }
+    fn permuted_by(self, perm: &Perm) -> Coords
+    { match self {
+        Coords::Carts(c) => Coords::Carts(c.permuted_by(perm)),
+        Coords::Fracs(c) => Coords::Fracs(c.permuted_by(perm)),
+    }}
+}
+
+impl Partition for Coords {
+    fn into_partitions<L: Clone>(self, part: &Part<L>) -> Parted<L, Coords>
+    {
+        let (tag, coords) = self.into_vec();
+        coords.into_partitions(part).into_iter()
+            .map(|(label, c)| (label, Self::from_vec(tag, c)))
+            .collect()
     }
 }
 

@@ -97,9 +97,11 @@ impl Perm {
 /// The output will satisfy `sorted.permute_by(&perm) == original`
 pub(crate) fn sort<T: Clone + Ord>(xs: &[T]) -> (Vec<T>, Perm)
 {
-    let mut xs: Vec<_> = xs.iter().cloned().enumerate().collect();
-    xs.sort_by(|a,b| a.1.cmp(&b.1));
-    let (perm, xs) = xs.into_iter().map(|(i, x)| (i as u32, x)).unzip();
+    let mut perm: Vec<_> = (0..xs.len() as u32).collect();
+    perm.sort_by(|&a, &b| xs[a as usize].cmp(&xs[b as usize]));
+
+    let mut xs = xs.to_vec();
+    xs.sort();
     (xs, Perm(perm))
 }
 
@@ -176,7 +178,7 @@ mod tests {
     use ::Error;
 
     #[test]
-    fn perm_inverse()
+    fn inverse()
     {
         let perm = Perm::random(20);
         let inv = perm.inverted();
@@ -186,7 +188,7 @@ mod tests {
     }
 
     #[test]
-    fn test_invalid_perm() {
+    fn invalid() {
         assert_matches!(
             Err(Error(ErrorKind::BadPerm, _)),
             Perm::from_vec(vec![0,1,3,3]));
@@ -198,26 +200,15 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "permutation length")]
-    fn test_incompatible_perm() {
+    fn incompatible() {
         // another requirement for the Vec impl's safety
         let _ = vec![4,2,1].permuted_by(&Perm::eye(2));
     }
 
     #[test]
-    fn test_permute_drop() {
-        use ::std::rc::Rc;
-        use ::std::cell::RefCell;
-        let drop_history = Rc::new(RefCell::new(vec![]));
-
-        struct DropPusher(Rc<RefCell<Vec<u32>>>, u32);
-        impl Drop for DropPusher {
-            fn drop(&mut self) {
-                self.0.borrow_mut().push(self.1);
-            }
-        }
-
+    fn drop_safety() {
+        let (drop_history, dp) = ::util::DropPusher::new_trial();
         {
-            let dp = |x| DropPusher(drop_history.clone(), x);
             let vec = vec![dp(0), dp(1), dp(2), dp(3), dp(4)];
 
             let vec2 = vec.permuted_by(&Perm(vec![3, 1, 0, 4, 2]));
@@ -230,7 +221,7 @@ mod tests {
     }
 
     #[test]
-    fn permute_associativity()
+    fn associativity()
     {
         let xy = Perm::from_vec(vec![1,0,2]).unwrap();
         let zx = Perm::from_vec(vec![2,1,0]).unwrap();
@@ -240,9 +231,11 @@ mod tests {
         assert_eq!(zx.of(&xy), xyzx);
         assert_eq!(
             vec![0,1,2].permuted_by(&xy).permuted_by(&zx),
-            vec![0,1,2].permuted_by(&xyzx));
+            vec![0,1,2].permuted_by(&xyzx),
+        );
         assert_eq!(
             vec![0,1,2].permuted_by(&xy).permuted_by(&zx),
-            vec![2,0,1]);
+            vec![2,0,1],
+        );
     }
 }

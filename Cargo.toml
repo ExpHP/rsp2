@@ -27,7 +27,6 @@ rsp2-tempdir = { path = "src/util/tempdir" }
 rsp2-linalg = { path = "src/math/linalg" }
 rsp2-eigenvector-classify = { path = "src/math/eigenvector-classify" }
 rsp2-fs-util = { path = "src/util/fs" }
-testsetests = { path = "atwjoitwr" }
 
 # Deps of examples/ and tests/.
 # Some of these could be dev-dependencies, however currently

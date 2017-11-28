@@ -1,6 +1,7 @@
 use ::{Lattice, Coords, Element, SentLattice};
 use ::errors::*;
 use ::oper::{Perm, Permute};
+use ::oper::{Part, Parted, Partition};
 
 /// Pairs [`Coords`] together with their [`Lattice`], and metadata.
 ///
@@ -187,6 +188,21 @@ impl<M> Permute for Structure<M> {
         let coords = self.coords.permuted_by(perm);
         let meta = self.meta.permuted_by(perm);
         Structure { lattice, coords, meta }
+    }
+}
+
+impl<M> Partition for Structure<M> {
+    fn into_partitions<L: Clone>(self, part: &Part<L>) -> Parted<L, Structure<M>>
+    {
+        let Structure { lattice, coords, meta } = self;
+
+        (coords, meta).into_partitions(part)
+            .into_iter()
+            .map(|(label, (coords, meta))| {
+                let lattice = lattice.clone();
+                (label, Structure { lattice, coords, meta })
+            })
+            .collect()
     }
 }
 
