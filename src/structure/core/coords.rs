@@ -1,6 +1,7 @@
 use ::Lattice;
 use ::oper::{Perm, Permute};
 use ::oper::{Part, Parted, Partition};
+use ::oper::part::Unlabeled;
 
 /// Wrapper type for coordinates used as input to some APIs.
 ///
@@ -92,12 +93,10 @@ impl Permute for Coords {
 }
 
 impl Partition for Coords {
-    fn into_partitions<L: Clone>(self, part: &Part<L>) -> Parted<L, Coords>
+    fn into_unlabeled_partitions<L>(self, part: &Part<L>) -> Unlabeled<Self>
     {
         let (tag, coords) = self.into_vec();
-        coords.into_partitions(part).into_iter()
-            .map(|(label, c)| (label, Self::from_vec(tag, c)))
-            .collect()
+        Box::new(coords.into_unlabeled_partitions(part).map(move |c| Self::from_vec(tag, c)))
     }
 }
 

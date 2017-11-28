@@ -25,16 +25,40 @@ pub struct Part<L> {
 // impl<L: Hash + Eq> Label<HashMap<L, Vec<usize>> for L;
 // impl<L> Label<Vec<(L, Vec<usize>)>> for L;
 
+pub type Keys<'a, L> = Box<VeclikeIterator<Item=&'a L> + 'a>;
+pub type Indices<'a> = Box<VeclikeIterator<Item=&'a [usize]> + 'a>;
+
 impl<L> Part<L> {
     /// Create a partition that decomposes a vector entirely.
     ///
     /// Every integer from 0 to the total length must appear once.
-    fn new(part: Parted<L, Vec<usize>>) -> Result<Self>
+    pub fn new(part: Parted<L, Vec<usize>>) -> Result<Self>
     {Ok({
         let index_limit = part.iter().map(|&(_, ref v)| v.len()).sum();
         ensure!(Self::validate_part(&part, index_limit), ErrorKind::BadPart);
         Self { part, index_limit }
     })}
+
+    /// Iterate over the keys for each region.
+    ///
+    /// Item type is `&L`;
+    pub fn region_keys(&self) -> Keys<L>
+    { Box::new(self.part.iter().map(|&(ref label, _)| label)) }
+
+    /// Iterate over the index vectors for each region.
+    ///
+    /// Item type is `&[usize]`;
+    pub fn region_indices(&self) -> Indices
+    { Box::new(self.part.iter().map(|&(_, ref idx)| &idx[..])) }
+
+    /// # Safety
+    ///
+    /// Usage of the constructed `Part<L>` may lead to Undefined Behavior
+    /// if either of the following conditions are violated:
+    /// - no usize index may appear more than once in the input.
+    /// - `index_limit` must equal the total size.
+    pub unsafe fn new_unchecked(part: Parted<L, Vec<usize>>, index_limit: usize) -> Self
+    { Part { part, index_limit } }
 
     /// Construct a Part from a sequence of keys, with one
     /// partition for each distinct value in the sequence.
@@ -57,6 +81,24 @@ impl<L> Part<L> {
     pub fn into_parted_indices(self) -> Vec<(L, Vec<usize>)>
     { self.part }
 
+    pub fn key_vec(&self) -> Vec<&L>
+    {
+        use ::std::mem;
+
+        let mut temp = vec![None; self.index_limit];
+        for &(ref label, ref indices) in &self.part {
+            for &i in indices {
+                temp[i] = Some(label);
+            }
+        }
+
+        // Take advantage of rust's null pointer optimization;
+        debug_assert!(temp.iter().all(|x| x.is_some()));
+        assert_eq!(mem::size_of::<&L>(), mem::size_of::<Option<&L>>());
+        assert_eq!(mem::align_of::<&L>(), mem::align_of::<Option<&L>>());
+        unsafe { mem::transmute::<Vec<Option<&L>>, Vec<&L>>(temp) }
+    }
+
     fn validate_part(part: &Parted<L, Vec<usize>>, index_limit: usize) -> bool
     {
         let slices: Vec<_> = part.iter().map(|&(_, ref v)| &v[..]).collect();
@@ -64,15 +106,6 @@ impl<L> Part<L> {
         xs.sort();
         xs.into_iter().eq(0..index_limit)
     }
-
-    /// # Safety
-    ///
-    /// Usage of the constructed `Part<L>` may lead to Undefined Behavior
-    /// if either of the following conditions are violated:
-    /// - no usize index may appear more than once in the input.
-    /// - `index_limit` must equal the total size.
-    unsafe fn new_unchecked(part: Parted<L, Vec<usize>>, index_limit: usize) -> Self
-    { Part { part, index_limit } }
 }
 
 impl<L> IntoIterator for Part<L> {
@@ -82,7 +115,25 @@ impl<L> IntoIterator for Part<L> {
     { self.part.into_iter() }
 }
 
+// defaults for associated types are still unstable, so we'll just have to
+// force all impls to be Boxed.
+/// Return type of `into_unlabeled_partitions`.  You hafta use it, sorry.
+///
+/// The lifetime is associated with the partition vector and not `self`,
+/// unfortunately, so prepare to see a lot of `Self: 'static` bounds...
+pub type Unlabeled<'part, T> = Box<VeclikeIterator<Item=T> + 'part>;
+pub trait VeclikeIterator: ExactSizeIterator + DoubleEndedIterator {}
+impl<T> VeclikeIterator for T where T: ExactSizeIterator + DoubleEndedIterator {}
+
 pub trait Partition: Sized {
+    /// Variant of `into_partitions` which composes more easily, and is
+    /// therefore the one you need to implement.
+    ///
+    /// It returns an iterator over the partitions of `self`.
+    ///
+    /// See `into_partitions` for more info.
+    fn into_unlabeled_partitions<L>(self, part: &Part<L>) -> Unlabeled<Self>;
+
     // NOTE: Specifying order allows composite types
     /// Consume self to produce partitions.
     ///
@@ -95,64 +146,58 @@ pub trait Partition: Sized {
     /// The ordering within each partition of the output must reflect the
     /// original order of those elements relative to each other in the
     /// input vec, rather than the order of the indices in `part`.
-    fn into_partitions<L: Clone>(self, part: &Part<L>) -> Parted<L, Self>;
+    fn into_partitions<L: Clone>(self, part: &Part<L>) -> Parted<L, Self>
+    { ::util::zip_eq(part.region_keys().cloned(), self.into_unlabeled_partitions(part)).collect() }
 }
 
-impl<T> Partition for Vec<T> {
-    fn into_partitions<L: Clone>(self, part: &Part<L>) -> Parted<L, Self>
+impl<T: 'static> Partition for Vec<T> {
+    fn into_unlabeled_partitions<L>(self, part: &Part<L>) -> Unlabeled<Self>
     {
-        // NOTE: this did not need unsafe code, but we reserve the right
-        //       to make it unsafe in the future.
+        // permute all data for the first group to the very end,
+        // with the second group before it, and etc.
+        let mut data = self.permuted_by(&composite_perm_for_part_lifo(part));
 
-        let (labels, index_vecs): (Vec<&L>, Vec<_>) =
-            part.part.iter()
-                .map(|&(ref lbl, ref idxs)| (lbl, idxs.clone()))
-                .unzip();
-
-        let label_sizes: Vec<_> = index_vecs.iter().map(|v| v.len()).collect();
-
-        // Permute so that all data for the last label comes first,
-        // followed by all the data for the second to last label,
-        // and so on.
-        let perm = {
-            let mut sort_keys = vec![::std::usize::MAX; part.index_limit];
-
-            // the rev() inverts the values assigned by enumerate()
-            // so that last group has the lowest key
-            for (key, indices) in index_vecs.into_iter().rev().enumerate() {
-                for i in indices {
-                    sort_keys[i] = key;
-                }
-            }
-            debug_assert!(sort_keys.iter().all(|&x| x != ::std::usize::MAX));
-            ::oper::perm::argsort(&sort_keys)
-        };
-
-        let mut data = self.permuted_by(&perm);
-
-        // read the first label's group (at the end), then the second...
-        let mut out = Vec::with_capacity(labels.len());
-        for (label, size) in ::util::zip_eq(labels, label_sizes) {
-            let start = data.len() - size;
-            out.push((label.clone(), data.drain(start..).collect()))
-        }
-
-        out
+        Box::new({
+             part.region_indices().map(|x| x.len())
+                 .map(move |region_len| {
+                     let start = data.len() - region_len;
+                     data.drain(start..).collect()
+                 })
+        })
     }
+}
+
+/// Helper function to generate a `Perm` that is useful for `Partition` impls:
+///
+/// The `Perm` returned permutes a vector so that all data for the first label
+/// comes last, with all the data for the second label before it, and so on.
+/// Ordering within each label follows the order required by the `Partition` trait.
+///
+/// It also gives a vector of each region's length, starting with the first label.
+pub fn composite_perm_for_part_lifo<L>(part: &Part<L>) -> ::Perm
+{
+    let mut sort_keys = vec![::std::usize::MAX; part.index_limit];
+
+    // rev() so that the last region gets a key of 0
+    for (int_key, indices) in part.region_indices().into_iter().rev().enumerate() {
+        for &i in indices {
+            sort_keys[i] = int_key;
+        }
+    }
+    debug_assert!(sort_keys.iter().all(|&x| x != ::std::usize::MAX));
+    ::oper::Perm::argsort(&sort_keys)
 }
 
 impl<A, B> Partition for (A, B)
 where
-    A: Partition,
-    B: Partition,
+    A: Partition + 'static,
+    B: Partition + 'static,
 {
-    fn into_partitions<L: Clone>(self, part: &Part<L>) -> Parted<L, (A, B)>
+    fn into_unlabeled_partitions<L>(self, part: &Part<L>) -> Unlabeled<Self>
     {
-        let a_parted = self.0.into_partitions(part);
-        let b_parted = self.1.into_partitions(part);
-        ::util::zip_eq(a_parted, b_parted)
-            .map(|((label, a), (_, b))| (label, (a, b)))
-            .collect()
+        let a_parted = self.0.into_unlabeled_partitions(part);
+        let b_parted = self.1.into_unlabeled_partitions(part);
+        Box::new(::util::zip_eq(a_parted, b_parted))
     }
 }
 
@@ -248,7 +293,6 @@ mod tests {
         let (drop_history, dp) = ::util::DropPusher::new_trial();
 
         {
-            let dp = |x| ::util::DropPusher(drop_history.clone(), x);
             let vec = vec![dp('a'), dp('b'), dp('c'), dp('d'), dp('e'), dp('f')];
 
             let mut vec2 = vec.into_partitions(&Part::new(vec![

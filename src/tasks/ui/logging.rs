@@ -44,6 +44,6 @@ impl fmt::Display for ColorizedLevel {
             LogLevel::Debug => ::ansi_term::Colour::Yellow.dimmed(),
             LogLevel::Trace => ::ansi_term::Colour::Cyan.normal(),
         };
-        write!(f, "{}", ::color::gpaint(style, self.0))
+        write!(f, "{}", ::ui::color::gpaint(style, self.0))
     }
 }

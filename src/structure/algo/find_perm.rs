@@ -4,7 +4,7 @@ use ::{FracRot, FracOp};
 use super::group::GroupTree;
 
 use ::Result;
-use ::{perm, Perm, Permute};
+use ::{Perm, Permute};
 
 /// Validate that structure is symmetric under the given operators.
 ///
@@ -160,7 +160,7 @@ fn of_rotation_impl(
                 .into_iter()
                 .map(|x| NotNaN::new(dot(&x, &x).sqrt()).unwrap())
                 .collect::<Vec<_>>();
-        let perm = perm::argsort(&distances);
+        let perm = Perm::argsort(&distances);
         (perm.clone(), fracs.permuted_by(&perm))
     };
 

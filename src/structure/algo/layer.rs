@@ -140,7 +140,7 @@ fn assign_layers_impl(fracs: &[[f64; 3]], lattice: &Lattice, normal: &[i32; 3], 
 #[deny(unused)]
 mod tests {
     use super::*;
-    use ::{perm, Permute, Perm};
+    use ::{Permute, Perm};
 
     #[test]
     fn assign_layers_impl() {
@@ -179,7 +179,7 @@ mod tests {
             (layers(vec![0, 0, 0, 1, 1]), 2));
 
         // put them out of order
-        let (fracs, perm) = perm::shuffle(&fracs);
+        let (fracs, perm) = ::oper::perm::shuffle(&fracs);
         assert_eq!(
             go(&fracs, &lattice, &[0, 1, 0], cart_tol).unwrap().0,
             layers(vec![0, 0, 0, 1, 1]).permuted_by(&perm));

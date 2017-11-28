@@ -2,16 +2,22 @@ use ::{Result, ErrorKind};
 
 /// Represents a reordering operation on atoms.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct Perm(Vec<u32>);
+pub struct Perm(Vec<u32>);
 
 impl Perm {
-    #[allow(unused)]
     pub fn eye(n: u32) -> Perm
     { Perm((0..n).collect()) }
 
-    #[allow(unused)]
     pub fn len(&self) -> usize
     { self.0.len() }
+
+    /// Compute the `Perm` that, when applied to the input slice, would sort it.
+    pub fn argsort<T: Ord>(xs: &[T]) -> Perm
+    {
+        let mut perm: Vec<_> = (0..xs.len() as u32).collect();
+        perm.sort_by(|&a, &b| xs[a as usize].cmp(&xs[b as usize]));
+        Perm(perm)
+    }
 
     /// This performs O(n log n) validation on the data
     /// to verify that it satisfies the invariants of Perm.
@@ -27,7 +33,6 @@ impl Perm {
     ///
     /// `vec` must contain every element in `(0..vec.len())`,
     /// or else the behavior is undefined.
-    #[allow(unused)]
     pub unsafe fn from_vec_unchecked(vec: Vec<u32>) -> Perm
     {
         debug_assert!(Self::validate_perm(&vec));
@@ -47,7 +52,6 @@ impl Perm {
     /// The inserted elements will be shifted by this permutation's length,
     /// so that they operate on an entirely independent set of data from
     /// the existing elements.
-    #[allow(unused)] // FIXME test
     pub fn append_mut(&mut self, other: &Perm)
     {
         let n = self.0.len() as u32;
@@ -64,18 +68,40 @@ impl Perm {
         Perm(perm)
     }
 
-    #[allow(unused)]
     pub fn into_vec(self) -> Vec<u32>
     { self.0 }
 
     pub fn inverted(&self) -> Perm
     {
         // bah. less code to test...
-        argsort(&self.0)
+        Self::argsort(&self.0)
     }
+
+    /// Construct the outer product of self and `slower`, with `self`
+    /// being the fast (inner) index.
+    ///
+    /// The resulting `Perm` will permute blocks of size `self.len()`
+    /// according to `slower`, and will permute elements within each
+    /// block by `self`.
+    pub fn with_outer(&self, slower: &Perm) -> Perm
+    {
+        assert!((self.len() as u32).checked_mul(slower.len() as u32).is_some());
+
+        let mut perm = Vec::with_capacity(self.len() * slower.len());
+
+        for &block_index in &slower.0 {
+            let offset = self.len() as u32 * block_index;
+            perm.extend(self.0.iter().map(|&x| x + offset));
+        }
+        Perm(perm)
+    }
+
+    /// Construct the outer product of self and `faster`, with `self`
+    /// being the slow (outer) index.
+    pub fn with_inner(&self, faster: &Perm) -> Perm
+    { faster.with_outer(self) }
 }
 
-#[allow(unused)]
 impl Perm {
     /// Flipped group operator.
     ///
@@ -92,19 +118,6 @@ impl Perm {
     { other.then(self) }
 }
 
-/// Decompose a sequence into (sorted, perm).
-///
-/// The output will satisfy `sorted.permute_by(&perm) == original`
-pub(crate) fn sort<T: Clone + Ord>(xs: &[T]) -> (Vec<T>, Perm)
-{
-    let mut perm: Vec<_> = (0..xs.len() as u32).collect();
-    perm.sort_by(|&a, &b| xs[a as usize].cmp(&xs[b as usize]));
-
-    let mut xs = xs.to_vec();
-    xs.sort();
-    (xs, Perm(perm))
-}
-
 #[cfg(test)]
 pub(crate) fn shuffle<T: Clone>(xs: &[T]) -> (Vec<T>, Perm)
 {
@@ -113,11 +126,7 @@ pub(crate) fn shuffle<T: Clone>(xs: &[T]) -> (Vec<T>, Perm)
     (xs.permuted_by(&perm), perm)
 }
 
-pub(crate) fn argsort<T: Clone + Ord>(xs: &[T]) -> Perm
-{ sort(xs).1 }
-
-pub(crate)
-trait Permute: Sized {
+pub trait Permute: Sized {
     // awkward name, but it makes it makes two things clear
     // beyond a shadow of a doubt:
     // - The receiver gets permuted, not the argument.
@@ -237,5 +246,48 @@ mod tests {
             vec![0,1,2].permuted_by(&xy).permuted_by(&zx),
             vec![2,0,1],
         );
+    }
+
+    #[test]
+    fn append()
+    {
+        let mut a = Perm::from_vec(vec![1, 0]).unwrap();
+        let b = Perm::from_vec(vec![1, 2, 0]).unwrap();
+        a.append_mut(&b);
+        assert_eq!(
+            vec![00, 01, /* -- */ 10, 11, 12].permuted_by(&a),
+            vec![01, 00, /* -- */ 11, 12, 10],
+        );
+    }
+
+    #[test]
+    fn outer()
+    {
+        let use_outer = |a, b| {
+            let a = Perm::from_vec(a).unwrap();
+            let b = Perm::from_vec(b).unwrap();
+            let xs: Vec<_> =
+                (0..b.len()).flat_map(|slow| {
+                    (0..a.len()).map(move |fast| 10 * slow + fast)
+                }).collect();
+            xs.permuted_by(&a.with_outer(&b))
+        };
+
+        assert_eq!(
+            use_outer(
+                vec![1, 0, 2, 3],
+                vec![1, 2, 0],
+            ),
+            vec![
+                11, 10, 12, 13,
+                21, 20, 22, 23,
+                01, 00, 02, 03,
+            ],
+        );
+
+        // empty perms
+        assert_eq!(use_outer(vec![1, 0], vec![]), vec![]);
+
+        assert_eq!(use_outer(vec![], vec![1, 0]), vec![]);
     }
 }

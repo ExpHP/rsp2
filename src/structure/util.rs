@@ -4,8 +4,8 @@
 use ::ordered_float::NotNaN;
 use ::errors::*;
 
-use ::std::rc::Rc;
-use ::std::cell::RefCell;
+#[cfg(test)] use ::std::rc::Rc;
+#[cfg(test)] use ::std::cell::RefCell;
 
 // Multiply on the right
 pub(crate) fn dot_n3_33(coords: &[[f64; 3]], mat: &[[f64; 3]; 3]) -> Vec<[f64; 3]>
@@ -100,8 +100,10 @@ where
     a.zip(b)
 }
 
+#[cfg(test)]
 pub(crate) struct DropPusher<T: Copy>(pub Rc<RefCell<Vec<T>>>, pub T);
 
+#[cfg(test)]
 impl<T: Copy + 'static> DropPusher<T> {
     /// Create a shared vector, and a `new` function which constructs
     /// `DropPushers` tied to that vector.
@@ -116,6 +118,7 @@ impl<T: Copy + 'static> DropPusher<T> {
     }
 }
 
+#[cfg(test)]
 impl<T: Copy> Drop for DropPusher<T> {
     fn drop(&mut self) {
         self.0.borrow_mut().push(self.1);

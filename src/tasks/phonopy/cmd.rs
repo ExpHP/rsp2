@@ -572,48 +572,6 @@ impl<P: AsPath> DirWithBands<P> {
         let file = open(self.path().join("eigenvalue.npy"))?;
         npy::read_eigenvalue_npy(file)?
     })}
-
-    // ick. Sloppy design, but it's the best we can do without
-    // having a separate directory type just for Gamma computations
-    /// Read the eigensystem at Gamma.
-    ///
-    /// There are a couple of reasons this could (partially) fail:
-    /// * It must read several files, which may produce Err.
-    /// * One of the q-positions requested must have been at gamma!
-    ///   Otherwise, the outer value will be `None`.
-    /// * The eigenvector will be `None` if eigenvectors were not computed.
-    pub fn gamma_eigensystem(&self)
-    -> Result<Option<(Vec<f64>, Option<Vec<Vec<[f64; 3]>>>)>>
-    {Ok({
-        // search for gamma.
-        let index = self.q_positions()?.iter().position(|&x| x == [0_f64; 3]);
-        let index = match index {
-            None => { return Ok(None); }
-            Some(i) => i,
-        };
-
-        // read the *entire* set of eigensystems at *all* q-points,
-        //  just to extract the one at gamma.
-        // ...What can I say? We've painted ourselves into a corner here.  _/o\_
-        let eigenvalues = self.eigenvalues()?[index].clone();
-        let eigenvectors = self.eigenvectors()?.map(|bases| {
-            trace!("Getting real...");
-            bases[index].iter().map(|ev| Ok({
-                ev.iter().map(|c| {
-                    ensure!(c.imag == 0.0, "non-real gamma eigenvector");
-                    Ok(c.real)
-                }).collect::<Result<Vec<_>>>()?.nest().to_vec()
-            })).collect::<Result<_>>()
-        });
-
-        let eigenvectors = match eigenvectors {
-            None => None,
-            Some(Err(e)) => Err(e)?,
-            Some(Ok(v)) => Some(v),
-        };
-
-        Some((eigenvalues, eigenvectors))
-    })}
 }
 
 //-----------------------------

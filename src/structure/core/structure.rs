@@ -2,6 +2,7 @@ use ::{Lattice, Coords, Element, SentLattice};
 use ::errors::*;
 use ::oper::{Perm, Permute};
 use ::oper::{Part, Parted, Partition};
+use ::oper::part::Unlabeled;
 
 /// Pairs [`Coords`] together with their [`Lattice`], and metadata.
 ///
@@ -191,18 +192,19 @@ impl<M> Permute for Structure<M> {
     }
 }
 
-impl<M> Partition for Structure<M> {
-    fn into_partitions<L: Clone>(self, part: &Part<L>) -> Parted<L, Structure<M>>
+// ugh, 'static due to use of box. (and more generally, lack of GATs...)
+impl<M: 'static> Partition for Structure<M> {
+    fn into_unlabeled_partitions<L>(self, part: &Part<L>) -> Unlabeled<Self>
     {
         let Structure { lattice, coords, meta } = self;
 
-        (coords, meta).into_partitions(part)
-            .into_iter()
-            .map(|(label, (coords, meta))| {
-                let lattice = lattice.clone();
-                (label, Structure { lattice, coords, meta })
-            })
-            .collect()
+        Box::new({
+            (coords, meta).into_unlabeled_partitions(part)
+                .map(move |(coords, meta)| {
+                    let lattice = lattice.clone();
+                    Structure { lattice, coords, meta }
+                })
+        })
     }
 }
 

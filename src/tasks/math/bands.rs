@@ -175,10 +175,10 @@ impl UnfolderAtQ {
 
                 let quotient_sample_spec = self::config::SampleType::Plain(sc_periods);
                 let quotient_indices: Vec<_> =
-                        quotient_sample_spec.signed_indices()
+                    quotient_sample_spec.signed_indices()
                         .into_iter().map(|v| {
-                            arr_from_fn(|k| (v[k] + sc_periods[k] as i32) as u32 % sc_periods[k])
-                        }).collect();
+                        arr_from_fn(|k| (v[k] + sc_periods[k] as i32) as u32 % sc_periods[k])
+                    }).collect();
                 assert!(quotient_indices.len() > 0, "no points to sample against");
 
                 let quotient_vecs = quotient_sample_spec.points(&sc_recip);
@@ -207,7 +207,7 @@ impl UnfolderAtQ {
     }
 
     pub fn unfold_phonon(&self, eigenvector: KetRef)
-    -> Vec<([u32; 3], f64)>
+                         -> Vec<([u32; 3], f64)>
     {
         use ::rsp2_array_utils::{arr_from_fn};
 

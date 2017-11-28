@@ -22,7 +22,6 @@ rsp2-array-utils = { path = "../util/array" }
 rsp2-slice-math = { path = "../util/slice-math" }
 rsp2-tempdir = { path = "../util/tempdir" }
 rsp2-util-macros = { path = "../util/macros" }
-rsp2-eigenvector-classify = { path = "../math/eigenvector-classify" }
 rsp2-fs-util = { path = "../util/fs" }
 
 slice-of-array = "0.1"

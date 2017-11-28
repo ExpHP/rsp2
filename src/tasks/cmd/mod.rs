@@ -1,11 +1,15 @@
 // HERE BE DRAGONS
 
+pub(crate) mod integrate_2d;
+
 const THZ_TO_WAVENUMBER: f64 = 33.35641;
 
 use ::errors::{Result, ok};
 use ::config::Settings;
 use ::util::push_dir;
-use ::logging::setup_global_logger;
+use ::ui::logging::setup_global_logger;
+
+use ::types::{Ket3, Basis3};
 
 use ::rsp2_structure::consts::CARBON;
 use ::rsp2_slice_math::{v, V, vdot};
@@ -13,6 +17,7 @@ use ::rsp2_slice_math::{v, V, vdot};
 use ::slice_of_array::prelude::*;
 use ::rsp2_structure::supercell::{self, SupercellToken};
 use ::rsp2_structure::{Coords, CoordStructure, Structure, ElementStructure};
+use ::rsp2_structure::{Part, Partition};
 use ::rsp2_structure_gen::Assemble;
 use ::rsp2_lammps_wrap::Lammps;
 use ::rsp2_lammps_wrap::Builder as LammpsBuilder;
@@ -63,8 +68,8 @@ pub fn run_relax_with_eigenvectors(
             let structure = carbon(&builder.assemble());
 
             let layer_sc_info = layer_sc_info_from_layers_yaml(open(&input)?)?;
-            let layer_sc_mats = layer_sc_info
-                .into_iter().map(|(matrix, periods, _)| ::bands::ScMatrix::new(&matrix, &periods))
+            let layer_sc_mats = layer_sc_info.into_iter()
+                .map(|(matrix, periods, _)| ::math::bands::ScMatrix::new(&matrix, &periods))
                 .collect_vec();
 
             (structure, layer_sc_mats)
@@ -119,11 +124,11 @@ pub fn run_relax_with_eigenvectors(
             write_eigen_info_for_humans(&einfos, &mut |s| ok(info!("{}", s)))?;
 
             let mut structure = structure;
-            let bad_evs: Vec<_> = izip!(1.., &einfos, &evecs)
+            let bad_evs: Vec<_> = izip!(1.., &einfos, &evecs.0)
                 .filter(|&(_, ref info, _)| info.frequency < 0.0 && !info.is_acoustic())
                 .map(|(i, info, evec)| {
                     let name = format!("band {} ({})", i, info.frequency);
-                    (name, &evec[..])
+                    (name, evec.as_real_checked())
                 }).collect();
 
             if !bad_evs.is_empty() {
@@ -200,7 +205,7 @@ fn do_diagonalize(
     phonopy: &PhonopyBuilder,
     structure: &ElementStructure,
     save_bands: Option<&Path>,
-) -> Result<(Vec<f64>, Vec<Vec<[f64; 3]>>)>
+) -> Result<(Vec<f64>, Basis3)>
 {ok({
     let disp_dir = phonopy.displacements(&structure)?;
     let force_sets = do_force_sets_at_disps(&lmp, &disp_dir)?;
@@ -211,20 +216,18 @@ fn do_diagonalize(
         .eigenvectors(true)
         .compute(&[[0.0; 3]])?;
 
-    let out = match bands_dir.gamma_eigensystem()? {
-        Some((eval, Some(evec))) => {
-            let V(eval) = THZ_TO_WAVENUMBER * v(eval);
-            (eval, evec)
-        },
-        _ => unreachable!(),
-    };
+    let evals = bands_dir.eigenvalues()?.pop().unwrap();
+    let V(evals) = THZ_TO_WAVENUMBER * v(evals);
+
+    let evecs = bands_dir.eigenvectors()?.unwrap().pop().unwrap();
+    let evecs = Basis3::from_basis(evecs);
 
     if let Some(save_dir) = save_bands {
         rm_rf(save_dir)?;
         bands_dir.relocate(save_dir)?;
     }
 
-    out
+    (evals, evecs)
 })}
 
 fn do_eigenvector_chase(
@@ -382,7 +385,7 @@ fn write_eigen_info_for_humans(
 ) -> Result<()>
 {ok({
     use ::ansi_term::Colour::{Red, Cyan, Yellow, Black};
-    use ::color::{ColorByRange, DisplayProb};
+    use ::ui::color::{ColorByRange, DisplayProb};
 
     let color_range = ColorByRange::new(vec![
         (0.999, Cyan.bold()),
@@ -585,60 +588,63 @@ pub fn optimize_layer_parameters(
 
 pub type EigenInfo = Vec<eigen_info::Item>;
 
-pub fn get_eigensystem_info<L: Eq + Clone + Hash>(
+pub fn get_eigensystem_info<L: Ord + Clone>(
     evals: &[f64],
-    evecs: &[Vec<[f64; 3]>],
+    evecs: &Basis3,
     layers: &[L],
     structure: Option<&ElementStructure>,
-    layer_supercell_matrices: Option<&[::bands::ScMatrix]>,
+    layer_supercell_matrices: Option<&[::math::bands::ScMatrix]>,
 ) -> EigenInfo
 {
-    use ::rsp2_eigenvector_classify::{keyed_acoustic_basis, polarization};
-    use ::bands::UnfolderAtQ;
+    use ::math::bands::UnfolderAtQ;
+
+    let part = Part::from_ord_keys(layers);
 
     // precomputed data applicable to all kets
-    let layers: Vec<_> = layers.iter().cloned().map(Some).collect();
-    let layer_acoustics = keyed_acoustic_basis(&layers[..], &[1,1,1]);
-    let acoustics = keyed_acoustic_basis(&vec![Some(()); evecs[0].len()], &[1,1,1]);
     let layer_gamma_unfolders: Option<Vec<UnfolderAtQ>> =
         match (structure, layer_supercell_matrices) {
             (Some(structure), Some(layer_supercell_matrices)) => Some({
-                layer_supercell_matrices.iter().map(|sc_mat| {
-                    UnfolderAtQ::from_config(
-                        &from_json!({
-                            "fbz": "reciprocal-cell",
-                            "sampling": { "plain": [4, 4, 1] },
-                        }),
-                        &structure.map_metadata_to(|_| ()),
-                        sc_mat,
-                        &[0.0, 0.0, 0.0], // eigenvector q
-                    )
-                }).collect()
+                structure
+                    .map_metadata_to(|_| ())
+                    .into_unlabeled_partitions(&part)
+                    .zip(layer_supercell_matrices)
+                    .map(|(layer_structure, layer_sc_mat)| {
+                        UnfolderAtQ::from_config(
+                            &from_json!({
+                                "fbz": "reciprocal-cell",
+                                "sampling": { "plain": [4, 4, 1] },
+                            }),
+                            &layer_structure,
+                            layer_sc_mat,
+                            &[0.0, 0.0, 0.0], // eigenvector q
+                        )
+                    }).collect()
             }),
             _ => None,
         };
 
     // now do each ket
     let mut out = vec![];
-    for (&eval, evec) in izip!(evals, evecs) {
-        use ::rsp2_kets::{Rect, Ket};
-        let ket: Ket = evec.flat().iter().cloned().map(Rect::from).collect();
+    for (&frequency, evec) in izip!(evals, &evecs.0) {
+        // split the evs up by layer (without renormalizing)
+        let layer_evecs: Vec<_> = evec.clone().into_unlabeled_partitions(&part).collect();
 
-        let gamma_probs = layer_gamma_unfolders.as_ref().map(|unfolders| {
-            unfolders.iter().map(|unfolder| {
-                unfolder.unfold_phonon(ket.as_ref())
+        let acousticness = evec.acousticness();
+        let layer_acousticness = layer_evecs.iter().map(|ev| ev.acousticness()).sum();
+        let polarization = evec.polarization();
+
+        let layer_gamma_probs = layer_gamma_unfolders.as_ref().map(|unfolders| {
+            unfolders.iter().zip(&layer_evecs).map(|(unfolder, ket)| {
+                unfolder.unfold_phonon(ket.to_ket().as_ref())
                     .iter()
                     .find(|&&(idx, _)| idx == [0, 0, 0])
                     .unwrap().1
+                * ket.sqnorm() // unfold_phonon renormalizes, so reintroduce this layer's weight
             }).collect()
         });
 
         out.push(eigen_info::Item {
-            frequency: eval,
-            acousticness: acoustics.probability(&evec),
-            layer_acousticness: layer_acoustics.probability(&evec),
-            polarization: polarization(&evec[..]),
-            layer_gamma_probs: gamma_probs,
+            frequency, acousticness, layer_acousticness, polarization, layer_gamma_probs,
         })
     }
     out
@@ -830,12 +836,16 @@ pub fn get_energy_surface(
         let bands_dir = ::phonopy::DirWithBands::from_existing(input)?;
         let structure = bands_dir.structure()?;
 
-        let (evals, evecs) = match bands_dir.gamma_eigensystem()? {
+        let gamma_index = match bands_dir.q_positions()?.iter().position(|&x| x == [0_f64; 3]) {
             None => bail!("Bands do not include gamma point: {}", bands_dir.path().display()),
-            Some((_, None)) => bail!("Directory has no eigenvectors: {}", bands_dir.path().display()),
-            Some((evals, Some(evecs))) => (evals, evecs),
+            Some(x) => x,
         };
 
+        let evals = bands_dir.eigenvalues()?.remove(gamma_index);
+        let evecs = match bands_dir.eigenvectors()? {
+            None => bail!("Directory has no eigenvectors: {}", bands_dir.path().display()),
+            Some(mut evs) => Basis3::from_basis(evs.remove(gamma_index)),
+        };
 
         let plot_ev_indices = {
             use ::config::EnergyPlotEvIndices::*;
@@ -876,11 +886,14 @@ pub fn get_energy_surface(
         let data = {
             let mut lmp = lmp.initialize_carbon(uncarbon(&structure))?;
 
-            ::integrate_2d::integrate_two_eigenvectors(
+            ::cmd::integrate_2d::integrate_two_eigenvectors(
                 (w, h),
                 &structure.to_carts(),
                 (-xmin..xmax, -ymin..ymax),
-                (&evecs[plot_ev_indices.0], &evecs[plot_ev_indices.1]),
+                (
+                    evecs.0[plot_ev_indices.0].as_real_checked(),
+                    evecs.0[plot_ev_indices.1].as_real_checked(),
+                ),
                 {
                     let mut i = 0;
                     move |pos| {ok({
@@ -896,7 +909,6 @@ pub fn get_energy_surface(
         ::serde_json::to_writer_pretty(create("out.json")?, &chunked)?;
         cwd_guard.pop()?;
     }
-
 })}
 
 

@@ -54,6 +54,10 @@ macro_rules! assert_matches {
     };
 }
 
+pub mod helper {
+    pub use ::oper::part::composite_perm_for_part_lifo;
+}
+
 pub mod supercell {
     pub use ::algo::supercell::{
         diagonal,
@@ -70,16 +74,10 @@ mod util;
 mod element;
 
 //---------------------------
-// private reexports
-
-// reexported for helpers like argsort and shuffle.
-use ::oper::perm;
-use ::oper::perm::{Perm, Permute};
-
-//---------------------------
 // public reexports; API
 
-pub use ::oper::part::{Part, Parted, Partition};
+pub use ::oper::perm::{Perm, Permute};
+pub use ::oper::part::{Part, Parted, Partition, Unlabeled};
 pub use ::core::lattice::Lattice;
 pub use ::core::lattice::Sent as SentLattice;
 pub use ::core::structure::Sent as SentStructure;

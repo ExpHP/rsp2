@@ -39,3 +39,14 @@ impl Drop for PushDir {
         }
     }
 }
+
+
+pub(crate) fn zip_eq<As, Bs>(a: As, b: Bs) -> ::std::iter::Zip<As::IntoIter, Bs::IntoIter>
+    where
+        As: IntoIterator, As::IntoIter: ExactSizeIterator,
+        Bs: IntoIterator, Bs::IntoIter: ExactSizeIterator,
+{
+    let (a, b) = (a.into_iter(), b.into_iter());
+    assert_eq!(a.len(), b.len());
+    a.zip(b)
+}

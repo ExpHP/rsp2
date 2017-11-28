@@ -17,7 +17,6 @@ path = "lib.rs"
 !!rsp2-slice-math
 !!rsp2-tempdir
 !!rsp2-util-macros
-!!rsp2-eigenvector-classify
 !!rsp2-fs-util
 
 !!slice-of-array
