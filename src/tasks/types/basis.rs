@@ -4,8 +4,6 @@ use ::rsp2_structure::{Part, Parted, Partition, Unlabeled};
 
 use ::slice_of_array::prelude::*;
 
-pub(crate) struct Phonons(pub(crate) ::rsp2_kets::Basis);
-
 // alternative types to those in rsp2_kets which are defined in terms of 3-vectors
 // and for which we can implement Permute and Partition, etc.
 #[derive(Debug, Clone)]
@@ -91,7 +89,7 @@ impl Ket3 {
     /// A measure from 0 to `self.sqnorm()` of how acoustic the ket is.
     pub fn acousticness(&self) -> f64
     {
-        let square = |x| x*x;
+        let square = |x: f64| x * x;
 
         // dot with an acoustic mode along each axis by simply summing the elements
         // along that axis
@@ -100,8 +98,8 @@ impl Ket3 {
             acc += square(self.imag.iter().map(|v| v[k]).sum());
             acc += square(self.real.iter().map(|v| v[k]).sum());
         }
-        // factor out the norm of the acoustic modes
-        acc / square(self.real.len() as f64)
+        // factor out the square norm of the acoustic modes
+        acc / self.real.len() as f64
     }
 
     /// Three numbers that sum to `self.sqnorm()` describing which axes the

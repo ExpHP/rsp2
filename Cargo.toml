@@ -25,7 +25,6 @@ rsp2-byte-tools-plus-float = { path = "src/util/byte-tools-plus-float" }
 rsp2-util-macros = { path = "src/util/macros" }
 rsp2-tempdir = { path = "src/util/tempdir" }
 rsp2-linalg = { path = "src/math/linalg" }
-rsp2-eigenvector-classify = { path = "src/math/eigenvector-classify" }
 rsp2-fs-util = { path = "src/util/fs" }
 
 # Deps of examples/ and tests/.

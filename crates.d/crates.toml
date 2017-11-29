@@ -45,8 +45,7 @@ rsp2-byte-tools-plus-float = "src/util/byte-tools-plus-float"
 rsp2-util-macros    = "src/util/macros"
 rsp2-tempdir        = "src/util/tempdir"
 rsp2-linalg         = "src/math/linalg"
-rsp2-eigenvector-classify = "./src/math/eigenvector-classify"
-rsp2-fs-util = "src/util/fs"
+rsp2-fs-util        = "src/util/fs"
 #!!INSERTION POINT FOR NEW CRATES!!#
 
 #--------------------------------------------

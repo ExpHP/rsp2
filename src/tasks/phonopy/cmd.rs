@@ -107,7 +107,7 @@ impl Builder {
                     .arg("--displacement")
                     .current_dir(&dir);
 
-                log_stdio_and_wait(command)?;
+                log_stdio_and_wait(command, None)?;
             }
         };
 
@@ -492,15 +492,36 @@ impl<'p, P: AsPath, Q: AsPath> BandsBuilder<'p, P, Q> {
                 command
                     .args(Args::load(dir.join("disp.args"))?.0)
                     .arg("band.conf")
-                    .arg("--hdf5")
+                    .arg("--fc-format=hdf5")
+                    .arg("--band-format=hdf5")
                     .arg(match dir.join(fc_filename).exists() {
                         true => "--readfc",
                         false => "--writefc",
                     })
-                    .env("EIGENVECTOR_NPY_HACK", "1")
                     .current_dir(&dir);
 
-                log_stdio_and_wait(command)?;
+                log_stdio_and_wait(command, None)?;
+            }
+
+            trace!("Converting bands...");
+            {
+                let mut command = Command::new("python3");
+                command.current_dir(&dir);
+
+                // ayyyyup.
+                log_stdio_and_wait(command, Some("
+import numpy as np
+import h5py
+
+band = h5py.File('band.hdf5')
+np.save('eigenvector.npy', band['eigenvector'])
+np.save('eigenvalue.npy', band['frequency'])
+np.save('q-position.npy', band['path'])
+np.save('q-distance.npy', band['distance'])
+
+del band
+import os; os.unlink('band.hdf5')
+".to_string()))?;
             }
 
             if me.dir_with_forces.cache_force_constants {
@@ -588,10 +609,17 @@ fn round_checked(x: f64, tol: f64) -> Result<i32>
     r as i32
 })}
 
-pub(crate) fn log_stdio_and_wait(mut cmd: ::std::process::Command) -> Result<()>
+pub(crate) fn log_stdio_and_wait(
+    mut cmd: ::std::process::Command,
+    stdin: Option<String>,
+) -> Result<()>
 {Ok({
     use ::std::process::Stdio;
     use ::std::io::{BufRead, BufReader};
+
+    if stdin.is_some() {
+        cmd.stdin(Stdio::piped());
+    }
 
     debug!("$ {:?}", cmd);
 
@@ -599,6 +627,10 @@ pub(crate) fn log_stdio_and_wait(mut cmd: ::std::process::Command) -> Result<()>
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;
+
+    if let Some(text) = stdin {
+        child.stdin.take().unwrap().write_all(text.as_bytes())?;
+    }
 
     let stdout_worker = {
         let f = BufReader::new(child.stdout.take().unwrap());

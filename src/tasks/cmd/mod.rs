@@ -639,7 +639,6 @@ pub fn get_eigensystem_info<L: Ord + Clone>(
                     .iter()
                     .find(|&&(idx, _)| idx == [0, 0, 0])
                     .unwrap().1
-                * ket.sqnorm() // unfold_phonon renormalizes, so reintroduce this layer's weight
             }).collect()
         });
 
