@@ -46,6 +46,7 @@ rsp2-util-macros    = "src/util/macros"
 rsp2-tempdir        = "src/util/tempdir"
 rsp2-linalg         = "src/math/linalg"
 rsp2-fs-util        = "src/util/fs"
+rsp2-clap = "src/util/clap"
 #!!INSERTION POINT FOR NEW CRATES!!#
 
 #--------------------------------------------

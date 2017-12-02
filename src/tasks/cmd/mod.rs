@@ -1060,6 +1060,30 @@ pub fn get_energy_surface(
     }
 })}
 
+//=================================================================
+
+pub fn run_save_bands_after_the_fact(
+    settings: &Settings,
+    dir: &AsPath,
+) -> Result<()>
+{Ok({
+    use ::rsp2_structure_io::poscar;
+
+    let lmp = make_lammps_builder(&settings.threading);
+
+    {
+        // dumb/lazy solution to ensuring all output files go in the dir
+        let cwd_guard = push_dir(dir.as_path())?;
+
+        let original = poscar::load(open("./final.vasp")?)?;
+        let phonopy = phonopy_builder_from_settings(&settings.phonons, &original);
+        do_diagonalize(
+            &lmp, &phonopy, &original,
+            Some(SAVE_BANDS_DIR.as_ref()),
+            &[Q_GAMMA, Q_K],
+        )?;
+    }
+})}
 
 //=================================================================
 

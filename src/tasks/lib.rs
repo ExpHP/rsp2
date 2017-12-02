@@ -53,6 +53,7 @@ pub mod relax_with_eigenvectors {
 pub use ::cmd::run_symmetry_test;
 pub use ::cmd::get_energy_surface;
 pub use ::cmd::make_force_sets;
+pub use ::cmd::run_save_bands_after_the_fact;
 
 pub use ::math::bands::unfold_phonon;
 

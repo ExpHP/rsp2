@@ -1,0 +1,328 @@
+#!/usr/bin/env python3
+
+import numpy as np
+
+# Observations from using this:
+#
+#  1. v_sim renormalizes individual eigenvectors automatically,
+#     so deleting atoms from the file has the risk of creating misleading looking
+#     eigenvectors when all of the displayed atoms would normally have ~0 motion.
+#
+#  2. The recoloring is still useful.  You'll need to tweak the colors in the v_sim
+#     interface since too many of the elements have the same default color of white.
+#
+#     You can disable rendering for certain elements in order to more accurately
+#     achieve what this script was trying to do. (this will hide the elements while
+#     keeping stationary atoms stationary)
+
+# 9 arbitrarily chosen elements that hopefully all have fairly distinct
+# colors in v_sim.  Not that I've checked...
+COLOR_BY_NUMBER = [None, 'C', 'B', 'N', 'F', 'O', 'Ne', 'Li', 'Be', 'Na']
+
+THZ_TO_WAVENUMBER = 33.35641
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "FILE",
+        help='v_sim ascii output from phonopy')
+
+    parser.add_argument(
+        '--colors', type=str, default='12',
+        help='periodic sequence of colors to use'
+        ' (string of digits starting from 1, 0 to delete)')
+
+    parser.add_argument(
+        '--thz-to-wave', action='store_true',
+        help='convert THz to wavenumbers')
+
+    parser.add_argument(
+        '--limit', metavar='N', type=int,
+        help='limit to first N atoms in each layer')
+
+    parser.add_argument(
+        '--split-layers', metavar='Z', type=float,
+        help='generate files for each layer by splitting at z=Z.')
+
+    parser.add_argument(
+        '--reorder-hack', metavar='N', type=int,
+        help='assume that images of the same atom are grouped together,'
+        ' and that there are N unique atoms.  Rearrange them to destroy the'
+        ' groups before applying the coloring scheme, ideally so that all images'
+        ' of the same atom get the same color.')
+
+    args = parser.parse_args()
+
+    vsim = VSim.from_file(args.FILE)
+
+    basename = delete_back('.ascii', args.FILE)
+
+    if args.reorder_hack is not None:
+        vsim = distribute_groups(vsim, args.reorder_hack)
+
+    if args.thz_to_wave:
+        vsim = convert_to_wavenumbers(vsim)
+    vsim = colorize(vsim, [COLOR_BY_NUMBER[int(c)] for c in args.colors])
+
+    vsim.write_file(f'{basename}-recolor.ascii')
+
+    if args.split_layers is None:
+        return
+
+    for (layer_num, pred) in enumerate([
+        lambda z: z < args.split_layers,
+        lambda z: z > args.split_layers,
+    ]):
+
+        def wrap_pred(item):
+            # R.I.P. destructuring lambda syntax
+            (_x, _y, z), _sym = item
+            return pred(z)
+
+        layer = vsim.filter(wrap_pred)
+        if args.limit is not None:
+            layer = layer.select(list(range(args.limit)))
+
+        vsim.write_file(f'{basename}-layer-{layer_num + 1}.ascii')
+
+#      Renumber atoms like  AAAABBBBCCCC
+#  into an order more like  ABCABCABCABC
+def distribute_groups(vsim, ngroups):
+    indices = np.arange(len(vsim.atoms.data))
+    indices = indices.reshape((ngroups, -1))
+    indices = list(indices.T.flat)
+    return vsim.select(indices)
+
+def convert_to_wavenumbers(vsim):
+    vsim = clone(vsim)
+
+    for m in vsim.metas.metas:
+        m.frequency *= THZ_TO_WAVENUMBER
+
+    return vsim
+
+def colorize(vsim, color_sequence):
+    vsim = clone(vsim)
+
+    # repeat to desired length
+    colors = color_sequence * (len(vsim.atoms.data) // len(color_sequence) + 1)
+    colors = colors[:len(vsim.atoms.data)]
+
+    # delete atoms of color None
+    vsim = vsim.select([i for (i, x) in enumerate(colors) if x is not None])
+    colors = [x for x in colors if x is not None]
+
+    # set other colors
+    vsim.atoms.data = [(q, new_color) for ((q, _), new_color) in zip(vsim.atoms.data, colors)]
+    return vsim
+
+# a vaguely reliable "deep copy" for lazy people
+def clone(x):
+    import pickle
+    return pickle.loads(pickle.dumps(x))
+
+#----------------------------------------------------------
+
+# reusable serialization/deserialization code
+
+# Example file:
+#
+# # Phonopy generated file for v_sim 3.6
+#     8.719747373   -4.359873686    7.551522739
+#     0.000000000    0.000000000   13.399996665
+#     0.000000000    0.000000000    4.999899642  C
+#    -0.670748123    2.323558819    5.000181962  C
+#    -1.341508549    4.647085643    4.999918985  C
+#    -2.012238661    6.970628244    5.000181962  C
+# #metaData: qpt=[0.333333;0.333333;0.000000;1.985766 \
+# #; 0.000029; 0.000000; 0.000000; -0.000000; -0.000007; -0.000000 \
+# #; 0.000020; 0.000006; -0.004916; -0.000010; 0.000005; 0.012603 \
+# #; 0.000012; 0.000015; 0.028597; -0.000011; -0.000006; 0.017812 \
+# #; 0.000012; 0.000001; 0.041538; -0.000015; -0.000006; -0.020086 \
+# # ]
+# #metaData: qpt=[0.333333;0.333333;0.000000;1.985766 \
+# #; 0.000029; 0.000000; 0.000000; -0.000000; -0.000007; -0.000000 \
+# #; 0.000020; 0.000006; -0.004916; -0.000010; 0.000005; 0.012603 \
+# #; 0.000012; 0.000015; 0.028597; -0.000011; -0.000006; 0.017812 \
+# #; 0.000012; 0.000001; 0.041538; -0.000015; -0.000006; -0.020086 \
+# # ]
+
+class VSim:
+    def __init__(self, header_lines, atoms, metas):
+        self.header_lines = header_lines
+        self.atoms = atoms
+        self.metas = metas
+
+    # deserialize from lines ('\n' included)
+    @classmethod
+    def parse(cls, lines):
+        # No idea what the format spec is so let's be careful
+        assert lines[0][0] == '#'
+        assert len(lines[1].split()) == 3
+        assert len(lines[2].split()) == 3
+        header, lines = lines[:3], lines[3:]
+
+        for i, line in enumerate(lines):
+            if line[0] == '#':
+                break
+        else:
+            i = len(lines)
+
+        atom_lines, meta_lines = lines[:i], lines[i:]
+        atoms = Atoms.parse(atom_lines)
+        metas = Metas.parse(meta_lines)
+
+        return cls(header, atoms, metas)
+
+    # serialize to lines ('\n' included)
+    def lines(self):
+        lines = []
+        lines += self.header_lines
+        lines += self.atoms.lines()
+        lines += self.metas.lines()
+        return lines
+
+    @classmethod
+    def from_file(cls, path):
+        with open(path) as f:
+            lines = list(f)
+        return cls.parse(lines)
+
+    def write_file(self, path):
+        lines = self.lines()
+        with open(path, 'w') as f:
+            f.writelines(lines)
+
+    def select(self, indices):
+        indices = list(indices)
+        return type(self)(
+            self.header_lines,
+            self.atoms.select(indices),
+            self.metas.select(indices),
+        )
+
+    def filter(self, predicate):
+        indices = [i for (i, dat) in enumerate(self.atoms.data) if predicate(dat)]
+        return self.select(indices)
+
+class Atoms:
+    def __init__(self, data):
+        # tuples of ((x, y, z), symbolstr)
+        self.data = list(data)
+
+    @classmethod
+    def parse(cls, lines):
+        data = []
+        for line in lines:
+            line = line.strip()
+            x, y, z, sym = line.split()
+            data.append(((float(x), float(y), float(z)), sym))
+        return cls(data)
+
+    def lines(self):
+        for ((x, y, z), sym) in self.data:
+            yield f' {x} {y} {z} {sym}\n'
+
+    def select(self, indices):
+        return Atoms(self.data[i] for i in indices)
+
+class Metas:
+    def __init__(self, metas):
+        self.metas = list(metas)
+
+    @classmethod
+    def parse(cls, lines):
+        # delete trailing newlines
+        lines = [line.strip() for line in lines]
+
+        # everything is dumped into what appears to be
+        # some big comment block. strip leading #.
+        lines = [delete_front('#', line) for line in lines]
+
+        # Within this comment block, some form of line continuation
+        # syntax appears to be used. Join them.
+        lines = '\n'.join(lines).replace('\\\n', '').split('\n')
+
+        # Each line now should contain one metadata block. Parse it.
+        metas = [QptMeta.parse(s) for s in lines]
+        return cls(metas)
+
+    def lines(self):
+        lines = [meta.string() + '\n' for meta in self.metas]
+        lines = ['#' + s for s in lines]
+        return lines
+
+    def select(self, indices):
+        indices = list(indices)
+        return Metas(m.select(indices) for m in self.metas)
+
+class QptMeta:
+    def __init__(self, qpt, freq, ev):
+        self.q = tuple(qpt)
+        self.frequency = freq
+        self.eigenvector = np.array(ev, dtype=complex)
+        assert len(self.q) == 3 and all(isinstance(x, float) for x in self.q)
+        assert isinstance(self.frequency, float)
+        assert self.eigenvector.ndim == 2 and self.eigenvector.shape[1] == 3
+
+    # deserialize
+    @classmethod
+    def parse(cls, s):
+        s = delete_front('metaData: qpt=[', s)
+        s = s.strip()
+        s = delete_back(']', s)
+
+        numbers = [float(word.strip()) for word in s.split(';')]
+
+        qpoint, numbers = [numbers[:3], numbers[3:]]
+        frequency = numbers.pop(0)
+
+        numbers = np.array(numbers).reshape(-1, 3, 2)
+        real = numbers[:, :, 0]
+        imag = numbers[:, :, 1]
+
+        return QptMeta(qpoint, frequency, real + 1j * imag)
+
+    # serialize
+    def string(self):
+        numbers = []
+        numbers += list(self.q)
+        numbers += [self.frequency]
+
+        # ev[complex][atom][3d]
+        ev = np.array([self.eigenvector.real, self.eigenvector.imag])
+        assert ev.ndim == 3 and ev.shape[0] == 2 and ev.shape[2] == 3
+        # ev[atom][complex][3d]
+        ev = ev.swapaxes(0, 1)
+        numbers += list(ev.flat)
+
+        s = '; '.join(str(float(x)) for x in numbers) # float() because numpy
+        s = f'metaData: qpt=[{s}]'
+        return s
+
+    def select(self, indices):
+        return type(self)(
+            self.q,
+            self.frequency,
+            self.eigenvector[list(indices)],
+        )
+
+def delete_front(prefix, s):
+    assert s.startswith(prefix), f"{repr(s)} does not start with {repr(prefix)}"
+    return s[len(prefix):]
+
+def delete_back(suffix, s):
+    assert s.endswith(suffix), f"{repr(s)} does not end with {repr(suffix)}"
+    return s[:-len(suffix)]
+
+def die(*args, **kw):
+    import sys
+    print(*args, **kw, file=sys.stderr)
+    sys.exit(1)
+
+#----------------------------------------------------------
+
+if __name__ == '__main__':
+    main()
