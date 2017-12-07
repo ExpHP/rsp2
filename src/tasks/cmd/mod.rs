@@ -2,17 +2,17 @@
 
 pub(crate) mod integrate_2d;
 
-use ::errors::{Result, ok};
-use ::config::Settings;
+use ::errors::{Error, ErrorKind, Result, ok};
+use ::config::{Settings, NormalizationMode};
 use ::util::push_dir;
 use ::ui::logging::setup_global_logger;
 use ::traits::AsPath;
-use ::phonopy::{DirWithBands, DirWithDisps};
+use ::phonopy::{DirWithBands, DirWithDisps, DirWithForces};
 
 use ::types::{Ket3, Basis3};
 
 use ::rsp2_structure::consts::CARBON;
-use ::rsp2_slice_math::{v, V, vdot};
+use ::rsp2_slice_math::{v, V, vdot, vnorm};
 
 use ::slice_of_array::prelude::*;
 use ::rsp2_structure::supercell::{self, SupercellToken};
@@ -992,7 +992,21 @@ pub fn get_energy_surface(
         let cwd_guard = push_dir(outdir)?;
         setup_global_logger(Some(&"rsp2.log"))?;
 
-        let bands_dir = DirWithBands::from_existing(input)?;
+        // support either a force dir or a bands dir as input
+        let bands_dir = match DirWithBands::from_existing(&input) {
+            // accept a bands dir
+            Ok(dir) => dir.map_dir(|p| p.to_owned()).boxed(),
+            // try computing gamma bands from a force dir
+            Err(Error(ErrorKind::MissingFile(..), _)) => {
+                DirWithForces::from_existing(&input)?
+                    .build_bands()
+                    .eigenvectors(true)
+                    .compute(&[Q_GAMMA])?
+                    .boxed()
+            },
+            Err(e) => return Err(e),
+        };
+
         let structure = bands_dir.structure()?;
         let (evals, evecs) = read_eigensystem(&bands_dir, &Q_GAMMA)?;
 
@@ -1029,6 +1043,11 @@ pub fn get_energy_surface(
             (i, j)
         };
 
+        let get_real_ev = |i: usize| {
+            let ev = evecs.0[i].as_real_checked();
+            settings.normalization.normalize(ev)
+        };
+
         let (xmin, xmax) = tup2(settings.xlim);
         let (ymin, ymax) = tup2(settings.ylim);
         let (w, h) = tup2(settings.dim);
@@ -1038,14 +1057,12 @@ pub fn get_energy_surface(
             ::cmd::integrate_2d::integrate_two_eigenvectors(
                 (w, h),
                 &structure.to_carts(),
-                (-xmin..xmax, -ymin..ymax),
-                (
-                    evecs.0[plot_ev_indices.0].as_real_checked(),
-                    evecs.0[plot_ev_indices.1].as_real_checked(),
-                ),
+                (xmin..xmax, ymin..ymax),
+                (&get_real_ev(plot_ev_indices.0), &get_real_ev(plot_ev_indices.1)),
                 {
                     let mut i = 0;
                     move |pos| {ok({
+                        // println!("{:?}", pos.flat().iter().sum::<f64>());
                         i += 1;
                         eprint!("\rdatapoint {:>6} of {}", i, w * h);
                         lmp.set_carts(&pos)?;
@@ -1059,6 +1076,41 @@ pub fn get_energy_surface(
         cwd_guard.pop()?;
     }
 })}
+
+impl NormalizationMode {
+    fn norm(&self, ev: &[[f64; 3]]) -> f64
+    {
+        let atom_rs = || ev.iter().map(|v| vnorm(v)).collect::<Vec<_>>();
+
+        match *self {
+            NormalizationMode::CoordNorm => vnorm(ev.flat()),
+            NormalizationMode::AtomMean => {
+                let rs = atom_rs();
+                rs.iter().sum::<f64>() / (rs.len() as f64)
+            },
+            NormalizationMode::AtomRms => {
+                let rs = atom_rs();
+                vnorm(&rs) / (rs.len() as f64).sqrt()
+            },
+            NormalizationMode::AtomMax => {
+                let rs = atom_rs();
+                rs.iter().cloned()
+                    .max_by(|a, b| a.partial_cmp(b).expect("NaN?!")).expect("zero-dim ev?!")
+            },
+        }
+    }
+
+    fn normalize(&self, ev: &[[f64; 3]]) -> Vec<[f64; 3]>
+    {
+        let norm = self.norm(ev);
+
+        let mut ev = ev.to_vec();
+        for x in ev.flat_mut() {
+            *x /= norm;
+        }
+        ev
+    }
+}
 
 //=================================================================
 

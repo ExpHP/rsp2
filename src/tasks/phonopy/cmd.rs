@@ -460,11 +460,11 @@ impl<'p, P: AsPath, Q: AsPath> BandsBuilder<'p, P, Q> {
             //        limitation that the force dir cannot be the band dir.
             //       Not sure whether that's a reasonable use case or not...
             rm_rf(dir.join("FORCE_SETS"))?;
-            hard_link(src.join("FORCE_SETS"), dir.join("FORCE_SETS"))?;
+            copy_or_link(src.join("FORCE_SETS"), dir.join("FORCE_SETS"))?;
 
             if dir.join(fc_filename).exists() {
                 rm_rf(dir.join(fc_filename))?;
-                hard_link(src.join(fc_filename), dir.join(fc_filename))?;
+                copy_or_link(src.join(fc_filename), dir.join(fc_filename))?;
             }
 
             QPositions(q_points.into()).save(dir.join("q-positions.json"))?;
@@ -687,6 +687,19 @@ pub fn cache_link<P: AsRef<Path>, Q: AsRef<Path>>(src: P, dest: Q) -> Result<()>
 
             // assume the error was due to being on a different filesystem.
             // (Even if not, we will probably just get the same error)
+            copy(src, dest)?;
+        }))
+}
+
+// Like `cache_link` except it fails if the destination exists.
+pub fn copy_or_link<P: AsRef<Path>, Q: AsRef<Path>>(src: P, dest: Q) -> Result<()>
+{
+    let (src, dest) = (src.as_ref(), dest.as_ref());
+    hard_link(src, dest)
+        .map(|_| ())
+        .or_else(|_| Ok({
+            // assume that, if the error was due to anything other than cross-device linking,
+            // then we'll get the same error again when we try to copy.
             copy(src, dest)?;
         }))
 }

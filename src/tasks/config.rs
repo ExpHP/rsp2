@@ -47,6 +47,8 @@ pub struct EnergyPlotSettings {
     pub ylim: [f64; 2],
     pub dim: [usize; 2],
     pub ev_indices: EnergyPlotEvIndices,
+    /// Defines scale of xlim/ylim.
+    pub normalization: NormalizationMode,
     //pub phonons: Phonons,
 }
 
@@ -115,6 +117,29 @@ impl SupercellSpec {
 pub enum Threading {
     Lammps,
     Rayon,
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum NormalizationMode {
+    /// Normalize the 2-norm of the 3N-component vector.
+    CoordNorm,
+
+    // These are anticipated but YAGNI for now.
+    //    /// Normalize rms of the 3N-component vector to 1.
+    //    CoordRms,
+    //    /// Normalize mean of the 3N-component vector to 1.
+    //    CoordMean,
+    //    /// Normalize max value of the 3N-component vector to 1.
+    //    CoordMax,
+
+    /// Normalize rms atomic displacement distance to 1.
+    AtomRms,
+    /// Normalize mean atomic displacement distance to 1.
+    AtomMean,
+    /// Normalize max atomic displacement distance to 1.
+    AtomMax,
 }
 
 impl Default for Threading {

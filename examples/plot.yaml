@@ -1,4 +1,9 @@
-threading: lammps
+threading: rayon
+xlim: [-1e-4, 1e-4]
+ylim: [-1e-4, 1e-4]
+normalization: coord-norm
+ev-indices: shear
+dim: [20, 20]
 phonons:
   supercell: {target: [35, 35, 1]}
   symmetry-tolerance: 1e-2

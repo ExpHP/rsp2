@@ -1,6 +1,8 @@
 
 pub type Point = (usize, usize);
 use ::std::ops::Range;
+use ::std::hash::Hash;
+use ::std::collections::HashSet;
 
 use ::slice_of_array::prelude::*;
 use ::rsp2_slice_math::{v, V, vdot};
@@ -21,11 +23,14 @@ where
     integrate_grid_random(
         dims,
         |(x, y)| {Ok::<_,E>({
+//            println!("XY {:?} {:?}", xs[x], ys[y]);
             let V(pos) = v(init_pos.flat())
                 + xs[x] * v(eigenvecs.0.flat())
                 + ys[y] * v(eigenvecs.1.flat());
 
             let pos = pos.to_vec();
+//            println!("IP {:?}", init_pos.flat().iter().sum::<f64>());
+//            println!("PP {:?}", pos.iter().sum::<f64>());
             let grad = compute_grad(pos.nest())?.flat().to_vec();
             (pos, grad)
         })},
@@ -39,65 +44,99 @@ where
     )
 }
 
-// randomly choose starting point and ancestors of each point,
-// with the expectation that this will reduce some forms of bias.
+#[derive(Debug, Clone)]
+struct Tree<V> {
+    /// Which node is the root?
+    root: V,
+    /// Tree edges `(source, target)`. Every node except the root will appear exactly once as the
+    /// `target`, and it will always appear as a `target` before it ever appears as a `source`.
+    edges: Vec<(V, V)>,
+}
+
+fn random_tree<V, Vs, F>(
+    vertices: Vs,
+    mut out_edges: F,
+) -> Tree<V>
+    where
+        V: Clone + Hash + Eq,
+        Vs: IntoIterator<Item=V>,
+        F: FnMut(V) -> Vec<V>,
+{
+    use ::rand::Rng;
+
+    let mut rng = ::rand::thread_rng();
+
+    // Begin at a random node
+    let vertices: Vec<_> = vertices.into_iter().collect();
+    let root = rng.choose(&vertices).expect("no vertices!?").clone();
+
+    let mut out_edges = |v: V| out_edges(v.clone()).into_iter().map(move |t| (v.clone(), t));
+
+    let mut edge_queue: Vec<_> = out_edges(root.clone()).collect();
+    let mut edges = vec![];
+    let mut done: HashSet<V> = vec![root.clone()].into_iter().collect();
+
+    'outer:
+        loop {
+        // Follow a random out edge to a new point.
+        rng.shuffle(&mut edge_queue[..]);
+
+        'skip:
+            while let Some((from, to)) = edge_queue.pop() {
+            if done.contains(&to) {
+                continue 'skip;
+            }
+
+            edges.push((from, to.clone()));
+            edge_queue.extend(out_edges(to.clone()));
+            done.insert(to);
+
+            continue 'outer;
+        }
+        break;
+    }
+    assert!(vertices.into_iter().collect::<HashSet<_>>() == done,
+               "mismatch between given vertices and those found through out_edges");
+
+    Tree { root, edges }
+}
+
 pub fn integrate_grid_random<M, E, F, G>(
     (n_x, n_y): (usize, usize),
     mut compute_meta: F,
     mut integrate: G,
 ) -> Result<Vec<f64>, E>
-where
-    F: FnMut(Point) -> Result<M, E>,
-    G: FnMut((Point, &M), (Point, &M)) -> Result<f64, E>,
+    where
+        F: FnMut(Point) -> Result<M, E>,
+        G: FnMut((Point, &M), (Point, &M)) -> Result<f64, E>,
 {Ok({
-    use ::rand::Rng;
-
-    let mut rng = ::rand::thread_rng();
-
-    let index = |(x, y)| (y * n_x + x);
+    let vertices = (0..n_x).flat_map(|x| (0..n_y).map(move |y| (x, y)));
     let out_edges = |(x, y)| {
         let mut out = vec![];
-        if 0 < x { out.push(((x, y), (x - 1, y))); }
-        if 0 < y { out.push(((x, y), (x, y - 1))); }
-        if x + 1 < n_x { out.push(((x, y), (x + 1, y))); }
-        if y + 1 < n_y { out.push(((x, y), (x, y + 1))); }
+        if 0 < x { out.push((x - 1, y)); }
+        if 0 < y { out.push((x, y - 1)); }
+        if x + 1 < n_x { out.push((x + 1, y)); }
+        if y + 1 < n_y { out.push((x, y + 1)); }
         out
     };
 
+    // randomly choose starting point and ancestors of each point,
+    // with the expectation that this will reduce some forms of bias.
+    let Tree { root, edges } = random_tree(vertices, out_edges);
+
+    let index = |(x, y)| (y * n_x + x);
     let mut metas: Vec<_> = (0..n_x * n_y).map(|_| None).collect(); // no Clone
     let mut values = vec![0./0.; n_x * n_y];
-    let mut edge_queue = vec![];
 
-    {
-        // Randomly choose zero point.
-        let x = rng.gen_range(0, n_x);
-        let y = rng.gen_range(0, n_y);
-        metas[index((x, y))] = Some(compute_meta((x, y))?);
-        values[index((x, y))] = 0.0;
-        edge_queue.extend(out_edges((x, y)))
-    }
+    metas[index(root)] = Some(compute_meta(root)?);
+    values[index(root)] = 0.0;
 
-    'outer:
-    loop {
-        // Follow a random out edge to a new point.
-        rng.shuffle(&mut edge_queue[..]);
-
-        'skip:
-        while let Some((from, to)) = edge_queue.pop() {
-            if metas[index(to)].is_some() {
-                continue 'skip;
-            }
-
-            metas[index(to)] = Some(compute_meta(to)?);
-            values[index(to)] = values[index(from)] + integrate(
-                (from, metas[index(from)].as_ref().unwrap()),
-                (to, metas[index(to)].as_ref().unwrap()),
-            )?;
-            edge_queue.extend(out_edges(to));
-
-            continue 'outer;
-        }
-        break;
+    for (from, to) in edges {
+        metas[index(to)] = Some(compute_meta(to)?);
+        values[index(to)] = values[index(from)] + integrate(
+            (from, metas[index(from)].as_ref().unwrap()),
+            (to, metas[index(to)].as_ref().unwrap()),
+        )?;
     }
     values
 })}
