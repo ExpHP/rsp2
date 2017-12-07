@@ -15,7 +15,8 @@ pub fn integrate_two_eigenvectors<E, F>(
     mut compute_grad: F,
 ) -> Result<Vec<f64>, E>
 where
-    F: FnMut(&[[f64; 3]]) -> Result<Vec<[f64; 3]>, E>,
+    F: Fn(&[[f64; 3]]) -> Result<Vec<[f64; 3]>, E> + Sync,
+    E: Send,
 {
     let xs = linspace(ranges.0, dims.0);
     let ys = linspace(ranges.1, dims.1);
@@ -107,10 +108,13 @@ pub fn integrate_grid_random<M, E, F, G>(
     mut integrate: G,
 ) -> Result<Vec<f64>, E>
     where
-        F: FnMut(Point) -> Result<M, E>,
+        F: Fn(Point) -> Result<M, E> + Sync,
+        M: Send, E: Send,
         G: FnMut((Point, &M), (Point, &M)) -> Result<f64, E>,
 {Ok({
-    let vertices = (0..n_x).flat_map(|x| (0..n_y).map(move |y| (x, y)));
+    use ::rayon::prelude::*;
+
+    let vertices = (0..n_x).flat_map(|x| (0..n_y).map(move |y| (x, y))).collect::<Vec<_>>();
     let out_edges = |(x, y)| {
         let mut out = vec![];
         if 0 < x { out.push((x - 1, y)); }
@@ -122,20 +126,20 @@ pub fn integrate_grid_random<M, E, F, G>(
 
     // randomly choose starting point and ancestors of each point,
     // with the expectation that this will reduce some forms of bias.
-    let Tree { root, edges } = random_tree(vertices, out_edges);
+    let Tree { root, edges } = random_tree(vertices.clone(), out_edges);
 
     let index = |(x, y)| (y * n_x + x);
-    let mut metas: Vec<_> = (0..n_x * n_y).map(|_| None).collect(); // no Clone
-    let mut values = vec![0./0.; n_x * n_y];
+    let metas = vertices.par_iter()
+        .map(|&v| compute_meta(v))
+        .collect::<Result<Vec<_>, E>>()?;
 
-    metas[index(root)] = Some(compute_meta(root)?);
+    let mut values = vec![0./0.; n_x * n_y];
     values[index(root)] = 0.0;
 
     for (from, to) in edges {
-        metas[index(to)] = Some(compute_meta(to)?);
         values[index(to)] = values[index(from)] + integrate(
-            (from, metas[index(from)].as_ref().unwrap()),
-            (to, metas[index(to)].as_ref().unwrap()),
+            (from, &metas[index(from)]),
+            (to, &metas[index(to)]),
         )?;
     }
     values

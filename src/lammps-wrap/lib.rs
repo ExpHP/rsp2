@@ -8,6 +8,7 @@ extern crate rsp2_structure;
 extern crate lammps_sys;
 #[macro_use] extern crate log;
 #[macro_use] extern crate error_chain;
+#[macro_use] extern crate lazy_static;
 extern crate chrono;
 
 error_chain! {
@@ -40,6 +41,7 @@ pub type StdResult<T, E> = ::std::result::Result<T, E>;
 
 use ::std::os::raw::{c_void, c_char, c_int, c_double};
 use ::std::ffi::CString;
+use ::std::sync::Mutex;
 use ::std::path::{Path, PathBuf};
 use ::slice_of_array::prelude::*;
 use ::rsp2_structure::{CoordStructure, Lattice};
@@ -134,8 +136,21 @@ struct LammpsOwner {
     argv: CArgv,
 }
 
+lazy_static! {
+    /// HACK to work around the segfaults that appear to result from
+    /// lammps being instantiated from multiple threads at the same time.
+    ///
+    /// This mutex is grabbed during the creation and destruction.
+    ///
+    /// NOTE: This is a leaf in the lock hierarchy (we never attempt to
+    ///  grab other locks while holding this lock).
+    static ref INSTANTIATION_LOCK: Mutex<()> = Default::default();
+}
+
 impl Drop for LammpsOwner {
     fn drop(&mut self) {
+        let _guard = INSTANTIATION_LOCK.lock();
+
         // NOTE: not lammps_free!
         unsafe { ::lammps_sys::lammps_close(self.ptr); }
     }
@@ -146,12 +161,18 @@ impl LammpsOwner {
     {Ok({
         let mut argv = CArgv::from_strs(argv)?;
         let mut ptr: *mut c_void = ::std::ptr::null_mut();
-        unsafe {
-            ::lammps_sys::lammps_open_no_mpi(
-                argv.len() as c_int,
-                argv.as_argv_ptr(),
-                &mut ptr,
-            );
+
+        {
+            // this will not deadlock because we never attempt to
+            // acquire other locks while we hold this lock.
+            let _guard = INSTANTIATION_LOCK.lock();
+            unsafe {
+                ::lammps_sys::lammps_open_no_mpi(
+                    argv.len() as c_int,
+                    argv.as_argv_ptr(),
+                    &mut ptr,
+                );
+            }
         }
 
         let ptr = unsafe {

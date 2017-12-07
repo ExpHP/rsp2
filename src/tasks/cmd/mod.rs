@@ -984,7 +984,6 @@ pub fn get_energy_surface(
 ) -> Result<()>
 {ok({
     let input = canonicalize(input)?;
-    let lmp = make_lammps_builder(&settings.threading);
 
     create_dir(&outdir)?;
     {
@@ -1052,19 +1051,23 @@ pub fn get_energy_surface(
         let (ymin, ymax) = tup2(settings.ylim);
         let (w, h) = tup2(settings.dim);
         let data = {
-            let mut lmp = lmp.initialize_carbon(uncarbon(&structure))?;
-
             ::cmd::integrate_2d::integrate_two_eigenvectors(
                 (w, h),
                 &structure.to_carts(),
                 (xmin..xmax, ymin..ymax),
                 (&get_real_ev(plot_ev_indices.0), &get_real_ev(plot_ev_indices.1)),
                 {
-                    let mut i = 0;
+                    use ::std::sync::atomic::{AtomicUsize, Ordering};
+                    let counter = AtomicUsize::new(0);
+
                     move |pos| {ok({
+                        let i = counter.fetch_add(1, Ordering::SeqCst);
                         // println!("{:?}", pos.flat().iter().sum::<f64>());
-                        i += 1;
+
                         eprint!("\rdatapoint {:>6} of {}", i, w * h);
+                        let mut lmp =
+                            make_lammps_builder(&settings.threading)
+                            .initialize_carbon(uncarbon(&structure))?;
                         lmp.set_carts(&pos)?;
                         lmp.compute_grad()?
                     })}
