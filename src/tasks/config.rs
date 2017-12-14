@@ -12,10 +12,14 @@ pub struct Settings {
     pub threading: Threading,
     pub potential: Potential,
     pub scale_ranges: ScaleRanges,
-    pub layers: Option<u32>, // Number of layers, when known in advance
+    // Number of layers, when known in advance
+    pub layers: Option<u32>,
     pub cg: Acgsd,
     pub phonons: Phonons,
     pub ev_chase: EigenvectorChase,
+    // Relaxation stops after all EVs are positive this many times
+    #[serde(default = "self::defaults::settings::min_positive_iters")]
+    pub min_positive_iters: u32,
     pub layer_gamma_threshold: f64,
 }
 
@@ -25,6 +29,8 @@ pub struct Settings {
 pub struct ScaleRanges {
     pub parameter: ScaleRange,
     pub layer_sep: ScaleRange,
+    #[serde(default="self::defaults::scale_ranges::warn")]
+    pub warn: Option<f64>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -50,6 +56,7 @@ pub struct EnergyPlotSettings {
     /// Defines scale of xlim/ylim.
     pub normalization: NormalizationMode,
     //pub phonons: Phonons,
+    pub lj: LennardJones,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -68,6 +75,17 @@ pub struct Potential {
     // Purpose is to help eliminate boundary effects or something?
     // I forget.  Might not be necessary
     pub supercell: SupercellSpec,
+    pub lj: LennardJones,
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub struct LennardJones {
+    /// Cutoff radius (x3.4A)
+    pub sigma: f64,
+    /// Scale hack
+    pub strength: f64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -144,4 +162,14 @@ pub enum NormalizationMode {
 
 impl Default for Threading {
     fn default() -> Self { Threading::Lammps }
+}
+
+mod defaults {
+    pub(crate) mod settings {
+        pub(crate) fn min_positive_iters() -> u32 { 3 }
+    }
+
+    pub(crate) mod scale_ranges {
+        pub(crate) fn warn() -> Option<f64> { Some(0.01) }
+    }
 }

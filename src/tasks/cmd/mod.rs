@@ -47,7 +47,7 @@ pub fn run_relax_with_eigenvectors(
 {ok({
     use ::rsp2_structure_io::poscar;
 
-    let lmp = make_lammps_builder(&settings.threading);
+    let lmp = make_lammps_builder(&settings.threading, &settings.potential.lj);
     let input = canonicalize(input.as_ref())?;
 
     create_dir(&outdir)?;
@@ -161,7 +161,7 @@ pub fn run_relax_with_eigenvectors(
 
             if bad_evs.is_empty() {
                 all_ok_count += 1;
-                if all_ok_count >= 3 {
+                if all_ok_count >= settings.min_positive_iters {
                     break (structure, einfos, bands_dir);
                 }
             }
@@ -175,12 +175,13 @@ pub fn run_relax_with_eigenvectors(
 
         write_eigen_info_for_machines(&einfos, create("eigenvalues.final")?)?;
 
-        let (k_evals, k_evecs) = read_eigensystem(&bands_dir, &Q_K)?;
-        let kinfos = get_k_eigensystem_info(
-            &k_evals, &k_evecs, &layers[..], &structure, Some(&layer_sc_mats),
-        );
+        // let (k_evals, k_evecs) = read_eigensystem(&bands_dir, &Q_K)?;
+        // let kinfos = get_k_eigensystem_info(
+        //     &k_evals, &k_evecs, &layers[..], &structure, Some(&layer_sc_mats),
+        // );
 
-        write_summary_file(settings, &lmp, &einfos, &kinfos)?;
+        // write_summary_file(settings, &lmp, &einfos, &kinfos)?;
+        write_summary_file(settings, &lmp, &einfos, None)?;
 
         cwd_guard.pop()?;
     }
@@ -371,8 +372,10 @@ fn warn_on_improvable_lattice_params(
     };
 
     if shrink_value.min(enlarge_value) < center_value {
-        warn!("Better value found at nearby lattice parameter: {:?}",
-            (shrink_value, center_value, enlarge_value));
+        warn!("Better value found at nearby lattice parameter:");
+        warn!(" Smaller: {}", shrink_value);
+        warn!(" Current: {}", center_value);
+        warn!("  Larger: {}", enlarge_value);
     }
 })}
 
@@ -450,7 +453,7 @@ fn write_summary_file(
     settings: &Settings,
     lmp: &LammpsBuilder,
     ginfos: &[GammaInfo],
-    kinfos: &[KInfo],
+    kinfos: Option<&[KInfo]>,
 ) -> Result<()>
 {Ok({
     use self::summary::{Modes, GammaModes, KModes, Summary, EnergyPerAtom};
@@ -468,13 +471,15 @@ fn write_summary_file(
     });
     let gamma_modes = GammaModes { acoustic, shear, layer_breathing, layer_gammas };
 
-    let layer_ks = kinfos.iter().next().unwrap().layer_k_probs.as_ref().map(|_| {  // all this to check if they're present
-        kinfos.iter().enumerate()
-            .filter(|&(_,x)| x.layer_k_probs.as_ref().unwrap()[0] > settings.layer_gamma_threshold)
-            .map(|(i,x)| (i, x.frequency()))
-            .collect()
+    let k_modes = kinfos.map(|kinfos| {
+        let layer_ks = kinfos.iter().next().unwrap().layer_k_probs.as_ref().map(|_| {  // all this to check if they're present
+            kinfos.iter().enumerate()
+                .filter(|&(_,x)| x.layer_k_probs.as_ref().unwrap()[0] > settings.layer_gamma_threshold)
+                .map(|(i,x)| (i, x.frequency()))
+                .collect()
+        });
+        KModes { layer_ks }
     });
-    let k_modes = KModes { layer_ks };
 
     let modes = Modes {
         gamma: gamma_modes,
@@ -571,6 +576,7 @@ pub fn optimize_layer_parameters(
     let ScaleRanges {
         parameter: ScaleRange { guess: parameter_guess, range: parameter_range },
         layer_sep: ScaleRange { guess: layer_sep_guess, range: layer_sep_range },
+        warn: warn_threshold,
     } = *settings;
 
     let n_seps = builder.layer_seps().len();
@@ -623,6 +629,18 @@ pub fn optimize_layer_parameters(
                     setter(a);
                     get_value().map(Value)
                 })??; // ?!??!!!?
+
+            if let Some(thresh) = warn_threshold {
+                // use signed differences so that all values outside violate the threshold
+                let lo = range.0.min(range.1);
+                let hi = range.0.max(range.1);
+                if (best - range.0).min(range.1 - best) / (range.1 - range.0) < thresh {
+                    warn!("Relaxed value of '{}' is suspiciously close to limits!", name);
+                    warn!("  lo: {:e}", lo);
+                    warn!(" val: {:e}", best);
+                    warn!("  hi: {:e}", hi);
+                }
+            }
 
             info!("Optimized {}: {} (from {:?})", name, best, range);
             setter(best);
@@ -850,7 +868,7 @@ mod summary {
     #[serde(rename_all="kebab-case")]
     pub struct Modes {
         pub gamma: GammaModes,
-        pub k: KModes,
+        pub k: Option<KModes>,
     }
 
     #[derive(Serialize, Deserialize)]
@@ -887,11 +905,19 @@ fn uncarbon(structure: &ElementStructure) -> CoordStructure
     structure.map_metadata_to(|_| ())
 }
 
-fn make_lammps_builder(threading: &::config::Threading) -> LammpsBuilder
+fn make_lammps_builder(
+    threading: &::config::Threading,
+    lj: &::config::LennardJones,
+) -> LammpsBuilder
 {
     let mut lmp = LammpsBuilder::new();
-    lmp.append_log("lammps.log");
-    lmp.threaded(*threading == ::config::Threading::Lammps);
+    lmp
+        .append_log("lammps.log")
+        .threaded(*threading == ::config::Threading::Lammps)
+        .lj_strength(lj.strength)
+        .lj_sigma(lj.sigma)
+        ;
+
     lmp
 }
 
@@ -1066,7 +1092,7 @@ pub fn get_energy_surface(
 
                         eprint!("\rdatapoint {:>6} of {}", i, w * h);
                         let mut lmp =
-                            make_lammps_builder(&settings.threading)
+                            make_lammps_builder(&settings.threading, &settings.lj)
                             .initialize_carbon(uncarbon(&structure))?;
                         lmp.set_carts(&pos)?;
                         lmp.compute_grad()?
@@ -1124,7 +1150,7 @@ pub fn run_save_bands_after_the_fact(
 {Ok({
     use ::rsp2_structure_io::poscar;
 
-    let lmp = make_lammps_builder(&settings.threading);
+    let lmp = make_lammps_builder(&settings.threading, &settings.potential.lj);
 
     {
         // dumb/lazy solution to ensuring all output files go in the dir
@@ -1151,6 +1177,9 @@ pub fn make_force_sets(
     use ::rsp2_structure_io::poscar;
     use ::std::io::BufReader;
 
+    let lj = panic!("TODO: lj in make_force_sets");
+    unreachable!();
+
     let mut phonopy = PhonopyBuilder::new();
     if let Some(conf) = conf {
         phonopy = phonopy.conf_from_file(BufReader::new(open(conf)?))?;
@@ -1158,7 +1187,7 @@ pub fn make_force_sets(
 
     let structure = poscar::load(open(poscar)?)?;
 
-    let lmp = make_lammps_builder(&::config::Threading::Lammps);
+    let lmp = make_lammps_builder(&::config::Threading::Lammps, &lj);
 
     create_dir(&outdir)?;
     {

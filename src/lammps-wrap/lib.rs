@@ -586,6 +586,8 @@ impl<T> MaybeDirty<T> {
 #[derive(Debug, Clone)]
 pub struct Builder {
     append_log: Option<PathBuf>,
+    lj_strength: f64,
+    lj_sigma: f64,
     threaded: bool,
 }
 
@@ -599,6 +601,8 @@ impl Builder {
     { Builder {
         append_log: None,
         threaded: true,
+        lj_strength: 1.0,
+        lj_sigma: 3.0,
     }}
 
     pub fn append_log<P: AsRef<Path>>(&mut self, path: P) -> &mut Self
@@ -606,6 +610,12 @@ impl Builder {
 
     pub fn threaded(&mut self, value: bool) -> &mut Self
     { self.threaded = value; self }
+
+    pub fn lj_strength(&mut self, value: f64) -> &mut Self
+    { self.lj_strength = value; self }
+
+    pub fn lj_sigma(&mut self, value: f64) -> &mut Self
+    { self.lj_sigma = value; self }
 
     pub fn initialize_carbon(&self, structure: CoordStructure) -> Result<Lammps>
     { Lammps::from_builder_carbon(self, structure) }
@@ -687,14 +697,15 @@ impl Lammps {
         }
 
         {
-            let sigma_scale = 3.0; // LJ Range (x3.4 A)
+            let sigma_scale = builder.lj_sigma; // LJ Range (x3.4 A)
             let lj = 1;            // on/off
             let torsion = 0;       // on/off
+            let lj_scale = builder.lj_strength;
             //let lj_scale = 1.0;
             me.ptr.borrow_mut().commands(&[
                 &format!("pair_style airebo/omp {} {} {}", sigma_scale, lj, torsion),
                 &format!("pair_coeff * * CH.airebo H C"), // read potential info
-                //&format!("pair_coeff * * lj/scale {}", lj_scale), // set lj potential scaling factor (HACK)
+                &format!("pair_coeff * * lj/scale {}", lj_scale), // set lj potential scaling factor (HACK)
             ])?;
         }
 
