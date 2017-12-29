@@ -55,6 +55,7 @@ impl Context {
         //
         // From the diagonal elements of this equality, we see that the 'kth' row
         // of (σ L) must be equal in length to the kth row of L.
+        // (but of course; a rotation must not change a vector's length!)
         //
         // This gives us an *extremely* small search space for valid rotations.
         let lengths = self.lattice.reduced().lengths();
@@ -77,7 +78,7 @@ impl Context {
         for (&frac_0, &cart_0) in izip!(&choices_frac[0], &choices_cart[0]) {
             for (&frac_1, &cart_1) in izip!(&choices_frac[1], &choices_cart[1]) {
                 // we *could* filter on the cross product of
-                // these rows 0 and 1, but meh.
+                // these rows (if it's 0, so is the determinant), but meh.
                 for (&frac_2, &cart_2) in izip!(&choices_frac[2], &choices_cart[2]) {
 
                     // Most of these matrices won't be unimodular; filter them out.
@@ -148,7 +149,6 @@ lazy_static!{
 
     static ref LATTICE_POINTS_FLOAT: Vec<[f64; 3]> = floatify(&LATTICE_POINTS_INT);
 }
-
 
 fn floatify(vs: &[[i32; 3]]) -> Vec<[f64; 3]>
 {
