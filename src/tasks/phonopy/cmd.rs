@@ -383,69 +383,40 @@ impl<P: AsPath> DirWithForces<P> {
     /// Compute bands in a temp directory.
     ///
     /// Returns an object used to configure the computation.
-    pub fn build_bands(&self) -> BandsBuilder<P, TempDir>
-    { BandsBuilder::init(self, MaybeDeferred::Deferred(make_temp_bands_dir)) }
-
-    // FIXME experimental API, but `relocate` may be safer/saner
-    /// Compute bands, running in a given directory.
-    ///
-    /// Returns an object used to configure the computation.
-    ///
-    /// Beware! Existing files in the given directory may be overwritten.
-    pub fn build_bands_in_dir<Q: AsPath>(&self, dir: Q) -> BandsBuilder<P, Q>
-    { BandsBuilder::init(self, MaybeDeferred::Value(dir)) }
+    pub fn build_bands(&self) -> BandsBuilder<P>
+    { BandsBuilder::init(self) }
 }
-
-#[derive(Debug, Clone)]
-enum MaybeDeferred<T> {
-    Value(T),
-    Deferred(fn() -> Result<T>),
-}
-
-fn make_temp_bands_dir() -> Result<TempDir>
-{Ok({
-    let tmp = TempDir::new("rsp2")?;
-    trace!("Bands directory: {}", tmp.path().display());
-    tmp
-})}
 
 declare_poison_pair! {
-    generics: {'p, P, Q}
+    generics: {'p, P}
     where: {
         P: AsPath + 'p,
-        Q: AsPath,
     }
     type: {
         #[derive(Debug, Clone)]
         pub struct BandsBuilder<...>(Option<_>);
         struct BandsBuilderImpl<...> {
             dir_with_forces: &'p DirWithForces<P>,
-            directory: MaybeDeferred<Q>,
             eigenvectors: bool,
         }
     }
     poisoned: { panic!("This BandsBuilder has already been used!"); }
 }
 
-impl<'p, P: AsPath, Q: AsPath> BandsBuilder<'p, P, Q> {
-    // Q must be provided in advance to dodge issues with type inference
-    fn init(dir_with_forces: &'p DirWithForces<P>, directory: MaybeDeferred<Q>) -> Self
+impl<'p, P: AsPath> BandsBuilder<'p, P> {
+    fn init(dir_with_forces: &'p DirWithForces<P>) -> Self
     { BandsBuilder(Some(BandsBuilderImpl {
         dir_with_forces,
-        directory: directory,
         eigenvectors: false,
     })) }
 
     pub fn eigenvectors(&mut self, b: bool) -> &mut Self
     { self.inner_mut().eigenvectors = b; self }
 
-    pub fn compute(&mut self, q_points: &[[f64; 3]]) -> Result<DirWithBands<Q>>
+    pub fn compute(&mut self, q_points: &[[f64; 3]]) -> Result<DirWithBands<TempDir>>
     {Ok({
         let me = self.into_inner();
-        let dir = match me.directory {
-            MaybeDeferred::Value(d) => d,
-            MaybeDeferred::Deferred(f) => f()?,
-        };
+        let dir = TempDir::new("rsp2")?;
 
         let fc_filename = "force_constants.hdf5";
         {
@@ -455,15 +426,9 @@ impl<'p, P: AsPath, Q: AsPath> BandsBuilder<'p, P, Q> {
             copy(src.join("POSCAR"), dir.join("POSCAR"))?;
             copy(src.join("disp.conf"), dir.join("disp.conf"))?;
             copy(src.join("disp.args"), dir.join("disp.args"))?;
-
-            // NOTE: this rm_rf carries with it the limitation
-            //        limitation that the force dir cannot be the band dir.
-            //       Not sure whether that's a reasonable use case or not...
-            rm_rf(dir.join("FORCE_SETS"))?;
             copy_or_link(src.join("FORCE_SETS"), dir.join("FORCE_SETS"))?;
 
-            if dir.join(fc_filename).exists() {
-                rm_rf(dir.join(fc_filename))?;
+            if src.join(fc_filename).exists() {
                 copy_or_link(src.join(fc_filename), dir.join(fc_filename))?;
             }
 
