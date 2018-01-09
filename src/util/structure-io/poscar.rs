@@ -5,181 +5,90 @@ use ::std::io::prelude::*;
 use ::itertools::Itertools;
 
 use ::rsp2_structure::{Element, ElementStructure};
-use ::rsp2_structure::{CoordStructure, Lattice, Coords};
+use ::rsp2_structure::{Lattice, Coords};
 
-// HACK this is closer to how the function was originally written,
-//      with support for atom types, but I don't want to have to worry
-//      about atom types right now.
+use ::vasp_poscar::{Poscar, RawPoscar, ScaleLine};
+
 /// Writes a POSCAR to an open file.
 pub fn dump<W>(
-    w: W,
+    mut w: W,
     title: &str,
     structure: &ElementStructure,
 ) -> Result<()>
-where W: Write,
-{
-    _dump(
-        w,
-        title,
-        &structure.map_metadata_to(|_| ()),
-        structure.metadata(),
-    )
-}
-
-/// Writes a POSCAR to an open file.
-fn _dump<W>(
-    mut w: W,
-    title: &str,
-    structure: &CoordStructure,
-    types: &[Element],
-) -> Result<()>
 where W: Write
 {
-    assert!(!title.contains("\n"));
-    assert!(!title.contains("\r"));
-    assert_eq!(structure.num_atoms(), types.len());
-
-    writeln!(&mut w, "{}", title)?;
-    writeln!(&mut w, " 1.0")?;
-    for row in structure.lattice().matrix().iter() {
-        writeln!(&mut w, "  {} {} {}", row[0], row[1], row[2])?;
+    // FIXME replace with e.g. Poscar::set_site_symbols when available
+    let mut group_counts = vec![];
+    let mut group_symbols = vec![];
+    for (key, group) in &structure.metadata().iter().group_by(|typ| *typ) {
+        group_counts.push(group.count());
+        group_symbols.push(key.symbol().into());
     }
 
-    {
-        let mut pairs = Vec::with_capacity(structure.num_atoms());
-        for (key, group) in &types.iter().group_by(|typ| *typ) {
-            pairs.push((key, group.count()));
-        }
-        for &(typ, _) in &pairs { write!(&mut w, " {}", typ.symbol())?; }
-        writeln!(&mut w)?;
-        for &(_, count) in &pairs { write!(&mut w, " {}", count)?; }
-        writeln!(&mut w)?;
-    }
+    // FIXME use Poscar builder when available
+    let poscar = RawPoscar {
+        comment: title.into(),
+        scale: ScaleLine::Factor(1.0),
+        lattice_vectors: *structure.lattice().matrix(),
+        positions: ::vasp_poscar::Coords::Cart(structure.to_carts()),
+        group_symbols: Some(group_symbols),
+        group_counts,
+        velocities: None,
+        dynamics: None,
+    }.validate().map_err(|e| {
+        let e: ::vasp_poscar::failure::Error = e.into(); e.compat()
+    })?;
 
-    // writeln!(&mut w, "Selective Dynamics")?;
-    writeln!(&mut w, "Cartesian")?;
-
-    for (c, typ) in structure.to_carts().iter().zip(types) {
-        writeln!(&mut w, " {} {} {} {}", c[0], c[1], c[2], typ.symbol())?;
-    }
+    write!(w, "{}", poscar)?;
 
     Ok(())
 }
 
+// FIXME This probably shouldn't exist.
 /// Reads a POSCAR from an open file.
-pub fn load<R>(f: R) -> Result<ElementStructure>
+///
+/// This forcibly reads to EOF because it must construct a BufReader.
+pub fn load<R>(mut f: R) -> Result<ElementStructure>
 where R: Read,
 {
-    // this is to get us up and running and nothing else
-    let f = ::std::io::BufReader::new(f);
-    let mut lines = f.lines();
+    let out = load_txt(::std::io::BufReader::new(&mut f))?;
+    f.read_to_end(&mut vec![])?;
+    Ok(out)
+}
 
-    // title
-    {
-        let _ = lines.next().unwrap()?;
-    }
+/// Reads a POSCAR from an open file.
+pub fn load_txt<R>(f: R) -> Result<ElementStructure>
+where R: BufRead,
+{
+    use vasp_poscar::failure::ResultExt;
+    let poscar = Poscar::from_reader(f).compat()?;
+    let RawPoscar {
+        scale, lattice_vectors, positions,
+        group_symbols, group_counts,
+        ..
+    } = poscar.raw();
 
-    // scale
-    {
-        let s = lines.next().unwrap()?;
-        assert_eq!(s.trim().parse::<f64>().unwrap(), 1f64);
-    }
-
-    // lattice
-    let lattice = &mut [[0f64; 3]; 3];
-    {
-        let lattice_lines = lines.by_ref().take(3).collect::<Vec<_>>();
-        for (i, line) in lattice_lines.into_iter().enumerate() {
-            let words = line?.trim().split_whitespace().map(String::from).collect::<Vec<_>>();
-            assert_eq!(words.len(), 3);
-            for (k, word) in words.into_iter().enumerate() {
-                lattice[i][k] = word.parse().unwrap();
-            }
-        }
-    }
-    let lattice = Lattice::new(lattice);
-
-    let (elements, n);
-    {
-        let line = lines.next().unwrap()?;
-        let line = line.trim();
-        let has_atom_types = match line.chars().next().unwrap(){
-            '0'...'9' => false,
-            _ => true,
-        };
-
-        // atom types
-        let (kinds, kounts_line) = {
-            if has_atom_types {
-                let kinds = line
-                    .trim().split_whitespace()
-                    .map(|sym| match Element::from_symbol(sym) {
-                        None => bail!("Unknown element: '{}'", sym),
-                        Some(e) => Ok(e),
-                    })
-                    .collect::<Result<Vec<Element>>>()?;
-                (Some(kinds), lines.next().unwrap()?)
-            } else { (None, line.to_string()) }
-        };
-
-        // atom counts
-        let kounts = {
-            kounts_line
-                .trim().split_whitespace()
-                .map(|s| Ok(s.parse()?))
-                .collect::<Result<Vec<usize>>>()?
-        };
-
-        // FIXME will need to change return type to not necessarily contain Elements
-        let kinds = kinds.unwrap_or_else(||
-            vec![::rsp2_structure::consts::CARBON; kounts.len()]);
-
-        n = kounts.iter().sum();
-        elements = izip!(kounts, kinds)
-            .flat_map(|(c, sym)| ::std::iter::repeat(sym).take(c))
-            .collect::<Vec<_>>();
+    // FIXME use Poscar::scaled_lattice_vectors() once it is available
+    // FIXME use Poscar::scaled_cart_positions() once it is available
+    assert_eq!(scale, ScaleLine::Factor(1.0));
+    let lattice = Lattice::new(&lattice_vectors);
+    let coords = match positions {
+        ::vasp_poscar::Coords::Cart(p) => Coords::Carts(p),
+        ::vasp_poscar::Coords::Frac(p) => Coords::Fracs(p),
     };
 
+    let group_symbols = group_symbols.expect("symbols are required").into_iter()
+        .map(|sym| match Element::from_symbol(&sym) {
+            None => bail!("Unknown element: '{}'", sym),
+            Some(e) => Ok(e),
+        })
+        .collect::<Result<Vec<Element>>>()?;
 
-    // selective dynamics and/or cartesian
-    let direct = {
-        let s = lines.next().unwrap()?;
-        match s.chars().next().unwrap() {
-            'c' | 'C' | 'k' | 'K' => false,
-            'd' | 'D' => true,
-            _ => panic!(),
-        }
-    };
+    // FIXME use Poscar method once available
+    let elements = izip!(group_counts, group_symbols)
+        .flat_map(|(c, sym)| ::std::iter::repeat(sym).take(c))
+        .collect::<Vec<_>>();
 
-    // coords
-    let coords = {
-        let coord_lines = lines.by_ref().take(n).collect::<Vec<_>>();
-        assert_eq!(coord_lines.len(), n);
-
-        let mut coords: Vec<[f64; 3]> = Vec::with_capacity(n);
-        for line in coord_lines {
-            let words = line?.trim().split_whitespace().map(String::from).collect::<Vec<_>>();
-            // maybe atomic symbol
-            assert!([3,4].contains(&words.len()));
-
-            let mut row = [0f64; 3];
-            for k in 0..3 {
-                row[k] = words[k].parse().unwrap();
-            }
-            coords.push(row);
-        }
-        coords
-    };
-
-    let coords = match direct {
-        true  => Coords::Fracs(coords),
-        false => Coords::Carts(coords),
-    };
-
-    // we don't support any other junk
-    while let Some(line) = lines.next() {
-        assert_eq!(line?.trim(), "");
-    }
-
+    assert_eq!(elements.len(), coords.len());
     Ok(ElementStructure::new(lattice, coords, elements))
 }
