@@ -315,7 +315,7 @@ mod tests {
         let lattice = Lattice::new(random_vec(3).as_array());
 
         let output = super::of_rotation_impl(
-            &lattice, &original, &permuted, 1e-5,
+            &lattice, &[(); 20], &original, &permuted, 1e-5,
         ).unwrap();
 
         assert_eq!(output, perm);
