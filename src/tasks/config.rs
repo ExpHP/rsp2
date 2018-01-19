@@ -21,6 +21,8 @@ pub struct Settings {
     #[serde(default = "self::defaults::settings::min_positive_iters")]
     pub min_positive_iters: u32,
     pub layer_gamma_threshold: f64,
+    #[serde(default)]
+    pub ev_loop: EvLoop,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -160,8 +162,22 @@ pub enum NormalizationMode {
     AtomMax,
 }
 
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub struct EvLoop {
+    #[serde(default = "self::defaults::ev_loop::max_iter")]
+    pub max_iter: u32,
+    #[serde(default = "self::defaults::ev_loop::fail")]
+    pub fail: bool,
+}
+
 impl Default for Threading {
     fn default() -> Self { Threading::Lammps }
+}
+
+impl Default for EvLoop {
+    fn default() -> Self { from_json!({}) }
 }
 
 mod defaults {
@@ -171,5 +187,10 @@ mod defaults {
 
     pub(crate) mod scale_ranges {
         pub(crate) fn warn() -> Option<f64> { Some(0.01) }
+    }
+
+    pub(crate) mod ev_loop {
+        pub(crate) fn max_iter() -> u32 { 15 }
+        pub(crate) fn fail() -> bool { true }
     }
 }

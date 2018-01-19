@@ -91,13 +91,6 @@ pub fn run_relax_with_eigenvectors(
         let mut all_ok_count = 0;
         let (structure, einfos, bands_dir) = loop { // NOTE: we use break with value
 
-            // Hard failure on too many iterations
-            // (we don't want to continue with negative non-acoustics)
-            if iteration > 15 {
-                error!("Too many relaxation steps!");
-                bail!("Too many relaxation steps!");
-            }
-
             let structure = do_relax(&lmp, &settings.cg, &settings.potential, from_structure)?;
             let bands_dir = do_diagonalize(
                 &lmp, &phonopy, &structure,
@@ -166,8 +159,24 @@ pub fn run_relax_with_eigenvectors(
                 }
             }
 
+            // -----------------------------
+            // mutate loop variables
+
+            iteration += 1; // REMINDER: not a for loop due to 'break value;'
+
+            // Possibly fail after too many iterations
+            // (we don't want to continue with negative non-acoustics)
+            if iteration > settings.ev_loop.max_iter {
+                if settings.ev_loop.fail {
+                    error!("Too many relaxation steps!");
+                    bail!("Too many relaxation steps!");
+                } else {
+                    warn!("Too many relaxation steps!");
+                    break (structure, einfos, bands_dir);
+                }
+            }
+
             from_structure = structure;
-            iteration += 1; // NOTE: not a for loop due to 'break value;'
         }; // (structure, einfos, final_bands_dir)
 
 
