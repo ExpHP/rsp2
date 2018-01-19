@@ -911,12 +911,10 @@ fn make_lammps_builder(
 ) -> LammpsBuilder
 {
     let mut lmp = LammpsBuilder::new();
-    lmp
-        .append_log("lammps.log")
-        .threaded(*threading == ::config::Threading::Lammps)
-        .lj_strength(lj.strength)
-        .lj_sigma(lj.sigma)
-        ;
+    lmp.append_log("lammps.log");
+    lmp.threaded(*threading == ::config::Threading::Lammps);
+    if let Some(x) = lj.strength { lmp.lj_strength(x); }
+    if let Some(x) = lj.sigma { lmp.lj_sigma(x); }
 
     lmp
 }

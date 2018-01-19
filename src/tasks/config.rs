@@ -83,9 +83,9 @@ pub struct Potential {
 #[serde(rename_all = "kebab-case")]
 pub struct LennardJones {
     /// Cutoff radius (x3.4A)
-    pub sigma: f64,
+    pub sigma: Option<f64>,
     /// Scale hack
-    pub strength: f64,
+    pub strength: Option<f64>,
 }
 
 #[derive(Serialize, Deserialize)]
