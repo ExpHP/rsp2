@@ -316,3 +316,17 @@ impl<M: Send> Sent<M> {
     // TODO: delete this
     pub fn recv(self) -> Structure<M> { self }
 }
+
+#[cfg(test)]
+mod compiletest {
+    use super::*;
+
+    fn assert_send<S: Send>() {}
+    fn assert_sync<S: Sync>() {}
+
+    #[test]
+    fn structure_is_send_and_sync() {
+        assert_send::<CoordStructure>();
+        assert_sync::<CoordStructure>();
+    }
+}

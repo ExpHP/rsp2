@@ -1019,3 +1019,17 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod compiletest {
+    use super::*;
+
+    fn assert_send<S: Send>() {}
+    fn assert_sync<S: Sync>() {}
+
+    #[test]
+    fn builder_is_send_and_sync() {
+        assert_send::<Builder>();
+        assert_sync::<Builder>();
+    }
+}

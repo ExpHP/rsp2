@@ -93,7 +93,7 @@ pub fn run_relax_with_eigenvectors(
 
             let structure = do_relax(&lmp, &settings.cg, &settings.potential, from_structure)?;
             let bands_dir = do_diagonalize(
-                &lmp, &phonopy, &structure,
+                &lmp, &settings.threading, &phonopy, &structure,
                 match cli.save_bands {
                     true => Some(SAVE_BANDS_DIR.as_ref()),
                     false => None,
@@ -219,17 +219,19 @@ fn do_relax(
 
 fn do_diagonalize_at_gamma(
     lmp: &LammpsBuilder,
+    threading: &::config::Threading,
     phonopy: &PhonopyBuilder,
     structure: &ElementStructure,
     save_bands: Option<&Path>,
 ) -> Result<(Vec<f64>, Basis3)>
 {Ok({
-    let dir = do_diagonalize(lmp, phonopy, structure, save_bands, &[Q_GAMMA])?;
+    let dir = do_diagonalize(lmp, threading, phonopy, structure, save_bands, &[Q_GAMMA])?;
     read_eigensystem(&dir, &Q_GAMMA)?
 })}
 
 fn do_diagonalize(
     lmp: &LammpsBuilder,
+    threading: &::config::Threading,
     phonopy: &PhonopyBuilder,
     structure: &ElementStructure,
     save_bands: Option<&Path>,
@@ -237,7 +239,7 @@ fn do_diagonalize(
 ) -> Result<DirWithBands<Box<AsPath>>>
 {ok({
     let disp_dir = phonopy.displacements(&structure)?;
-    let force_sets = do_force_sets_at_disps(&lmp, &disp_dir)?;
+    let force_sets = do_force_sets_at_disps(&lmp, &threading, &disp_dir)?;
 
     let bands_dir = disp_dir
         .make_force_dir(&force_sets)?
@@ -526,24 +528,35 @@ fn phonopy_builder_from_settings<M>(
         .conf("DIAG", ".FALSE.")
 }
 
-fn do_force_sets_at_disps<P: AsPath>(
+fn do_force_sets_at_disps<P: AsPath + Send + Sync>(
     lmp: &LammpsBuilder,
+    threading: &::config::Threading,
     disp_dir: &DirWithDisps<P>,
 ) -> Result<Vec<Vec<[f64; 3]>>>
 {ok({
     use ::std::io::prelude::*;
+    use ::rayon::prelude::*;
 
     trace!("Computing forces at displacements");
 
-    let mut i = 0;
-    let force_sets = disp_dir.displaced_structures()
-        .map(|structure| ok({
-            i += 1;
-            eprint!("\rdisp {} of {}", i, disp_dir.displacements().len());
-            ::std::io::stderr().flush().unwrap();
+    let counter = ::util::AtomicCounter::new();
+    let compute = move |structure| ok({
+        let i = counter.inc();
+        eprint!("\rdisp {} of {}", i + 1, disp_dir.displacements().len());
+        ::std::io::stderr().flush().unwrap();
 
-            lmp.initialize_carbon(structure)?.compute_force()?
-        })).collect::<Result<Vec<_>>>()?;
+        lmp.initialize_carbon(structure)?.compute_force()?
+    });
+
+    let force_sets = match threading {
+        &::config::Threading::Lammps => {
+            disp_dir.displaced_structures().map(compute).collect::<Result<Vec<_>>>()?
+        },
+        &::config::Threading::Rayon => {
+            let structures = disp_dir.displaced_structures().collect::<Vec<_>>();
+            structures.into_par_iter().map(compute).collect::<Result<Vec<_>>>()?
+        },
+    };
     eprintln!();
     force_sets
 })}
@@ -1166,7 +1179,7 @@ pub fn run_save_bands_after_the_fact(
         let original = poscar::load(open("./final.vasp")?)?;
         let phonopy = phonopy_builder_from_settings(&settings.phonons, &original);
         do_diagonalize(
-            &lmp, &phonopy, &original,
+            &lmp, &settings.threading, &phonopy, &original,
             Some(SAVE_BANDS_DIR.as_ref()),
             &[Q_GAMMA, Q_K],
         )?;
@@ -1205,7 +1218,7 @@ pub fn make_force_sets(
         poscar::dump(create("./input.vasp")?, "", &structure)?;
 
         let disp_dir = phonopy.displacements(&structure)?;
-        let force_sets = do_force_sets_at_disps(&lmp, &disp_dir)?;
+        let force_sets = do_force_sets_at_disps(&lmp, &::config::Threading::Rayon, &disp_dir)?;
         disp_dir.make_force_dir_in_dir(&force_sets, ".")?;
 
         cwd_guard.pop()?;

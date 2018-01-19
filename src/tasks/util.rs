@@ -1,6 +1,24 @@
 use ::std::path::{Path, PathBuf};
 use ::std::io::Result as IoResult;
+use ::std::sync::atomic::AtomicUsize;
+use ::std::sync::atomic::Ordering::SeqCst;
+use ::std::sync::Arc;
+use ::std::fmt;
 
+#[derive(Clone, )]
+pub(crate) struct AtomicCounter(Arc<AtomicUsize>);
+
+impl AtomicCounter {
+    pub fn new() -> Self { AtomicCounter(Arc::new(AtomicUsize::new(0))) }
+    pub fn get(&self) -> usize { self.0.load(SeqCst) }
+    pub fn inc(&self) -> usize { self.0.fetch_add(1, SeqCst) }
+}
+
+impl fmt::Display for AtomicCounter {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        <usize as fmt::Display>::fmt(&self.get(), f)
+    }
+}
 
 /// RAII type to temporarily enter a directory.
 ///
