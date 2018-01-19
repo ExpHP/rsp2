@@ -621,6 +621,17 @@ impl Builder {
     { Lammps::from_builder_carbon(self, structure) }
 }
 
+/// Initialize LAMMPS, do nothing of particular value, and exit.
+///
+/// For debugging linker errors.
+pub fn link_test() -> Result<()>
+{Ok({
+    let _ = ::LammpsOwner::new(&["lammps",
+        "-screen", "none",
+        "-log", "none",
+    ])?;
+})}
+
 impl Lammps {
 
     fn from_builder_carbon(builder: &Builder, structure: CoordStructure) -> Result<Lammps>
