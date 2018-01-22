@@ -470,6 +470,8 @@ impl<'p, P: AsPath> BandsBuilder<'p, P> {
                 log_stdio_and_wait(command, None)?;
             }
 
+            panic!();
+
             trace!("Converting bands...");
             {
                 let mut command = Command::new("python3");
