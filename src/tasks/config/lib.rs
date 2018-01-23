@@ -1,8 +1,37 @@
+// Crate where serde_yaml code is monomorphized, which is a huge compile time sink
+
+#[macro_use]
+extern crate serde_derive;
+extern crate serde_yaml;
+#[macro_use]
+extern crate serde_json; // FIXME only used to assist default impls
+extern crate serde;
+
+#[macro_use]
+extern crate rsp2_util_macros; // FIXME only used to assist default impls
+extern crate rsp2_array_utils;
+extern crate rsp2_structure;
+extern crate rsp2_minimize;
 
 use ::rsp2_array_utils::arr_from_fn;
 use ::rsp2_structure::Lattice;
 
 pub use ::rsp2_minimize::acgsd::Settings as Acgsd;
+pub use ::serde_yaml::Error as Error;
+pub type Result<T> = ::std::result::Result<T, Error>;
+
+pub trait YamlRead: for <'de> ::serde::Deserialize<'de> {
+    fn read_from_bytes(bytes: &[u8]) -> Result<Self>;
+}
+
+macro_rules! derive_yaml_read {
+    ($Type:ty) => {
+        impl YamlRead for $Type {
+            fn read_from_bytes(bytes: &[u8]) -> Result<Self>
+            { ::serde_yaml::from_reader(bytes) }
+        }
+    };
+}
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
@@ -24,6 +53,7 @@ pub struct Settings {
     #[serde(default)]
     pub ev_loop: EvLoop,
 }
+derive_yaml_read!{Settings}
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
@@ -64,6 +94,7 @@ pub struct EnergyPlotSettings {
     //pub phonons: Phonons,
     pub lj: LennardJones,
 }
+derive_yaml_read!{EnergyPlotSettings}
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]

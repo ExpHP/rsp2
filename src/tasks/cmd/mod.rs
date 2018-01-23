@@ -1137,7 +1137,12 @@ pub fn get_energy_surface(
     }
 })}
 
-impl NormalizationMode {
+// HACK: These used to be inherent methods but the type was relocated to another crate
+trait NormalizationModeExt {
+    fn norm(&self, ev: &[[f64; 3]]) -> f64;
+    fn normalize(&self, ev: &[[f64; 3]]) -> Vec<[f64; 3]>;
+}
+impl NormalizationModeExt for NormalizationMode {
     fn norm(&self, ev: &[[f64; 3]]) -> f64
     {
         let atom_rs = || ev.iter().map(|v| vnorm(v)).collect::<Vec<_>>();

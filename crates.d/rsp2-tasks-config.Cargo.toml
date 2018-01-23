@@ -1,0 +1,18 @@
+[package]
+name = "rsp2-tasks-config"
+version = "0.1.0"
+authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+!!rsp2-minimize
+!!rsp2-structure
+!!rsp2-array-utils
+!!rsp2-util-macros
+
+!!serde
+!!serde-derive
+!!serde-yaml
+!!serde-json

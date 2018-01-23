@@ -1,7 +1,6 @@
 extern crate rsp2_tasks;
 #[macro_use]
 extern crate rsp2_clap;
-extern crate serde_yaml;
 use ::rsp2_clap::clap;
 
 fn main() {
@@ -24,7 +23,7 @@ fn main() {
     if matches.is_present("force") && ::std::path::Path::new(outdir).exists() {
         ::std::fs::remove_dir_all(outdir).unwrap();
     }
-    let settings = ::serde_yaml::from_reader(::std::fs::File::open(config).unwrap()).unwrap();
+    let settings = ::rsp2_tasks::config::read_yaml(::std::fs::File::open(config).unwrap()).unwrap();
     let args = relax_with_eigenvectors::CliArgs {
         save_bands: matches.is_present("save_bands"),
     };

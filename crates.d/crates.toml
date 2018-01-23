@@ -47,6 +47,7 @@ rsp2-tempdir        = "src/util/tempdir"
 rsp2-linalg         = "src/math/linalg"
 rsp2-fs-util        = "src/util/fs"
 rsp2-clap = "src/util/clap"
+rsp2-tasks-config = "src/tasks/config"
 #!!INSERTION POINT FOR NEW CRATES!!#
 
 #--------------------------------------------

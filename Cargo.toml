@@ -27,6 +27,7 @@ rsp2-tempdir = { path = "src/util/tempdir" }
 rsp2-linalg = { path = "src/math/linalg" }
 rsp2-fs-util = { path = "src/util/fs" }
 rsp2-clap = { path = "src/util/clap" }
+rsp2-tasks-config = { path = "src/tasks/config" }
 
 # Deps of examples/ and tests/.
 # Some of these could be dev-dependencies, however currently

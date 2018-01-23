@@ -2,6 +2,8 @@
 
 #![recursion_limit="256"] // for error chain...
 
+extern crate rsp2_tasks_config;
+
 extern crate rsp2_lammps_wrap;
 extern crate rsp2_minimize;
 extern crate rsp2_structure;
@@ -37,7 +39,6 @@ macro_rules! ichain {
 #[macro_use]
 mod traits;
 mod util;
-mod config;
 mod cmd;
 mod phonopy;
 mod math;
@@ -45,7 +46,7 @@ mod ui;
 mod types;
 pub use traits::alternate;
 
-pub use ::config::Settings;
+pub use ::rsp2_tasks_config::Settings;
 pub mod relax_with_eigenvectors {
     pub use ::cmd::run_relax_with_eigenvectors as run;
     pub use ::cmd::CliArgs;
@@ -143,4 +144,26 @@ impl<T> As3<T> for [T; 3] {
 impl<T> As3<T> for (T, T, T) {
     fn as_3(&self) -> (&T, &T, &T)
     { (&self.0, &self.1, &self.2) }
+}
+
+/// Config-reading functions intended for use by run scripts.
+///
+/// They handle the error type from io and forward to monomorphized
+/// implementations in a separate crate, so that things can be rebuilt
+/// much faster than if the script had used `serde_yaml` on its own.
+pub mod config {
+    use super::Result;
+    use ::std::io::Read;
+    use ::rsp2_tasks_config::YamlRead;
+
+    // HACK reexporting all the config-related types under the same path where
+    //      they originally existed to minimize churn
+    pub use ::rsp2_tasks_config::*;
+
+    pub fn read_yaml<R: Read, T: YamlRead>(mut r: R) -> Result<T>
+    {Ok({
+        let mut buf = vec![];
+        r.read_to_end(&mut buf)?;
+        YamlRead::read_from_bytes(&buf)?
+    })}
 }
