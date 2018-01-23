@@ -1,7 +1,6 @@
 extern crate rsp2_tasks;
 #[macro_use]
 extern crate clap;
-extern crate serde_yaml;
 
 fn main() {
 

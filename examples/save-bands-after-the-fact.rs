@@ -1,7 +1,6 @@
 extern crate rsp2_tasks;
 #[macro_use]
 extern crate rsp2_clap;
-extern crate serde_yaml;
 use ::rsp2_clap::clap;
 
 fn main() {
@@ -16,7 +15,7 @@ fn main() {
         .get_matches();
     let dir = matches.value_of("dir").expect("bug! dir");
     let config = matches.value_of("config").expect("bug! config");
-    let settings = ::serde_yaml::from_reader(::std::fs::File::open(config).unwrap()).unwrap();
+    let settings = ::rsp2_tasks::config::read_yaml(::std::fs::File::open(config).unwrap()).unwrap();
 
     ::rsp2_tasks::run_save_bands_after_the_fact(&settings, &dir).unwrap();
 }
