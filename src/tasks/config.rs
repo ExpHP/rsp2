@@ -37,12 +37,16 @@ pub struct ScaleRanges {
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
-#[serde(rename_all = "kebab-case")]
-pub struct ScaleRange {
-    pub range: (f64, f64),
-    /// A "reasonable value" that might be used while another
-    ///  parameter is optimized.
-    pub guess: Option<f64>,
+#[serde(untagged)]
+pub enum ScaleRange {
+    #[serde(rename_all = "kebab-case")]
+    Range {
+        range: (f64, f64),
+        /// A "reasonable value" that might be used while another
+        ///  parameter is optimized.
+        guess: Option<f64>,
+    },
+    Exact(f64),
 }
 
 #[derive(Serialize, Deserialize)]

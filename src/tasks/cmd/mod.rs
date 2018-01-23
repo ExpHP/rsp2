@@ -594,10 +594,9 @@ pub fn optimize_layer_parameters(
     use ::config::{ScaleRanges, ScaleRange};
     use ::std::cell::RefCell;
 
-    // full destructure so we don't miss anything
     let ScaleRanges {
-        parameter: ScaleRange { guess: parameter_guess, range: parameter_range },
-        layer_sep: ScaleRange { guess: layer_sep_guess, range: layer_sep_range },
+        parameter: ref parameter_spec,
+        layer_sep: ref layer_sep_spec,
         warn: warn_threshold,
     } = *settings;
 
@@ -611,7 +610,7 @@ pub fn optimize_layer_parameters(
         let optimizables = {
             let mut optimizables: Vec<(_, Box<Fn(f64)>)> = vec![];
             optimizables.push((
-                (format!("lattice parameter"), parameter_guess, parameter_range),
+                (format!("lattice parameter"), parameter_spec.clone()),
                 Box::new(|s| {
                     builder.borrow_mut().scale = s;
                 }),
@@ -619,7 +618,7 @@ pub fn optimize_layer_parameters(
 
             for i in 0..n_seps {
                 optimizables.push((
-                    (format!("layer sep {}", i), layer_sep_guess, layer_sep_range),
+                    (format!("layer sep {}", i), layer_sep_spec.clone()),
                     Box::new(move |s| {
                         builder.borrow_mut().layer_seps()[i] = s;
                     }),
@@ -628,50 +627,62 @@ pub fn optimize_layer_parameters(
             optimizables
         };
 
-        // try to start with reasonable defaults ('guess' in config)
-        for &((_, guess, _), ref setter) in &optimizables {
-            if let Some(guess) = guess {
-                setter(guess);
+        // Set reasonable values before initializing LAMMPS
+        //
+        // exact specs: set the value
+        // range specs: start with reasonable defaults ('guess' in config)
+        for &((_, ref spec), ref setter) in &optimizables {
+            match *spec {
+                ScaleRange::Exact(value) |
+                ScaleRange::Range { range: _, guess: Some(value) } => {
+                    setter(value);
+                },
+                ScaleRange::Range { range: _, guess: None } => {},
             }
         }
 
-        //let mut lmp = lmp.initialize_carbon(builder.borrow().assemble())?;
         let get_value = || ok({
             // use ::std::hash::{Hash, Hasher};
             lmp.initialize_carbon(builder.borrow().assemble())?.compute_value()?
         });
 
         // optimize them one-by-one.
-        for &((ref name, _, range), ref setter) in &optimizables {
+        for &((ref name, ref spec), ref setter) in &optimizables {
             trace!("Optimizing {}", name);
 
-            let best = Golden::new()
-                .stop_condition(&from_json!({"interval-size": 1e-7}))
-                .run(range, |a| {
-                    setter(a);
-                    get_value().map(Value)
-                })??; // ?!??!!!?
+            let best = match *spec {
+                ScaleRange::Exact(value) => value,
+                ScaleRange::Range { guess: _, range } => {
+                    let best = Golden::new()
+                        .stop_condition(&from_json!({"interval-size": 1e-7}))
+                        .run(range, |a| {
+                            setter(a);
+                            get_value().map(Value)
+                        })??; // ?!??!!!?
 
-            if let Some(thresh) = warn_threshold {
-                // use signed differences so that all values outside violate the threshold
-                let lo = range.0.min(range.1);
-                let hi = range.0.max(range.1);
-                if (best - range.0).min(range.1 - best) / (range.1 - range.0) < thresh {
-                    warn!("Relaxed value of '{}' is suspiciously close to limits!", name);
-                    warn!("  lo: {:e}", lo);
-                    warn!(" val: {:e}", best);
-                    warn!("  hi: {:e}", hi);
-                }
-            }
+                    if let Some(thresh) = warn_threshold {
+                        // use signed differences so that all values outside violate the threshold
+                        let lo = range.0.min(range.1);
+                        let hi = range.0.max(range.1);
+                        if (best - range.0).min(range.1 - best) / (range.1 - range.0) < thresh {
+                            warn!("Relaxed value of '{}' is suspiciously close to limits!", name);
+                            warn!("  lo: {:e}", lo);
+                            warn!(" val: {:e}", best);
+                            warn!("  hi: {:e}", hi);
+                        }
+                    }
 
-            info!("Optimized {}: {} (from {:?})", name, best, range);
+                    info!("Optimized {}: {} (from {:?})", name, best, range);
+                    best
+                },
+            };
+
             setter(best);
         }
     }
 
     builder.into_inner()
 })}
-
 
 //-----------------------------------
 
