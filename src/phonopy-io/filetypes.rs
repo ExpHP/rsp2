@@ -61,7 +61,11 @@ pub mod disp_yaml {
         structure
     }
 
-    pub fn read<R: Read>(r: R) -> Result<DispYaml>
+    pub fn read<R: Read>(mut r: R) -> Result<DispYaml>
+    { _read(&mut r) }
+
+    // Monomorphic to ensure that all the yaml parsing code is generated inside this crate
+    pub fn _read(r: &mut Read) -> Result<DispYaml>
     {
         use ::rsp2_structure::{Coords, Lattice};
         use self::cereal::{Point, Displacement, DispYaml as RawDispYaml};
@@ -70,17 +74,17 @@ pub mod disp_yaml {
 
         let (carts, meta): (_, Vec<_>) =
             points.into_iter()
-            .map(|Point { symbol, coordinates, mass }|
-                (coordinates, Meta { symbol, mass }))
-            .unzip();
+                .map(|Point { symbol, coordinates, mass }|
+                    (coordinates, Meta { symbol, mass }))
+                .unzip();
 
         let structure = Structure::new(Lattice::new(&lattice), Coords::Fracs(carts), meta);
 
         let displacements =
             displacements.into_iter()
-            // phonopy numbers from 1
-            .map(|Displacement { atom, displacement, .. }| ((atom - 1) as usize, displacement))
-            .collect();
+                // phonopy numbers from 1
+                .map(|Displacement { atom, displacement, .. }| ((atom - 1) as usize, displacement))
+                .collect();
 
         Ok(DispYaml { structure, displacements })
     }
@@ -159,7 +163,11 @@ pub mod symmetry_yaml {
     }
 
     // NOTE: this is currently entirely unvalidated.
-    pub fn read<R: Read>(r: R) -> Result<SymmetryYaml>
+    pub fn read<R: Read>(mut r: R) -> Result<SymmetryYaml>
+    { _read(&mut r) }
+
+    // Monomorphic to ensure that all the yaml parsing code is generated inside this crate
+    pub fn _read(r: &mut Read) -> Result<SymmetryYaml>
     {Ok({ ::serde_yaml::from_reader(r)? })}
 }
 
