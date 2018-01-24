@@ -26,6 +26,7 @@ path = "lib.rs"
 !!rand
 !!log
 !!fern
+!!extension-trait
 !!itertools
 !!ansi-term
 !!rayon

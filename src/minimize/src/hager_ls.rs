@@ -64,18 +64,9 @@ mod defaults {
 }
 
 impl Settings { pub fn new() -> Settings { Default::default() } }
-impl Default for Settings {
-    fn default() -> Settings {
-        Settings {
-            armijo_coeff: 0.1,
-            curvature_coeff: 0.9,
-            value_epsilon: 1e-10,
-            bisection_point: 0.5,
-            min_reduction: 2.0/3.0,
-            expansion_growth_factor: (1.0 + 5f64.sqrt()) / 2.0,
-        }
-    }
-}
+impl Default for Settings { fn default() -> Settings { from_json!({}) } }
+
+#[test] fn test_settings_default() { Settings::default(); }
 
 impl Settings {
     pub fn validate(&self) {

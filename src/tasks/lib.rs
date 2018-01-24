@@ -15,6 +15,7 @@ extern crate rsp2_slice_math;
 extern crate rsp2_tempdir;
 extern crate rsp2_fs_util;
 #[macro_use] extern crate rsp2_util_macros;
+#[macro_use] extern crate extension_trait;
 
 extern crate rayon;
 extern crate rand;
@@ -148,9 +149,9 @@ impl<T> As3<T> for (T, T, T) {
 
 /// Config-reading functions intended for use by run scripts.
 ///
-/// They handle the error type from io and forward to monomorphized
-/// implementations in a separate crate, so that things can be rebuilt
-/// much faster than if the script had used `serde_yaml` on its own.
+/// They forward to monomorphized implementations in a separate crate,
+/// so that things can be rebuilt much faster than if the script had
+/// used `serde_yaml` on its own.
 pub mod config {
     use super::Result;
     use ::std::io::Read;
@@ -160,10 +161,6 @@ pub mod config {
     //      they originally existed to minimize churn
     pub use ::rsp2_tasks_config::*;
 
-    pub fn read_yaml<R: Read, T: YamlRead>(mut r: R) -> Result<T>
-    {Ok({
-        let mut buf = vec![];
-        r.read_to_end(&mut buf)?;
-        YamlRead::read_from_bytes(&buf)?
-    })}
+    pub fn read_yaml<R: Read, T: YamlRead>(r: R) -> Result<T>
+    { Ok(YamlRead::from_reader(r)?) }
 }

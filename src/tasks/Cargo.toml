@@ -31,6 +31,7 @@ rsp2-kets = { version = "0.3.6", git = "https://github.com/ExpHP/rsp2-kets", fea
 rand = "0.3"
 log = "0.3"
 fern = "0.4"
+extension-trait = "0.1.2"
 itertools = "0.7"
 ansi_term = "0.10"
 rayon = "0.8"

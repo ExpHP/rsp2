@@ -3,7 +3,7 @@
 pub(crate) mod integrate_2d;
 
 use ::errors::{Error, ErrorKind, Result, ok};
-use ::config::{Settings, NormalizationMode};
+use ::config::{Settings, NormalizationMode, SupercellSpec};
 use ::util::push_dir;
 use ::ui::logging::setup_global_logger;
 use ::traits::AsPath;
@@ -15,8 +15,9 @@ use ::rsp2_structure::consts::CARBON;
 use ::rsp2_slice_math::{v, V, vdot, vnorm};
 
 use ::slice_of_array::prelude::*;
+use ::rsp2_array_utils::arr_from_fn;
 use ::rsp2_structure::supercell::{self, SupercellToken};
-use ::rsp2_structure::{Coords, CoordStructure, Structure, ElementStructure};
+use ::rsp2_structure::{Lattice, Coords, CoordStructure, Structure, ElementStructure};
 use ::rsp2_structure::{Part, Partition};
 use ::rsp2_structure_gen::Assemble;
 use ::rsp2_lammps_wrap::Lammps;
@@ -1138,42 +1139,56 @@ pub fn get_energy_surface(
 })}
 
 // HACK: These used to be inherent methods but the type was relocated to another crate
-trait NormalizationModeExt {
-    fn norm(&self, ev: &[[f64; 3]]) -> f64;
-    fn normalize(&self, ev: &[[f64; 3]]) -> Vec<[f64; 3]>;
-}
-impl NormalizationModeExt for NormalizationMode {
-    fn norm(&self, ev: &[[f64; 3]]) -> f64
-    {
-        let atom_rs = || ev.iter().map(|v| vnorm(v)).collect::<Vec<_>>();
-
-        match *self {
-            NormalizationMode::CoordNorm => vnorm(ev.flat()),
-            NormalizationMode::AtomMean => {
-                let rs = atom_rs();
-                rs.iter().sum::<f64>() / (rs.len() as f64)
-            },
-            NormalizationMode::AtomRms => {
-                let rs = atom_rs();
-                vnorm(&rs) / (rs.len() as f64).sqrt()
-            },
-            NormalizationMode::AtomMax => {
-                let rs = atom_rs();
-                rs.iter().cloned()
-                    .max_by(|a, b| a.partial_cmp(b).expect("NaN?!")).expect("zero-dim ev?!")
-            },
+extension_trait!{
+    SupercellSpecExt for SupercellSpec {
+        fn dim_for_unitcell(&self, prim: &Lattice) -> [u32; 3] {
+            match *self {
+                SupercellSpec::Dim(d) => d,
+                SupercellSpec::Target(targets) => {
+                    let unit_lengths = prim.lengths();
+                    arr_from_fn(|k| {
+                        (targets[k] / unit_lengths[k]).ceil().max(1.0) as u32
+                    })
+                },
+            }
         }
     }
+}
 
-    fn normalize(&self, ev: &[[f64; 3]]) -> Vec<[f64; 3]>
-    {
-        let norm = self.norm(ev);
+extension_trait! {
+    NormalizationModeExt for NormalizationMode {
+        fn norm(&self, ev: &[[f64; 3]]) -> f64
+        {
+            let atom_rs = || ev.iter().map(|v| vnorm(v)).collect::<Vec<_>>();
 
-        let mut ev = ev.to_vec();
-        for x in ev.flat_mut() {
-            *x /= norm;
+            match *self {
+                NormalizationMode::CoordNorm => vnorm(ev.flat()),
+                NormalizationMode::AtomMean => {
+                    let rs = atom_rs();
+                    rs.iter().sum::<f64>() / (rs.len() as f64)
+                },
+                NormalizationMode::AtomRms => {
+                    let rs = atom_rs();
+                    vnorm(&rs) / (rs.len() as f64).sqrt()
+                },
+                NormalizationMode::AtomMax => {
+                    let rs = atom_rs();
+                    rs.iter().cloned()
+                        .max_by(|a, b| a.partial_cmp(b).expect("NaN?!")).expect("zero-dim ev?!")
+                },
+            }
         }
-        ev
+
+        fn normalize(&self, ev: &[[f64; 3]]) -> Vec<[f64; 3]>
+        {
+            let norm = self.norm(ev);
+
+            let mut ev = ev.to_vec();
+            for x in ev.flat_mut() {
+                *x /= norm;
+            }
+            ev
+        }
     }
 }
 

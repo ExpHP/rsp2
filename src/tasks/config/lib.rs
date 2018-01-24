@@ -1,34 +1,42 @@
 // Crate where serde_yaml code is monomorphized, which is a huge compile time sink
 
+// NOTE: Please make sure to use the YamlRead trait!
+//       DO NOT USE serde_yaml::from_{reader,value,etc.} OUTSIDE THIS CRATE
+//       or else you defeat the entire reason for its existence.
+
+// (NOTE: I can't enforce this through the type system without completely destroying
+//        the ergonomics of these types. Just Ctrl+Shift+F the workspace for "serde_yaml"
+//        if compile times seem suspiciously off...)
+
 #[macro_use]
 extern crate serde_derive;
 extern crate serde_yaml;
-#[macro_use]
-extern crate serde_json; // FIXME only used to assist default impls
+
 extern crate serde;
 
-#[macro_use]
-extern crate rsp2_util_macros; // FIXME only used to assist default impls
-extern crate rsp2_array_utils;
-extern crate rsp2_structure;
 extern crate rsp2_minimize;
 
-use ::rsp2_array_utils::arr_from_fn;
-use ::rsp2_structure::Lattice;
-
+use ::std::io::Read;
 pub use ::rsp2_minimize::acgsd::Settings as Acgsd;
-pub use ::serde_yaml::Error as Error;
-pub type Result<T> = ::std::result::Result<T, Error>;
 
+/// Provides an alternative to serde_yaml::from_reader where all of the
+/// expensive codegen has already been performed in this crate.
 pub trait YamlRead: for <'de> ::serde::Deserialize<'de> {
-    fn read_from_bytes(bytes: &[u8]) -> Result<Self>;
+    fn from_reader<R: Read>(mut r: R) -> Result<Self, ::serde_yaml::Error>
+    { YamlRead::from_dyn_reader(&mut r) }
+
+    fn from_dyn_reader(r: &mut Read) -> Result<Self, ::serde_yaml::Error>;
 }
 
 macro_rules! derive_yaml_read {
     ($Type:ty) => {
         impl YamlRead for $Type {
-            fn read_from_bytes(bytes: &[u8]) -> Result<Self>
-            { ::serde_yaml::from_reader(bytes) }
+            // NOTE: Moving this body into a default fn definition on the trait
+            //       appears to make codegen lazy for some reason (compilation
+            //       of this crate becomes suspiciously quick).
+            //       Hence we generate these identical bodies in a macro.
+            fn from_dyn_reader(r: &mut Read) -> Result<$Type, ::serde_yaml::Error>
+            { ::serde_yaml::from_reader(r) }
         }
     };
 }
@@ -151,21 +159,6 @@ pub enum SupercellSpec {
     Dim([u32; 3]),
 }
 
-impl SupercellSpec {
-    pub fn dim_for_unitcell(&self, prim: &Lattice) -> [u32; 3] {
-        match *self {
-            SupercellSpec::Dim(d) => d,
-            SupercellSpec::Target(targets) => {
-                let unit_lengths = prim.lengths();
-                arr_from_fn(|k| {
-                    (targets[k] / unit_lengths[k]).ceil().max(1.0) as u32
-                })
-            },
-        }
-    }
-}
-
-// FIXME delete
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all="kebab-case")]
@@ -207,12 +200,19 @@ pub struct EvLoop {
     pub fail: bool,
 }
 
+// --------------------------------------------------------
+
 impl Default for Threading {
     fn default() -> Self { Threading::Lammps }
 }
 
 impl Default for EvLoop {
-    fn default() -> Self { from_json!({}) }
+    fn default() -> Self { from_empty_mapping().unwrap() }
+}
+
+fn from_empty_mapping<T: for<'de> ::serde::Deserialize<'de>>() -> ::serde_yaml::Result<T> {
+    use ::serde_yaml::{from_value, Value, Mapping};
+    from_value(Value::Mapping(Mapping::new()))
 }
 
 mod defaults {
