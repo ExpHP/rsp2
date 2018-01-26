@@ -12,3 +12,4 @@ path = "lib.rs"
 !!serde
 !!serde-derive
 !!serde-yaml
+!!serde-json

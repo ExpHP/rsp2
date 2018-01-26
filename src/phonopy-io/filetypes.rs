@@ -180,18 +180,23 @@ pub mod force_sets {
     use ::rsp2_structure::Structure;
 
     /// Write a FORCE_SETS file.
-    pub fn write<M, W, V>(
+    pub fn write<W, Vs>(
         mut w: W,
-        structure: &Structure<M>, // only used for natoms  _/o\_
         displacements: &[(usize, [f64; 3])],
-        force_sets: &[V],
+        force_sets: Vs,
     ) -> Result<()>
     where
         W: Write,
-        V: AsRef<[[f64; 3]]>,
+        Vs: IntoIterator,
+        <Vs as IntoIterator>::IntoIter: ExactSizeIterator,
+        <Vs as IntoIterator>::Item: AsRef<[[f64; 3]]>,
     {
+        let mut force_sets = force_sets.into_iter().peekable();
+
         assert_eq!(force_sets.len(), displacements.len());
-        writeln!(w, "{}", structure.num_atoms())?;
+        let n_atom = force_sets.peek().expect("no displacements!?").as_ref().len();
+
+        writeln!(w, "{}", n_atom)?;
         writeln!(w, "{}", displacements.len())?;
         writeln!(w, "")?;
 
@@ -199,7 +204,7 @@ pub mod force_sets {
             writeln!(w, "{}", atom + 1)?; // NOTE: phonopy indexes atoms from 1
             writeln!(w, "{:e} {:e} {:e}", disp[0], disp[1], disp[2])?;
 
-            assert_eq!(force.as_ref().len(), structure.num_atoms());
+            assert_eq!(force.as_ref().len(), n_atom);
             for row in force.as_ref() {
                 writeln!(w, "{:e} {:e} {:e}", row[0], row[1], row[2])?;
             }
@@ -209,4 +214,75 @@ pub mod force_sets {
         }
         Ok(())
     }
+}
+
+pub mod sparse_sets {
+    use ::Result;
+
+    use ::std::io::prelude::*;
+    use ::rsp2_structure::Structure;
+
+    #[derive(Serialize, Deserialize)]
+    #[derive(Debug, Clone)]
+    #[serde(rename_all = "kebab-case")]
+    pub struct SparseSets {
+        natom: usize,
+        force_sets: Vec<Forces>,
+    }
+
+    #[derive(Serialize, Deserialize)]
+    #[derive(Debug, Clone)]
+    #[serde(rename_all = "kebab-case")]
+    pub struct Forces {
+        atom: usize,
+        displacement: [f64; 3],
+        partners: Vec<usize>,
+        vectors: Vec<[f64; 3]>,
+    }
+
+    /// Write a SPARSE_SETS file.
+    pub fn write<W, Vs>(
+        mut w: W,
+        displacements: &[(usize, [f64; 3])],
+        force_sets: Vs,
+    ) -> Result<()>
+        where
+            W: Write,
+            Vs: IntoIterator,
+            <Vs as IntoIterator>::IntoIter: ExactSizeIterator,
+            <Vs as IntoIterator>::Item: AsRef<[[f64; 3]]>,
+    {
+        let mut force_sets = force_sets.into_iter().peekable();
+        let n_atom = force_sets.peek().expect("no force sets!?").as_ref().len();
+
+        assert_eq!(force_sets.len(), displacements.len());
+        let force_sets =
+            displacements.iter().zip(force_sets)
+                .map(|(&(atom, displacement), force)| {
+                    assert_eq!(force.as_ref().len(), n_atom);
+
+                    // sparsify
+                    let (partners, vectors) =
+                        force.as_ref().iter().cloned().enumerate()
+                            .filter(|&(_, x)| x != [0.0; 3])
+                            .map(|(i, x)| (i + 1, x)) // to 1-based
+                            .unzip();
+
+                    Forces {
+                        atom: atom + 1, // to 1-based
+                        displacement,
+                        partners,
+                        vectors,
+                    }
+                })
+                .collect();
+
+        _write(&mut w, &SparseSets {
+            natom: n_atom,
+            force_sets,
+        })
+    }
+
+    fn _write(w: &mut Write, sparse_sets: &SparseSets) -> Result<()>
+    { Ok(::serde_json::to_writer(w, sparse_sets)?) }
 }

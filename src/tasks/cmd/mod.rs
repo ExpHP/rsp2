@@ -78,8 +78,9 @@ pub fn run_relax_with_eigenvectors(
 
         poscar::dump(create("./initial.vasp")?, "", &original)?;
         let phonopy = phonopy_builder_from_settings(&settings.phonons, &original);
+        let phonopy = phonopy.use_sparse_sets(settings.tweaks.sparse_sets);
 
-        // (we can expect that the layers assignments will not change...)
+        // (we can expect that the layers assignments will not change, so we do this early...)
         trace!("Finding layers");
         let (layers, nlayer) = ::rsp2_structure::assign_layers(&original, &[0, 0, 1], 0.25)?;
         if let Some(expected) = settings.layers {
@@ -1209,6 +1210,7 @@ pub fn run_save_bands_after_the_fact(
 
         let original = poscar::load(open("./final.vasp")?)?;
         let phonopy = phonopy_builder_from_settings(&settings.phonons, &original);
+        let phonopy = phonopy.use_sparse_sets(settings.tweaks.sparse_sets);
         do_diagonalize(
             &lmp, &settings.threading, &phonopy, &original,
             Some(SAVE_BANDS_DIR.as_ref()),

@@ -60,6 +60,8 @@ pub struct Settings {
     pub layer_gamma_threshold: f64,
     #[serde(default)]
     pub ev_loop: EvLoop,
+    #[serde(default)]
+    pub tweaks: Tweaks,
 }
 derive_yaml_read!{Settings}
 
@@ -145,6 +147,14 @@ pub enum EigenvectorChase {
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
+pub struct Tweaks {
+    #[serde(default = "self::defaults::tweaks::sparse_sets")]
+    pub sparse_sets: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case")]
 pub struct Phonons {
     pub symmetry_tolerance: f64,
     pub displacement_distance: f64,
@@ -209,6 +219,12 @@ impl Default for Threading {
 impl Default for EvLoop {
     fn default() -> Self { from_empty_mapping().unwrap() }
 }
+#[test] fn test_ev_loop_default() { let _ = EvLoop::default(); }
+
+impl Default for Tweaks {
+    fn default() -> Self { from_empty_mapping().unwrap() }
+}
+#[test] fn test_tweaks_default() { let _ = Tweaks::default(); }
 
 fn from_empty_mapping<T: for<'de> ::serde::Deserialize<'de>>() -> ::serde_yaml::Result<T> {
     use ::serde_yaml::{from_value, Value, Mapping};
@@ -218,6 +234,10 @@ fn from_empty_mapping<T: for<'de> ::serde::Deserialize<'de>>() -> ::serde_yaml::
 mod defaults {
     pub(crate) mod settings {
         pub(crate) fn min_positive_iters() -> u32 { 3 }
+    }
+
+    pub(crate) mod tweaks {
+        pub(crate) fn sparse_sets() -> bool { false }
     }
 
     pub(crate) mod scale_ranges {
