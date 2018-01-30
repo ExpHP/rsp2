@@ -45,6 +45,22 @@ impl Coords {
     }}
 }
 
+// projections
+impl Coords {
+    pub(crate) fn as_carts_opt(&self) -> Option<&[[f64; 3]]>
+    { match *self {
+        Coords::Carts(ref x) => Some(x),
+        Coords::Fracs(_) => None,
+    }}
+
+    pub(crate) fn as_fracs_opt(&self) -> Option<&[[f64; 3]]>
+    { match *self {
+        Coords::Carts(_) => None,
+        Coords::Fracs(ref x) => Some(x),
+    }}
+}
+
+// conversions
 impl Coords {
     pub fn into_carts(self, lattice: &Lattice) -> Vec<[f64; 3]>
     { match self {

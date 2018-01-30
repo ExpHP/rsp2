@@ -45,26 +45,40 @@ impl<M> Structure<M> {
 
     pub fn num_atoms(&self) -> usize { self.coords.len() }
     pub fn lattice(&self) -> &Lattice { &self.lattice }
+}
 
+impl<M> Structure<M> {
     // FIXME bad idea for stable interface, but good enough for now
     pub fn metadata(&self) -> &[M] { &self.meta }
+
     pub fn map_metadata_into<M2, F>(self, f: F) -> Structure<M2>
-    where F: FnMut(M) -> M2
+    where F: FnMut(M) -> M2,
     {
         let Structure { lattice, coords, meta } = self;
         let meta = meta.into_iter().map(f).collect();
         Structure { lattice, coords, meta }
     }
+
     // This variant can be useful when using the by-value variant
     // would require the user to clone() first, needlessly
     // cloning the entire metadata.
     pub fn map_metadata_to<M2, F>(&self, f: F) -> Structure<M2>
-    where F: FnMut(&M) -> M2
+    where F: FnMut(&M) -> M2,
     {
         let lattice = self.lattice.clone();
         let coords = self.coords.clone();
         let meta = self.meta.iter().map(f).collect();
         Structure { lattice, coords, meta }
+    }
+
+    /// Store new metadata in-place.
+    pub fn set_metadata<Ms>(&mut self, meta: Ms)
+    where Ms: IntoIterator<Item=M>,
+    {
+        let old = self.meta.len();
+        self.meta.clear();
+        self.meta.extend(meta.into_iter());
+        assert_eq!(self.meta.len(), old);
     }
 
     /// Use the given vector as the metadata.
@@ -75,7 +89,9 @@ impl<M> Structure<M> {
         let Structure { lattice, coords, .. } = self;
         Structure { lattice, coords, meta }
     }
+}
 
+impl<M> Structure<M> {
     /// Move all data out by value.
     ///
     /// This operation is not guaranteed to be zero-cost.
@@ -130,6 +146,13 @@ impl<M> Structure<M> {
     //       (`&mut [_]` works because can insert the data)
     pub fn to_carts(&self) -> Vec<[f64; 3]> { self.coords.to_carts(&self.lattice) }
     pub fn to_fracs(&self) -> Vec<[f64; 3]> { self.coords.to_fracs(&self.lattice) }
+
+    // `ensure_carts` should be called before this to guarantee that the value is `Some(_)`.
+    //
+    // Yes, having to unwrap the option sucks, but it's unavoidable; this is simply the
+    // only way you will ever be able to borrow positions from a borrowed &Structure.
+    pub fn as_carts_cached(&self) -> Option<&[[f64; 3]]> { self.coords.as_carts_opt() }
+    pub fn as_fracs_cached(&self) -> Option<&[[f64; 3]]> { self.coords.as_fracs_opt() }
 
     pub fn carts_mut(&mut self) -> &mut [[f64; 3]] {
         self.ensure_only_carts(); // 'only' because user modifications will invalidate fracs

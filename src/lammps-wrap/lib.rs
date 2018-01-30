@@ -27,6 +27,10 @@ error_chain! {
                 message
             ),
         }
+        BadMeta(potential: &'static str, value_debug: String) {
+            description("Bad atom metadata for potential"),
+            display("Bad atom metadata for potential {}: {}", potential, value_debug),
+        }
     }
 }
 
@@ -37,462 +41,30 @@ macro_rules! err {
     => { Error::from(format!($($t)+)) }
 }
 
+macro_rules! zip_eq {
+    ($a:expr, $b:expr) => {{
+        let a = $a.into_iter();
+        let b = $b.into_iter();
+        assert_eq!(a.len(), b.len());
+        a.zip(b)
+    }}
+}
+
 pub type StdResult<T, E> = ::std::result::Result<T, E>;
 
-use ::std::os::raw::{c_void, c_char, c_int, c_double};
-use ::std::ffi::CString;
-use ::std::sync::Mutex;
+use ::low_level::ComputeStyle;
+pub use ::low_level::Severity;
+use low_level::LammpsOwner;
+mod low_level;
+
 use ::std::path::{Path, PathBuf};
 use ::slice_of_array::prelude::*;
-use ::rsp2_structure::{CoordStructure, Lattice};
+use ::rsp2_structure::{Structure, Lattice};
 
-// Lammps exposes no API to obtain the error message length so we have to guess.
-const MAX_ERROR_BYTES: usize = 4096;
+const REBO_MASS_CARBON:   f64 = 12.01;
+const REBO_MASS_HYDROGEN: f64 =  1.00;
 
-macro_rules! c_enums {
-    (
-        $(
-            [$($vis:tt)*] enum $Type:ident {
-                // tt so it can double as expr and pat
-                $($Variant:ident = $value:tt,)+
-            }
-        )+
-    ) => {
-        $(
-            #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-            $($vis)* enum $Type {
-                $($Variant = $value,)+
-            }
-
-            impl $Type {
-                #[allow(unused)]
-                pub fn from_int(x: u32) -> Result<$Type>
-                { match x {
-                    $($value => Ok($Type::$Variant),)+
-                    _ => bail!("Invalid value {} for {}", x, stringify!($Type)),
-                }}
-            }
-        )+
-    };
-}
-
-c_enums!{
-    [] enum ComputeStyle {
-        Global = 0,
-        PerAtom = 1,
-        Local = 2,
-    }
-
-    [] enum ComputeType {
-        Scalar = 0,
-        Vector = 1,
-        Array = 2, // 2D
-    }
-
-    [] enum ScatterGatherDatatype {
-        Integer = 0,
-        Float = 1,
-    }
-
-    [pub] enum Severity {
-        Recoverable = 1,
-        Fatal = 2,
-    }
-}
-
-macro_rules! derive_into_from_as_cast {
-    ($($A:ty as $B:ty;)*)
-    => { $(
-        impl From<$A> for $B {
-            fn from(a: $A) -> $B { a as $B }
-        }
-    )* };
-}
-
-derive_into_from_as_cast!{
-    ComputeStyle as c_int;
-    ComputeType as c_int;
-    ScatterGatherDatatype as c_int;
-}
-
-/// A light wrapper around a LAMMPS instance which handles ownership
-/// concerns and provides an interface that uses rust primitive types.
-///
-/// The design is fairly conservative, trying to make as few design choices
-/// as necessary.  As a result, some exposed functions are still unsafe.
-/// The expectation is that another, higher-level wrapper will be built
-/// around this.
-///
-/// It is expressly NOT CLONE.
-#[derive(Debug)]
-struct LammpsOwner {
-    // Pointer to LAMMPS instance.
-    // - The 'static lifetime indicates that we own this.
-    // - The lack of Clone prevents double-freeing.
-    // - Box is not used because it is not allocated by Rust.
-    ptr: &'static mut c_void,
-    // Lammps holds some fingers into the argv we give it,
-    // so we gotta make sure they don't get freed too early.
-    argv: CArgv,
-}
-
-lazy_static! {
-    /// HACK to work around the segfaults that appear to result from
-    /// lammps being instantiated from multiple threads at the same time.
-    ///
-    /// This mutex is grabbed during the creation and destruction.
-    ///
-    /// NOTE: This is a leaf in the lock hierarchy (we never attempt to
-    ///  grab other locks while holding this lock).
-    static ref INSTANTIATION_LOCK: Mutex<()> = Default::default();
-}
-
-impl Drop for LammpsOwner {
-    fn drop(&mut self) {
-        let _guard = INSTANTIATION_LOCK.lock();
-
-        // NOTE: not lammps_free!
-        unsafe { ::lammps_sys::lammps_close(self.ptr); }
-    }
-}
-
-impl LammpsOwner {
-    pub fn new(argv: &[&str]) -> Result<LammpsOwner>
-    {Ok({
-        let mut argv = CArgv::from_strs(argv)?;
-        let mut ptr: *mut c_void = ::std::ptr::null_mut();
-
-        {
-            // this will not deadlock because we never attempt to
-            // acquire other locks while we hold this lock.
-            let _guard = INSTANTIATION_LOCK.lock();
-            unsafe {
-                ::lammps_sys::lammps_open_no_mpi(
-                    argv.len() as c_int,
-                    argv.as_argv_ptr(),
-                    &mut ptr,
-                );
-            }
-        }
-
-        let ptr = unsafe {
-            ptr.as_mut()
-        }.ok_or_else(|| err!("Lammps initialization failed"))?;
-
-        LammpsOwner { argv, ptr }
-    })}
-}
-
-mod cli { // name shows up in log output
-    pub fn trace(cmd: &str) {
-        trace!("{}", cmd);
-    }
-}
-
-impl LammpsOwner {
-
-    //------------------------------
-    // the basics
-
-    /// Invokes `lammps_command`.
-    ///
-    /// # Panics
-    ///
-    /// Panics on embedded NUL (`'\0'`) characters, but that's the least of your concerns.
-    ///
-    /// If the command is ill-formed, Lammps may **abort** the process.  As in,
-    /// `MpiAbort`, `MpiFinalize`, and everybody's favorite, `libc::exit`.
-    /// Good luck, and have fun!
-    ///
-    /// In some cases, it might panic instead of aborting.  This occurs when we can visibly
-    /// detect that Lammps did not like the command (e.g. it returned NULL).  This might
-    /// be changed to Result::Err later, but for now, we panic because I have no idea if and
-    /// when this ever actually happens.  - ML
-    // TODO: Looks like we can change (some of?) these aborts into detectable errors
-    //        by defining LAMMPS_EXCEPTIONS at build time,
-    //        which introduces `lammps_has_error` and `lammps_get_last_error_message`
-    pub fn command(&mut self, cmd: &str) -> Result<()>
-    {Ok({
-        cli::trace(cmd);
-
-        // FIXME: I still don't know if I'm supposed to free the output or not.
-        // NOTE:  This returns "the command name" as a 'char *'.
-        //        I pored over the Lammps source, and I, uh... *think* it's just
-        //        a pointer into our string (which has had a null terminator
-        //        forcefully thrust into it).  But I'm not sure.  - ML
-        let ret = unsafe {
-            with_temporary_c_str(cmd, |cmd| {
-                ::lammps_sys::lammps_command(self.ptr, cmd)
-            })? // NulError
-        };
-
-        // NOTE: supposing that ret points into our argument (which has been
-        //       freed), it is no longer safe to dereference.
-        self.pop_error_as_result()?;
-
-        assert!(!ret.is_null(), "lammps_command threw no exception, but returned null?!");
-    })}
-
-    // convenience wrapper
-    // NOTE: repeatedly invokes `lammps_command`, not `lammps_command_list`
-    pub fn commands<S: AsRef<str>>(&mut self, cmds: &[S]) -> Result<()>
-    {Ok({
-        for s in cmds { self.command(s.as_ref())?; }
-    })}
-
-    pub fn get_natoms(&mut self) -> usize
-    {
-        let out = unsafe { ::lammps_sys::lammps_get_natoms(self.ptr) } as usize;
-        self.assert_no_error();
-        out
-    }
-
-    //------------------------------
-    // error API (used internally)
-
-    // (this is our '?')
-    fn pop_error_as_result(&mut self) -> Result<()>
-    {Ok({
-        match self.pop_error() {
-            None => {},
-            Some((severity, s)) => bail!(ErrorKind::Lammps(severity, s)),
-        }
-    })}
-
-    // (this is our 'unwrap')
-    fn assert_no_error(&mut self)
-    {
-        self.pop_error_as_result().unwrap_or_else(|e| {
-            use ::error_chain::ChainedError;
-            panic!("Unexpected error from LAMMPS: {}", e.display_chain());
-        });
-    }
-
-    // Read an error from the Lammps API if there is one.
-    // (This removes the error, so that a second call will produce None.)
-    fn pop_error(&mut self) -> Option<(Severity, String)>
-    {
-        use ::lammps_sys::{lammps_get_last_error_message, lammps_has_error};
-
-        let has_error = unsafe { lammps_has_error(self.ptr) } != 0;
-        if !has_error {
-            return None;
-        };
-
-        // +1 to guarantee a nul
-        let mut buf = vec![0u8; MAX_ERROR_BYTES + 1];
-
-        let severity_int = unsafe {
-            lammps_get_last_error_message(
-                self.ptr,
-                buf.as_mut_ptr() as *mut c_char,
-                MAX_ERROR_BYTES as c_int,
-            )
-        } as u32;
-        let severity = Severity::from_int(severity_int).expect("lammps-wrap bug!");
-
-        // truncate to written content
-        let nul = buf.iter().position(|&c| c == b'\0').expect("lammps-wrap bug!");
-        buf.truncate(nul);
-
-        // (NOTE: the thought here was: if our guess for a maximum length
-        //        happened to be right in the middle of a character,
-        //        then we should cut off the invalid part...
-        //        ...but now that I think about it, who says the error
-        //        is even encoded in utf8?)
-        let message = string_from_utf8_prefix(buf);
-        Some((severity, message))
-    }
-
-    //------------------------------
-    // scatter/gather
-
-    // Gather an integer property across all atoms.
-    //
-    // unsafe because an incorrect 'count' or a non-integer field may cause an out-of-bounds read.
-    pub unsafe fn gather_atoms_i(&mut self, name: &str, count: usize) -> Result<Vec<i64>>
-    {Ok({
-        self.__gather_atoms_c_ty::<c_int>(name, ScatterGatherDatatype::Integer, count)?
-            .into_iter().map(|x| x as i64).collect()
-    })}
-
-    // Gather a floating property across all atoms.
-    //
-    // unsafe because an incorrect 'count' or a non-floating field may cause an out-of-bounds read.
-    pub unsafe fn gather_atoms_f(&mut self, name: &str, count: usize) -> Result<Vec<f64>>
-    {Ok({
-        self.__gather_atoms_c_ty::<c_double>(name, ScatterGatherDatatype::Float, count)?
-            .into_iter().map(|x| x as f64).collect()
-    })}
-
-    // unsafe because an incorrect 'count', 'ty', or 'T' may cause an out-of-bounds read.
-    //
-    // I would very much like for this and the rest of the __gather_atoms family to
-    // return Option::None on failure.  Unfortunately, Lammps doesn't want to talk to us
-    // about the problems it has with us.
-    unsafe fn __gather_atoms_c_ty<T:Default + Clone>(
-        &mut self,
-        name: &str,
-        ty: ScatterGatherDatatype,
-        count: usize,
-    ) -> Result<Vec<T>>
-    {Ok({
-        let natoms = self.get_natoms();
-        let mut out = vec![T::default(); count * natoms];
-
-        with_temporary_c_str(name, |name| {
-            ::lammps_sys::lammps_gather_atoms(
-                self.ptr, name, ty.into(), count as c_int,
-                out.as_mut_ptr() as *mut c_void,
-            );
-        })?;
-
-        // NOTE: Known cases where this is Err:
-        // * None so far.
-        self.pop_error_as_result()?;
-
-        // I'm not sure if there is any way at all for us to verify that the operation
-        // actually succeeded without screenscraping diagnostic output from LAMMPS.
-        // The function only prints a warning on failure and does not set the error state.
-        //   - ML
-        let yolo = out;
-        yolo
-    })}
-
-    // Write an integer property across all atoms.
-    //
-    // unsafe because a non-integer field may copy data of the wrong size,
-    // and data of inappropriate length could cause an out of bounds write.
-    pub unsafe fn scatter_atoms_i(&mut self, name: &str, data: &[i64]) -> Result<()>
-    {Ok({
-        let mut cdata: Vec<_> = data.iter().map(|&x| x as c_int).collect();
-        self.__scatter_atoms_c_ty(name, ScatterGatherDatatype::Integer, &mut cdata)?;
-    })}
-
-    // Write a floating property across all atoms.
-    //
-    // unsafe because a non-floating field may copy data of the wrong size,
-    // and data of inappropriate length could cause an out of bounds write.
-    unsafe fn scatter_atoms_f(&mut self, name: &str, data: &[f64]) -> Result<()>
-    {Ok({
-        let mut cdata: Vec<_> = data.iter().map(|&x| x as c_double).collect();
-        self.__scatter_atoms_c_ty(name, ScatterGatherDatatype::Float, &mut cdata)?;
-    })}
-
-    // unsafe because an incorrect 'ty' or 'T' may cause an out-of-bounds write.
-    unsafe fn __scatter_atoms_c_ty<T>(
-        &mut self,
-        name: &str,
-        ty: ScatterGatherDatatype,
-        data: &mut [T]
-    ) -> Result<()>
-    {Ok({
-        let natoms = self.get_natoms();
-        assert_eq!(data.len() % natoms, 0);
-        let count = data.len() / natoms;
-
-        with_temporary_c_str(name, |name| {
-            ::lammps_sys::lammps_scatter_atoms(
-                self.ptr, name, ty.into(), count as c_int,
-                data.as_mut_ptr() as *mut c_void,
-            );
-        })?;
-
-        // NOTE: Known cases where this is Err:
-        // * None so far.
-        self.pop_error_as_result()?;
-
-        // I'm not sure if there is any way at all for us to verify that the operation
-        // actually succeeded without screenscraping diagnostic output from LAMMPS.
-        // The function only prints a warning on failure and does not set the error state.
-        //   - ML
-    })}
-
-    //------------------------------
-    // computes
-
-    // Read a scalar compute, possibly computing it in the process.
-    //
-    // NOTE: There are warnings in extract_compute about making sure it is valid
-    //       to run the compute.  I'm not sure what it means, and it sounds to me
-    //       like this could possibly actually cause UB; I just have no idea how.
-    pub unsafe fn extract_compute_0d(&mut self, name: &str) -> Result<f64>
-    {Ok({
-        let out_ptr = with_temporary_c_str(name, |name| {
-            unsafe { ::lammps_sys::lammps_extract_compute(
-                self.ptr, name,
-                ComputeStyle::Global.into(),
-                ComputeType::Scalar.into(),
-            )}
-        })? as *mut c_double;
-
-        // NOTE: Known cases where this produces Err:
-        // * None so far.
-        self.pop_error_as_result()?;
-
-        // NOTE: Known cases where the pointer is NULL:
-        // * (bug in lammps-wrap) Name provided does not belong to a compute.
-        unsafe { out_ptr.as_ref() }
-            .cloned()
-            .ok_or_else(|| Error::from(format!("could not extract {:?}", name)))?
-    })}
-
-    // Read a vector compute, possibly computing it in the process.
-    //
-    // NOTE: There are warnings in extract_compute about making sure it is valid
-    //       to run the compute.  I'm not sure what it means, and it sounds to me
-    //       like this could possibly actually cause UB; I just have no idea how.
-    pub unsafe fn extract_compute_1d(
-        &mut self,
-        name: &str,
-        style: ComputeStyle,
-        len: usize,
-    ) -> Result<Vec<f64>>
-    {Ok({
-        let out_ptr = with_temporary_c_str(name, |name| {
-            unsafe { ::lammps_sys::lammps_extract_compute(
-                self.ptr, name,
-                style.into(),
-                ComputeType::Vector.into(),
-            )}
-        })? as *mut c_double;
-
-        // NOTE: See extract_compute_0d for a breakdown of the error cases.
-        self.pop_error_as_result()?;
-        let p =
-            out_ptr.as_ref()
-            .ok_or_else(|| err!("Could not extract {:?}", name))?;
-
-        ::std::slice::from_raw_parts(p, len)
-            .iter().map(|&c| c as f64).collect()
-    })}
-}
-
-// Get the longest valid utf8 prefix as a String.
-// This function never fails.
-fn string_from_utf8_prefix(buf: Vec<u8>) -> String
-{
-    String::from_utf8(buf)
-        .unwrap_or_else(|e| {
-            let valid_len = e.utf8_error().valid_up_to();
-            let mut bytes = e.into_bytes();
-            bytes.truncate(valid_len);
-
-            String::from_utf8(bytes).expect("bug!")
-        })
-}
-
-// Temporarily allocate a c string for the duration of a closure.
-unsafe fn with_temporary_c_str<B, F>(s: &str, f: F) -> Result<B>
-where F: FnOnce(*mut c_char) -> B
-{Ok({
-    let p = CString::new(s)?.into_raw();
-    let out = f(p);
-    let _ = CString::from_raw(p); // free memory
-    out
-})}
-
-pub struct Lammps {
+pub struct Lammps<P> {
     /// Put Lammps behind a RefCell so we can paper over things like `get_natoms(&mut self)`
     /// without needing to manually verify that no mutation occurs in the Lammps source.
     ///
@@ -508,9 +80,12 @@ pub struct Lammps {
     /// (NOTE: I'm not entirely sure if this is correct.)
     ptr: ::std::cell::RefCell<LammpsOwner>,
 
+    /// This is stored to help convert metadata to/from AtomTypes.
+    potential: P,
+
     /// The currently computed structure, encapsulated in a helper type
     /// that tracks dirtiness and helps us decide when we need to call lammps
-    structure: MaybeDirty<CoordStructure>,
+    structure: MaybeDirty<Structure<AtomType>>,
 }
 
 struct MaybeDirty<T> {
@@ -569,10 +144,13 @@ impl<T> MaybeDirty<T> {
     // test if f(x) is dirty by equality
     // HACK
     // this is only provided to help work around borrow checker issues
-    pub fn is_projection_dirty<K, F>(&self, mut f: F) -> bool
+    //
+    // To clarify: If there is no last clean value, then ALL projections
+    // are considered dirty by definition.
+    pub fn is_projection_dirty<K: ?Sized, F>(&self, mut f: F) -> bool
     where
         K: PartialEq,
-        F: FnMut(&T) -> K,
+        F: FnMut(&T) -> &K,
     {
         match (&self.clean, &self.dirty) {
             (&Some(ref clean), &Some(ref dirty)) => f(clean) != f(dirty),
@@ -617,8 +195,10 @@ impl Builder {
     pub fn lj_sigma(&mut self, value: f64) -> &mut Self
     { self.lj_sigma = value; self }
 
-    pub fn initialize_carbon(&self, structure: CoordStructure) -> Result<Lammps>
-    { Lammps::from_builder_carbon(self, structure) }
+    pub fn build<P>(&self, potential: P, structure: Structure<P::Meta>) -> Result<Lammps<P>>
+    where P: Potential,
+    { Lammps::from_builder(self, potential, structure) }
+
 }
 
 /// Initialize LAMMPS, do nothing of particular value, and exit.
@@ -632,23 +212,222 @@ pub fn link_test() -> Result<()>
     ])?;
 })}
 
-impl Lammps {
+#[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Hash)]
+pub struct AtomType(i64);
+impl AtomType {
+    pub fn new(x: i64) -> Self {
+        assert!(x > 0);
+        AtomType(x as _)
+    }
+    pub fn int(self) -> i64 { self.0 }
 
-    fn from_builder_carbon(builder: &Builder, structure: CoordStructure) -> Result<Lammps>
+    pub fn slice_as_ints(slice: &[Self]) -> &[i64]
+    {
+        assert_eq!(::std::mem::size_of::<Self>(), ::std::mem::size_of::<i64>());
+        assert_eq!(::std::mem::align_of::<Self>(), ::std::mem::align_of::<i64>());
+        unsafe { ::std::slice::from_raw_parts(slice.as_ptr() as *const _, slice.len()) }
+    }
+}
+
+// Code that abstracts over the different commands we need
+// to send based on which potential we are using.
+pub use potential::{Potential, Airebo, KolmogorovCrespi};
+
+use potential::InitInfo;
+mod potential {
+    use super::*;
+    use ::std::fmt::Debug;
+    use rsp2_structure::Element;
+    use rsp2_structure::Layer;
+
+    // ----------------------------
+    // Abstract interface
+
+    /// Represents a pair potential of Lammps that is explicitly supported by RSP2.
+    ///
+    /// The Lammps type is parameterized over one of these.
+    pub trait Potential {
+        /// User-facing atom metadata type.
+        ///
+        /// The public API of `Lammps<Self>` takes structures of type `Structure<Self::Meta>`
+        type Meta: Debug;
+
+        // Conversions to and fro.
+        // Conversions from meta may produce user-facing errors.
+        #[doc(hidden)] fn _atom_type_from_meta(&self, meta: &Self::Meta) -> Result<AtomType>;
+        #[doc(hidden)] fn _meta_from_atom_type(&self, meta: AtomType) -> Self::Meta;
+
+        // See InitInfo for an explanation.
+        #[doc(hidden)] fn _lammps_setup_info(&self, structure: &Structure<Self::Meta>) -> Result<InitInfo>;
+
+        // Produces the type of structure stored in the `Lammps` object.
+        #[doc(hidden)] fn _convert_structure(&self, structure: Structure<Self::Meta>) -> Result<Structure<AtomType>>
+        {Ok({
+            let meta = structure.metadata().iter()
+                    .map(|m| self._atom_type_from_meta(m))
+                    .collect::<Result<Vec<_>>>()?;
+            structure.with_metadata(meta)
+        })}
+    }
+
+    /// Data describing the commands which need to be sent to lammps to initialize
+    /// atom types and the potential, for a specific Potential and Structure.
+    #[doc(hidden)]
+    pub struct InitInfo {
+        /// Mass of each atom type.
+        pub(crate) masses: Vec<f64>,
+        /// Contains one or more of the following commands:
+        ///
+        /// * pair_style
+        /// * pair_coeff
+        pub(crate) pair_commands: Vec<String>,
+    }
+
+    impl InitInfo {
+        pub(crate) fn atom_type_ids(&self) -> Box<ExactSizeIterator<Item=AtomType>>
+        { Box::new((0..self.masses.len()).map(|i| AtomType::new(i as i64 + 1))) }
+    }
+
+    // ----------------------------
+    // Implementations
+
+    /// Uses `pair_style airebo`.
+    #[derive(Debug, Clone)]
+    pub struct Airebo {
+        pub lj_sigma: f64,
+        pub lj_strength: f64,
+        pub lj: bool,
+        pub torsion: bool,
+    }
+
+    impl Default for Airebo {
+        fn default() -> Self
+        { Airebo {
+            lj_sigma: 3.0,
+            lj_strength: 1.0,
+            lj: true,
+            torsion: false,
+        }}
+    }
+
+    impl Airebo {
+        pub fn new() -> Self { Self::default() }
+        pub fn lj_sigma(&mut self, value: f64) -> &mut Self { self.lj_sigma = value; self }
+        pub fn lj_strength(&mut self, value: f64) -> &mut Self { self.lj_strength = value; self }
+        pub fn lj_enabled(&mut self, value: bool) -> &mut Self { self.lj = value; self }
+        pub fn torsion_enabled(&mut self, value: bool) -> &mut Self { self.torsion = value; self }
+    }
+
+    impl Potential for Airebo {
+        type Meta = Element;
+
+        fn _atom_type_from_meta(&self, meta: &Self::Meta) -> Result<AtomType>
+        { match meta.symbol() {
+            "H" => Ok(AtomType::new(1)),
+            "C" => Ok(AtomType::new(2)),
+            _ => bail!(ErrorKind::BadMeta("Airebo", format!("{:?}", meta))),
+        }}
+
+        fn _meta_from_atom_type(&self, id: AtomType) -> Self::Meta
+        { match id.int() {
+            1 => Element::from_symbol("H").unwrap(),
+            2 => Element::from_symbol("C").unwrap(),
+            _ => panic!("unexpected atom type from lammps: {}", id.int()),
+        }}
+
+        fn _lammps_setup_info(&self, _: &Structure<Self::Meta>) -> Result<InitInfo>
+        { Ok(InitInfo {
+            masses: vec![REBO_MASS_HYDROGEN, REBO_MASS_CARBON],
+            pair_commands: vec![
+                format!(
+                    "pair_style airebo/omp {} {} {}",
+                    self.lj_sigma, boole(self.lj), boole(self.torsion),
+                ),
+                format!("pair_coeff * * CH.airebo H C"), // read potential info
+                format!("pair_coeff * * lj/scale {}", self.lj_strength), // set lj potential scaling factor (HACK)
+            ],
+        })}
+    }
+
+    fn boole(b: bool) -> u32 { b as _ }
+
+    /// Uses `pair_style kolmogorov/crespi/z`.
+    #[derive(Debug, Clone, Default)]
+    pub struct KolmogorovCrespi {
+        cutoff: f64,
+    }
+
+    impl KolmogorovCrespi {
+        pub fn new() -> Self { Self::default() }
+    }
+
+    impl Potential for KolmogorovCrespi {
+        type Meta = Layer;
+
+        fn _atom_type_from_meta(&self, &Layer(layer): &Self::Meta) -> Result<AtomType>
+        { Ok(AtomType::new(layer as i64 + 1)) }
+
+        fn _meta_from_atom_type(&self, id: AtomType) -> Self::Meta
+        { Layer(id.int() as u32 - 1) }
+
+        fn _lammps_setup_info(&self, structure: &Structure<Self::Meta>) -> Result<InitInfo>
+        {
+            let nlayers = structure.metadata().iter().map(|&Layer(layer)| layer).max().unwrap_or(0) + 1;
+            let masses = vec![REBO_MASS_CARBON; nlayers as usize];
+
+            let mut pair_commands = vec![
+                format!("pair_style hybrid/overlay rebo kolmogorov/crespi/z {}", self.cutoff),
+                format!("pair_coeff * * rebo                 CH.airebo  C C"),
+            ];
+            pair_commands.extend((0..nlayers - 1).map(|i| {
+                let typ = i + 1;
+                format!("pair_coeff {} {} kolmogorov/crespi/z  CC.KC      C C", typ, typ + 1)
+            }));
+
+            Ok(InitInfo { masses, pair_commands })
+        }
+    }
+}
+
+impl<P: Potential> Lammps<P>
+{
+    fn from_builder(builder: &Builder, potential: P, structure: Structure<P::Meta>) -> Result<Self>
+    {Ok({
+        let info_from_potential = potential._lammps_setup_info(&structure)?;
+        let structure = potential._convert_structure(structure)?;
+
+        let ptr = Self::_from_builder(builder, structure.num_atoms(), info_from_potential)?;
+        Lammps {
+            ptr: ::std::cell::RefCell::new(ptr),
+            structure: MaybeDirty::new_dirty(structure),
+            potential,
+        }
+    })}
+
+    // monomorphic
+    fn _from_builder(
+        builder: &Builder,
+        num_atoms: usize,
+        info_from_potential: InitInfo,
+    ) -> Result<LammpsOwner>
     {Ok({
         // Lammps script based on code from Colin Daniels.
 
-        let carts = structure.to_carts();
-
-        let lmp = ::LammpsOwner::new(&["lammps",
+        let mut lmp = ::LammpsOwner::new(&[
+            "lammps",
             "-screen", "none",
             "-log", "none", // logs opened from CLI are truncated, but we want to append
         ])?;
-        let ptr = ::std::cell::RefCell::new(lmp);
-        let me = Lammps { ptr, structure: MaybeDirty::new_dirty(structure) };
 
         if let Some(ref log_file) = builder.append_log
         {
+            // Append a header to the log file as a feeble attempt to help delimit individual
+            // runs (even though it will still get messy for parallel runs).
+            //
+            // NOTE: This looks like a surprising hidden side-effect, but it isn't really.
+            //       Or rather, that is to say, removing it won't make things any better,
+            //       because LAMMPS itself will be writing many things to this same file
+            //       anyways over the course of this function.
             use ::std::io::prelude::*;
             if let Ok(mut f) =
                 ::std::fs::OpenOptions::new()
@@ -662,12 +441,12 @@ impl Lammps {
                 let _ = writeln!(f, "---------------------------------------------");
             }
 
-            me.ptr.borrow_mut().command(
+            lmp.command(
                 &format!("log {} append", log_file.display()),
             )?;
         }
 
-        me.ptr.borrow_mut().commands(&[
+        lmp.commands(&[
             "package omp 0",
             "units metal",                  // Angstroms, picoseconds, eV
             match builder.threaded {
@@ -681,7 +460,7 @@ impl Lammps {
         ])?;
 
         // (mostly) garbage initial lattice
-        me.ptr.borrow_mut().commands(&[
+        lmp.commands(&[
             "boundary p p p",               // (p)eriodic, (f)ixed, (s)hrinkwrap
             "box tilt small",               // triclinic
             // NOTE: Initial skew factors must be zero to simplify
@@ -690,51 +469,56 @@ impl Lammps {
         ])?;
 
         {
-            let n_atom_types = 2;
-            me.ptr.borrow_mut().command(&format!("create_box {} sim", n_atom_types))?;
-            me.ptr.borrow_mut().commands(&[
-                "mass 1 1.0",
-                "mass 2 12.01",
-            ])?;
+            let atom_types = info_from_potential.atom_type_ids();
+            let n_atom_types = atom_types.len();
+
+            lmp.command(&format!("create_box {} sim", n_atom_types))?;
+            for (i, mass) in zip_eq!(atom_types, info_from_potential.masses) {
+                lmp.command(&format!("mass {} {}", i.int(), mass))?;
+            }
+
+            lmp.commands(&info_from_potential.pair_commands[..])?;
         }
 
         // garbage initial positions
         {
-            let this_atom_type = 2;
+            let this_atom_type = 1;
             let seed = 0xbeef;
-            me.ptr.borrow_mut().command(
+            lmp.command(
                 &format!("create_atoms {} random {} {} NULL remap yes",
-                this_atom_type, carts.len(), seed))?;
-        }
-
-        {
-            let sigma_scale = builder.lj_sigma; // LJ Range (x3.4 A)
-            let lj = 1;            // on/off
-            let torsion = 0;       // on/off
-            let lj_scale = builder.lj_strength;
-            //let lj_scale = 1.0;
-            me.ptr.borrow_mut().commands(&[
-                &format!("pair_style airebo/omp {} {} {}", sigma_scale, lj, torsion),
-                &format!("pair_coeff * * CH.airebo H C"), // read potential info
-                &format!("pair_coeff * * lj/scale {}", lj_scale), // set lj potential scaling factor (HACK)
-            ])?;
+                this_atom_type, num_atoms, seed))?;
         }
 
         // set up computes
-        me.ptr.borrow_mut().commands(&[
+        lmp.commands(&[
             &format!("compute RSP2_PE all pe"),
             &format!("compute RSP2_Pressure all pressure NULL virial"),
         ])?;
 
-        me
+        lmp
+    })}
+}
+
+//-------------------------------------------
+// modifying the system
+//
+// All these need to do is modify the Structure object through the dirtying API.
+//
+// There's nothing tricky that needs to be done here to ensure that updates are
+// propagated to LAMMPS, so long as `update_computation` is able to correctly
+// detect when the new values differ from the old.
+impl<P: Potential> Lammps<P> {
+    pub fn set_structure(&mut self, structure: Structure<P::Meta>) -> Result<()>
+    {Ok({
+        let new = self.potential._convert_structure(structure)?;
+        *self.structure.get_mut() = new;
     })}
 
-    //-------------------------------------------
-    // modifying the system
-
-    pub fn set_structure(&mut self, structure: CoordStructure) -> Result<()>
+    pub fn set_metadata(&mut self, meta: &[P::Meta]) -> Result<()>
+    where P::Meta: Clone,
     {Ok({
-        *self.structure.get_mut() = structure;
+        let new: Vec<_> = meta.iter().map(|m| self.potential._atom_type_from_meta(m)).collect::<Result<_>>()?;
+        self.structure.get_mut().set_metadata(new);
     })}
 
     pub fn set_carts(&mut self, carts: &[[f64; 3]]) -> Result<()>
@@ -746,11 +530,15 @@ impl Lammps {
     {Ok({
         self.structure.get_mut().set_lattice(&lattice);
     })}
+}
 
-    //-------------------------------------------
-    // sending input to lammps and running the main computation
+//-------------------------------------------
+// sending input to lammps and running the main computation
 
+impl<P> Lammps<P> {
     // This will rerun computations in lammps, but only if things have changed.
+    // (The very first time it is called is also when the everything in LAMMPS
+    //  will be populated with initial data that isn't just garbage.)
     //
     // At the end, (cached, updated) == (Some(_), None)
     fn update_computation(&mut self) -> Result<()>
@@ -758,21 +546,38 @@ impl Lammps {
         if self.structure.is_dirty() {
             self.structure.get_mut().ensure_carts();
 
-            // only send data that has changed from the cache.
+            // Only send data that has changed from the cache.
             // This is done because it appears that lammps does some form of
-            //  caching as well (lattice modifications in particular appear
-            //  to increase the amount of computational work)
-            if self.structure.is_projection_dirty(|s| s.lattice().clone()) {
+            // caching as well (lattice modifications in particular appear
+            // to increase the amount of computational work)
+            //
+            // The first time through, all projections will be considered dirty,
+            // so everything will be sent to replace the garbage data that we
+            // gave lammps during initialization.
+            if self.structure.is_projection_dirty(|s| s.metadata()) {
+                self.send_lmp_types()?;
+            }
+
+            if self.structure.is_projection_dirty(|s| s.lattice()) {
                 self.send_lmp_lattice()?;
             }
 
-            if self.structure.is_projection_dirty(|s| s.to_carts()) {
+            if self.structure.is_projection_dirty(|s| s.as_carts_cached().unwrap()) {
                 self.send_lmp_carts()?;
             }
 
             self.ptr.borrow_mut().command("run 0")?;
             self.structure.mark_clean();
         }
+    })}
+
+    fn send_lmp_types(&mut self) -> Result<()>
+    {Ok({
+        let meta = AtomType::slice_as_ints(self.structure.get().metadata());
+
+        assert_eq!(meta.len(), self.ptr.borrow_mut().get_natoms());
+
+        unsafe { self.ptr.borrow_mut().scatter_atoms_i("type", meta) }?;
     })}
 
     fn send_lmp_carts(&mut self) -> Result<()>
@@ -889,13 +694,15 @@ impl Lammps {
             },
         }
     })}
+}
 
-    //-------------------------------------------
-    // gathering output from lammps
-    //
-    // NOTE: Every method here should call update_computation().
-    //       Don't worry about being sloppy with redundant calls;
-    //       the method was designed for such usage.
+//-------------------------------------------
+// gathering output from lammps
+//
+// NOTE: Every method here should call update_computation().
+//       Don't worry about being sloppy with redundant calls;
+//       the method was designed for such usage.
+impl<P> Lammps<P> {
 
     pub fn compute(&mut self) -> Result<(f64, Vec<[f64; 3]>)>
     {Ok({
@@ -941,48 +748,7 @@ impl Lammps {
     })}
 }
 
-use memory::CArgv;
-mod memory {
-    use ::std::os::raw::c_char;
-    use ::std::ffi::{CString, NulError};
-
-    /// An argv for C ffi, allocated and managed by rust code.
-    ///
-    /// It is safe to move this around without fear of invalidating
-    /// pointers; only dropping the CArgv will invalidate the pointers.
-    /// It is expressly NOT CLONE.
-    #[derive(Debug)]
-    pub(crate) struct CArgv(Vec<*mut c_char>);
-
-    impl CArgv {
-        pub(crate) fn from_strs(strs: &[&str]) -> Result<Self, NulError> {
-            // do all the nul-checking up front before we leak anything
-            let strs: Vec<_> = strs.iter().map(|&s| CString::new(s)).collect::<Result<_,_>>()?;
-
-            Ok(CArgv(strs.into_iter().map(|s| s.into_raw()).collect()))
-        }
-
-        pub(crate) fn len(&self) -> usize { self.0.len() }
-
-        // Exposes the argv pointer.
-        //
-        // NOTE: For safety, it is important not to modify the inner '*mut' pointers
-        //       to point to different memory.  This is not possible without the use
-        //       of unsafe code.
-        pub(crate) fn as_argv_ptr(&mut self) -> *mut *mut c_char { self.0.as_mut_ptr() }
-    }
-
-    impl Drop for CArgv {
-        fn drop(&mut self) {
-            // Unleak each inner pointer to free its memory.
-            while let Some(s) = self.0.pop() {
-                // Assuming the inner pointers were never modified,
-                // this is safe because each pointer was allocated by rust.
-                unsafe { let _ = CString::from_raw(s); }
-            }
-        }
-    }
-}
+//-------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -992,14 +758,16 @@ mod tests {
     //       through the other crates that use it.
 
     // get a fresh Lammps instance on which arbitrary functions can be called.
-    fn arbitrary_initialized_lammps() -> Lammps
+    fn arbitrary_initialized_lammps() -> Lammps<Airebo>
     {
         use ::rsp2_structure::Coords;
-        let structure = CoordStructure::new_coords(
+        use ::rsp2_structure::consts::CARBON;
+        let structure = Structure::new(
             Lattice::eye(),
             Coords::Fracs(vec![[0.0; 3]]),
+            vec![CARBON],
         );
-        Builder::new().initialize_carbon(structure).unwrap()
+        Builder::new().build(Airebo::default(), structure).unwrap()
     }
 
     macro_rules! assert_matches {
