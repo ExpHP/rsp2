@@ -14,7 +14,7 @@
 //! things was the biggest limitation of the previous API, which never
 //! exposed its own temporary directories.
 
-use ::{Result, IoResult, ErrorKind};
+use ::{Error, Result, IoResult, ErrorKind};
 use ::As3;
 
 use super::{Conf, DispYaml, SymmetryYaml, QPositions, Args, OtherSettings};
@@ -26,10 +26,10 @@ use ::std::process::Command;
 use ::std::path::{Path, PathBuf};
 use ::rsp2_fs_util::{open, open_text, create, copy, hard_link, mv, rm_rf};
 use ::rsp2_tempdir::TempDir;
-use ::std::collections::HashMap;
+use ::error_chain::ChainedError;
 
 use ::rsp2_kets::Basis;
-use ::rsp2_structure::{CoordStructure, ElementStructure};
+use ::rsp2_structure::{CoordStructure, ElementStructure, Element};
 use ::rsp2_structure::{FracRot, FracTrans, FracOp};
 use ::rsp2_phonopy_io::npy;
 
@@ -250,11 +250,7 @@ pub struct DirWithDisps<P: AsPath> {
     pub(crate) dir: P,
     // These are cached in memory from `disp.yaml` due to the likelihood
     // that code using `DirWithDisps` will need them.
-    // FIXME: Should be ElementStructure, but this needs `try_map_metadata_to` or
-    //        similar.  I guess we could also expose the DispYaml metadata type,
-    //        but it'd be unnecessarily annoying to work with in user code,
-    //        and we're already commited to ElementStructure as an input type.
-    pub(crate) superstructure: CoordStructure,
+    pub(crate) superstructure: ElementStructure,
     pub(crate) displacements: Vec<(usize, [f64; 3])>,
     pub(crate) settings: OtherSettings,
 }
@@ -278,14 +274,18 @@ impl<P: AsPath> DirWithDisps<P> {
         let DispYaml {
             displacements, structure: superstructure
         } = Load::load(dir.as_path().join("disp.yaml"))?;
-        let superstructure = superstructure.map_metadata_into(|_| ());
+        let superstructure = superstructure.try_map_metadata_into(|d| {
+            match Element::from_symbol(&d.symbol[..]) {
+                Some(e) => Ok::<_, Error>(e),
+                None => bail!("invalid symbol in disp.yaml: {:?}", d.symbol),
+            }
+        })?;
         let settings = Load::load(dir.as_path().join(FNAME_OTHER_SETTINGS))?;
 
         DirWithDisps { dir, superstructure, displacements, settings }
     })}
 
-    /// FIXME: This should be an ElementStructure.
-    pub fn superstructure(&self) -> &CoordStructure
+    pub fn superstructure(&self) -> &ElementStructure
     { &self.superstructure }
     pub fn displacements(&self) -> &[(usize, [f64; 3])]
     { &self.displacements }
@@ -294,10 +294,8 @@ impl<P: AsPath> DirWithDisps<P> {
     /// clones of the structure... though it seems unlikely that this cost
     /// is anything to worry about compared to the cost of computing the
     /// forces on said structure.
-    ///
-    /// FIXME: This should give ElementStructure.
-    pub fn displaced_structures<'a>(&'a self) -> Box<Iterator<Item=CoordStructure> + 'a>
-    {Box::new({
+    pub fn displaced_structures<'a>(&'a self) -> Box<Iterator<Item=ElementStructure> + 'a>
+    { Box::new({
         use ::rsp2_phonopy_io::disp_yaml::apply_displacement;
         self.displacements
             .iter()
@@ -467,9 +465,9 @@ impl<'p, P: AsPath> BandsBuilder<'p, P> {
             let src = me.dir_with_forces.as_path();
             let dir = dir.as_path();
 
-            copy(src.join("POSCAR"), dir.join("POSCAR"))?;
-            copy(src.join("disp.conf"), dir.join("disp.conf"))?;
-            copy(src.join("disp.args"), dir.join("disp.args"))?;
+            for name in &["POSCAR", "disp.conf", "disp.args", FNAME_OTHER_SETTINGS] {
+                copy(src.join(name), dir.join(name))?;
+            }
             {
                 let name = me.dir_with_forces.settings.force_sets_filename();
                 copy_or_link(src.join(name), dir.join(name))?;
@@ -516,8 +514,6 @@ impl<'p, P: AsPath> BandsBuilder<'p, P> {
 
                 log_stdio_and_wait(command, None)?;
             }
-
-            panic!();
 
             trace!("Converting bands...");
             {
@@ -607,7 +603,7 @@ impl<P: AsPath> DirWithBands<P> {
 
     pub fn eigenvalues(&self) -> Result<Vec<Vec<f64>>>
     {Ok({
-        use ::rsp2_slice_math::{v, V};
+        use ::rsp2_slice_math::{v};
         trace!("Reading eigenvectors...");
         let file = open(self.path().join("eigenvalue.npy"))?;
         npy::read_eigenvalue_npy(file)?

@@ -1,6 +1,6 @@
 use ::Lattice;
 use ::oper::{Perm, Permute};
-use ::oper::{Part, Parted, Partition};
+use ::oper::{Part, Partition};
 use ::oper::part::Unlabeled;
 
 /// Wrapper type for coordinates used as input to some APIs.

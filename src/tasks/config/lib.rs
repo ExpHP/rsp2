@@ -102,7 +102,10 @@ pub struct EnergyPlotSettings {
     /// Defines scale of xlim/ylim.
     pub normalization: NormalizationMode,
     //pub phonons: Phonons,
-    pub lj: LennardJones,
+
+    // FIXME confusingly this is placed under ["potential"]["kind"]
+    //       in one type of config, but just ["potential"] here
+    pub potential: PotentialKind,
 }
 derive_yaml_read!{EnergyPlotSettings}
 
@@ -122,17 +125,35 @@ pub struct Potential {
     // Purpose is to help eliminate boundary effects or something?
     // I forget.  Might not be necessary
     pub supercell: SupercellSpec,
-    pub lj: LennardJones,
+    pub kind: PotentialKind,
 }
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
+pub enum PotentialKind {
+    #[serde(rename = "airebo")] Airebo(PotentialAirebo),
+    #[serde(rename = "kc-z")] KolmogorovCrespiZ(PotentialKolmogorovCrespiZ),
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default)]
 #[serde(rename_all = "kebab-case")]
-pub struct LennardJones {
+pub struct PotentialAirebo {
     /// Cutoff radius (x3.4A)
-    pub sigma: Option<f64>,
-    /// Scale hack
-    pub strength: Option<f64>,
+    pub lj_sigma: Option<f64>,
+    /// Colin's scale hack
+    pub lj_strength: Option<f64>,
+    // (I'm too lazy to make an ADT for this)
+    pub lj_enabled: Option<bool>,
+    pub torsion_enabled: Option<bool>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub struct PotentialKolmogorovCrespiZ {
+    /// Cutoff radius (Angstrom?)
+    pub cutoff: Option<f64>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -175,6 +196,7 @@ pub enum SupercellSpec {
 pub enum Threading {
     Lammps,
     Rayon,
+    Serial,
 }
 
 #[derive(Serialize, Deserialize)]

@@ -2,6 +2,9 @@
 
 pub(crate) mod integrate_2d;
 
+use self::lammps::{Lammps, LammpsBuilder};
+mod lammps;
+
 use ::errors::{Error, ErrorKind, Result, ok};
 use ::config::{Settings, NormalizationMode, SupercellSpec};
 use ::util::push_dir;
@@ -9,7 +12,7 @@ use ::ui::logging::setup_global_logger;
 use ::traits::AsPath;
 use ::phonopy::{DirWithBands, DirWithDisps, DirWithForces};
 
-use ::types::{Ket3, Basis3};
+use ::types::{Basis3};
 
 use ::rsp2_structure::consts::CARBON;
 use ::rsp2_slice_math::{v, V, vdot, vnorm};
@@ -20,15 +23,12 @@ use ::rsp2_structure::supercell::{self, SupercellToken};
 use ::rsp2_structure::{Lattice, Coords, CoordStructure, Structure, ElementStructure};
 use ::rsp2_structure::{Part, Partition};
 use ::rsp2_structure_gen::Assemble;
-use ::rsp2_lammps_wrap::Lammps;
-use ::rsp2_lammps_wrap::Builder as LammpsBuilder;
 use ::phonopy::Builder as PhonopyBuilder;
 
 use ::rsp2_fs_util::{open, create, canonicalize, create_dir, rm_rf};
 
 use ::std::io::{Write};
 use ::std::path::{Path};
-use ::std::hash::Hash;
 
 use ::itertools::Itertools;
 
@@ -48,7 +48,7 @@ pub fn run_relax_with_eigenvectors(
 {ok({
     use ::rsp2_structure_io::poscar;
 
-    let lmp = make_lammps_builder(&settings.threading, &settings.potential.lj);
+    let lmp = LammpsBuilder::new(&settings.threading, &settings.potential.kind);
     let input = canonicalize(input.as_ref())?;
 
     create_dir(&outdir)?;
@@ -60,6 +60,8 @@ pub fn run_relax_with_eigenvectors(
 
         // let mut original = poscar::load(open(input)?)?;
         // original.scale_vecs(&settings.hack_scale);
+
+        // For the time being this now only supports layers.yaml format.
         let (original, layer_sc_mats) = {
             use ::rsp2_structure_gen::load_layers_yaml;
             use ::rsp2_structure_gen::layer_sc_info_from_layers_yaml;
@@ -208,7 +210,7 @@ fn do_relax(
     let sc_dims = tup3(potential_settings.supercell.dim_for_unitcell(structure.lattice()));
     let (supercell, sc_token) = supercell::diagonal(sc_dims, structure);
 
-    let mut lmp = lmp.clone().threaded(true).initialize_carbon(uncarbon(&supercell))?;
+    let mut lmp = lmp.with_modified_inner(|b| b.threaded(true)).build(supercell.clone())?;
     let relaxed_flat = ::rsp2_minimize::acgsd(
         cg_settings,
         supercell.to_carts().flat(),
@@ -319,7 +321,7 @@ fn _do_cg_along_evecs(
     let flat_evecs: Vec<_> = evecs.iter().map(|ev| ev.flat()).collect();
     let init_pos = supercell.to_carts();
 
-    let mut lmp = lmp.clone().threaded(true).initialize_carbon(uncarbon(&supercell))?;
+    let mut lmp = lmp.with_modified_inner(|b| b.threaded(true)).build(supercell.clone())?;
     let relaxed_coeffs = ::rsp2_minimize::acgsd(
         cg_settings,
         &vec![0.0; evecs.len()],
@@ -341,7 +343,7 @@ fn do_minimize_along_evec(
     let sc_dims = tup3(settings.supercell.dim_for_unitcell(structure.lattice()));
     let (structure, sc_token) = supercell::diagonal(sc_dims, structure);
     let evec = sc_token.replicate(evec);
-    let mut lmp = lmp.clone().threaded(true).initialize_carbon(uncarbon(&structure))?;
+    let mut lmp = lmp.with_modified_inner(|b| b.threaded(true)).build(structure.clone())?;
 
     let from_structure = structure;
     let direction = &evec[..];
@@ -367,20 +369,20 @@ fn warn_on_improvable_lattice_params(
 ) -> Result<()>
 {Ok({
     const SCALE_AMT: f64 = 1e-6;
-    let mut lmp = lmp.initialize_carbon(uncarbon(structure))?;
+    let mut lmp = lmp.build(structure.clone())?;
     let center_value = lmp.compute_value()?;
 
     let shrink_value = {
         let mut structure = structure.clone();
         structure.scale_vecs(&[1.0 - SCALE_AMT, 1.0 - SCALE_AMT, 1.0]);
-        lmp.set_structure(uncarbon(&structure))?;
+        lmp.set_structure(structure)?;
         lmp.compute_value()?
     };
 
     let enlarge_value = {
         let mut structure = structure.clone();
         structure.scale_vecs(&[1.0 + SCALE_AMT, 1.0 + SCALE_AMT, 1.0]);
-        lmp.set_structure(uncarbon(&structure))?;
+        lmp.set_structure(structure)?;
         lmp.compute_value()?
     };
 
@@ -502,7 +504,7 @@ fn write_summary_file(
     let energy_per_atom = {
         let f = |structure: ElementStructure| ok({
             let na = structure.num_atoms() as f64;
-            lmp.initialize_carbon(uncarbon(&structure))?.compute_value()? / na
+            lmp.build(structure)?.compute_value()? / na
         });
         let f_path = |s: &AsRef<Path>| ok(f(poscar::load(open(s)?)?)?);
 
@@ -547,11 +549,12 @@ fn do_force_sets_at_disps<P: AsPath + Send + Sync>(
         eprint!("\rdisp {} of {}", i + 1, disp_dir.displacements().len());
         ::std::io::stderr().flush().unwrap();
 
-        lmp.initialize_carbon(structure)?.compute_force()?
+        lmp.build(structure)?.compute_force()?
     });
 
     let force_sets = match threading {
-        &::config::Threading::Lammps => {
+        &::config::Threading::Lammps |
+        &::config::Threading::Serial => {
             disp_dir.displaced_structures().map(compute).collect::<Result<Vec<_>>>()?
         },
         &::config::Threading::Rayon => {
@@ -586,7 +589,7 @@ fn read_eigensystem<P: AsPath>(
 
 //-----------------------------------
 
-pub fn optimize_layer_parameters(
+pub(crate) fn optimize_layer_parameters(
     settings: &::config::ScaleRanges,
     lmp: &LammpsBuilder,
     mut builder: Assemble,
@@ -644,8 +647,7 @@ pub fn optimize_layer_parameters(
         }
 
         let get_value = || ok({
-            // use ::std::hash::{Hash, Hasher};
-            lmp.initialize_carbon(builder.borrow().assemble())?.compute_value()?
+            lmp.build(carbon(&builder.borrow().assemble()))?.compute_value()?
         });
 
         // optimize them one-by-one.
@@ -931,6 +933,7 @@ fn carbon(structure: &CoordStructure) -> ElementStructure
     structure.map_metadata_to(|_| CARBON)
 }
 
+#[allow(unused)] // if this isn't used, I'm *glad*
 fn uncarbon(structure: &ElementStructure) -> CoordStructure
 {
     assert!(structure.metadata().iter().all(|&e| e == CARBON),
@@ -938,20 +941,6 @@ fn uncarbon(structure: &ElementStructure) -> CoordStructure
         do something about all the carbon-specific code.  Look for calls \
         to `carbon()`");
     structure.map_metadata_to(|_| ())
-}
-
-fn make_lammps_builder(
-    threading: &::config::Threading,
-    lj: &::config::LennardJones,
-) -> LammpsBuilder
-{
-    let mut lmp = LammpsBuilder::new();
-    lmp.append_log("lammps.log");
-    lmp.threaded(*threading == ::config::Threading::Lammps);
-    if let Some(x) = lj.strength { lmp.lj_strength(x); }
-    if let Some(x) = lj.sigma { lmp.lj_sigma(x); }
-
-    lmp
 }
 
 fn lammps_flat_diff_fn<'a>(lmp: &'a mut Lammps)
@@ -1124,9 +1113,8 @@ pub fn get_energy_surface(
                         // println!("{:?}", pos.flat().iter().sum::<f64>());
 
                         eprint!("\rdatapoint {:>6} of {}", i, w * h);
-                        let mut lmp =
-                            make_lammps_builder(&settings.threading, &settings.lj)
-                            .initialize_carbon(uncarbon(&structure))?;
+                        let lmp = LammpsBuilder::new(&settings.threading, &settings.potential);
+                        let mut lmp = lmp.build(structure.clone())?;
                         lmp.set_carts(&pos)?;
                         lmp.compute_grad()?
                     })}
@@ -1202,7 +1190,7 @@ pub fn run_save_bands_after_the_fact(
 {Ok({
     use ::rsp2_structure_io::poscar;
 
-    let lmp = make_lammps_builder(&settings.threading, &settings.potential.lj);
+    let lmp = LammpsBuilder::new(&settings.threading, &settings.potential.kind);
 
     {
         // dumb/lazy solution to ensuring all output files go in the dir
@@ -1230,7 +1218,7 @@ pub fn make_force_sets(
     use ::rsp2_structure_io::poscar;
     use ::std::io::BufReader;
 
-    let lj = panic!("TODO: lj in make_force_sets");
+    let potential = panic!("TODO: potential in make_force_sets");
     unreachable!();
 
     let mut phonopy = PhonopyBuilder::new();
@@ -1240,7 +1228,7 @@ pub fn make_force_sets(
 
     let structure = poscar::load(open(poscar)?)?;
 
-    let lmp = make_lammps_builder(&::config::Threading::Lammps, &lj);
+    let lmp = LammpsBuilder::new(&::config::Threading::Lammps, &potential);
 
     create_dir(&outdir)?;
     {

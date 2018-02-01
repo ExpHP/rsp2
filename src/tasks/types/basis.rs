@@ -1,6 +1,6 @@
 use ::rsp2_kets::{Ket, Basis, AsKetRef};
 use ::rsp2_structure::{Perm, Permute};
-use ::rsp2_structure::{Part, Parted, Partition, Unlabeled};
+use ::rsp2_structure::{Part, Partition, Unlabeled};
 
 use ::slice_of_array::prelude::*;
 

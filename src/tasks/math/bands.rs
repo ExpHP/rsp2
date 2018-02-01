@@ -1,6 +1,5 @@
 
 use ::rsp2_structure::{Coords, Lattice, CoordStructure};
-use ::rsp2_slice_math::vnorm;
 use ::rsp2_array_utils::{dot, map_arr};
 use ::rsp2_kets::{Ket, KetRef, Rect};
 use ::rsp2_array_utils::{arr_from_fn};

@@ -178,9 +178,9 @@ impl LammpsOwner {
     ///
     /// That is to say, it does NOT invoke `lammps_command_list`.
     /// (Though one should sincerely *hope* this difference does not matter...)
-    pub fn commands<S: AsRef<str>>(&mut self, cmds: &[S]) -> Result<()>
+    pub fn commands<S: ToString>(&mut self, cmds: &[S]) -> Result<()>
     {Ok({
-        for s in cmds { self.command(s.as_ref())?; }
+        for s in cmds { self.command(&s.to_string())?; }
     })}
 
     pub fn get_natoms(&mut self) -> usize

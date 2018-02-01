@@ -1,8 +1,9 @@
-use ::{Lattice, Coords, Element, SentLattice};
+use ::{Lattice, Coords, Element};
 use ::errors::*;
 use ::oper::{Perm, Permute};
-use ::oper::{Part, Parted, Partition};
+use ::oper::{Part, Partition};
 use ::oper::part::Unlabeled;
+use ::std::result::Result as StdResult;
 
 /// Pairs [`Coords`] together with their [`Lattice`], and metadata.
 ///
@@ -50,6 +51,14 @@ impl<M> Structure<M> {
 impl<M> Structure<M> {
     // FIXME bad idea for stable interface, but good enough for now
     pub fn metadata(&self) -> &[M] { &self.meta }
+
+    pub fn try_map_metadata_into<M2, E, F>(self, f: F) -> StdResult<Structure<M2>, E>
+    where F: FnMut(M) -> StdResult<M2, E>,
+    {Ok({
+        let Structure { lattice, coords, meta } = self;
+        let meta = meta.into_iter().map(f).collect::<StdResult<_, E>>()?;
+        Structure { lattice, coords, meta }
+    })}
 
     pub fn map_metadata_into<M2, F>(self, f: F) -> Structure<M2>
     where F: FnMut(M) -> M2,
