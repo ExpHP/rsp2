@@ -5,7 +5,7 @@ use ::rsp2_clap::clap;
 
 fn main() {
     use ::rsp2_tasks::relax_with_eigenvectors;
-    let matches = ::clap::App::new("thing")
+    let matches = ::clap::App::new("rsp2")
         .version("negative 0.00.3-734.bubbles")
         .author("Michael T. Lamparski")
         .about("blah")
@@ -31,29 +31,4 @@ fn main() {
         panic!("{}", e.display_chain());
     };
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
