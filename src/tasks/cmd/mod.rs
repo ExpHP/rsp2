@@ -98,7 +98,7 @@ pub fn run_relax_with_eigenvectors(
         let mut iteration = 1;
         // HACK to stop one iteration AFTER all non-acoustics are positive
         let mut all_ok_count = 0;
-        let (structure, einfos, bands_dir) = loop { // NOTE: we use break with value
+        let (structure, einfos) = loop { // NOTE: we use break with value
 
             let structure = do_relax(&lmp, &settings.cg, &settings.potential, from_structure)?;
             let bands_dir = do_diagonalize(
@@ -163,8 +163,8 @@ pub fn run_relax_with_eigenvectors(
 
             if bad_evs.is_empty() {
                 all_ok_count += 1;
-                if all_ok_count >= settings.min_positive_iters {
-                    break (structure, einfos, bands_dir);
+                if all_ok_count >= settings.ev_loop.min_positive_iter {
+                    break (structure, einfos /*, bands_dir */);
                 }
             }
 
@@ -181,7 +181,7 @@ pub fn run_relax_with_eigenvectors(
                     bail!("Too many relaxation steps!");
                 } else {
                     warn!("Too many relaxation steps!");
-                    break (structure, einfos, bands_dir);
+                    break (structure, einfos /*, bands_dir */);
                 }
             }
 

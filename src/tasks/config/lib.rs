@@ -1,4 +1,6 @@
-// Crate where serde_yaml code is monomorphized, which is a huge compile time sink
+// Crate where serde_yaml code is monomorphized, which is a huge compile time sink.
+//
+// The functions here also make use of serde_ignored to catch typos in the config.
 
 // NOTE: Please make sure to use the YamlRead trait!
 //       DO NOT USE serde_yaml::from_{reader,value,etc.} OUTSIDE THIS CRATE
@@ -13,6 +15,7 @@ extern crate serde_derive;
 extern crate serde_yaml;
 
 extern crate serde;
+extern crate serde_ignored;
 
 extern crate rsp2_minimize;
 
@@ -36,7 +39,20 @@ macro_rules! derive_yaml_read {
             //       of this crate becomes suspiciously quick).
             //       Hence we generate these identical bodies in a macro.
             fn from_dyn_reader(r: &mut Read) -> Result<$Type, ::serde_yaml::Error>
-            { ::serde_yaml::from_reader(r) }
+            {
+                // serde_ignored needs a Deserializer.
+                // unlike serde_json, serde_yaml doesn't seem to expose a Deserializer that is
+                // directly constructable from a Read... but it does impl Deserialize for Value.
+                let de: ::serde_yaml::Value = ::serde_yaml::from_reader(r)?;
+                ::serde_ignored::deserialize(
+                    de,
+                    |path| {
+                        // FIXME we should log a warning instead, but unfortunately
+                        // config reading tends to occur before logging is initialized.
+                        panic!("Unused config item (possible typo?): {}", path)
+                    },
+                )
+            }
         }
     };
 }
@@ -54,9 +70,6 @@ pub struct Settings {
     pub cg: Acgsd,
     pub phonons: Phonons,
     pub ev_chase: EigenvectorChase,
-    // Relaxation stops after all EVs are positive this many times
-    #[serde(default = "self::defaults::settings::min_positive_iters")]
-    pub min_positive_iters: u32,
     pub layer_gamma_threshold: f64,
     #[serde(default)]
     pub ev_loop: EvLoop,
@@ -226,6 +239,9 @@ pub enum NormalizationMode {
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub struct EvLoop {
+    // Relaxation stops after all EVs are positive this many times
+    #[serde(default = "self::defaults::ev_loop::min_positive_iter")]
+    pub min_positive_iter: u32,
     #[serde(default = "self::defaults::ev_loop::max_iter")]
     pub max_iter: u32,
     #[serde(default = "self::defaults::ev_loop::fail")]
@@ -254,10 +270,6 @@ fn from_empty_mapping<T: for<'de> ::serde::Deserialize<'de>>() -> ::serde_yaml::
 }
 
 mod defaults {
-    pub(crate) mod settings {
-        pub(crate) fn min_positive_iters() -> u32 { 3 }
-    }
-
     pub(crate) mod tweaks {
         pub(crate) fn sparse_sets() -> bool { false }
     }
@@ -267,6 +279,7 @@ mod defaults {
     }
 
     pub(crate) mod ev_loop {
+        pub(crate) fn min_positive_iter() -> u32 { 3 }
         pub(crate) fn max_iter() -> u32 { 15 }
         pub(crate) fn fail() -> bool { true }
     }
