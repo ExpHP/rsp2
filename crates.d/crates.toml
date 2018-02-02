@@ -46,6 +46,8 @@ rsp2-util-macros    = "src/util/macros"
 rsp2-tempdir        = "src/util/tempdir"
 rsp2-linalg         = "src/math/linalg"
 rsp2-fs-util        = "src/util/fs"
+rsp2-clap = "src/util/clap"
+rsp2-tasks-config = "src/tasks/config"
 #!!INSERTION POINT FOR NEW CRATES!!#
 
 #--------------------------------------------
@@ -61,6 +63,7 @@ chrono = "0.4"
 either = "1"
 fern = "0.4"
 env_logger = "0.4"
+extension-trait = "0.1.2"
 error-chain = "0.11"
 itertools = "0.7"
 lazy_static = "0.2"
@@ -74,11 +77,12 @@ serde = "1"
 serde_derive = "1"
 serde_json = "1"
 serde_yaml = "0.7"
+serde_ignored = "0.0.4"
 tempdir = "0.3"
 ansi_term = "0.10"
 slice-of-array = "0.1"
 rsp2-kets = { version = "0.3.6", git = "https://github.com/ExpHP/rsp2-kets", features = ["serde"] }
-lammps-sys = { tag = "v0.2.0", git = "https://github.com/ExpHP/lammps-sys" }
+lammps-sys = { tag = "v0.3.0", git = "https://github.com/ExpHP/lammps-sys" }
 rayon = "0.8"
 failure = "0.1.0"
 failure_derive = "0.1.0"

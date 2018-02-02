@@ -7,6 +7,8 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 path = "lib.rs"
 
 [dependencies]
+!!rsp2-tasks-config
+
 !!rsp2-lammps-wrap
 !!rsp2-minimize
 !!rsp2-structure
@@ -21,14 +23,15 @@ path = "lib.rs"
 
 !!slice-of-array
 !!rsp2-kets
-!!serde
-!!serde-json
-!!serde-yaml
-!!serde-derive
 !!rand
 !!log
 !!fern
+!!extension-trait
 !!itertools
 !!ansi-term
 !!rayon
 !!error-chain
+!!serde
+!!serde-derive
+!!serde-json
+!!serde-yaml

@@ -17,6 +17,7 @@ nom = "3"
 serde = "1"
 serde_derive = "1"
 serde_yaml = "0.7"
+serde_json = "1"
 
 rsp2-structure = { path = "../structure" }
 rsp2-byte-tools-plus-float = { path = "../util/byte-tools-plus-float" }

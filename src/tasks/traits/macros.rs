@@ -173,6 +173,11 @@ macro_rules! impl_dirlike_boilerplate {
                 $(let $other_members = self.$other_members;)*
                 $Type { $member, $($other_members),* }
             }
+
+            /// Box the path, erasing its type.
+            pub fn boxed(self) -> $Type<Box<AsPath>>
+            where P: 'static,
+            { self.map_dir(move |d| Box::new(d) as _) }
         }
     };
 }

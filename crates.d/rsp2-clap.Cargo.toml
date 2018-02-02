@@ -1,5 +1,5 @@
 [package]
-name = "rsp2-tempdir"
+name = "rsp2-clap"
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 
@@ -7,7 +7,4 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 path = "lib.rs"
 
 [dependencies]
-tempdir = "0.3"
-
-!!log
-!!rsp2-fs-util
+!!clap

@@ -12,6 +12,7 @@ path = "lib.rs"
 !!serde
 !!serde-derive
 !!serde-yaml
+!!serde-json
 
 !!rsp2-structure
 !!rsp2-byte-tools-plus-float

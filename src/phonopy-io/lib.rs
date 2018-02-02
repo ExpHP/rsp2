@@ -5,15 +5,15 @@ extern crate rsp2_byte_tools_plus_float as byte_tools;
 #[macro_use] extern crate error_chain;
 #[macro_use] extern crate nom;
 #[macro_use] extern crate serde_derive;
+extern crate serde_json;
 extern crate serde_yaml;
 
-pub type IoError = ::std::io::Error;
-pub type YamlError = ::serde_yaml::Error;
+pub use self::filetypes::{conf, Conf};
+pub use self::filetypes::symmetry_yaml::{self, SymmetryYaml};
+pub use self::filetypes::disp_yaml::{self, DispYaml};
+pub use self::filetypes::force_sets;
+pub use self::filetypes::sparse_sets;
 
-pub use self::filetypes::{conf, disp_yaml, force_sets, symmetry_yaml};
-pub use self::filetypes::{Conf};
-pub use self::filetypes::symmetry_yaml::SymmetryYaml;
-pub use self::filetypes::disp_yaml::DispYaml;
 mod filetypes;
 pub mod npy;
 
@@ -26,6 +26,7 @@ pub(crate) mod errors {
         foreign_links {
             Io(::std::io::Error);
             Yaml(::serde_yaml::Error);
+            Json(::serde_json::Error);
         }
 
         errors {}

@@ -1,7 +1,9 @@
 
-use ::rsp2_structure::CoordStructure;
+use ::rsp2_structure::{Coords, Lattice, CoordStructure};
 use ::rsp2_array_utils::{dot, map_arr};
 use ::rsp2_kets::{Ket, KetRef, Rect};
+use ::rsp2_array_utils::{arr_from_fn};
+
 
 use ::std::f64::consts::PI;
 use ::itertools::Itertools;
@@ -128,8 +130,10 @@ pub fn unfold_phonon(
     supercell_matrix: &ScMatrix,
 ) -> Vec<([u32; 3], f64)>
 {
-    UnfolderAtQ::from_config(config, superstructure, supercell_matrix, eigenvector_q)
-        .unfold_phonon(eigenvector)
+    let unfolder = UnfolderAtQ::from_config(config, superstructure, supercell_matrix, eigenvector_q);
+    let indices = unfolder.q_indices().iter().cloned();
+    let probs = unfolder.unfold_phonon(eigenvector);
+    izip!(indices, probs).collect()
 }
 
 /// Contains precomputed information derived from the
@@ -138,10 +142,16 @@ pub fn unfold_phonon(
 /// This speeds up the unfolding of many eigenvectors computed
 /// at the same q point.
 pub struct UnfolderAtQ {
-    /// 3D indices of supercell reciprocal lattice points
+    /// `[sc_recip_index] -> index` (3D index of sc reciprocal lattice point)
     sc_indices: Vec<[u32; 3]>,
-    /// [pc_recip_index][sc_recip_index] -> q_ket
+    /// `[pc_recip_index][sc_recip_index] -> q_ket`
     q_kets_by_pc_sc: Vec<Vec<Ket>>,
+
+    // HACK: these are only here to service the code that uses UnfolderAtQ
+    /// `[sc_recip_index] -> q` (reduced into primitive cell)
+    sc_qs_frac: Vec<PrimFracQ>,
+    ev_q_frac: PrimFracQ,
+    pc_recip_lattice: [[f64; 3]; 3],
 }
 
 impl UnfolderAtQ {
@@ -149,10 +159,14 @@ impl UnfolderAtQ {
         config: &Config,
         superstructure: &CoordStructure,
         supercell_matrix: &ScMatrix,
-        eigenvector_q: &[f64; 3],
+        eigenvector_q: &[f64; 3], // reduced by sc lattice
     ) -> UnfolderAtQ
     {
         use ::rsp2_array_utils::{inv, map_mat, mat_from_fn, arr_from_fn};
+
+        // FIXME expected behavior unclear when the following does not hold.
+        //       especially so if it lies outside the (larger) primitive reciprocal cell.
+        assert!(eigenvector_q.iter().all(|&x| 0.0 <= x && x < 1.0));
 
         match config.fbz {
             config::FbzType::Voronoi => {
@@ -185,7 +199,7 @@ impl UnfolderAtQ {
                 let pc_recip_vecs = config.sampling.points(&pc_recip);
 
                 // into recip cartesian space
-                let eigenvector_q = dot(eigenvector_q, &sc_recip);
+                let eigenvector_q_cart = dot(eigenvector_q, &sc_recip);
                 if eigenvector_q.iter().any(|&x| x != 0.0) {
                     // (I currently always run this code on gamma eigenvectors...)
                     warn!("Untested code path: 9fc15058-7199-45d2-80ec-630ceb575d3d");
@@ -197,20 +211,65 @@ impl UnfolderAtQ {
                         quotient_vecs.iter().map(|quotient_q| {
                             q_ket(
                                 &superstructure.to_carts(),
-                                &arr_from_fn(|k| eigenvector_q[k] + sample_q[k] + quotient_q[k]),
+                                &arr_from_fn(|k| eigenvector_q_cart[k] + sample_q[k] + quotient_q[k]),
                             )
                         }).collect()
                     }).collect(),
+                    sc_qs_frac: {
+                        let pc_recip = Lattice::new(&pc_recip);
+                        Coords::Carts(quotient_vecs.clone()).to_fracs(&pc_recip)
+                    },
+                    pc_recip_lattice: pc_recip,
+                    ev_q_frac: {
+                        use ::rsp2_array_utils::dot;
+                        let q = eigenvector_q_cart;
+                        let q = dot(&q, &inv(&pc_recip));
+                        q
+                    }
                 }
             },
         }
     }
 
-    pub fn unfold_phonon(&self, eigenvector: KetRef)
-                         -> Vec<([u32; 3], f64)>
-    {
-        use ::rsp2_array_utils::{arr_from_fn};
+    pub fn q_indices(&self) -> &[[u32; 3]]
+    { &self.sc_indices }
 
+    pub fn q_fracs(&self) -> &[[f64; 3]]
+    { &self.sc_qs_frac }
+
+    pub fn lookup_q_index(&self, q: &PrimFracQ, tol: f64) -> Option<usize>
+    {
+        use ::rsp2_array_utils::arr_from_fn;
+
+        debug!("EVQ: {:?}", self.ev_q_frac);
+        for q in &self.sc_qs_frac {
+            debug!("QQQ: {:?}", q);
+        }
+
+        let dq: [_; 3] = arr_from_fn(|k| {
+            let mut d = q[k] - self.ev_q_frac[k];
+            d -= d.floor();
+            d -= d.floor(); // for -EPSILON < d < 0
+            d
+        });
+
+        let mut sc_qs_frac = self.sc_qs_frac.to_vec();
+        for row in &mut sc_qs_frac {
+            for k in 0..3 {
+                row[k] -= dq[k];
+            }
+        }
+
+        let sc_qs_cart =
+            Coords::Fracs(sc_qs_frac.to_vec())
+                .into_carts(&Lattice::new(&self.pc_recip_lattice));
+
+
+        index_of_shortest_with_nearest_27(&sc_qs_cart, &self.pc_recip_lattice, tol)
+    }
+
+    pub fn unfold_phonon(&self, eigenvector: KetRef) -> Vec<f64>
+    {
         assert_eq!(eigenvector.len(), 3 * self.q_kets_by_pc_sc[0][0].len());
 
         // separate kets for each polarization axis (they don't cancel each other)
@@ -233,10 +292,14 @@ impl UnfolderAtQ {
                 }
             }
         }
+
+        // unfortunately it seems this method of computing weights is rather
+        // fuzzy and the total weight will tend to be something completely
+        // unpredictable; hence we must normalize it after the fact.
         let total: f64 = probs.iter().sum();
         probs.iter_mut().for_each(|p| *p /= total);
 
-        izip!(self.sc_indices.clone(), probs).collect()
+        probs
     }
 }
 
@@ -245,6 +308,34 @@ fn q_ket(carts: &[[f64; 3]], q: &[f64; 3]) -> Ket
 { carts.iter().map(|x| Rect::from_phase(-dot(x, q) * 2.0 * PI)).collect() }
 
 type SuperFracQ = [f64; 3];
+type PrimFracQ = [f64; 3];
+
+/// Shortest vector in consideration of the 27 images around them.
+// FIXME this shouldn't be just some util function, it is a common mathematical problem and
+//   there are nontrivial criteria that must be met for this function to even be useful.
+//  (e.g. the given cell must be reduced enough for the 27 images to cover the voronoi cell)
+//  (It also could make much better use of SIMD, but that's for another time)
+fn index_of_shortest_with_nearest_27(
+    carts: &[[f64; 3]],
+    lattice: &[[f64; 3]; 3],
+    tol: f64,
+) -> Option<usize>
+{
+    use ::rsp2_array_utils::arr_from_fn;
+
+    assert!(carts.len() > 0);
+    let mut all_carts = carts.to_vec();
+    for row in lattice {
+        let mut new_carts = Vec::with_capacity(all_carts.len() * 3);
+        new_carts.extend(all_carts.iter().cloned());
+        new_carts.extend(all_carts.iter().map(|v| arr_from_fn::<[_; 3], _>(|k| v[k] - row[k])));
+        new_carts.extend(all_carts.iter().map(|v| arr_from_fn::<[_; 3], _>(|k| v[k] + row[k])));
+        all_carts = new_carts;
+    }
+
+    ::util::index_of_shortest(&all_carts[..], tol)
+        .map(|i| i % carts.len()) // of original, not of image
+}
 
 #[cfg(test)]
 #[deny(dead_code)]

@@ -14,32 +14,48 @@
 //! things was the biggest limitation of the previous API, which never
 //! exposed its own temporary directories.
 
-use ::{Result, IoResult, ErrorKind};
+use ::{Error, Result, IoResult, ErrorKind};
 use ::As3;
 
-use super::{Conf, DispYaml, SymmetryYaml, QPositions, Args};
+use super::{Conf, DispYaml, SymmetryYaml, QPositions, Args, OtherSettings};
 use ::traits::{AsPath, HasTempDir, Save, Load};
 
 use ::rsp2_structure_io::poscar;
-use ::std::io::{Read, Write, BufRead};
+use ::std::io::prelude::*;
 use ::std::process::Command;
 use ::std::path::{Path, PathBuf};
-use ::rsp2_fs_util::{open, open_text, create, copy, hard_link, mv, rm_rf};
+use ::rsp2_fs_util::{open, open_text, create, copy, hard_link, mv};
 use ::rsp2_tempdir::TempDir;
-use ::std::collections::HashMap;
 
 use ::rsp2_kets::Basis;
-use ::rsp2_structure::{CoordStructure, ElementStructure};
+use ::rsp2_structure::{ElementStructure, Element};
 use ::rsp2_structure::{FracRot, FracTrans, FracOp};
 use ::rsp2_phonopy_io::npy;
 
 use ::slice_of_array::prelude::*;
 
-#[derive(Debug, Clone, Default)]
+const THZ_TO_WAVENUMBER: f64 = 33.35641;
+
+#[derive(Debug, Clone)]
 pub struct Builder {
     symprec: Option<f64>,
     conf: Conf,
+    more: OtherSettings,
 }
+
+impl Default for Builder {
+    fn default() -> Self {
+        Builder {
+            symprec: None,
+            conf: Default::default(),
+            more: OtherSettings {
+                use_sparse_sets: false,
+            },
+        }
+    }
+}
+
+const FNAME_OTHER_SETTINGS: &'static str = "rsp2-phonopy.json";
 
 impl Builder {
     pub fn new() -> Self
@@ -71,6 +87,9 @@ impl Builder {
         })
     }
 
+    pub fn use_sparse_sets(mut self, value: bool) -> Self
+    { self.more.use_sparse_sets = value; self }
+
     fn args_from_settings(&self) -> Args
     {
         let mut out = vec![];
@@ -97,6 +116,7 @@ impl Builder {
             self.conf.save(dir.join("disp.conf"))?;
             poscar::dump(create(dir.join("POSCAR"))?, "blah", &structure)?;
             extra_args.save(dir.join("disp.args"))?;
+            self.more.save(dir.join(FNAME_OTHER_SETTINGS))?;
 
             trace!("Calling phonopy for displacements...");
             {
@@ -229,12 +249,9 @@ pub struct DirWithDisps<P: AsPath> {
     pub(crate) dir: P,
     // These are cached in memory from `disp.yaml` due to the likelihood
     // that code using `DirWithDisps` will need them.
-    // FIXME: Should be ElementStructure, but this needs `try_map_metadata_to` or
-    //        similar.  I guess we could also expose the DispYaml metadata type,
-    //        but it'd be unnecessarily annoying to work with in user code,
-    //        and we're already commited to ElementStructure as an input type.
-    pub(crate) superstructure: CoordStructure,
+    pub(crate) superstructure: ElementStructure,
     pub(crate) displacements: Vec<(usize, [f64; 3])>,
+    pub(crate) settings: OtherSettings,
 }
 
 impl<P: AsPath> DirWithDisps<P> {
@@ -245,6 +262,7 @@ impl<P: AsPath> DirWithDisps<P> {
             "disp.yaml",
             "disp.conf",
             "disp.args",
+            FNAME_OTHER_SETTINGS,
         ] {
             let path = dir.as_path().join(name);
             ensure!(path.exists(),
@@ -255,13 +273,19 @@ impl<P: AsPath> DirWithDisps<P> {
         let DispYaml {
             displacements, structure: superstructure
         } = Load::load(dir.as_path().join("disp.yaml"))?;
-        let superstructure = superstructure.map_metadata_into(|_| ());
+        let superstructure = superstructure.try_map_metadata_into(|d| {
+            match Element::from_symbol(&d.symbol[..]) {
+                Some(e) => Ok::<_, Error>(e),
+                None => bail!("invalid symbol in disp.yaml: {:?}", d.symbol),
+            }
+        })?;
+        let settings = Load::load(dir.as_path().join(FNAME_OTHER_SETTINGS))?;
 
-        DirWithDisps { dir, superstructure, displacements }
+        DirWithDisps { dir, superstructure, displacements, settings }
     })}
 
-    /// FIXME: This should be an ElementStructure.
-    pub fn superstructure(&self) -> &CoordStructure
+    #[allow(unused)]
+    pub fn superstructure(&self) -> &ElementStructure
     { &self.superstructure }
     pub fn displacements(&self) -> &[(usize, [f64; 3])]
     { &self.displacements }
@@ -270,58 +294,76 @@ impl<P: AsPath> DirWithDisps<P> {
     /// clones of the structure... though it seems unlikely that this cost
     /// is anything to worry about compared to the cost of computing the
     /// forces on said structure.
-    ///
-    /// FIXME: This should give ElementStructure.
-    pub fn displaced_structures<'a>(&'a self) -> Box<Iterator<Item=CoordStructure> + 'a>
-    {Box::new({
+    pub fn displaced_structures<'a>(&'a self) -> Box<Iterator<Item=ElementStructure> + 'a>
+    { Box::new({
         use ::rsp2_phonopy_io::disp_yaml::apply_displacement;
         self.displacements
             .iter()
             .map(move |&disp| apply_displacement(&self.superstructure, disp))
     })}
 
-    /// Write FORCE_SETS to create a `DirWithForces`
+    /// Write FORCE_SETS (or SPARSE_SETS) to create a `DirWithForces`
     /// (which may serve as a template for one or more band computations).
     ///
     /// This variant creates a new temporary directory.
-    pub fn make_force_dir<V>(self, forces: &[V]) -> Result<DirWithForces<TempDir>>
-    where V: AsRef<[[f64; 3]]>,
+    pub fn make_force_dir<Vs>(self, forces: Vs) -> Result<DirWithForces<TempDir>>
+    where
+        Vs: IntoIterator,
+        <Vs as IntoIterator>::IntoIter: ExactSizeIterator,
+        <Vs as IntoIterator>::Item: AsRef<[[f64; 3]]>,
     {Ok({
         let out = TempDir::new("rsp2")?;
         trace!("Force sets dir: '{}'...", out.path().display());
 
-        self.make_force_dir_in_dir(&forces, out)?
+        self.make_force_dir_in_dir(forces, out)?
     })}
 
-    /// Write FORCE_SETS to create a `DirWithForces`
+    /// Write FORCE_SETS (or SPARSE_SETS) to create a `DirWithForces`
     /// (which may serve as a template for one or more band computations).
     ///
     /// This variant uses the specified path.
-    pub fn make_force_dir_in_dir<V, Q>(self, forces: &[V], path: Q) -> Result<DirWithForces<Q>>
+    pub fn make_force_dir_in_dir<Vs, Q>(self, forces: Vs, path: Q) -> Result<DirWithForces<Q>>
     where
-        V: AsRef<[[f64; 3]]>,
         Q: AsPath,
+        Vs: IntoIterator,
+        <Vs as IntoIterator>::IntoIter: ExactSizeIterator,
+        <Vs as IntoIterator>::Item: AsRef<[[f64; 3]]>,
     {Ok({
-        let forces: Vec<_> = forces.iter().map(|x: &_| x.as_ref()).collect();
-        self.prepare_force_dir(&forces, path.as_path())?;
+        self.prepare_force_dir(forces, path.as_path())?;
         DirWithForces::from_existing(path)?
     })}
 
-    fn prepare_force_dir(self, forces: &[&[[f64; 3]]], path: &Path) -> Result<()>
+    /// Creates the files expected by DirWithForces::from_existing
+    fn prepare_force_dir<Vs>(self, forces: Vs, path: &Path) -> Result<()>
+    where
+        Vs: IntoIterator,
+        <Vs as IntoIterator>::IntoIter: ExactSizeIterator,
+        <Vs as IntoIterator>::Item: AsRef<[[f64; 3]]>,
     {Ok({
         let disp_dir = self.path();
 
-        for name in &["POSCAR", "disp.yaml", "disp.conf", "disp.args"] {
+        for name in &["POSCAR", "disp.yaml", "disp.conf", "disp.args", FNAME_OTHER_SETTINGS] {
             copy(disp_dir.join(name), path.join(name))?;
         }
 
-        trace!("Writing FORCE_SETS...");
-        ::rsp2_phonopy_io::force_sets::write(
-            create(path.join("FORCE_SETS"))?,
-            &self.superstructure,
-            &self.displacements,
-            &forces,
-        )?;
+        match self.settings.use_sparse_sets {
+            false => {
+                trace!("Writing FORCE_SETS...");
+                ::rsp2_phonopy_io::force_sets::write(
+                    create(path.join("FORCE_SETS"))?,
+                    &self.displacements,
+                    forces,
+                )?;
+            },
+            true => {
+                trace!("Writing SPARSE_SETS...");
+                ::rsp2_phonopy_io::sparse_sets::write(
+                    create(path.join("SPARSE_SETS"))?,
+                    &self.displacements,
+                    forces,
+                )?;
+            },
+        }
     })}
 }
 
@@ -330,6 +372,7 @@ impl<P: AsPath> DirWithDisps<P> {
 /// - `FORCE_SETS`: Phonopy file with forces for displacements
 /// - configuration settings which impact the selection of displacements
 ///   - `--tol`, `--dim`
+/// - OtherSettings
 ///
 /// It may also contain a force constants file.
 ///
@@ -345,28 +388,30 @@ impl<P: AsPath> DirWithDisps<P> {
 #[derive(Debug, Clone)]
 pub struct DirWithForces<P: AsPath> {
     dir: P,
+    settings: OtherSettings,
     cache_force_constants: bool,
 }
 
 impl<P: AsPath> DirWithForces<P> {
     pub fn from_existing(dir: P) -> Result<Self>
     {Ok({
+        let settings = OtherSettings::load(dir.as_path().join(FNAME_OTHER_SETTINGS))?;
+
         // Sanity check
         for name in &[
             "POSCAR",
-            "FORCE_SETS",
+            settings.force_sets_filename(),
             "disp.args",
             "disp.conf",
         ] {
             let path = dir.as_path().join(name);
-            if !path.exists() {
-                ensure!(path.exists(),
-                    ErrorKind::MissingFile("DirWithForces", dir.as_path().to_owned(), name.to_string()));
-            }
+            ensure!(path.exists(),
+                ErrorKind::MissingFile("DirWithForces", dir.as_path().to_owned(), name.to_string()));
         }
-        DirWithForces { dir, cache_force_constants: true }
+        DirWithForces { dir, settings, cache_force_constants: true }
     })}
 
+    #[allow(unused)]
     pub fn structure(&self) -> Result<ElementStructure>
     { Ok(poscar::load(open_text(self.path().join("POSCAR"))?)?) }
 
@@ -375,94 +420,63 @@ impl<P: AsPath> DirWithForces<P> {
     /// When enabled (the default), force constants are copied back from
     /// the first successful `DirWithBands` created, and are reused in
     /// subsequent band computations. (these copies are hard links if possible)
+    #[allow(unused)]
     pub fn cache_force_constants(&mut self, b: bool) -> &mut Self
     { self.cache_force_constants = b; self }
 
     /// Compute bands in a temp directory.
     ///
     /// Returns an object used to configure the computation.
-    pub fn build_bands(&self) -> BandsBuilder<P, TempDir>
-    { BandsBuilder::init(self, MaybeDeferred::Deferred(make_temp_bands_dir)) }
-
-    // FIXME experimental API, but `relocate` may be safer/saner
-    /// Compute bands, running in a given directory.
-    ///
-    /// Returns an object used to configure the computation.
-    ///
-    /// Beware! Existing files in the given directory may be overwritten.
-    pub fn build_bands_in_dir<Q: AsPath>(&self, dir: Q) -> BandsBuilder<P, Q>
-    { BandsBuilder::init(self, MaybeDeferred::Value(dir)) }
+    pub fn build_bands(&self) -> BandsBuilder<P>
+    { BandsBuilder::init(self) }
 }
-
-#[derive(Debug, Clone)]
-enum MaybeDeferred<T> {
-    Value(T),
-    Deferred(fn() -> Result<T>),
-}
-
-fn make_temp_bands_dir() -> Result<TempDir>
-{Ok({
-    let tmp = TempDir::new("rsp2")?;
-    trace!("Bands directory: {}", tmp.path().display());
-    tmp
-})}
 
 declare_poison_pair! {
-    generics: {'p, P, Q}
+    generics: {'p, P}
     where: {
         P: AsPath + 'p,
-        Q: AsPath,
     }
     type: {
         #[derive(Debug, Clone)]
         pub struct BandsBuilder<...>(Option<_>);
         struct BandsBuilderImpl<...> {
             dir_with_forces: &'p DirWithForces<P>,
-            directory: MaybeDeferred<Q>,
             eigenvectors: bool,
         }
     }
     poisoned: { panic!("This BandsBuilder has already been used!"); }
 }
 
-impl<'p, P: AsPath, Q: AsPath> BandsBuilder<'p, P, Q> {
-    // Q must be provided in advance to dodge issues with type inference
-    fn init(dir_with_forces: &'p DirWithForces<P>, directory: MaybeDeferred<Q>) -> Self
+impl<'p, P: AsPath> BandsBuilder<'p, P> {
+    fn init(dir_with_forces: &'p DirWithForces<P>) -> Self
     { BandsBuilder(Some(BandsBuilderImpl {
         dir_with_forces,
-        directory: directory,
         eigenvectors: false,
     })) }
 
     pub fn eigenvectors(&mut self, b: bool) -> &mut Self
     { self.inner_mut().eigenvectors = b; self }
 
-    pub fn compute(&mut self, q_points: &[[f64; 3]]) -> Result<DirWithBands<Q>>
+    pub fn compute(&mut self, q_points: &[[f64; 3]]) -> Result<DirWithBands<TempDir>>
     {Ok({
         let me = self.into_inner();
-        let dir = match me.directory {
-            MaybeDeferred::Value(d) => d,
-            MaybeDeferred::Deferred(f) => f()?,
-        };
+        let dir = TempDir::new("rsp2")?;
 
         let fc_filename = "force_constants.hdf5";
         {
             let src = me.dir_with_forces.as_path();
             let dir = dir.as_path();
 
-            copy(src.join("POSCAR"), dir.join("POSCAR"))?;
-            copy(src.join("disp.conf"), dir.join("disp.conf"))?;
-            copy(src.join("disp.args"), dir.join("disp.args"))?;
+            for name in &["POSCAR", "disp.conf", "disp.args", FNAME_OTHER_SETTINGS] {
+                copy(src.join(name), dir.join(name))?;
+            }
+            {
+                let name = me.dir_with_forces.settings.force_sets_filename();
+                copy_or_link(src.join(name), dir.join(name))?;
+            }
 
-            // NOTE: this rm_rf carries with it the limitation
-            //        limitation that the force dir cannot be the band dir.
-            //       Not sure whether that's a reasonable use case or not...
-            rm_rf(dir.join("FORCE_SETS"))?;
-            hard_link(src.join("FORCE_SETS"), dir.join("FORCE_SETS"))?;
-
-            if dir.join(fc_filename).exists() {
-                rm_rf(dir.join(fc_filename))?;
-                hard_link(src.join(fc_filename), dir.join(fc_filename))?;
+            if src.join(fc_filename).exists() {
+                copy_or_link(src.join(fc_filename), dir.join(fc_filename))?;
             }
 
             QPositions(q_points.into()).save(dir.join("q-positions.json"))?;
@@ -537,6 +551,7 @@ import os; os.unlink('band.hdf5')
 /// - input structure
 /// - q-points
 /// - eigenvalues (and possibly eigenvectors)
+/// - OtherSettings
 ///
 /// # Note
 ///
@@ -546,6 +561,7 @@ import os; os.unlink('band.hdf5')
 /// may instead cause a panic, or may not be detected as early as possible.
 #[derive(Debug, Clone)]
 pub struct DirWithBands<P: AsPath> {
+    settings: OtherSettings,
     dir: P,
 }
 
@@ -553,21 +569,21 @@ pub struct DirWithBands<P: AsPath> {
 impl<P: AsPath> DirWithBands<P> {
     pub fn from_existing(dir: P) -> Result<Self>
     {Ok({
+        let settings = OtherSettings::load(dir.as_path().join(FNAME_OTHER_SETTINGS))?;
+
         // Sanity check
         for name in &[
             "POSCAR",
-            "FORCE_SETS",
+            settings.force_sets_filename(),
             "eigenvalue.npy",
             "q-positions.json",
         ] {
             let path = dir.as_path().join(name);
-            if !path.exists() {
-                ensure!(path.exists(),
-                    ErrorKind::MissingFile("DirWithBands", dir.as_path().to_owned(), name.to_string()));
-            }
+            ensure!(path.exists(),
+                ErrorKind::MissingFile("DirWithBands", dir.as_path().to_owned(), name.to_string()));
         }
 
-        DirWithBands { dir }
+        DirWithBands { settings, dir }
     })}
 
     pub fn structure(&self) -> Result<ElementStructure>
@@ -589,18 +605,20 @@ impl<P: AsPath> DirWithBands<P> {
 
     pub fn eigenvalues(&self) -> Result<Vec<Vec<f64>>>
     {Ok({
+        use ::rsp2_slice_math::{v};
         trace!("Reading eigenvectors...");
         let file = open(self.path().join("eigenvalue.npy"))?;
         npy::read_eigenvalue_npy(file)?
+            .into_iter()
+            .map(|evs| (v(evs) * THZ_TO_WAVENUMBER).0)
+            .collect()
     })}
 }
 
 //-----------------------------
 
 fn band_string(ks: &[[f64; 3]]) -> String
-{
-    ks.flat().iter().map(|x| x.to_string()).collect::<Vec<_>>().join(" ")
-}
+{ ks.flat().iter().map(|x| x.to_string()).collect::<Vec<_>>().join(" ") }
 
 fn round_checked(x: f64, tol: f64) -> Result<i32>
 {Ok({
@@ -687,24 +705,37 @@ pub fn cache_link<P: AsRef<Path>, Q: AsRef<Path>>(src: P, dest: Q) -> Result<()>
         }))
 }
 
+// Like `cache_link` except it fails if the destination exists.
+pub fn copy_or_link<P: AsRef<Path>, Q: AsRef<Path>>(src: P, dest: Q) -> Result<()>
+{
+    let (src, dest) = (src.as_ref(), dest.as_ref());
+    hard_link(src, dest)
+        .map(|_| ())
+        .or_else(|_| Ok({
+            // assume that, if the error was due to anything other than cross-device linking,
+            // then we'll get the same error again when we try to copy.
+            copy(src, dest)?;
+        }))
+}
+
 //-----------------------------
 
 impl_dirlike_boilerplate!{
     type: {DirWithDisps<_>}
     member: self.dir
-    other_members: [self.displacements, self.superstructure]
+    other_members: [self.displacements, self.settings, self.superstructure]
 }
 
 impl_dirlike_boilerplate!{
     type: {DirWithForces<_>}
     member: self.dir
-    other_members: [self.cache_force_constants]
+    other_members: [self.cache_force_constants, self.settings]
 }
 
 impl_dirlike_boilerplate!{
     type: {DirWithBands<_>}
     member: self.dir
-    other_members: []
+    other_members: [self.settings]
 }
 
 #[cfg(test)]

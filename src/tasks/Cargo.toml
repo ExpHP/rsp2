@@ -12,6 +12,8 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 path = "lib.rs"
 
 [dependencies]
+rsp2-tasks-config = { path = "config" }
+
 rsp2-lammps-wrap = { path = "../lammps-wrap" }
 rsp2-minimize = { path = "../minimize" }
 rsp2-structure = { path = "../structure" }
@@ -26,14 +28,15 @@ rsp2-fs-util = { path = "../util/fs" }
 
 slice-of-array = "0.1"
 rsp2-kets = { version = "0.3.6", git = "https://github.com/ExpHP/rsp2-kets", features = ["serde"] } 
-serde = "1"
-serde_json = "1"
-serde_yaml = "0.7"
-serde_derive = "1"
 rand = "0.3"
 log = "0.3"
 fern = "0.4"
+extension-trait = "0.1.2"
 itertools = "0.7"
 ansi_term = "0.10"
 rayon = "0.8"
 error-chain = "0.11"
+serde = "1"
+serde_derive = "1"
+serde_json = "1"
+serde_yaml = "0.7"

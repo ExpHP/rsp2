@@ -11,7 +11,7 @@ pub use self::cmd::*;
 
 pub type SymmetryYaml = symmetry_yaml::SymmetryYaml;
 impl Load for SymmetryYaml {
-    fn load<P: AsPath>(path: P) -> Result<SymmetryYaml>
+    fn load<P: AsPath>(path: P) -> Result<Self>
     { Ok(symmetry_yaml::read(open(path.as_path())?)?) }
 }
 
@@ -19,7 +19,7 @@ impl Load for SymmetryYaml {
 
 pub type DispYaml = disp_yaml::DispYaml;
 impl Load for DispYaml {
-    fn load<P: AsPath>(path: P) -> Result<DispYaml>
+    fn load<P: AsPath>(path: P) -> Result<Self>
     { Ok(disp_yaml::read(open(path.as_path())?)?) }
 }
 
@@ -29,7 +29,7 @@ impl Load for DispYaml {
 #[derive(Debug, Clone, Default)]
 pub struct Conf(pub ::rsp2_phonopy_io::Conf);
 impl Load for Conf {
-    fn load<P: AsPath>(path: P) -> Result<Conf>
+    fn load<P: AsPath>(path: P) -> Result<Self>
     { Ok(conf::read(open_text(path.as_path())?)?).map(Conf) }
 }
 
@@ -53,12 +53,12 @@ where
     S: AsRef<str>,
     Ss: IntoIterator<Item=S>,
 {
-    fn from(args: Ss) -> Args
+    fn from(args: Ss) -> Self
     { Args(args.into_iter().map(|s| s.as_ref().to_owned()).collect()) }
 }
 
 impl Load for Args {
-    fn load<P: AsPath>(path: P) -> Result<Args>
+    fn load<P: AsPath>(path: P) -> Result<Self>
     { Ok(::serde_json::from_reader(open(path.as_path())?)?) }
 }
 
@@ -69,12 +69,39 @@ impl Save for Args {
 
 //--------------------------------------------------------
 
+/// Type representing Builder config that goes beyond simple adjustments to phonopy's input.
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone)]
+pub(crate) struct OtherSettings {
+    use_sparse_sets: bool,
+}
+
+impl Load for OtherSettings {
+    fn load<P: AsPath>(path: P) -> Result<Self>
+    { Ok(::serde_json::from_reader(open(path.as_path())?)?) }
+}
+
+impl Save for OtherSettings {
+    fn save<P: AsPath>(&self, path: P) -> Result<()>
+    {Ok({ ::serde_json::to_writer(create(path.as_path())?, self)?; })}
+}
+
+impl OtherSettings {
+    fn force_sets_filename(&self) -> &'static str
+    { match self.use_sparse_sets {
+        true => "SPARSE_SETS",
+        false => "FORCE_SETS",
+    }}
+}
+
+//--------------------------------------------------------
+
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, Default)]
 pub(crate) struct QPositions(Vec<[f64; 3]>);
 
 impl Load for QPositions {
-    fn load<P: AsPath>(path: P) -> Result<QPositions>
+    fn load<P: AsPath>(path: P) -> Result<Self>
     { Ok(::serde_json::from_reader(open(path.as_path())?)?) }
 }
 

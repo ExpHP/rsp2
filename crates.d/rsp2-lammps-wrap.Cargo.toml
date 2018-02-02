@@ -11,6 +11,7 @@ path = "lib.rs"
 !!lammps-sys
 
 !!log
+!!lazy-static
 !!chrono
 !!ndarray
 !!error-chain

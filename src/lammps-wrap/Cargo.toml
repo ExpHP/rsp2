@@ -13,9 +13,10 @@ path = "lib.rs"
 
 [dependencies]
 rsp2-structure = { path = "../structure" }
-lammps-sys = { tag = "v0.2.0", git = "https://github.com/ExpHP/lammps-sys" } 
+lammps-sys = { tag = "v0.3.0", git = "https://github.com/ExpHP/lammps-sys" } 
 
 log = "0.3"
+lazy_static = "0.2"
 chrono = "0.4"
 ndarray = "0.10"
 error-chain = "0.11"

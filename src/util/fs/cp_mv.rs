@@ -155,7 +155,7 @@ impl MoveCmd {
         // args specific to copy vs move, but valid for both "one and many"
         let mut cmd = match self.copy {
             true => {
-                let mut cmd = Command::new("/usr/bin/cp");
+                let mut cmd = Command::new("cp");
                 cmd.arg("--archive");
 
                 if self.link { cmd.arg("--link"); }
@@ -163,7 +163,7 @@ impl MoveCmd {
                 cmd
             },
             false => {
-                let cmd = Command::new("/usr/bin/mv");
+                let cmd = Command::new("mv");
 
                 // no API should have been provided to set these
                 assert!(!self.link);

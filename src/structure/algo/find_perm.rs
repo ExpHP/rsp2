@@ -1,5 +1,5 @@
 use ::slice_of_array::prelude::*;
-use ::{Lattice, CoordStructure};
+use ::{Lattice, Structure, CoordStructure};
 use ::{FracRot, FracOp};
 use super::group::GroupTree;
 
@@ -69,13 +69,22 @@ fn dumb_validate_equivalent(
     }
 }
 
-// NOTE: Takes CoordStructure to communicate that the algorithm only cares
-//       about positions.  There is a small use-case for an <M: Eq> variant
-//       which could possibly allow two identical positions to be distinguished
-//       (maybe e.g. representing a defect as some superposition with a ghost)
-//       but I wouldn't want it to be the default.
+// NOTE: Takes CoordStructure as a speedbump to prevent accidental use
+//       with inappropriate metadata.
 pub(crate) fn of_spacegroup(
     prim_structure: &CoordStructure,
+    ops: &[FracOp],
+    tol: f64,
+) -> Result<Vec<Perm>>
+{
+    of_spacegroup_with_meta(prim_structure, ops, tol)
+}
+
+// NOTE: This version uses the metadata to group the atoms and potentially
+//       elide even more comparisons. Is it effective? No idea! But adding it
+//       came at zero extra cost for `M = ()`, so I figured it's worth trying out.
+pub(crate) fn of_spacegroup_with_meta<M: Ord>(
+    prim_structure: &Structure<M>,
     ops: &[FracOp],
     tol: f64,
 ) -> Result<Vec<Perm>>
@@ -92,7 +101,7 @@ pub(crate) fn of_spacegroup(
     tree.try_compute_homomorphism(
         |op| Ok::<_, Error>({
             let to_fracs = op.transform_prim(&from_fracs);
-            let perm = of_rotation_impl(lattice, &from_fracs, &to_fracs[..], tol)?;
+            let perm = of_rotation_impl(lattice, prim_structure.metadata(), &from_fracs, &to_fracs[..], tol)?;
             dumb_validate_equivalent(
                 lattice,
                 &to_fracs[..],
@@ -113,14 +122,22 @@ pub(crate) fn of_spacegroup(
     )?
 })}
 
-// NOTE: Takes CoordStructure to communicate that the algorithm only cares
-//       about positions.  There is a small use-case for an <M: Eq> variant
-//       which could possibly allow two identical positions to be distinguished
-//       (maybe e.g. representing a defect as some superposition with a ghost)
-//       but I wouldn't want it to be the default.
+// NOTE: Takes CoordStructure as a speedbump to prevent accidental use
+//       with inappropriate metadata.
 #[allow(unused)]
 pub(crate) fn of_rotation(
     structure: &CoordStructure,
+    rotation: &FracRot,
+    tol: f64,
+) -> Result<Perm>
+{ of_rotation_with_meta(structure, rotation, tol) }
+
+// NOTE: This version uses the metadata to group the atoms and potentially
+//       elide even more comparisons. Is it effective? No idea! But adding it
+//       came at zero extra cost for `M = ()`, so I figured it's worth trying out.
+#[allow(unused)]
+pub(crate) fn of_rotation_with_meta<M: Ord>(
+    structure: &Structure<M>,
     rotation: &FracRot,
     tol: f64,
 ) -> Result<Perm>
@@ -128,12 +145,14 @@ pub(crate) fn of_rotation(
     let lattice = structure.lattice();
     let from_fracs = structure.to_fracs();
     let to_fracs = rotation.transform_prim(&from_fracs);
+    let meta = structure.metadata();
 
-    of_rotation_impl(lattice, &from_fracs, &to_fracs, tol)?
+    of_rotation_impl(lattice, meta, &from_fracs, &to_fracs, tol)?
 })}
 
-fn of_rotation_impl(
+fn of_rotation_impl<M: Ord>(
     lattice: &Lattice,
+    meta: &[M],
     from_fracs: &[[f64; 3]],
     to_fracs: &[[f64; 3]],
     tol: f64,
@@ -148,19 +167,26 @@ fn of_rotation_impl(
     // The C code is optimized for this case, reducing an O(n^2)
     // search down to ~O(n). (for O(n log n) work overall, including the sort)
     //
-    // We choose distance from the nearest bravais lattice point as our measure.
+    // We choose to sort first by atom type, then by distance to the nearest
+    // bravais lattice point.
     let sort_by_lattice_distance = |fracs: &[[f64; 3]]| {
         let mut fracs = fracs.to_vec();
         for x in fracs.flat_mut() {
             *x -= x.round();
         }
 
-        let distances = Fracs(fracs.clone())
+        let data_to_sort = Fracs(fracs.clone())
                 .to_carts(lattice)
                 .into_iter()
-                .map(|x| NotNaN::new(dot(&x, &x).sqrt()).unwrap())
+                .zip(meta)
+                .map(|(x, m)| {
+                    (
+                        m, // first by atom type
+                        NotNaN::new(dot(&x, &x).sqrt()).unwrap(),
+                    )
+                })
                 .collect::<Vec<_>>();
-        let perm = Perm::argsort(&distances);
+        let perm = Perm::argsort(&data_to_sort);
         (perm.clone(), fracs.permuted_by(&perm))
     };
 
@@ -289,7 +315,7 @@ mod tests {
         let lattice = Lattice::new(random_vec(3).as_array());
 
         let output = super::of_rotation_impl(
-            &lattice, &original, &permuted, 1e-5,
+            &lattice, &[(); 20], &original, &permuted, 1e-5,
         ).unwrap();
 
         assert_eq!(output, perm);

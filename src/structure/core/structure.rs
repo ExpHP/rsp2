@@ -1,8 +1,9 @@
-use ::{Lattice, Coords, Element, SentLattice};
+use ::{Lattice, Coords, Element};
 use ::errors::*;
 use ::oper::{Perm, Permute};
-use ::oper::{Part, Parted, Partition};
+use ::oper::{Part, Partition};
 use ::oper::part::Unlabeled;
+use ::std::result::Result as StdResult;
 
 /// Pairs [`Coords`] together with their [`Lattice`], and metadata.
 ///
@@ -45,21 +46,33 @@ impl<M> Structure<M> {
 
     pub fn num_atoms(&self) -> usize { self.coords.len() }
     pub fn lattice(&self) -> &Lattice { &self.lattice }
+}
 
+impl<M> Structure<M> {
     // FIXME bad idea for stable interface, but good enough for now
     pub fn metadata(&self) -> &[M] { &self.meta }
+
+    pub fn try_map_metadata_into<M2, E, F>(self, f: F) -> StdResult<Structure<M2>, E>
+    where F: FnMut(M) -> StdResult<M2, E>,
+    {Ok({
+        let Structure { lattice, coords, meta } = self;
+        let meta = meta.into_iter().map(f).collect::<StdResult<_, E>>()?;
+        Structure { lattice, coords, meta }
+    })}
+
     pub fn map_metadata_into<M2, F>(self, f: F) -> Structure<M2>
-    where F: FnMut(M) -> M2
+    where F: FnMut(M) -> M2,
     {
         let Structure { lattice, coords, meta } = self;
         let meta = meta.into_iter().map(f).collect();
         Structure { lattice, coords, meta }
     }
+
     // This variant can be useful when using the by-value variant
-    // would require the user to clone() first, uneccessarily
+    // would require the user to clone() first, needlessly
     // cloning the entire metadata.
     pub fn map_metadata_to<M2, F>(&self, f: F) -> Structure<M2>
-    where F: FnMut(&M) -> M2
+    where F: FnMut(&M) -> M2,
     {
         let lattice = self.lattice.clone();
         let coords = self.coords.clone();
@@ -67,6 +80,27 @@ impl<M> Structure<M> {
         Structure { lattice, coords, meta }
     }
 
+    /// Store new metadata in-place.
+    pub fn set_metadata<Ms>(&mut self, meta: Ms)
+    where Ms: IntoIterator<Item=M>,
+    {
+        let old = self.meta.len();
+        self.meta.clear();
+        self.meta.extend(meta.into_iter());
+        assert_eq!(self.meta.len(), old);
+    }
+
+    /// Use the given vector as the metadata.
+    /// No cost other than the destruction of the old metadata.
+    pub fn with_metadata<M2>(self, meta: Vec<M2>) -> Structure<M2>
+    {
+        assert_eq!(meta.len(), self.meta.len());
+        let Structure { lattice, coords, .. } = self;
+        Structure { lattice, coords, meta }
+    }
+}
+
+impl<M> Structure<M> {
     /// Move all data out by value.
     ///
     /// This operation is not guaranteed to be zero-cost.
@@ -121,6 +155,13 @@ impl<M> Structure<M> {
     //       (`&mut [_]` works because can insert the data)
     pub fn to_carts(&self) -> Vec<[f64; 3]> { self.coords.to_carts(&self.lattice) }
     pub fn to_fracs(&self) -> Vec<[f64; 3]> { self.coords.to_fracs(&self.lattice) }
+
+    // `ensure_carts` should be called before this to guarantee that the value is `Some(_)`.
+    //
+    // Yes, having to unwrap the option sucks, but it's unavoidable; this is simply the
+    // only way you will ever be able to borrow positions from a borrowed &Structure.
+    pub fn as_carts_cached(&self) -> Option<&[[f64; 3]]> { self.coords.as_carts_opt() }
+    pub fn as_fracs_cached(&self) -> Option<&[[f64; 3]]> { self.coords.as_fracs_opt() }
 
     pub fn carts_mut(&mut self) -> &mut [[f64; 3]] {
         self.ensure_only_carts(); // 'only' because user modifications will invalidate fracs
@@ -294,25 +335,30 @@ impl<M> Structure<M> {
 }
 
 /// A Structure rendered into a form sendable across threads.
-#[derive(Debug, Clone)]
-pub struct Sent<M> {
-    pub(crate) lattice: SentLattice,
-    pub(crate) coords: Coords,
-    pub(crate) meta: Vec<M>,
-}
+// TODO: delete this
+pub type Sent<M> = Structure<M>;
 
 impl<M: Send> Structure<M> {
-    pub fn send(self) -> Sent<M> {
-        let Structure { lattice, coords, meta } = self;
-        let lattice = lattice.send();
-        Sent { lattice, coords, meta }
-    }
+    // TODO: delete this
+    #[deprecated(note = "Structure itself is now Send.")]
+    pub fn send(self) -> Sent<M> { self }
 }
 
 impl<M: Send> Sent<M> {
-    pub fn recv(self) -> Structure<M> {
-        let Sent { lattice, coords, meta } = self;
-        let lattice = lattice.recv();
-        Structure { lattice, coords, meta }
+    // TODO: delete this
+    pub fn recv(self) -> Structure<M> { self }
+}
+
+#[cfg(test)]
+mod compiletest {
+    use super::*;
+
+    fn assert_send<S: Send>() {}
+    fn assert_sync<S: Sync>() {}
+
+    #[test]
+    fn structure_is_send_and_sync() {
+        assert_send::<CoordStructure>();
+        assert_sync::<CoordStructure>();
     }
 }

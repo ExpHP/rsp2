@@ -8,14 +8,22 @@ use ::rsp2_structure::{Coords, Lattice, CoordStructure};
 use ::rsp2_array_utils::inv;
 use ::std::io::Read;
 
-pub fn load_layers_yaml<R: Read>(file: R) -> Result<Assemble>
+pub fn load_layers_yaml<R: Read>(mut file: R) -> Result<Assemble>
+{ _load_layers_yaml(&mut file) }
+
+// Monomorphized to ensure YAML parsing code is generated in this crate
+fn _load_layers_yaml(file: &mut Read) -> Result<Assemble>
 {
     let cereal = ::serde_yaml::from_reader(file)?;
     assemble_from_cereal(cereal).map(|a| a)
 }
 
 // FIXME this really doesn't belong here, but it's the easiest reuse of code
-pub fn layer_sc_info_from_layers_yaml<R: Read>(file: R) -> Result<Vec<([[i32; 3]; 3], [u32; 3], usize)>>
+pub fn layer_sc_info_from_layers_yaml<R: Read>(mut file: R) -> Result<Vec<([[i32; 3]; 3], [u32; 3], usize)>>
+{ _layer_sc_info_from_layers_yaml(&mut file) }
+
+// Monomorphized to ensure YAML parsing code is generated in this crate
+fn _layer_sc_info_from_layers_yaml(file: &mut Read) -> Result<Vec<([[i32; 3]; 3], [u32; 3], usize)>>
 {
     let cereal = ::serde_yaml::from_reader(file)?;
     layer_sc_info_from_cereal(cereal).map(|a| a)

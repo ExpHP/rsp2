@@ -1,12 +1,12 @@
 use ::rsp2_array_utils::{inv, det, dot, map_arr, map_mat};
 use ::std::ops::Mul;
-use ::std::rc::Rc;
+use ::std::sync::Arc;
 
 /// A 3x3 matrix with a precomputed inverse.
 #[derive(Debug, Clone)]
 pub struct Lattice {
-    matrix: Rc<[[f64; 3]; 3]>,
-    inverse: Rc<[[f64; 3]; 3]>,
+    matrix: Arc<[[f64; 3]; 3]>,
+    inverse: Arc<[[f64; 3]; 3]>,
 }
 
 // Manual impl that doesn't compare the inverse.
@@ -21,8 +21,8 @@ impl PartialEq<Lattice> for Lattice {
 impl Lattice {
     /// Create a lattice from a matrix where the rows are lattice vectors.
     pub fn new(matrix: &[[f64; 3]; 3]) -> Self {
-        let inverse = Rc::new(inv(matrix));
-        let matrix = Rc::new(*matrix);
+        let inverse = Arc::new(inv(matrix));
+        let matrix = Arc::new(*matrix);
         Self { matrix, inverse }
     }
 
@@ -154,28 +154,18 @@ impl<'a, 'b> Mul<&'b Lattice> for &'a [[f64; 3]; 3] {
 }
 
 /// A Lattice that can be sent across thread boundaries.
-#[derive(Debug, Clone)]
-pub struct Sent {
-    matrix: Box<[[f64; 3]; 3]>,
-    inverse: Box<[[f64; 3]; 3]>,
-}
+// TODO: delete
+pub type Sent = Lattice; // Lattice itself is now Send.
 
 impl Lattice {
-    pub fn send(self) -> Sent {
-        let Lattice { matrix, inverse } = self;
-        let matrix = Box::new((&*matrix).clone());
-        let inverse = Box::new((&*inverse).clone());
-        Sent { matrix, inverse }
-    }
+    // TODO: delete
+    #[deprecated(note = "Lattice itself is now Send.")]
+    pub fn send(self) -> Sent { self }
 }
 
 impl Sent {
-    pub fn recv(self) -> Lattice {
-        let Sent { matrix, inverse } = self;
-        let matrix = matrix.into();
-        let inverse = inverse.into();
-        Lattice { matrix, inverse }
-    }
+    // TODO: delete
+    pub fn recv(self) -> Lattice { self }
 }
 
 #[cfg(tests)]

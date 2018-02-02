@@ -2,32 +2,34 @@
 
 pub(crate) mod integrate_2d;
 
-const THZ_TO_WAVENUMBER: f64 = 33.35641;
+use self::lammps::{Lammps, LammpsBuilder};
+mod lammps;
 
-use ::errors::{Result, ok};
-use ::config::Settings;
+use ::errors::{Error, ErrorKind, Result, ok};
+use ::config::{Settings, NormalizationMode, SupercellSpec};
 use ::util::push_dir;
-use ::ui::logging::setup_global_logger;
+use ::traits::AsPath;
+use ::phonopy::{DirWithBands, DirWithDisps, DirWithForces};
 
-use ::types::{Ket3, Basis3};
+use ::types::{Basis3};
 
 use ::rsp2_structure::consts::CARBON;
-use ::rsp2_slice_math::{v, V, vdot};
+use ::rsp2_slice_math::{v, V, vdot, vnorm};
 
 use ::slice_of_array::prelude::*;
+use ::rsp2_array_utils::arr_from_fn;
 use ::rsp2_structure::supercell::{self, SupercellToken};
-use ::rsp2_structure::{Coords, CoordStructure, Structure, ElementStructure};
+use ::rsp2_structure::{Lattice, Coords, CoordStructure, Structure, ElementStructure};
 use ::rsp2_structure::{Part, Partition};
 use ::rsp2_structure_gen::Assemble;
-use ::rsp2_lammps_wrap::Lammps;
-use ::rsp2_lammps_wrap::Builder as LammpsBuilder;
 use ::phonopy::Builder as PhonopyBuilder;
 
 use ::rsp2_fs_util::{open, create, canonicalize, create_dir, rm_rf};
 
 use ::std::io::{Write};
 use ::std::path::{Path};
-use ::std::hash::Hash;
+
+use ::ui::logging::GlobalLogger;
 
 use ::itertools::Itertools;
 
@@ -36,6 +38,7 @@ const SAVE_BANDS_DIR: &'static str = "gamma-bands";
 // cli args aren't in Settings, so they're just here.
 pub struct CliArgs {
     pub save_bands: bool,
+    pub verbosity: i32,
 }
 
 pub fn run_relax_with_eigenvectors(
@@ -47,7 +50,7 @@ pub fn run_relax_with_eigenvectors(
 {ok({
     use ::rsp2_structure_io::poscar;
 
-    let lmp = make_lammps_builder(&settings.threading);
+    let lmp = LammpsBuilder::new(&settings.threading, &settings.potential.kind);
     let input = canonicalize(input.as_ref())?;
 
     create_dir(&outdir)?;
@@ -55,10 +58,15 @@ pub fn run_relax_with_eigenvectors(
         // dumb/lazy solution to ensuring all output files go in the dir
         let cwd_guard = push_dir(outdir)?;
 
-        setup_global_logger(Some(&"rsp2.log"))?;
+        GlobalLogger::default()
+            .path("rsp2.log")
+            .verbosity(cli.verbosity)
+            .apply()?;
 
         // let mut original = poscar::load(open(input)?)?;
         // original.scale_vecs(&settings.hack_scale);
+
+        // For the time being this now only supports layers.yaml format.
         let (original, layer_sc_mats) = {
             use ::rsp2_structure_gen::load_layers_yaml;
             use ::rsp2_structure_gen::layer_sc_info_from_layers_yaml;
@@ -67,8 +75,8 @@ pub fn run_relax_with_eigenvectors(
             let builder = optimize_layer_parameters(&settings.scale_ranges, &lmp, builder)?;
             let structure = carbon(&builder.assemble());
 
-            let layer_sc_info = layer_sc_info_from_layers_yaml(open(&input)?)?;
-            let layer_sc_mats = layer_sc_info.into_iter()
+            let layer_sc_mats =
+                layer_sc_info_from_layers_yaml(open(&input)?)?.into_iter()
                 .map(|(matrix, periods, _)| ::math::bands::ScMatrix::new(&matrix, &periods))
                 .collect_vec();
 
@@ -77,35 +85,35 @@ pub fn run_relax_with_eigenvectors(
 
         poscar::dump(create("./initial.vasp")?, "", &original)?;
         let phonopy = phonopy_builder_from_settings(&settings.phonons, &original);
+        let phonopy = phonopy.use_sparse_sets(settings.tweaks.sparse_sets);
+
+        // (we can expect that the layers assignments will not change, so we do this early...)
+        trace!("Finding layers");
+        let (layers, nlayer) = ::rsp2_structure::assign_layers(&original, &[0, 0, 1], 0.25)?;
+        if let Some(expected) = settings.layers {
+            assert_eq!(nlayer, expected);
+        }
 
         let mut from_structure = original.clone();
         let mut iteration = 1;
         // HACK to stop one iteration AFTER all non-acoustics are positive
         let mut all_ok_count = 0;
-        let (structure, einfos, _evecs) = loop { // NOTE: we use break with value
-
-            // Hard failure on too many iterations
-            // (we don't want to continue with negative non-acoustics)
-            if iteration > 15 {
-                error!("Too many relaxation steps!");
-                bail!("Too many relaxation steps!");
-            }
+        let (structure, einfos) = loop { // NOTE: we use break with value
 
             let structure = do_relax(&lmp, &settings.cg, &settings.potential, from_structure)?;
-            let force_dest = match cli.save_bands {
-                true => Some(SAVE_BANDS_DIR.as_ref()),
-                false => None,
-            };
-            let (evals, evecs) = do_diagonalize(&lmp, &phonopy, &structure, force_dest)?;
+            let bands_dir = do_diagonalize(
+                &lmp, &settings.threading, &phonopy, &structure,
+                match cli.save_bands {
+                    true => Some(SAVE_BANDS_DIR.as_ref()),
+                    false => None,
+                },
+                &[Q_GAMMA, Q_K],
+            )?;
+
+            let (evals, evecs) = read_eigensystem(&bands_dir, &Q_GAMMA)?;
 
             trace!("============================");
             trace!("Finished relaxation # {}", iteration);
-
-            trace!("Finding layers");
-            let (layers, nlayer) = ::rsp2_structure::assign_layers(&structure, &[0, 0, 1], 0.25)?;
-            if let Some(expected) = settings.layers {
-                assert_eq!(nlayer, expected);
-            }
 
             {
                 let fname = format!("./structure-{:02}.1.vasp", iteration);
@@ -118,7 +126,7 @@ pub fn run_relax_with_eigenvectors(
 
             trace!("Computing eigensystem info");
             let einfos = get_eigensystem_info(
-                &evals, &evecs, &layers[..], Some(&structure), Some(&layer_sc_mats),
+                &evals, &evecs, &layers[..], &structure, Some(&layer_sc_mats),
             );
             write_eigen_info_for_machines(&einfos, create(format!("eigenvalues.{:02}", iteration))?)?;
             write_eigen_info_for_humans(&einfos, &mut |s| ok(info!("{}", s)))?;
@@ -155,25 +163,43 @@ pub fn run_relax_with_eigenvectors(
 
             if bad_evs.is_empty() {
                 all_ok_count += 1;
-                if all_ok_count >= 3 {
-                    // (clone is HACK because bad_evs borrows from evecs)
-                    break (structure, einfos, evecs.clone());
+                if all_ok_count >= settings.ev_loop.min_positive_iter {
+                    break (structure, einfos /*, bands_dir */);
+                }
+            }
+
+            // -----------------------------
+            // mutate loop variables
+
+            iteration += 1; // REMINDER: not a for loop due to 'break value;'
+
+            // Possibly fail after too many iterations
+            // (we don't want to continue with negative non-acoustics)
+            if iteration > settings.ev_loop.max_iter {
+                if settings.ev_loop.fail {
+                    error!("Too many relaxation steps!");
+                    bail!("Too many relaxation steps!");
+                } else {
+                    warn!("Too many relaxation steps!");
+                    break (structure, einfos /*, bands_dir */);
                 }
             }
 
             from_structure = structure;
-            iteration += 1; // NOTE: not a for loop due to 'break value;'
-        }; // (structure, einfos, evecs)
+        }; // (structure, einfos, final_bands_dir)
 
-        write_eigen_info_for_machines(&einfos, create("eigenvalues.final")?)?;
 
         poscar::dump(create("./final.vasp")?, "", &structure)?;
 
-        if cli.save_bands {
-            let _ = do_diagonalize(&lmp, &phonopy, &structure, Some(SAVE_BANDS_DIR.as_ref()))?;
-        }
+        write_eigen_info_for_machines(&einfos, create("eigenvalues.final")?)?;
 
-        write_summary_file(settings, &lmp, &einfos)?;
+        // let (k_evals, k_evecs) = read_eigensystem(&bands_dir, &Q_K)?;
+        // let kinfos = get_k_eigensystem_info(
+        //     &k_evals, &k_evecs, &layers[..], &structure, Some(&layer_sc_mats),
+        // );
+
+        // write_summary_file(settings, &lmp, &einfos, &kinfos)?;
+        write_summary_file(settings, &lmp, &einfos, None)?;
 
         cwd_guard.pop()?;
     }
@@ -189,7 +215,7 @@ fn do_relax(
     let sc_dims = tup3(potential_settings.supercell.dim_for_unitcell(structure.lattice()));
     let (supercell, sc_token) = supercell::diagonal(sc_dims, structure);
 
-    let mut lmp = lmp.clone().threaded(true).initialize_carbon(uncarbon(&supercell))?;
+    let mut lmp = lmp.with_modified_inner(|b| b.threaded(true)).build(supercell.clone())?;
     let relaxed_flat = ::rsp2_minimize::acgsd(
         cg_settings,
         supercell.to_carts().flat(),
@@ -200,34 +226,42 @@ fn do_relax(
     multi_threshold_deconstruct(sc_token, 1e-10, 1e-3, supercell)?
 })}
 
-fn do_diagonalize(
+fn do_diagonalize_at_gamma(
     lmp: &LammpsBuilder,
+    threading: &::config::Threading,
     phonopy: &PhonopyBuilder,
     structure: &ElementStructure,
     save_bands: Option<&Path>,
 ) -> Result<(Vec<f64>, Basis3)>
+{Ok({
+    let dir = do_diagonalize(lmp, threading, phonopy, structure, save_bands, &[Q_GAMMA])?;
+    read_eigensystem(&dir, &Q_GAMMA)?
+})}
+
+fn do_diagonalize(
+    lmp: &LammpsBuilder,
+    threading: &::config::Threading,
+    phonopy: &PhonopyBuilder,
+    structure: &ElementStructure,
+    save_bands: Option<&Path>,
+    points: &[[f64; 3]],
+) -> Result<DirWithBands<Box<AsPath>>>
 {ok({
     let disp_dir = phonopy.displacements(&structure)?;
-    let force_sets = do_force_sets_at_disps(&lmp, &disp_dir)?;
+    let force_sets = do_force_sets_at_disps(&lmp, &threading, &disp_dir)?;
 
     let bands_dir = disp_dir
         .make_force_dir(&force_sets)?
         .build_bands()
         .eigenvectors(true)
-        .compute(&[[0.0; 3]])?;
-
-    let evals = bands_dir.eigenvalues()?.pop().unwrap();
-    let V(evals) = THZ_TO_WAVENUMBER * v(evals);
-
-    let evecs = bands_dir.eigenvectors()?.unwrap().pop().unwrap();
-    let evecs = Basis3::from_basis(evecs);
+        .compute(&points)?;
 
     if let Some(save_dir) = save_bands {
         rm_rf(save_dir)?;
-        bands_dir.relocate(save_dir)?;
+        bands_dir.relocate(save_dir)?.boxed()
+    } else {
+        bands_dir.boxed()
     }
-
-    (evals, evecs)
 })}
 
 fn do_eigenvector_chase(
@@ -292,7 +326,7 @@ fn _do_cg_along_evecs(
     let flat_evecs: Vec<_> = evecs.iter().map(|ev| ev.flat()).collect();
     let init_pos = supercell.to_carts();
 
-    let mut lmp = lmp.clone().threaded(true).initialize_carbon(uncarbon(&supercell))?;
+    let mut lmp = lmp.with_modified_inner(|b| b.threaded(true)).build(supercell.clone())?;
     let relaxed_coeffs = ::rsp2_minimize::acgsd(
         cg_settings,
         &vec![0.0; evecs.len()],
@@ -314,7 +348,7 @@ fn do_minimize_along_evec(
     let sc_dims = tup3(settings.supercell.dim_for_unitcell(structure.lattice()));
     let (structure, sc_token) = supercell::diagonal(sc_dims, structure);
     let evec = sc_token.replicate(evec);
-    let mut lmp = lmp.clone().threaded(true).initialize_carbon(uncarbon(&structure))?;
+    let mut lmp = lmp.with_modified_inner(|b| b.threaded(true)).build(structure.clone())?;
 
     let from_structure = structure;
     let direction = &evec[..];
@@ -340,26 +374,28 @@ fn warn_on_improvable_lattice_params(
 ) -> Result<()>
 {Ok({
     const SCALE_AMT: f64 = 1e-6;
-    let mut lmp = lmp.initialize_carbon(uncarbon(structure))?;
+    let mut lmp = lmp.build(structure.clone())?;
     let center_value = lmp.compute_value()?;
 
     let shrink_value = {
         let mut structure = structure.clone();
         structure.scale_vecs(&[1.0 - SCALE_AMT, 1.0 - SCALE_AMT, 1.0]);
-        lmp.set_structure(uncarbon(&structure))?;
+        lmp.set_structure(structure)?;
         lmp.compute_value()?
     };
 
     let enlarge_value = {
         let mut structure = structure.clone();
         structure.scale_vecs(&[1.0 + SCALE_AMT, 1.0 + SCALE_AMT, 1.0]);
-        lmp.set_structure(uncarbon(&structure))?;
+        lmp.set_structure(structure)?;
         lmp.compute_value()?
     };
 
     if shrink_value.min(enlarge_value) < center_value {
-        warn!("Better value found at nearby lattice parameter: {:?}",
-            (shrink_value, center_value, enlarge_value));
+        warn!("Better value found at nearby lattice parameter:");
+        warn!(" Smaller: {}", shrink_value);
+        warn!(" Current: {}", center_value);
+        warn!("  Larger: {}", enlarge_value);
     }
 })}
 
@@ -379,8 +415,9 @@ fn multi_threshold_deconstruct(
     }
 })}
 
+// FIXME write_gamma_info
 fn write_eigen_info_for_humans(
-    einfos: &EigenInfo,
+    einfos: &[GammaInfo],
     writeln: &mut FnMut(&::std::fmt::Display) -> Result<()>,
 ) -> Result<()>
 {ok({
@@ -415,7 +452,7 @@ fn write_eigen_info_for_humans(
 })}
 
 fn write_eigen_info_for_machines<W: Write>(
-    einfos: &EigenInfo,
+    einfos: &[GammaInfo],
     mut file: W,
 ) -> Result<()>
 {ok({
@@ -435,28 +472,44 @@ fn write_eigen_info_for_machines<W: Write>(
 fn write_summary_file(
     settings: &Settings,
     lmp: &LammpsBuilder,
-    einfos: &EigenInfo,
+    ginfos: &[GammaInfo],
+    kinfos: Option<&[KInfo]>,
 ) -> Result<()>
 {Ok({
-    use self::summary::{Modes, Summary, EnergyPerAtom};
-    use self::eigen_info::Item;
+    use self::summary::{Modes, GammaModes, KModes, Summary, EnergyPerAtom};
+    use self::eigen_info::GammaInfo;
     use ::rsp2_structure_io::poscar;
 
-    let acoustic = einfos.iter().filter(|x| x.is_acoustic()).map(Item::frequency).collect();
-    let shear = einfos.iter().filter(|x| x.is_shear()).map(Item::frequency).collect();
-    let layer_breathing = einfos.iter().filter(|x| x.is_layer_breathing()).map(Item::frequency).collect();
-    let layer_gammas = einfos.iter().next().unwrap().layer_gamma_probs.as_ref().map(|_| {
-        einfos.iter().enumerate()
+    let acoustic = ginfos.iter().filter(|x| x.is_acoustic()).map(GammaInfo::frequency).collect();
+    let shear = ginfos.iter().filter(|x| x.is_shear()).map(GammaInfo::frequency).collect();
+    let layer_breathing = ginfos.iter().filter(|x| x.is_layer_breathing()).map(GammaInfo::frequency).collect();
+    let layer_gammas = ginfos.iter().next().unwrap().layer_gamma_probs.as_ref().map(|_| { // all this to check if they're present
+        ginfos.iter().enumerate()
             .filter(|&(_,x)| x.layer_gamma_probs.as_ref().unwrap()[0] > settings.layer_gamma_threshold)
             .map(|(i,x)| (i, x.frequency()))
             .collect()
     });
-    let modes = Modes { acoustic, shear, layer_breathing, layer_gammas };
+    let gamma_modes = GammaModes { acoustic, shear, layer_breathing, layer_gammas };
+
+    let k_modes = kinfos.map(|kinfos| {
+        let layer_ks = kinfos.iter().next().unwrap().layer_k_probs.as_ref().map(|_| {  // all this to check if they're present
+            kinfos.iter().enumerate()
+                .filter(|&(_,x)| x.layer_k_probs.as_ref().unwrap()[0] > settings.layer_gamma_threshold)
+                .map(|(i,x)| (i, x.frequency()))
+                .collect()
+        });
+        KModes { layer_ks }
+    });
+
+    let modes = Modes {
+        gamma: gamma_modes,
+        k: k_modes,
+    };
 
     let energy_per_atom = {
         let f = |structure: ElementStructure| ok({
             let na = structure.num_atoms() as f64;
-            lmp.initialize_carbon(uncarbon(&structure))?.compute_value()? / na
+            lmp.build(structure)?.compute_value()? / na
         });
         let f_path = |s: &AsRef<Path>| ok(f(poscar::load(open(s)?)?)?);
 
@@ -484,31 +537,64 @@ fn phonopy_builder_from_settings<M>(
         .conf("DIAG", ".FALSE.")
 }
 
-fn do_force_sets_at_disps<P: ::traits::AsPath>(
+fn do_force_sets_at_disps<P: AsPath + Send + Sync>(
     lmp: &LammpsBuilder,
-    disp_dir: &::phonopy::DirWithDisps<P>,
+    threading: &::config::Threading,
+    disp_dir: &DirWithDisps<P>,
 ) -> Result<Vec<Vec<[f64; 3]>>>
 {ok({
     use ::std::io::prelude::*;
+    use ::rayon::prelude::*;
 
     trace!("Computing forces at displacements");
 
-    let mut i = 0;
-    let force_sets = disp_dir.displaced_structures()
-        .map(|structure| ok({
-            i += 1;
-            eprint!("\rdisp {} of {}", i, disp_dir.displacements().len());
-            ::std::io::stderr().flush().unwrap();
+    let counter = ::util::AtomicCounter::new();
+    let compute = move |structure| ok({
+        let i = counter.inc();
+        eprint!("\rdisp {} of {}", i + 1, disp_dir.displacements().len());
+        ::std::io::stderr().flush().unwrap();
 
-            lmp.initialize_carbon(structure)?.compute_force()?
-        })).collect::<Result<Vec<_>>>()?;
+        lmp.build(structure)?.compute_force()?
+    });
+
+    let force_sets = match threading {
+        &::config::Threading::Lammps |
+        &::config::Threading::Serial => {
+            disp_dir.displaced_structures().map(compute).collect::<Result<Vec<_>>>()?
+        },
+        &::config::Threading::Rayon => {
+            let structures = disp_dir.displaced_structures().collect::<Vec<_>>();
+            structures.into_par_iter().map(compute).collect::<Result<Vec<_>>>()?
+        },
+    };
     eprintln!();
     force_sets
 })}
 
+fn read_eigensystem<P: AsPath>(
+    bands_dir: &DirWithBands<P>,
+    q: &[f64; 3],
+) -> Result<(Vec<f64>, Basis3)>
+{Ok({
+    let index = ::util::index_of_nearest(&bands_dir.q_positions()?, q, 1e-4);
+    let index = match index {
+        Some(i) => i,
+        None => bail!("Bands do not include kpoint:\n  dir: {}\npoint: {:?}",
+            bands_dir.path().display(), q),
+    };
+
+    let evals = bands_dir.eigenvalues()?.remove(index);
+    let evecs = match bands_dir.eigenvectors()? {
+        None => bail!("Directory has no eigenvectors: {}", bands_dir.path().display()),
+        Some(mut evs) => Basis3::from_basis(evs.remove(index)),
+    };
+
+    (evals, evecs)
+})}
+
 //-----------------------------------
 
-pub fn optimize_layer_parameters(
+pub(crate) fn optimize_layer_parameters(
     settings: &::config::ScaleRanges,
     lmp: &LammpsBuilder,
     mut builder: Assemble,
@@ -518,10 +604,10 @@ pub fn optimize_layer_parameters(
     use ::config::{ScaleRanges, ScaleRange};
     use ::std::cell::RefCell;
 
-    // full destructure so we don't miss anything
     let ScaleRanges {
-        parameter: ScaleRange { guess: parameter_guess, range: parameter_range },
-        layer_sep: ScaleRange { guess: layer_sep_guess, range: layer_sep_range },
+        parameter: ref parameter_spec,
+        layer_sep: ref layer_sep_spec,
+        warn: warn_threshold,
     } = *settings;
 
     let n_seps = builder.layer_seps().len();
@@ -534,7 +620,7 @@ pub fn optimize_layer_parameters(
         let optimizables = {
             let mut optimizables: Vec<(_, Box<Fn(f64)>)> = vec![];
             optimizables.push((
-                (format!("lattice parameter"), parameter_guess, parameter_range),
+                (format!("lattice parameter"), parameter_spec.clone()),
                 Box::new(|s| {
                     builder.borrow_mut().scale = s;
                 }),
@@ -542,7 +628,7 @@ pub fn optimize_layer_parameters(
 
             for i in 0..n_seps {
                 optimizables.push((
-                    (format!("layer sep {}", i), layer_sep_guess, layer_sep_range),
+                    (format!("layer sep {}", i), layer_sep_spec.clone()),
                     Box::new(move |s| {
                         builder.borrow_mut().layer_seps()[i] = s;
                     }),
@@ -551,31 +637,55 @@ pub fn optimize_layer_parameters(
             optimizables
         };
 
-        // try to start with reasonable defaults ('guess' in config)
-        for &((_, guess, _), ref setter) in &optimizables {
-            if let Some(guess) = guess {
-                setter(guess);
+        // Set reasonable values before initializing LAMMPS
+        //
+        // exact specs: set the value
+        // range specs: start with reasonable defaults ('guess' in config)
+        for &((_, ref spec), ref setter) in &optimizables {
+            match *spec {
+                ScaleRange::Exact(value) |
+                ScaleRange::Range { range: _, guess: Some(value) } => {
+                    setter(value);
+                },
+                ScaleRange::Range { range: _, guess: None } => {},
             }
         }
 
-        //let mut lmp = lmp.initialize_carbon(builder.borrow().assemble())?;
         let get_value = || ok({
-            // use ::std::hash::{Hash, Hasher};
-            lmp.initialize_carbon(builder.borrow().assemble())?.compute_value()?
+            lmp.build(carbon(&builder.borrow().assemble()))?.compute_value()?
         });
 
         // optimize them one-by-one.
-        for &((ref name, _, range), ref setter) in &optimizables {
+        for &((ref name, ref spec), ref setter) in &optimizables {
             trace!("Optimizing {}", name);
 
-            let best = Golden::new()
-                .stop_condition(&from_json!({"interval-size": 1e-7}))
-                .run(range, |a| {
-                    setter(a);
-                    get_value().map(Value)
-                })??; // ?!??!!!?
+            let best = match *spec {
+                ScaleRange::Exact(value) => value,
+                ScaleRange::Range { guess: _, range } => {
+                    let best = Golden::new()
+                        .stop_condition(&from_json!({"interval-size": 1e-7}))
+                        .run(range, |a| {
+                            setter(a);
+                            get_value().map(Value)
+                        })??; // ?!??!!!?
 
-            info!("Optimized {}: {} (from {:?})", name, best, range);
+                    if let Some(thresh) = warn_threshold {
+                        // use signed differences so that all values outside violate the threshold
+                        let lo = range.0.min(range.1);
+                        let hi = range.0.max(range.1);
+                        if (best - range.0).min(range.1 - best) / (range.1 - range.0) < thresh {
+                            warn!("Relaxed value of '{}' is suspiciously close to limits!", name);
+                            warn!("  lo: {:e}", lo);
+                            warn!(" val: {:e}", best);
+                            warn!("  hi: {:e}", hi);
+                        }
+                    }
+
+                    info!("Optimized {}: {} (from {:?})", name, best, range);
+                    best
+                },
+            };
+
             setter(best);
         }
     }
@@ -583,45 +693,44 @@ pub fn optimize_layer_parameters(
     builder.into_inner()
 })}
 
-
 //-----------------------------------
 
-pub type EigenInfo = Vec<eigen_info::Item>;
 
-pub fn get_eigensystem_info<L: Ord + Clone>(
+pub fn get_eigensystem_info<L: Ord + Clone, M>(
     evals: &[f64],
     evecs: &Basis3,
     layers: &[L],
-    structure: Option<&ElementStructure>,
+    // (M gets tossed out, but we don't take Structure<L> because it could
+    //  unintentionally accept Element as our layer type)
+    structure: &Structure<M>,
+    // unfolding is only done when this is provided
     layer_supercell_matrices: Option<&[::math::bands::ScMatrix]>,
-) -> EigenInfo
+) -> Vec<GammaInfo>
 {
     use ::math::bands::UnfolderAtQ;
 
     let part = Part::from_ord_keys(layers);
+    let layer_structures = structure
+            .map_metadata_to(|_| ())
+            .into_unlabeled_partitions(&part)
+            .collect_vec();
 
     // precomputed data applicable to all kets
     let layer_gamma_unfolders: Option<Vec<UnfolderAtQ>> =
-        match (structure, layer_supercell_matrices) {
-            (Some(structure), Some(layer_supercell_matrices)) => Some({
-                structure
-                    .map_metadata_to(|_| ())
-                    .into_unlabeled_partitions(&part)
-                    .zip(layer_supercell_matrices)
-                    .map(|(layer_structure, layer_sc_mat)| {
-                        UnfolderAtQ::from_config(
-                            &from_json!({
-                                "fbz": "reciprocal-cell",
-                                "sampling": { "plain": [4, 4, 1] },
-                            }),
-                            &layer_structure,
-                            layer_sc_mat,
-                            &[0.0, 0.0, 0.0], // eigenvector q
-                        )
-                    }).collect()
-            }),
-            _ => None,
-        };
+        layer_supercell_matrices.map(|layer_supercell_matrices| {
+            izip!(&layer_structures, layer_supercell_matrices)
+                .map(|(layer_structure, layer_sc_mat)| {
+                    UnfolderAtQ::from_config(
+                        &from_json!({
+                            "fbz": "reciprocal-cell",
+                            "sampling": { "plain": [4, 4, 1] },
+                        }),
+                        &layer_structure,
+                        layer_sc_mat,
+                        &Q_GAMMA, // eigenvector q
+                    )
+                }).collect()
+        });
 
     // now do each ket
     let mut out = vec![];
@@ -634,23 +743,104 @@ pub fn get_eigensystem_info<L: Ord + Clone>(
         let polarization = evec.polarization();
 
         let layer_gamma_probs = layer_gamma_unfolders.as_ref().map(|unfolders| {
-            unfolders.iter().zip(&layer_evecs).map(|(unfolder, ket)| {
-                unfolder.unfold_phonon(ket.to_ket().as_ref())
-                    .iter()
-                    .find(|&&(idx, _)| idx == [0, 0, 0])
-                    .unwrap().1
-            }).collect()
+            izip!(&unfolders[..], &layer_evecs)
+                .map(|(unfolder, ket)| {
+                    let probs = unfolder.unfold_phonon(ket.to_ket().as_ref());
+                    izip!(unfolder.q_indices(), probs)
+                        .find(|&(idx, _)| idx == &[0, 0, 0])
+                        .unwrap().1
+                }).collect()
         });
 
-        out.push(eigen_info::Item {
+        out.push(GammaInfo {
             frequency, acousticness, layer_acousticness, polarization, layer_gamma_probs,
         })
     }
     out
 }
 
+// HACK:
+// These are only valid for a hexagonal system represented
+// with the [[a, 0], [-a/2, a sqrt(3)/2]] lattice convention
+const Q_GAMMA: [f64; 3] = [0.0, 0.0, 0.0];
+const Q_K: [f64; 3] = [1f64/3.0, 1.0/3.0, 0.0];
+const Q_K_PRIME: [f64; 3] = [2.0 / 3f64, 2.0 / 3f64, 0.0];
+
+// FIXME not sure how to generalize
+pub fn get_k_eigensystem_info<L: Ord + Clone, M>(
+    evals: &[f64],
+    evecs: &Basis3,
+    layers: &[L],
+    // (M gets tossed out, but we don't take Structure<L> because it could
+    //  unintentionally accept Element as our layer type)
+    structure: &Structure<M>,
+    // unfolding is only done when this is provided
+    layer_supercell_matrices: Option<&[::math::bands::ScMatrix]>,
+) -> Vec<KInfo>
+{
+    use ::math::bands::UnfolderAtQ;
+
+    let part = Part::from_ord_keys(layers);
+    let layer_structures = structure
+            .map_metadata_to(|_| ())
+            .into_unlabeled_partitions(&part)
+            .collect_vec();
+
+    struct LayerKData {
+        unfolder: UnfolderAtQ,
+        k_equiv_indices: Vec<usize>,
+    }
+
+    // precomputed data applicable to all kets
+    let layer_k_data: Option<Vec<LayerKData>> =
+        layer_supercell_matrices.map(|layer_supercell_matrices| {
+            izip!(&layer_structures, layer_supercell_matrices)
+                .map(|(layer_structure, layer_sc_mat)| {
+                    let unfolder = UnfolderAtQ::from_config(
+                        &from_json!({
+                                "fbz": "reciprocal-cell",
+                                "sampling": { "plain": [4, 4, 1] },
+                            }),
+                        &layer_structure,
+                        layer_sc_mat,
+                        &Q_K, // eigenvector q
+                    );
+                    let k_equiv_indices = vec![
+                        unfolder.lookup_q_index(&Q_K, 1e-4).expect("no Q close to K?"),
+                        unfolder.lookup_q_index(&Q_K_PRIME, 1e-4).expect("no Q close to K'?"),
+                    ];
+
+                    LayerKData { unfolder, k_equiv_indices }
+                }).collect::<Vec<_>>()
+        });
+
+
+    // now do each ket
+    let mut out = vec![];
+    for (&frequency, evec) in izip!(evals, &evecs.0) {
+        // split the evs up by layer (without renormalizing)
+        let layer_evecs: Vec<_> = evec.clone().into_unlabeled_partitions(&part).collect();
+
+        let polarization = evec.polarization();
+
+        let layer_k_probs = layer_k_data.as_ref().map(|layer_k_data| {
+            izip!(&layer_k_data[..], &layer_evecs)
+                .map(|(&LayerKData { ref unfolder, ref k_equiv_indices }, ket)| {
+                    let probs = unfolder.unfold_phonon(ket.to_ket().as_ref());
+                    izip!(0.., probs)
+                        .filter(|&(idx, _)| k_equiv_indices.contains(&idx))
+                        .fold(0.0, |acc, (_, x)| acc + x)
+                }).collect()
+        });
+
+        out.push(KInfo { frequency, polarization, layer_k_probs })
+    }
+    out
+}
+
+use self::eigen_info::{GammaInfo, KInfo};
 pub mod eigen_info {
-    pub struct Item {
+    pub struct GammaInfo {
         pub frequency: f64,
         pub acousticness: f64,
         pub layer_acousticness: f64,
@@ -658,7 +848,7 @@ pub mod eigen_info {
         pub layer_gamma_probs: Option<Vec<f64>>,
     }
 
-    impl Item {
+    impl GammaInfo {
         pub fn frequency(&self) -> f64
         { self.frequency }
 
@@ -679,6 +869,23 @@ pub mod eigen_info {
 
         pub fn is_layer_breathing(&self) -> bool
         { self.is_layer_acoustic() && self.is_z_polarized() }
+    }
+
+    pub struct KInfo {
+        pub frequency: f64,
+        pub polarization: [f64; 3],
+        pub layer_k_probs: Option<Vec<f64>>,
+    }
+
+    impl KInfo {
+        pub fn frequency(&self) -> f64
+        { self.frequency }
+
+        pub fn is_xy_polarized(&self) -> bool
+        { self.polarization[0] + self.polarization[1] > 0.9 }
+
+        pub fn is_z_polarized(&self) -> bool
+        { self.polarization[2] > 0.9 }
     }
 }
 
@@ -702,10 +909,23 @@ mod summary {
     #[derive(Serialize, Deserialize)]
     #[serde(rename_all="kebab-case")]
     pub struct Modes {
+        pub gamma: GammaModes,
+        pub k: Option<KModes>,
+    }
+
+    #[derive(Serialize, Deserialize)]
+    #[serde(rename_all="kebab-case")]
+    pub struct GammaModes {
         pub acoustic: Vec<f64>,
         pub shear: Vec<f64>,
         pub layer_breathing: Vec<f64>,
         pub layer_gammas: Option<Vec<(usize, f64)>>,
+    }
+
+    #[derive(Serialize, Deserialize)]
+    #[serde(rename_all="kebab-case")]
+    pub struct KModes {
+        pub layer_ks: Option<Vec<(usize, f64)>>,
     }
 }
 
@@ -718,6 +938,7 @@ fn carbon(structure: &CoordStructure) -> ElementStructure
     structure.map_metadata_to(|_| CARBON)
 }
 
+#[allow(unused)] // if this isn't used, I'm *glad*
 fn uncarbon(structure: &ElementStructure) -> CoordStructure
 {
     assert!(structure.metadata().iter().all(|&e| e == CARBON),
@@ -725,14 +946,6 @@ fn uncarbon(structure: &ElementStructure) -> CoordStructure
         do something about all the carbon-specific code.  Look for calls \
         to `carbon()`");
     structure.map_metadata_to(|_| ())
-}
-
-fn make_lammps_builder(threading: &::config::Threading) -> LammpsBuilder
-{
-    let mut lmp = LammpsBuilder::new();
-    lmp.append_log("lammps.log");
-    lmp.threaded(*threading == ::config::Threading::Lammps);
-    lmp
 }
 
 fn lammps_flat_diff_fn<'a>(lmp: &'a mut Lammps)
@@ -808,7 +1021,7 @@ pub fn run_symmetry_test(input: &Path) -> Result<()>
 {ok({
     use ::rsp2_structure_io::poscar;
 
-    setup_global_logger(None)?;
+    GlobalLogger::default().apply()?;
 
     let poscar = poscar::load(open(input)?)?;
     let symmops = PhonopyBuilder::new().symmetry(&poscar)?;
@@ -824,27 +1037,32 @@ pub fn get_energy_surface(
 ) -> Result<()>
 {ok({
     let input = canonicalize(input)?;
-    let lmp = make_lammps_builder(&settings.threading);
 
     create_dir(&outdir)?;
     {
         // dumb/lazy solution to ensuring all output files go in the dir
         let cwd_guard = push_dir(outdir)?;
-        setup_global_logger(Some(&"rsp2.log"))?;
+        GlobalLogger::default()
+            .path("rsp2.log")
+            .apply()?;
 
-        let bands_dir = ::phonopy::DirWithBands::from_existing(input)?;
+        // support either a force dir or a bands dir as input
+        let bands_dir = match DirWithBands::from_existing(&input) {
+            // accept a bands dir
+            Ok(dir) => dir.map_dir(|p| p.to_owned()).boxed(),
+            // try computing gamma bands from a force dir
+            Err(Error(ErrorKind::MissingFile(..), _)) => {
+                DirWithForces::from_existing(&input)?
+                    .build_bands()
+                    .eigenvectors(true)
+                    .compute(&[Q_GAMMA])?
+                    .boxed()
+            },
+            Err(e) => return Err(e),
+        };
+
         let structure = bands_dir.structure()?;
-
-        let gamma_index = match bands_dir.q_positions()?.iter().position(|&x| x == [0_f64; 3]) {
-            None => bail!("Bands do not include gamma point: {}", bands_dir.path().display()),
-            Some(x) => x,
-        };
-
-        let evals = bands_dir.eigenvalues()?.remove(gamma_index);
-        let evecs = match bands_dir.eigenvectors()? {
-            None => bail!("Directory has no eigenvectors: {}", bands_dir.path().display()),
-            Some(mut evs) => Basis3::from_basis(evs.remove(gamma_index)),
-        };
+        let (evals, evecs) = read_eigensystem(&bands_dir, &Q_GAMMA)?;
 
         let plot_ev_indices = {
             use ::config::EnergyPlotEvIndices::*;
@@ -856,7 +1074,7 @@ pub fn get_energy_surface(
                     assert!(nlayer >= 2);
 
                     trace!("Computing eigensystem info");
-                    let einfos = get_eigensystem_info(&evals, &evecs, &layers, None, None);
+                    let einfos = get_eigensystem_info(&evals, &evecs, &layers, &structure, None);
 
                     write_eigen_info_for_humans(&einfos, &mut |s| ok(info!("{}", s)))?;
 
@@ -874,30 +1092,36 @@ pub fn get_energy_surface(
             };
 
             // (in case of confusion about 0-based/1-based indices)
-            trace!("X: Eigensolution {:>3}, frequency {}", i, evals[i] * THZ_TO_WAVENUMBER);
-            trace!("Y: Eigensolution {:>3}, frequency {}", j, evals[j] * THZ_TO_WAVENUMBER);
+            trace!("X: Eigensolution {:>3}, frequency {}", i, evals[i]);
+            trace!("Y: Eigensolution {:>3}, frequency {}", j, evals[j]);
             (i, j)
+        };
+
+        let get_real_ev = |i: usize| {
+            let ev = evecs.0[i].as_real_checked();
+            settings.normalization.normalize(ev)
         };
 
         let (xmin, xmax) = tup2(settings.xlim);
         let (ymin, ymax) = tup2(settings.ylim);
         let (w, h) = tup2(settings.dim);
         let data = {
-            let mut lmp = lmp.initialize_carbon(uncarbon(&structure))?;
-
             ::cmd::integrate_2d::integrate_two_eigenvectors(
                 (w, h),
                 &structure.to_carts(),
-                (-xmin..xmax, -ymin..ymax),
-                (
-                    evecs.0[plot_ev_indices.0].as_real_checked(),
-                    evecs.0[plot_ev_indices.1].as_real_checked(),
-                ),
+                (xmin..xmax, ymin..ymax),
+                (&get_real_ev(plot_ev_indices.0), &get_real_ev(plot_ev_indices.1)),
                 {
-                    let mut i = 0;
+                    use ::std::sync::atomic::{AtomicUsize, Ordering};
+                    let counter = AtomicUsize::new(0);
+
                     move |pos| {ok({
-                        i += 1;
+                        let i = counter.fetch_add(1, Ordering::SeqCst);
+                        // println!("{:?}", pos.flat().iter().sum::<f64>());
+
                         eprint!("\rdatapoint {:>6} of {}", i, w * h);
+                        let lmp = LammpsBuilder::new(&settings.threading, &settings.potential);
+                        let mut lmp = lmp.build(structure.clone())?;
                         lmp.set_carts(&pos)?;
                         lmp.compute_grad()?
                     })}
@@ -910,9 +1134,91 @@ pub fn get_energy_surface(
     }
 })}
 
+// HACK: These used to be inherent methods but the type was relocated to another crate
+extension_trait!{
+    SupercellSpecExt for SupercellSpec {
+        fn dim_for_unitcell(&self, prim: &Lattice) -> [u32; 3] {
+            match *self {
+                SupercellSpec::Dim(d) => d,
+                SupercellSpec::Target(targets) => {
+                    let unit_lengths = prim.lengths();
+                    arr_from_fn(|k| {
+                        (targets[k] / unit_lengths[k]).ceil().max(1.0) as u32
+                    })
+                },
+            }
+        }
+    }
+}
+
+extension_trait! {
+    NormalizationModeExt for NormalizationMode {
+        fn norm(&self, ev: &[[f64; 3]]) -> f64
+        {
+            let atom_rs = || ev.iter().map(|v| vnorm(v)).collect::<Vec<_>>();
+
+            match *self {
+                NormalizationMode::CoordNorm => vnorm(ev.flat()),
+                NormalizationMode::AtomMean => {
+                    let rs = atom_rs();
+                    rs.iter().sum::<f64>() / (rs.len() as f64)
+                },
+                NormalizationMode::AtomRms => {
+                    let rs = atom_rs();
+                    vnorm(&rs) / (rs.len() as f64).sqrt()
+                },
+                NormalizationMode::AtomMax => {
+                    let rs = atom_rs();
+                    rs.iter().cloned()
+                        .max_by(|a, b| a.partial_cmp(b).expect("NaN?!")).expect("zero-dim ev?!")
+                },
+            }
+        }
+
+        fn normalize(&self, ev: &[[f64; 3]]) -> Vec<[f64; 3]>
+        {
+            let norm = self.norm(ev);
+
+            let mut ev = ev.to_vec();
+            for x in ev.flat_mut() {
+                *x /= norm;
+            }
+            ev
+        }
+    }
+}
 
 //=================================================================
 
+pub fn run_save_bands_after_the_fact(
+    settings: &Settings,
+    dir: &AsPath,
+) -> Result<()>
+{Ok({
+    use ::rsp2_structure_io::poscar;
+
+    let lmp = LammpsBuilder::new(&settings.threading, &settings.potential.kind);
+
+    {
+        // dumb/lazy solution to ensuring all output files go in the dir
+        let cwd_guard = push_dir(dir.as_path())?;
+
+        let original = poscar::load(open("./final.vasp")?)?;
+        let phonopy = phonopy_builder_from_settings(&settings.phonons, &original);
+        let phonopy = phonopy.use_sparse_sets(settings.tweaks.sparse_sets);
+        do_diagonalize(
+            &lmp, &settings.threading, &phonopy, &original,
+            Some(SAVE_BANDS_DIR.as_ref()),
+            &[Q_GAMMA, Q_K],
+        )?;
+
+        cwd_guard.pop()?;
+    }
+})}
+
+//=================================================================
+
+#[allow(warnings)]
 pub fn make_force_sets(
     conf: Option<&AsRef<Path>>,
     poscar: &AsRef<Path>,
@@ -922,6 +1228,9 @@ pub fn make_force_sets(
     use ::rsp2_structure_io::poscar;
     use ::std::io::BufReader;
 
+    let potential = panic!("TODO: potential in make_force_sets");
+    unreachable!();
+
     let mut phonopy = PhonopyBuilder::new();
     if let Some(conf) = conf {
         phonopy = phonopy.conf_from_file(BufReader::new(open(conf)?))?;
@@ -929,18 +1238,20 @@ pub fn make_force_sets(
 
     let structure = poscar::load(open(poscar)?)?;
 
-    let lmp = make_lammps_builder(&::config::Threading::Lammps);
+    let lmp = LammpsBuilder::new(&::config::Threading::Lammps, &potential);
 
     create_dir(&outdir)?;
     {
         // dumb/lazy solution to ensuring all output files go in the dir
         let cwd_guard = push_dir(outdir)?;
-        setup_global_logger(Some(&"rsp2.log"))?;
+        GlobalLogger::default()
+            .path("rsp2.log")
+            .apply()?;
 
         poscar::dump(create("./input.vasp")?, "", &structure)?;
 
         let disp_dir = phonopy.displacements(&structure)?;
-        let force_sets = do_force_sets_at_disps(&lmp, &disp_dir)?;
+        let force_sets = do_force_sets_at_disps(&lmp, &::config::Threading::Rayon, &disp_dir)?;
         disp_dir.make_force_dir_in_dir(&force_sets, ".")?;
 
         cwd_guard.pop()?;
