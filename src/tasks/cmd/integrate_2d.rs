@@ -12,7 +12,7 @@ pub fn integrate_two_eigenvectors<E, F>(
     init_pos: &[[f64; 3]],
     ranges: (Range<f64>, Range<f64>),
     eigenvecs: (&[[f64; 3]], &[[f64; 3]]),
-    mut compute_grad: F,
+    compute_grad: F,
 ) -> Result<Vec<f64>, E>
 where
     F: Fn(&[[f64; 3]]) -> Result<Vec<[f64; 3]>, E> + Sync,
@@ -104,7 +104,7 @@ fn random_tree<V, Vs, F>(
 
 pub fn integrate_grid_random<M, E, F, G>(
     (n_x, n_y): (usize, usize),
-    mut compute_meta: F,
+    compute_meta: F,
     mut integrate: G,
 ) -> Result<Vec<f64>, E>
     where

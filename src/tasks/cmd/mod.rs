@@ -8,7 +8,6 @@ mod lammps;
 use ::errors::{Error, ErrorKind, Result, ok};
 use ::config::{Settings, NormalizationMode, SupercellSpec};
 use ::util::push_dir;
-use ::ui::logging::setup_global_logger;
 use ::traits::AsPath;
 use ::phonopy::{DirWithBands, DirWithDisps, DirWithForces};
 
@@ -30,6 +29,8 @@ use ::rsp2_fs_util::{open, create, canonicalize, create_dir, rm_rf};
 use ::std::io::{Write};
 use ::std::path::{Path};
 
+use ::ui::logging::GlobalLogger;
+
 use ::itertools::Itertools;
 
 const SAVE_BANDS_DIR: &'static str = "gamma-bands";
@@ -37,6 +38,7 @@ const SAVE_BANDS_DIR: &'static str = "gamma-bands";
 // cli args aren't in Settings, so they're just here.
 pub struct CliArgs {
     pub save_bands: bool,
+    pub verbosity: i32,
 }
 
 pub fn run_relax_with_eigenvectors(
@@ -56,7 +58,10 @@ pub fn run_relax_with_eigenvectors(
         // dumb/lazy solution to ensuring all output files go in the dir
         let cwd_guard = push_dir(outdir)?;
 
-        setup_global_logger(Some(&"rsp2.log"))?;
+        GlobalLogger::default()
+            .path("rsp2.log")
+            .verbosity(cli.verbosity)
+            .apply()?;
 
         // let mut original = poscar::load(open(input)?)?;
         // original.scale_vecs(&settings.hack_scale);
@@ -1016,7 +1021,7 @@ pub fn run_symmetry_test(input: &Path) -> Result<()>
 {ok({
     use ::rsp2_structure_io::poscar;
 
-    setup_global_logger(None)?;
+    GlobalLogger::default().apply()?;
 
     let poscar = poscar::load(open(input)?)?;
     let symmops = PhonopyBuilder::new().symmetry(&poscar)?;
@@ -1037,7 +1042,9 @@ pub fn get_energy_surface(
     {
         // dumb/lazy solution to ensuring all output files go in the dir
         let cwd_guard = push_dir(outdir)?;
-        setup_global_logger(Some(&"rsp2.log"))?;
+        GlobalLogger::default()
+            .path("rsp2.log")
+            .apply()?;
 
         // support either a force dir or a bands dir as input
         let bands_dir = match DirWithBands::from_existing(&input) {
@@ -1204,11 +1211,14 @@ pub fn run_save_bands_after_the_fact(
             Some(SAVE_BANDS_DIR.as_ref()),
             &[Q_GAMMA, Q_K],
         )?;
+
+        cwd_guard.pop()?;
     }
 })}
 
 //=================================================================
 
+#[allow(warnings)]
 pub fn make_force_sets(
     conf: Option<&AsRef<Path>>,
     poscar: &AsRef<Path>,
@@ -1234,7 +1244,9 @@ pub fn make_force_sets(
     {
         // dumb/lazy solution to ensuring all output files go in the dir
         let cwd_guard = push_dir(outdir)?;
-        setup_global_logger(Some(&"rsp2.log"))?;
+        GlobalLogger::default()
+            .path("rsp2.log")
+            .apply()?;
 
         poscar::dump(create("./input.vasp")?, "", &structure)?;
 

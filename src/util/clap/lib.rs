@@ -118,8 +118,12 @@ macro_rules! arg_impl {
         ({
             // (this same code is run for both options and positionals;
             //  thankfully, takes_value(true) on a positional is harmless)
-            $b.takes_value(true).value_name(stringify!($NAME))
-        }) []
+            // (it also appears that this is the case for number_of_values(1) as well.
+            //  Something which, by the way, IS bad when paired with takes_value(false). )
+            $b.takes_value(true).value_name(stringify!($NAME)).number_of_values(1)
+        })
+        // We'll need to remember this for a future decision...
+        []
         #multiple# $($rest)*
     }};
 
@@ -140,7 +144,7 @@ macro_rules! arg_impl {
         #multiple# ... $($rest:tt)*
     )
     => {arg_impl!{
-        ($b.multiple(true).number_of_values(1)) []
+        ($b.multiple(true)) []
         #help# $($rest)*
     }};
 

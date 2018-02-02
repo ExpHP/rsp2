@@ -13,6 +13,8 @@ fn main() {
             arg!(*output [-o][--output]=OUTDIR "output directory"),
             arg!(*config [-c][--config]=CONFIG "settings yaml"),
             arg!( input=POSCAR "POSCAR"),
+            arg!( verbose_minus [-q][--quiet]... "reduce verbosity level"),
+            arg!( verbose_plus [-v][--verbose]... "increase verbosity level"),
             arg!( force [-f][--force] "replace existing output directories"),
             arg!( save_bands [--save-bands] "save phonopy directory with bands at gamma"),
         ])
@@ -23,9 +25,16 @@ fn main() {
     if matches.is_present("force") && ::std::path::Path::new(outdir).exists() {
         ::std::fs::remove_dir_all(outdir).unwrap();
     }
+    let verbosity = {
+        let plus = matches.occurrences_of("verbose_plus") as i32;
+        let minus = matches.occurrences_of("verbose_minus") as i32;
+        plus - minus
+    };
+
     let settings = ::rsp2_tasks::config::read_yaml(::std::fs::File::open(config).unwrap()).unwrap();
     let args = relax_with_eigenvectors::CliArgs {
         save_bands: matches.is_present("save_bands"),
+        verbosity,
     };
     if let Err(e) = relax_with_eigenvectors::run(&settings, &input, &outdir, args) {
         panic!("{}", e.display_chain());

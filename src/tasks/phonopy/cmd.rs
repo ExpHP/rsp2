@@ -24,12 +24,11 @@ use ::rsp2_structure_io::poscar;
 use ::std::io::prelude::*;
 use ::std::process::Command;
 use ::std::path::{Path, PathBuf};
-use ::rsp2_fs_util::{open, open_text, create, copy, hard_link, mv, rm_rf};
+use ::rsp2_fs_util::{open, open_text, create, copy, hard_link, mv};
 use ::rsp2_tempdir::TempDir;
-use ::error_chain::ChainedError;
 
 use ::rsp2_kets::Basis;
-use ::rsp2_structure::{CoordStructure, ElementStructure, Element};
+use ::rsp2_structure::{ElementStructure, Element};
 use ::rsp2_structure::{FracRot, FracTrans, FracOp};
 use ::rsp2_phonopy_io::npy;
 
@@ -285,6 +284,7 @@ impl<P: AsPath> DirWithDisps<P> {
         DirWithDisps { dir, superstructure, displacements, settings }
     })}
 
+    #[allow(unused)]
     pub fn superstructure(&self) -> &ElementStructure
     { &self.superstructure }
     pub fn displacements(&self) -> &[(usize, [f64; 3])]
@@ -411,6 +411,7 @@ impl<P: AsPath> DirWithForces<P> {
         DirWithForces { dir, settings, cache_force_constants: true }
     })}
 
+    #[allow(unused)]
     pub fn structure(&self) -> Result<ElementStructure>
     { Ok(poscar::load(open_text(self.path().join("POSCAR"))?)?) }
 
@@ -419,6 +420,7 @@ impl<P: AsPath> DirWithForces<P> {
     /// When enabled (the default), force constants are copied back from
     /// the first successful `DirWithBands` created, and are reused in
     /// subsequent band computations. (these copies are hard links if possible)
+    #[allow(unused)]
     pub fn cache_force_constants(&mut self, b: bool) -> &mut Self
     { self.cache_force_constants = b; self }
 

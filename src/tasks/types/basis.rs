@@ -21,6 +21,7 @@ impl Basis3 {
     pub fn from_basis(basis: Basis) -> Self
     { Basis3(basis.iter().map(|k| Ket3::from_ket(k)).collect()) }
 
+    #[allow(unused)]
     pub fn to_basis(&self) -> Basis
     {
         let mut basis = Basis::new(vec![], 3 * self.0[0].real.len());
@@ -80,6 +81,7 @@ impl Partition for Basis3
 }
 
 impl Ket3 {
+    #[allow(unused)]
     pub fn sqnorm(&self) -> f64
     {
         self.real.flat().iter().map(|x| x*x).sum::<f64>()

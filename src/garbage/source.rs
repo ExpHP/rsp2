@@ -1,3 +1,24 @@
+//! # What is this?
+//!
+//! A failure.
+//!
+//! Some dumb abstraction I thought of to try and help make
+//! it easier to split large tasks into multiple binaries.
+//! It was supposed to help abstract over data that either exists
+//! in memory (because it was just computed) or on the filesystem
+//! (because it was from a previous separate binary).
+//!
+//! When I tried to actually implement it for some types, however,
+//! I discovered that it was unusable.  I don't remember all the
+//! details, but I do remember that the combinators were worthless
+//! (due to ambiguities in trait resolution).
+//!
+//! # Why keep it?
+//!
+//! It was a terrible idea, but it's here just in case I try to
+//! find it again later, so I can remind myself just how terrible
+//! it is.
+
 use ::{Result};
 use ::traits::AsPath;
 use ::traits::Load;
