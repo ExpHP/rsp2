@@ -177,7 +177,6 @@ pub mod force_sets {
     use ::Result;
 
     use ::std::io::prelude::*;
-    use ::rsp2_structure::Structure;
 
     /// Write a FORCE_SETS file.
     pub fn write<W, Vs>(
@@ -220,7 +219,6 @@ pub mod sparse_sets {
     use ::Result;
 
     use ::std::io::prelude::*;
-    use ::rsp2_structure::Structure;
 
     #[derive(Serialize, Deserialize)]
     #[derive(Debug, Clone)]

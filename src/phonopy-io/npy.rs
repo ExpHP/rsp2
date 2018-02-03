@@ -1,3 +1,9 @@
+
+// The expansion of do_parse! appears to leave unnecessary parentheses
+// around an output expression (the final '>>') that isn't a tuple of
+// 2 or more elements.
+#![allow(unused_parens)]
+
 use ::Result;
 use ::std::io::Read;
 

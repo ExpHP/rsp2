@@ -80,7 +80,7 @@ impl Drop for TempDir {
             // create $RSP2_SAVETEMP if it doesn't exist yet.
             if let Err(e) = ::std::fs::create_dir(dest) {
                 if !dest.exists() {
-                    warn!("failed to create '{}' during panic", dest.display());
+                    warn!("failed to create '{}' during panic: {}", dest.display(), e);
                     return;
                 }
             }
