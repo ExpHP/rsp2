@@ -1,4 +1,5 @@
 extern crate rsp2_array_utils;
+#[cfg(test)] #[macro_use] extern crate rsp2_assert_close;
 
 extern crate ordered_float;
 extern crate slice_of_array;
@@ -79,15 +80,12 @@ mod element;
 pub use ::oper::perm::{Perm, Permute};
 pub use ::oper::part::{Part, Parted, Partition, Unlabeled};
 pub use ::core::lattice::Lattice;
-pub use ::core::lattice::Sent as SentLattice;
-pub use ::core::structure::Sent as SentStructure;
 pub use ::core::coords::Coords;
 pub use ::core::structure::{Structure, CoordStructure, ElementStructure};
 
 pub use ::element::Element;
 
-pub use algo::layer::Layer;
-pub use algo::layer::assign_layers;
+pub use algo::layer::{find_layers, Layers, LayersPerUnitCell};
 
 // yuck. would rather not expose this yet
 pub use ::oper::symmops::{FracRot, FracTrans, FracOp};

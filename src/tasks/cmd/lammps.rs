@@ -7,7 +7,7 @@
 use ::Result;
 use ::rsp2_lammps_wrap::{InitInfo, Potential, AtomType, PairCommand};
 use ::rsp2_lammps_wrap::Builder as InnerBuilder;
-use ::rsp2_structure::{Structure, Element, ElementStructure, Layer};
+use ::rsp2_structure::{Structure, Element, ElementStructure, Layers};
 use ::config as cfg;
 
 const REBO_MASS_HYDROGEN: f64 =  1.00;
@@ -156,9 +156,9 @@ impl KolmogorovCrespiZ {
     //
     //       If we *really* wanted to, we could store precomputed layers in
     //       the potential, but IMO it's just cleaner if we don't need to.
-    fn assign_layers<M>(&self, structure: &Structure<M>) -> (Vec<Layer>, u32)
+    fn find_layers<M>(&self, structure: &Structure<M>) -> Layers
     {
-        ::rsp2_structure::assign_layers(&structure, &[0, 0, 1], 0.25)
+        ::rsp2_structure::find_layers(&structure, &[0, 0, 1], 0.25)
             .unwrap_or_else(|e| {
                 panic!("Failure to determine layers when using kolmogorov/crespi/z: {}", e);
             })
@@ -188,14 +188,13 @@ impl Potential for KolmogorovCrespiZ {
 
     fn atom_types(&self, structure: &ElementStructure) -> Vec<AtomType>
     {
-        let (atom_layers, _) = self.assign_layers(structure);
-        atom_layers.into_iter().map(|Layer(x)| AtomType::new((x + 1) as _)).collect()
+        self.find_layers(structure)
+            .by_atom().into_iter()
+            .map(|x| AtomType::new((x + 1) as _)).collect()
     }
 
     fn init_info(&self, structure: &Structure<Self::Meta>) -> InitInfo
     {
-        let (_atom_layers, nlayer) = self.assign_layers(structure);
-
         // TODO: Judging from the documentation, if I want more than 2 layers,
         //       the commands will need to look something like this:
         //
@@ -226,12 +225,16 @@ impl Potential for KolmogorovCrespiZ {
         //       Or something else that is similarly horrible.
         //       I have too many questions right now that can only be answered by
         // TODO: actually trying them out on Lammps, so for now we just bail out.
+        let layers = match self.find_layers(structure).per_unit_cell() {
+            None => panic!("kolmogorov/crespi/z is only supported for layered materials"),
+            Some(layers) => layers,
+        };
         assert_eq!(
-            nlayer, 2,
+            layers.len(), 2,
             "Sorry, kolmogorov/crespi/z is not yet supported for arbitrary # layers.",
         );
 
-        let masses = vec![REBO_MASS_CARBON; nlayer as usize];
+        let masses = vec![REBO_MASS_CARBON; layers.len() as usize];
 
         let mut pair_commands = vec![
             PairCommand::pair_style("hybrid/overlay")
@@ -240,7 +243,7 @@ impl Potential for KolmogorovCrespiZ {
             PairCommand::pair_coeff(.., ..)
                 .args(&["rebo", "CH.airebo", "C", "C"]),
         ];
-        pair_commands.extend((0..nlayer - 1).map(|i| {
+        pair_commands.extend((0..layers.len() - 1).map(|i| {
             let first = AtomType::new((i + 1) as _);
             let second = AtomType::new((i + 2) as _);
             PairCommand::pair_coeff(first, second)

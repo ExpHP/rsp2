@@ -334,21 +334,6 @@ impl<M> Structure<M> {
     }
 }
 
-/// A Structure rendered into a form sendable across threads.
-// TODO: delete this
-pub type Sent<M> = Structure<M>;
-
-impl<M: Send> Structure<M> {
-    // TODO: delete this
-    #[deprecated(note = "Structure itself is now Send.")]
-    pub fn send(self) -> Sent<M> { self }
-}
-
-impl<M: Send> Sent<M> {
-    // TODO: delete this
-    pub fn recv(self) -> Structure<M> { self }
-}
-
 #[cfg(test)]
 mod compiletest {
     use super::*;

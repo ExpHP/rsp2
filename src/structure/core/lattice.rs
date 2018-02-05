@@ -153,21 +153,6 @@ impl<'a, 'b> Mul<&'b Lattice> for &'a [[f64; 3]; 3] {
     }
 }
 
-/// A Lattice that can be sent across thread boundaries.
-// TODO: delete
-pub type Sent = Lattice; // Lattice itself is now Send.
-
-impl Lattice {
-    // TODO: delete
-    #[deprecated(note = "Lattice itself is now Send.")]
-    pub fn send(self) -> Sent { self }
-}
-
-impl Sent {
-    // TODO: delete
-    pub fn recv(self) -> Lattice { self }
-}
-
 #[cfg(tests)]
 #[deny(unused)]
 mod tests {

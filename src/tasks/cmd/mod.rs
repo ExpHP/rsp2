@@ -89,10 +89,17 @@ pub fn run_relax_with_eigenvectors(
 
         // (we can expect that the layers assignments will not change, so we do this early...)
         trace!("Finding layers");
-        let (layers, nlayer) = ::rsp2_structure::assign_layers(&original, &[0, 0, 1], 0.25)?;
-        if let Some(expected) = settings.layers {
-            assert_eq!(nlayer, expected);
-        }
+        let layers = {
+            let layers =
+                ::rsp2_structure::find_layers(&original, &[0, 0, 1], 0.25)?
+                    .per_unit_cell().expect("Structure is not layered?");
+
+            if let Some(expected) = settings.layers {
+                assert_eq!(expected, layers.len() as u32);
+            }
+            layers.by_atom()
+        };
+
 
         let mut from_structure = original.clone();
         let mut iteration = 1;
@@ -1070,7 +1077,12 @@ pub fn get_energy_surface(
             let (i, j) = match settings.ev_indices {
                 Shear => {
                     trace!("Finding layers");
-                    let (layers, nlayer) = ::rsp2_structure::assign_layers(&structure, &[0, 0, 1], 0.25)?;
+                    let (layers, nlayer) = {
+                        let layers =
+                            ::rsp2_structure::find_layers(&structure, &[0, 0, 1], 0.25)?
+                                .per_unit_cell().expect("Structure is not layered?");
+                        (layers.by_atom(), layers.len())
+                    };
                     assert!(nlayer >= 2);
 
                     trace!("Computing eigensystem info");
