@@ -238,12 +238,19 @@ mod kc_z {
             //
             //       pair_coeff 1 2 kolmogorov/crespi/z CC.KC C C
             //
-            // If there are more than one, then the pair_coeff commands need integer labels:
+            // If there are more than one, then the pair_coeff commands need integer labels.
+            // Also, you still need elements for all atom types; these can be set to NULL.
             //
             //                                          v--this
-            //       pair_coeff 1 2 kolmogorov/crespi/z 1 CC.KC C C
-            //       pair_coeff 1 3 kolmogorov/crespi/z 2 CC.KC C C
-            //       pair_coeff 2 3 kolmogorov/crespi/z 3 CC.KC C C
+            //       pair_coeff 1 2 kolmogorov/crespi/z 1 CC.KC C C NULL
+            //       pair_coeff 1 3 kolmogorov/crespi/z 2 CC.KC C NULL C
+            //       pair_coeff 2 3 kolmogorov/crespi/z 3 CC.KC NULL C C
+            //
+            // Although I think I prefer not using NULL, because it appears to me that this
+            // internally sets the type to '-1' and this is NEVER CHECKED, IF YOU USE IT
+            // THEN IT JUST SEGFAULTS, WTF, WHY ON EARTH WOULD YOU ASSIGN A SPECIAL VALUE
+            // FOR SOME CASE AND THEN NEVER ACTUALLY CHECK FOR IT!? WHY!? WHY!? WHYYYY!?!
+            //                                       - ML
             //
             // TODO: Should maybe factor out some Hybrid: Potential that takes
             //       care of this nonsense, and put it in rsp2_lammps_wrap sometime.
@@ -258,7 +265,8 @@ mod kc_z {
                     1 => cmd.arg("kolmogorov/crespi/z"),
                     _ => cmd.arg("kolmogorov/crespi/z").arg(cmd_n + 1),
                 };
-                let cmd = cmd.args(&["CC.KC", "C", "C"]);
+                let cmd = cmd.arg("CC.KC");
+                let cmd = cmd.args(vec!["C"; layers.len()]); // ...let's not use NULL.
                 pair_commands.push(cmd);
             };
 
