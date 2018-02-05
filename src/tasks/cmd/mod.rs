@@ -615,6 +615,7 @@ pub(crate) fn optimize_layer_parameters(
         parameter: ref parameter_spec,
         layer_sep: ref layer_sep_spec,
         warn: warn_threshold,
+        repeat_count,
     } = *settings;
 
     let n_seps = builder.layer_seps().len();
@@ -663,39 +664,46 @@ pub(crate) fn optimize_layer_parameters(
         });
 
         // optimize them one-by-one.
-        for &((ref name, ref spec), ref setter) in &optimizables {
-            trace!("Optimizing {}", name);
+        //
+        // Repeat the whole process repeat_count times.
+        // In future iterations, parameters other than the one currently being
+        // relaxed may be set to different, better values, which may in turn
+        // cause different values to be chosen for the earlier parameters.
+        for _ in 0..repeat_count {
+            for &((ref name, ref spec), ref setter) in &optimizables {
+                trace!("Optimizing {}", name);
 
-            let best = match *spec {
-                ScaleRange::Exact(value) => value,
-                ScaleRange::Range { guess: _, range } => {
-                    let best = Golden::new()
-                        .stop_condition(&from_json!({"interval-size": 1e-7}))
-                        .run(range, |a| {
-                            setter(a);
-                            get_value().map(Value)
-                        })??; // ?!??!!!?
+                let best = match *spec {
+                    ScaleRange::Exact(value) => value,
+                    ScaleRange::Range { guess: _, range } => {
+                        let best = Golden::new()
+                            .stop_condition(&from_json!({"interval-size": 1e-7}))
+                            .run(range, |a| {
+                                setter(a);
+                                get_value().map(Value)
+                            })??; // ?!??!!!?
 
-                    if let Some(thresh) = warn_threshold {
-                        // use signed differences so that all values outside violate the threshold
-                        let lo = range.0.min(range.1);
-                        let hi = range.0.max(range.1);
-                        if (best - range.0).min(range.1 - best) / (range.1 - range.0) < thresh {
-                            warn!("Relaxed value of '{}' is suspiciously close to limits!", name);
-                            warn!("  lo: {:e}", lo);
-                            warn!(" val: {:e}", best);
-                            warn!("  hi: {:e}", hi);
+                        if let Some(thresh) = warn_threshold {
+                            // use signed differences so that all values outside violate the threshold
+                            let lo = range.0.min(range.1);
+                            let hi = range.0.max(range.1);
+                            if (best - range.0).min(range.1 - best) / (range.1 - range.0) < thresh {
+                                warn!("Relaxed value of '{}' is suspiciously close to limits!", name);
+                                warn!("  lo: {:e}", lo);
+                                warn!(" val: {:e}", best);
+                                warn!("  hi: {:e}", hi);
+                            }
                         }
-                    }
 
-                    info!("Optimized {}: {} (from {:?})", name, best, range);
-                    best
-                },
-            };
+                        info!("Optimized {}: {} (from {:?})", name, best, range);
+                        best
+                    },
+                }; // let best = { ... }
 
-            setter(best);
-        }
-    }
+                setter(best);
+            } // for ... in optimizables
+        } // for ... in repeat_count
+    } // RefCell borrow scope
 
     builder.into_inner()
 })}

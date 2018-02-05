@@ -84,6 +84,12 @@ derive_yaml_read!{Settings}
 pub struct ScaleRanges {
     pub parameter: ScaleRange,
     pub layer_sep: ScaleRange,
+    /// How many times to repeat the process of relaxing all parameters.
+    ///
+    /// This may yield better results if one of the parameters relaxed
+    /// earlier in the sequence impacts one of the ones relaxed earlier.
+    #[serde(default="self::defaults::scale_ranges::repeat_count")]
+    pub repeat_count: u32,
     #[serde(default="self::defaults::scale_ranges::warn")]
     pub warn: Option<f64>,
 }
@@ -277,6 +283,7 @@ mod defaults {
     }
 
     pub(crate) mod scale_ranges {
+        pub(crate) fn repeat_count() -> u32 { 1 }
         pub(crate) fn warn() -> Option<f64> { Some(0.01) }
     }
 
