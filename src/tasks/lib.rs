@@ -37,6 +37,20 @@ macro_rules! ichain {
     => { $e.into_iter().chain(ichain!($($es,)+)) };
 }
 
+macro_rules! _log_once_impl {
+    ($mac:ident!($($arg:tt)*)) => {{
+        use std::sync::{Once, ONCE_INIT};
+        static ONCE: Once = ONCE_INIT;
+        ONCE.call_once(|| {
+            // Explicitly label one-time messages to discourage reasoning
+            // along the lines of "well it didn't say anything THIS time"
+            $mac!("{} (this message will not be shown again)", format_args!($($arg)*));
+        });
+    }};
+}
+
+macro_rules! warn_once { ($($arg:tt)*) => { _log_once_impl!{warn!($($arg)*)} }; }
+
 #[macro_use]
 mod traits;
 mod util;

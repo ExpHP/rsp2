@@ -254,6 +254,12 @@ mod atom_type {
             AtomType(x as _)
         }
         pub fn value(self) -> i64 { self.0 }
+
+        // because this is a PITA to do manually all the time...
+        /// Construct from a 0-based index.
+        pub fn from_index(x: usize) -> Self { AtomType((x + 1) as _) }
+        /// Recover the 0-based index.
+        pub fn to_index(self) -> usize { self.0 as usize - 1 }
     }
 }
 

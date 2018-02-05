@@ -167,6 +167,8 @@ pub struct PotentialAirebo {
 pub struct PotentialKolmogorovCrespiZ {
     /// Cutoff radius (Angstrom?)
     pub cutoff: Option<f64>,
+    /// Separations larger than this are regarded as vacuum and do not interact. (Angstrom)
+    pub max_layer_sep: Option<f64>
 }
 
 #[derive(Serialize, Deserialize)]

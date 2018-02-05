@@ -265,7 +265,9 @@ fn assign_layers_impl_frac_1d(
     }
 
     // Sanity check, to guard against bugs of the `-1e-30 % 1.0 (== 1.0)` variety.
-    assert!(layer_seps.iter().all(|&x| 0.0 <= x && x < 1.0));
+    // Notice that separations CAN be equal to 1, but not 0, which is interestingly
+    //  reversed from most half-open domains.
+    assert!(layer_seps.iter().all(|&x| 0.0 < x && x <= 1.0));
 
     Layers::PerUnitCell(LayersPerUnitCell { groups, gaps: layer_seps })
 })}
@@ -312,7 +314,31 @@ mod tests {
     use ::{Permute, Perm};
 
     #[test]
-    fn assign_layers_impl() {
+    fn layer_separation_eq_one() {
+        // Perhaps surprisingly, fractional layer separations are
+        // actually in the range `0.0 < sep <= 1.0`. And a value equal
+        // to 1.0 is not unlikely for a single layer structure recently
+        // read from an input file, so let's make sure it works.
+        let fracs = vec![
+            [0.00, 0.25, 0.5],
+            [0.25, 0.00, 0.5],
+        ];
+        let lattice = Lattice::eye();
+
+        // deliberately test using exact equality; the periodic length
+        // is 1.0 so there should be no rounding difficulties.
+        assert_eq!(
+            super::find_layers_impl(&fracs, &lattice, &[0, 0, 1], 0.15).unwrap(),
+            Layers::PerUnitCell(LayersPerUnitCell {
+                groups: vec![vec![0, 1]],
+                gaps: vec![1.0], // <-- field of greatest interest
+            }),
+        );
+    }
+
+
+    #[test]
+    fn find_layers_impl() {
         let fracs = vec![
             // we will be looking along y with frac_tol = 0.11
             [0.0, 0.1, 0.0],
@@ -367,6 +393,10 @@ mod tests {
 
         // --------------------------------------
         // test cases
+
+        // FIXME: These tests are too stateful; attempting to reuse this much data
+        //        between tests makes it difficult to reason about what each test
+        //        case is actually testing.
 
         check(
             (&fracs, &lattice, &[0, 1, 0], cart_tol),
