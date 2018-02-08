@@ -608,13 +608,14 @@ pub(crate) fn optimize_layer_parameters(
 ) -> Result<Assemble>
 {ok({
     pub use ::rsp2_minimize::exact_ls::{Value, Golden};
-    use ::config::{ScaleRanges, ScaleRange};
+    use ::config::{ScaleRanges, ScaleRange, ScaleRangesLayerSepStyle};
     use ::std::cell::RefCell;
 
     let ScaleRanges {
         parameter: ref parameter_spec,
         layer_sep: ref layer_sep_spec,
         warn: warn_threshold,
+        layer_sep_style,
         repeat_count,
     } = *settings;
 
@@ -634,13 +635,27 @@ pub(crate) fn optimize_layer_parameters(
                 }),
             ));
 
-            for i in 0..n_seps {
-                optimizables.push((
-                    (format!("layer sep {}", i), layer_sep_spec.clone()),
-                    Box::new(move |s| {
-                        builder.borrow_mut().layer_seps()[i] = s;
-                    }),
-                ));
+            match layer_sep_style {
+                ScaleRangesLayerSepStyle::Individual => {
+                    for i in 0..n_seps {
+                        optimizables.push((
+                            (format!("layer sep {}", i), layer_sep_spec.clone()),
+                            Box::new(move |s| {
+                                builder.borrow_mut().layer_seps()[i] = s;
+                            }),
+                        ));
+                    }
+                },
+                ScaleRangesLayerSepStyle::Uniform => {
+                    optimizables.push((
+                        (format!("layer sep"), layer_sep_spec.clone()),
+                        Box::new(move |s| {
+                            for dest in builder.borrow_mut().layer_seps() {
+                                *dest = s;
+                            }
+                        })
+                    ))
+                },
             }
             optimizables
         };

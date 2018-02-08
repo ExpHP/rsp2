@@ -84,6 +84,8 @@ derive_yaml_read!{Settings}
 pub struct ScaleRanges {
     pub parameter: ScaleRange,
     pub layer_sep: ScaleRange,
+    #[serde(default)]
+    pub layer_sep_style: ScaleRangesLayerSepStyle,
     /// How many times to repeat the process of relaxing all parameters.
     ///
     /// This may yield better results if one of the parameters relaxed
@@ -92,6 +94,23 @@ pub struct ScaleRanges {
     pub repeat_count: u32,
     #[serde(default="self::defaults::scale_ranges::warn")]
     pub warn: Option<f64>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum ScaleRangesLayerSepStyle {
+    /// Optimize each layer separation individually. Can be costly.
+    Individual,
+    /// Optimize a single value shared by all layer separations.
+    ///
+    /// Under certain conditions, the optimum separation IS identical for
+    /// all layers (e.g. generated structures where all pairs of layers
+    /// look similar, and where the potential only affects adjacent layers).
+    ///
+    /// There are also conditions where the separation obtained from this method
+    /// is "good enough" that CG can be trusted to take care of the rest.
+    Uniform,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -260,6 +279,10 @@ pub struct EvLoop {
 
 impl Default for Threading {
     fn default() -> Self { Threading::Lammps }
+}
+
+impl Default for ScaleRangesLayerSepStyle {
+    fn default() -> Self { ScaleRangesLayerSepStyle::Individual }
 }
 
 impl Default for EvLoop {
