@@ -5,8 +5,11 @@ pub(crate) mod integrate_2d;
 use self::lammps::{Lammps, LammpsBuilder};
 mod lammps;
 
+use self::trial::Trial;
+pub(crate) mod trial;
+
 use ::errors::{Error, ErrorKind, Result, ok};
-use ::config::{Settings, NormalizationMode, SupercellSpec};
+use ::rsp2_tasks_config::{self as cfg, Settings, NormalizationMode, SupercellSpec};
 use ::util::push_dir;
 use ::traits::AsPath;
 use ::phonopy::{DirWithBands, DirWithDisps, DirWithForces};
@@ -24,12 +27,12 @@ use ::rsp2_structure::{Part, Partition};
 use ::rsp2_structure_gen::Assemble;
 use ::phonopy::Builder as PhonopyBuilder;
 
-use ::rsp2_fs_util::{open, create, canonicalize, create_dir, rm_rf};
+use ::ui::logging::GlobalLogger;
+use ::util::CanonicalPath;
+use ::rsp2_fs_util::{open, create, create_dir, rm_rf};
 
 use ::std::io::{Write};
 use ::std::path::{Path};
-
-use ::ui::logging::GlobalLogger;
 
 use ::itertools::Itertools;
 
@@ -38,30 +41,19 @@ const SAVE_BANDS_DIR: &'static str = "gamma-bands";
 // cli args aren't in Settings, so they're just here.
 pub struct CliArgs {
     pub save_bands: bool,
-    pub verbosity: i32,
 }
 
-pub fn run_relax_with_eigenvectors(
-    settings: &Settings,
-    input: &AsRef<Path>,
-    outdir: &AsRef<Path>,
-    cli: CliArgs,
-) -> Result<()>
-{ok({
-    use ::rsp2_structure_io::poscar;
+impl Trial {
+    pub(crate) fn run_relax_with_eigenvectors(
+        self,
+        settings: &Settings,
+        input: &CanonicalPath,
+        cli: CliArgs,
+    ) -> Result<()>
+    {ok({
+        use ::rsp2_structure_io::poscar;
 
-    let lmp = LammpsBuilder::new(&settings.threading, &settings.potential.kind);
-    let input = canonicalize(input.as_ref())?;
-
-    create_dir(&outdir)?;
-    {
-        // dumb/lazy solution to ensuring all output files go in the dir
-        let cwd_guard = push_dir(outdir)?;
-
-        GlobalLogger::default()
-            .path("rsp2.log")
-            .verbosity(cli.verbosity)
-            .apply()?;
+        let lmp = LammpsBuilder::new(&settings.threading, &settings.potential.kind);
 
         // let mut original = poscar::load(open(input)?)?;
         // original.scale_vecs(&settings.hack_scale);
@@ -207,15 +199,13 @@ pub fn run_relax_with_eigenvectors(
 
         // write_summary_file(settings, &lmp, &einfos, &kinfos)?;
         write_summary_file(settings, &lmp, &einfos, None)?;
-
-        cwd_guard.pop()?;
-    }
-})}
+    })}
+}
 
 fn do_relax(
     lmp: &LammpsBuilder,
-    cg_settings: &::config::Acgsd,
-    potential_settings: &::config::Potential,
+    cg_settings: &cfg::Acgsd,
+    potential_settings: &cfg::Potential,
     structure: ElementStructure,
 ) -> Result<ElementStructure>
 {ok({
@@ -235,7 +225,7 @@ fn do_relax(
 
 fn do_diagonalize_at_gamma(
     lmp: &LammpsBuilder,
-    threading: &::config::Threading,
+    threading: &cfg::Threading,
     phonopy: &PhonopyBuilder,
     structure: &ElementStructure,
     save_bands: Option<&Path>,
@@ -247,7 +237,7 @@ fn do_diagonalize_at_gamma(
 
 fn do_diagonalize(
     lmp: &LammpsBuilder,
-    threading: &::config::Threading,
+    threading: &cfg::Threading,
     phonopy: &PhonopyBuilder,
     structure: &ElementStructure,
     save_bands: Option<&Path>,
@@ -273,14 +263,14 @@ fn do_diagonalize(
 
 fn do_eigenvector_chase(
     lmp: &LammpsBuilder,
-    chase_settings: &::config::EigenvectorChase,
-    potential_settings: &::config::Potential,
+    chase_settings: &cfg::EigenvectorChase,
+    potential_settings: &cfg::Potential,
     mut structure: ElementStructure,
     bad_evecs: &[(String, &[[f64; 3]])],
 ) -> Result<ElementStructure>
 {ok({
     match *chase_settings {
-        ::config::EigenvectorChase::OneByOne => {
+        cfg::EigenvectorChase::OneByOne => {
             for &(ref name, evec) in bad_evecs {
                 let (alpha, new_structure) = do_minimize_along_evec(lmp, potential_settings, structure, &evec[..])?;
                 info!("Optimized along {}, a = {:e}", name, alpha);
@@ -289,7 +279,7 @@ fn do_eigenvector_chase(
             }
             structure
         },
-        ::config::EigenvectorChase::Acgsd(ref cg_settings) => {
+        cfg::EigenvectorChase::Acgsd(ref cg_settings) => {
             let evecs: Vec<_> = bad_evecs.iter().map(|&(_, ev)| ev).collect();
             do_cg_along_evecs(
                 lmp,
@@ -304,8 +294,8 @@ fn do_eigenvector_chase(
 
 fn do_cg_along_evecs<V, I>(
     lmp: &LammpsBuilder,
-    cg_settings: &::config::Acgsd,
-    potential_settings: &::config::Potential,
+    cg_settings: &cfg::Acgsd,
+    potential_settings: &cfg::Potential,
     structure: ElementStructure,
     evecs: I,
 ) -> Result<ElementStructure>
@@ -320,8 +310,8 @@ where
 
 fn _do_cg_along_evecs(
     lmp: &LammpsBuilder,
-    cg_settings: &::config::Acgsd,
-    potential_settings: &::config::Potential,
+    cg_settings: &cfg::Acgsd,
+    potential_settings: &cfg::Potential,
     structure: ElementStructure,
     evecs: &[&[[f64; 3]]],
 ) -> Result<ElementStructure>
@@ -347,7 +337,7 @@ fn _do_cg_along_evecs(
 
 fn do_minimize_along_evec(
     lmp: &LammpsBuilder,
-    settings: &::config::Potential,
+    settings: &cfg::Potential,
     structure: ElementStructure,
     evec: &[[f64; 3]],
 ) -> Result<(f64, ElementStructure)>
@@ -532,7 +522,7 @@ fn write_summary_file(
 })}
 
 fn phonopy_builder_from_settings<M>(
-    settings: &::config::Phonons,
+    settings: &cfg::Phonons,
     // the structure is needed to resolve the correct supercell size
     structure: &Structure<M>,
 ) -> PhonopyBuilder
@@ -546,7 +536,7 @@ fn phonopy_builder_from_settings<M>(
 
 fn do_force_sets_at_disps<P: AsPath + Send + Sync>(
     lmp: &LammpsBuilder,
-    threading: &::config::Threading,
+    threading: &cfg::Threading,
     disp_dir: &DirWithDisps<P>,
 ) -> Result<Vec<Vec<[f64; 3]>>>
 {ok({
@@ -565,11 +555,11 @@ fn do_force_sets_at_disps<P: AsPath + Send + Sync>(
     });
 
     let force_sets = match threading {
-        &::config::Threading::Lammps |
-        &::config::Threading::Serial => {
+        &cfg::Threading::Lammps |
+        &cfg::Threading::Serial => {
             disp_dir.displaced_structures().map(compute).collect::<Result<Vec<_>>>()?
         },
-        &::config::Threading::Rayon => {
+        &cfg::Threading::Rayon => {
             let structures = disp_dir.displaced_structures().collect::<Vec<_>>();
             structures.into_par_iter().map(compute).collect::<Result<Vec<_>>>()?
         },
@@ -602,13 +592,13 @@ fn read_eigensystem<P: AsPath>(
 //-----------------------------------
 
 pub(crate) fn optimize_layer_parameters(
-    settings: &::config::ScaleRanges,
+    settings: &cfg::ScaleRanges,
     lmp: &LammpsBuilder,
     mut builder: Assemble,
 ) -> Result<Assemble>
 {ok({
     pub use ::rsp2_minimize::exact_ls::{Value, Golden};
-    use ::config::{ScaleRanges, ScaleRange, ScaleRangesLayerSepStyle};
+    use ::rsp2_tasks_config::{ScaleRanges, ScaleRange, ScaleRangesLayerSepStyle};
     use ::std::cell::RefCell;
 
     let ScaleRanges {
@@ -1060,26 +1050,17 @@ pub fn run_symmetry_test(input: &Path) -> Result<()>
 
 //=================================================================
 
-pub fn get_energy_surface(
-    settings: &::config::EnergyPlotSettings,
-    input: &AsRef<Path>,
-    outdir: &AsRef<Path>,
-) -> Result<()>
-{ok({
-    let input = canonicalize(input)?;
-
-    create_dir(&outdir)?;
-    {
-        // dumb/lazy solution to ensuring all output files go in the dir
-        let cwd_guard = push_dir(outdir)?;
-        GlobalLogger::default()
-            .path("rsp2.log")
-            .apply()?;
-
+impl Trial {
+    pub(crate) fn run_energy_surface(
+        self,
+        settings: &cfg::EnergyPlotSettings,
+        input: &CanonicalPath,
+    ) -> Result<()>
+    {ok({
         // support either a force dir or a bands dir as input
-        let bands_dir = match DirWithBands::from_existing(&input) {
+        let bands_dir = match DirWithBands::from_existing(input.to_path_buf()) {
             // accept a bands dir
-            Ok(dir) => dir.map_dir(|p| p.to_owned()).boxed(),
+            Ok(dir) => dir.boxed(),
             // try computing gamma bands from a force dir
             Err(Error(ErrorKind::MissingFile(..), _)) => {
                 DirWithForces::from_existing(&input)?
@@ -1095,7 +1076,7 @@ pub fn get_energy_surface(
         let (evals, evecs) = read_eigensystem(&bands_dir, &Q_GAMMA)?;
 
         let plot_ev_indices = {
-            use ::config::EnergyPlotEvIndices::*;
+            use ::rsp2_tasks_config::EnergyPlotEvIndices::*;
 
             let (i, j) = match settings.ev_indices {
                 Shear => {
@@ -1165,9 +1146,8 @@ pub fn get_energy_surface(
         };
         let chunked: Vec<_> = data.chunks(w).collect();
         ::serde_json::to_writer_pretty(create("out.json")?, &chunked)?;
-        cwd_guard.pop()?;
-    }
-})}
+    })}
+}
 
 // HACK: These used to be inherent methods but the type was relocated to another crate
 extension_trait!{
@@ -1226,7 +1206,7 @@ extension_trait! {
 //=================================================================
 
 pub fn run_save_bands_after_the_fact(
-    settings: &Settings,
+    settings: &Settings, // FIXME no longer needed, can read from pre-existing trial dir
     dir: &AsPath,
 ) -> Result<()>
 {Ok({
@@ -1273,7 +1253,7 @@ pub fn make_force_sets(
 
     let structure = poscar::load(open(poscar)?)?;
 
-    let lmp = LammpsBuilder::new(&::config::Threading::Lammps, &potential);
+    let lmp = LammpsBuilder::new(&cfg::Threading::Lammps, &potential);
 
     create_dir(&outdir)?;
     {
@@ -1286,7 +1266,7 @@ pub fn make_force_sets(
         poscar::dump(create("./input.vasp")?, "", &structure)?;
 
         let disp_dir = phonopy.displacements(&structure)?;
-        let force_sets = do_force_sets_at_disps(&lmp, &::config::Threading::Rayon, &disp_dir)?;
+        let force_sets = do_force_sets_at_disps(&lmp, &cfg::Threading::Rayon, &disp_dir)?;
         disp_dir.make_force_dir_in_dir(&force_sets, ".")?;
 
         cwd_guard.pop()?;

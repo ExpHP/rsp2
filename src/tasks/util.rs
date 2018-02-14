@@ -1,3 +1,5 @@
+use ::traits::IsNewtype;
+
 use ::std::path::{Path, PathBuf};
 use ::std::io::Result as IoResult;
 use ::std::sync::atomic::AtomicUsize;
@@ -80,5 +82,27 @@ pub(crate) fn index_of_nearest(carts: &[[f64; 3]], needle: &[f64; 3], tol: f64) 
         .map(|(i, _)| i)
 }
 
+#[allow(unused)]
 pub(crate) fn index_of_shortest(carts: &[[f64; 3]], tol: f64) -> Option<usize>
 { index_of_nearest(carts, &[0.0; 3], tol) }
+
+/// Newtype for canonicalized paths
+#[derive(Debug)]
+pub(crate) struct CanonicalPath(Path);
+
+unsafe impl ::traits::IsNewtype<Path> for CanonicalPath { }
+
+impl ::std::ops::Deref for CanonicalPath {
+    type Target = Path;
+    fn deref(&self) -> &Path { &self.0 }
+}
+
+impl AsRef<Path> for CanonicalPath {
+    fn as_ref(&self) -> &Path { &self.0 }
+}
+
+pub(crate) fn canonicalize<P: ::traits::AsPath>(path: P) -> ::Result<Box<CanonicalPath>> {
+    let path = ::rsp2_fs_util::canonicalize(path.as_path())?;
+    let path = path.into_boxed_path();
+    Ok(CanonicalPath::wrap_box(path))
+}

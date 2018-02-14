@@ -20,7 +20,9 @@ path = "lib.rs"
 !!rsp2-tempdir
 !!rsp2-util-macros
 !!rsp2-fs-util
+!!rsp2-clap
 
+!!clap
 !!slice-of-array
 !!rsp2-kets
 !!rand

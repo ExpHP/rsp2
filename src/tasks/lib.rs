@@ -15,14 +15,16 @@ extern crate rsp2_slice_math;
 extern crate rsp2_tempdir;
 extern crate rsp2_fs_util;
 #[macro_use] extern crate rsp2_util_macros;
-#[macro_use] extern crate extension_trait;
+#[macro_use] extern crate rsp2_clap;
 
+#[macro_use] extern crate extension_trait;
 extern crate rayon;
 extern crate rand;
 extern crate slice_of_array;
 extern crate serde;
 extern crate ansi_term;
 extern crate fern;
+#[macro_use] extern crate clap;
 extern crate rsp2_kets;
 extern crate serde_yaml;
 #[macro_use] extern crate serde_json;
@@ -63,13 +65,12 @@ pub use traits::alternate;
 
 pub use ::rsp2_tasks_config::Settings;
 pub mod relax_with_eigenvectors {
-    pub use ::cmd::run_relax_with_eigenvectors as run;
     pub use ::cmd::CliArgs;
 }
 pub use ::cmd::run_symmetry_test;
-pub use ::cmd::get_energy_surface;
 pub use ::cmd::make_force_sets;
 pub use ::cmd::run_save_bands_after_the_fact;
+pub use ::cmd::trial::{Trial, TheOnlyGlobalTrial};
 
 pub use ::math::bands::unfold_phonon;
 
@@ -132,6 +133,7 @@ mod errors {
     }
 }
 
+pub mod entry_points;
 
 /// This module only exists to have its name appear in logs.
 /// It marks a process's stdout.
@@ -159,22 +161,4 @@ impl<T> As3<T> for [T; 3] {
 impl<T> As3<T> for (T, T, T) {
     fn as_3(&self) -> (&T, &T, &T)
     { (&self.0, &self.1, &self.2) }
-}
-
-/// Config-reading functions intended for use by run scripts.
-///
-/// They forward to monomorphized implementations in a separate crate,
-/// so that things can be rebuilt much faster than if the script had
-/// used `serde_yaml` on its own.
-pub mod config {
-    use super::Result;
-    use ::std::io::Read;
-    use ::rsp2_tasks_config::YamlRead;
-
-    // HACK reexporting all the config-related types under the same path where
-    //      they originally existed to minimize churn
-    pub use ::rsp2_tasks_config::*;
-
-    pub fn read_yaml<R: Read, T: YamlRead>(r: R) -> Result<T>
-    { Ok(YamlRead::from_reader(r)?) }
 }

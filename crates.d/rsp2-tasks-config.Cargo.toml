@@ -9,6 +9,7 @@ path = "lib.rs"
 [dependencies]
 !!rsp2-minimize
 
+!!log
 !!serde
 !!serde-derive
 !!serde-yaml

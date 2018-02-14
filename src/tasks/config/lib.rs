@@ -1,4 +1,5 @@
-// Crate where serde_yaml code is monomorphized, which is a huge compile time sink.
+// Crate where serde_yaml code for the 'tasks' crate is monomorphized,
+// because this is a huge compile time sink.
 //
 // The functions here also make use of serde_ignored to catch typos in the config.
 
@@ -19,6 +20,9 @@ extern crate serde_ignored;
 
 extern crate rsp2_minimize;
 
+#[macro_use]
+extern crate log;
+
 use ::std::io::Read;
 pub use ::rsp2_minimize::acgsd::Settings as Acgsd;
 
@@ -28,7 +32,14 @@ pub trait YamlRead: for <'de> ::serde::Deserialize<'de> {
     fn from_reader<R: Read>(mut r: R) -> Result<Self, ::serde_yaml::Error>
     { YamlRead::from_dyn_reader(&mut r) }
 
-    fn from_dyn_reader(r: &mut Read) -> Result<Self, ::serde_yaml::Error>;
+    fn from_dyn_reader(r: &mut Read) -> Result<Self, ::serde_yaml::Error> {
+        // serde_ignored needs a Deserializer.
+        // unlike serde_json, serde_yaml doesn't seem to expose a Deserializer that is
+        // directly constructable from a Read... but it does impl Deserialize for Value.
+        Self::from_value(value_from_dyn_reader(r)?)
+    }
+
+    fn from_value(value: ::serde_yaml::Value) -> Result<Self, ::serde_yaml::Error>;
 }
 
 macro_rules! derive_yaml_read {
@@ -38,24 +49,21 @@ macro_rules! derive_yaml_read {
             //       appears to make codegen lazy for some reason (compilation
             //       of this crate becomes suspiciously quick).
             //       Hence we generate these identical bodies in a macro.
-            fn from_dyn_reader(r: &mut Read) -> Result<$Type, ::serde_yaml::Error>
-            {
-                // serde_ignored needs a Deserializer.
-                // unlike serde_json, serde_yaml doesn't seem to expose a Deserializer that is
-                // directly constructable from a Read... but it does impl Deserialize for Value.
-                let de: ::serde_yaml::Value = ::serde_yaml::from_reader(r)?;
+            fn from_value(value: ::serde_yaml::Value) -> Result<$Type, ::serde_yaml::Error> {
                 ::serde_ignored::deserialize(
-                    de,
-                    |path| {
-                        // FIXME we should log a warning instead, but unfortunately
-                        // config reading tends to occur before logging is initialized.
-                        panic!("Unused config item (possible typo?): {}", path)
-                    },
+                    value,
+                    |path| warn!("Unused config item (possible typo?): {}", path),
                 )
             }
         }
     };
 }
+
+derive_yaml_read!{::serde_yaml::Value}
+
+// (this also exists solely for codegen reasons)
+fn value_from_dyn_reader(r: &mut Read) -> Result<::serde_yaml::Value, ::serde_yaml::Error>
+{ ::serde_yaml::from_reader(r) }
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]

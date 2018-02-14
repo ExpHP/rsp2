@@ -29,10 +29,10 @@ impl<T> Load for Json<T> where T: for<'de> ::serde::Deserialize<'de> {
     {Ok(::serde_json::from_reader(open(path.as_path())?)?).map(Json)}
 }
 
-impl<T> Load for Yaml<T> where T: for<'de> ::serde::Deserialize<'de> {
-    fn load<P: AsPath>(path: P) -> Result<Yaml<T>>
-    {Ok(::serde_yaml::from_reader(open(path.as_path())?)?).map(Yaml)}
-}
+// impl<T> Load for Yaml<T> where T: for<'de> ::serde::Deserialize<'de> {
+//     fn load<P: AsPath>(path: P) -> Result<Yaml<T>>
+//     {Ok(::serde_yaml::from_reader(open(path.as_path())?)?).map(Yaml)}
+// }
 
 impl<T> Save for Json<T> where T: ::serde::Serialize {
     fn save<P: AsPath>(&self, path: P) -> Result<()>

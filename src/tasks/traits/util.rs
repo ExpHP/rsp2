@@ -23,6 +23,14 @@ pub unsafe trait IsNewtype<T: ?Sized> {
     /// The inverse of `&mut self.0` for a newtype.
     fn wrap_mut(x: &mut T) -> &mut Self
     { unsafe { transmute_copy_mut(x) } }
+
+    /// The inverse of `Box::new(self.0)` for a newtype.
+    fn wrap_box(x: Box<T>) -> Box<Self>
+    { unsafe { transmute_copy_box(x) } }
+
+    /// Basically just `Box::new(self.0)`.
+    fn unwrap_box(x: Box<Self>) -> Box<T>
+    { unsafe { transmute_copy_box(x) } }
 }
 
 /// `transmute_copy` restricted to references.
@@ -53,4 +61,19 @@ unsafe fn transmute_copy_mut<A: ?Sized, B: ?Sized>(borrow: &mut A) -> &mut B
     let ptrptr = (&ptr) as *const *mut A as *const *mut B;
     let ptr = unsafe { *ptrptr };
     unsafe { ptr.as_mut().unwrap() }
+}
+
+/// `transmute_copy` restricted to references.
+///
+/// Behavior is undefined if A and B differ in sizedness.
+/// (and of course, plenty of other undefined behavior is possible
+///  depending on what type B is...)
+unsafe fn transmute_copy_box<A: ?Sized, B: ?Sized>(x: Box<A>) -> Box<B>
+{
+    #![allow(unused_unsafe)]
+    let ptr = Box::into_raw(x);
+    // we can't just cast ptr to *const B because they may differ in fatness
+    let ptrptr = (&ptr) as *const *mut A as *const *mut B;
+    let ptr = unsafe { *ptrptr };
+    unsafe { Box::from_raw(ptr) }
 }

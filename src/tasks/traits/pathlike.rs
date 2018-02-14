@@ -34,7 +34,7 @@ macro_rules! as_path_impl {
 
 as_path_impl!{
     (by AsRef) [] ::std::path::Path;
-    (by AsRef) [] ::std::path::PathBuf;
+    (by Deref) [] ::std::path::PathBuf;
     (by AsRef) [] ::rsp2_tempdir::TempDir;
     (by AsRef) [] ::std::ffi::OsString;
     (by AsRef) [] ::std::ffi::OsStr;
@@ -47,6 +47,7 @@ as_path_impl!{
     (by Deref) [P: AsPath + ?Sized] ::std::rc::Rc<P>;
     (by Deref) [P: AsPath + ?Sized] ::std::sync::Arc<P>;
     (by Deref) ['p, P: AsPath + ToOwned + ?Sized] ::std::borrow::Cow<'p, P>;
+    (by Deref) [] ::util::CanonicalPath;
 }
 
 impl<'p, P: AsPath + ?Sized> AsPath for &'p P

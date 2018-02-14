@@ -8,7 +8,7 @@ use ::Result;
 use ::rsp2_lammps_wrap::{InitInfo, Potential, AtomType, PairCommand};
 use ::rsp2_lammps_wrap::Builder as InnerBuilder;
 use ::rsp2_structure::{Structure, Element, ElementStructure, Layers};
-use ::config as cfg;
+use ::rsp2_tasks_config as cfg;
 
 const REBO_MASS_HYDROGEN: f64 =  1.00;
 const REBO_MASS_CARBON:   f64 = 12.01;
@@ -327,21 +327,21 @@ mod kc_z {
 
     #[test]
     fn test_determine_pair_coeff_pairs() {
-        use self::GapKind::Vacuum as Vac;
-        use self::GapKind::Interacting as X;
+        use self::GapKind::Vacuum as V;
+        use self::GapKind::Interacting as I;
         let f_ok = |gaps| determine_pair_coeff_pairs(gaps).unwrap();
         let f_err = |gaps| determine_pair_coeff_pairs(gaps).unwrap_err();
         let pair = |i, j| (AtomType::new(i), AtomType::new(j));
 
         assert_eq!(f_ok(&[]), vec![]);
         assert_eq!(f_ok(&[V]), vec![]);
-        let _ = f_err(&[X]);
-        assert_eq!(f_ok(&[V, V], vec![]));
-        assert_eq!(f_ok(&[I, V], vec![pair(1, 2)]));
-        assert_eq!(f_ok(&[V, I], vec![pair(1, 2)]));
-        assert_eq!(f_ok(&[I, I], vec![pair(1, 2)]));
-        assert_eq!(f_ok(&[I, I, I], vec![pair(1, 2), pair(1, 3), pair(2, 3)]));
-        assert_eq!(f_ok(&[I, I, V], vec![pair(1, 2), pair(2, 3)]));
-        assert_eq!(f_ok(&[I, I, I, I], vec![pair(1, 2), pair(1, 4), pair(2, 3), pair(3, 4)]));
+        let _ = f_err(&[I]);
+        assert_eq!(f_ok(&[V, V]), vec![]);
+        assert_eq!(f_ok(&[I, V]), vec![pair(1, 2)]);
+        assert_eq!(f_ok(&[V, I]), vec![pair(1, 2)]);
+        assert_eq!(f_ok(&[I, I]), vec![pair(1, 2)]);
+        assert_eq!(f_ok(&[I, I, I]), vec![pair(1, 2), pair(1, 3), pair(2, 3)]);
+        assert_eq!(f_ok(&[I, I, V]), vec![pair(1, 2), pair(2, 3)]);
+        assert_eq!(f_ok(&[I, I, I, I]), vec![pair(1, 2), pair(1, 4), pair(2, 3), pair(3, 4)]);
     }
 }

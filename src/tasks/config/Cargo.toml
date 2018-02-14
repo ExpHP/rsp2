@@ -14,6 +14,7 @@ path = "lib.rs"
 [dependencies]
 rsp2-minimize = { path = "../../minimize" }
 
+log = "0.3"
 serde = "1"
 serde_derive = "1"
 serde_yaml = "0.7"
