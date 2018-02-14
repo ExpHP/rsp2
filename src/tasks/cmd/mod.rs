@@ -1144,6 +1144,8 @@ impl Trial {
                 }
             )?
         };
+        eprintln!();
+
         let chunked: Vec<_> = data.chunks(w).collect();
         ::serde_json::to_writer_pretty(create("out.json")?, &chunked)?;
     })}

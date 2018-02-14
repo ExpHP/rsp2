@@ -3,6 +3,14 @@ name = "rsp2"
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 
+[[bin]]
+name = "rsp2"
+path = "src/binary-shims/main.rs"
+
+[[bin]]
+name = "rsp2-shear-plot"
+path = "src/binary-shims/shear-plot.rs"
+
 [dependencies]
 
 # Workspace members

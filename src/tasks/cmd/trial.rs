@@ -171,3 +171,26 @@ mod global {
         }
     }
 }
+
+pub use self::existing::ExistingTrial;
+mod existing {
+    use super::*;
+    use ::rsp2_tasks_config::YamlRead;
+
+    pub struct ExistingTrial(PathBuf);
+
+    impl ExistingTrial {
+        pub fn resolve_from_path(path: &Path) -> Result<Self> {
+            let path = ::util::canonicalize(path)?;
+            Ok(ExistingTrial(path.to_path_buf()))
+        }
+
+        pub fn read_settings<T>(&self) -> Result<T>
+        where T: YamlRead,
+        {
+            use ::rsp2_fs_util as fsx;
+            let file = fsx::open(self.0.join("settings.yaml"))?;
+            Ok(YamlRead::from_reader(file)?)
+        }
+    }
+}

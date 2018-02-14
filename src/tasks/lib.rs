@@ -1,4 +1,8 @@
+//! Implements the entry points for rsp2's binaries.
+
 // HERE BE DRAGONS
+//
+// Basically, everything in this crate is purely ad-hoc.
 
 #![recursion_limit="256"] // for error chain...
 
@@ -61,20 +65,10 @@ mod phonopy;
 mod math;
 mod ui;
 mod types;
-pub use traits::alternate;
 
-pub use ::rsp2_tasks_config::Settings;
-pub mod relax_with_eigenvectors {
-    pub use ::cmd::CliArgs;
-}
-pub use ::cmd::run_symmetry_test;
-pub use ::cmd::make_force_sets;
-pub use ::cmd::run_save_bands_after_the_fact;
-pub use ::cmd::trial::{Trial, TheOnlyGlobalTrial};
+pub mod entry_points;
 
-pub use ::math::bands::unfold_phonon;
-
-pub use errors::{Result, ResultExt, Error, ErrorKind, StdResult, IoResult};
+use errors::{Result, ResultExt, Error, ErrorKind, StdResult, IoResult};
 mod errors {
     use ::std::path::PathBuf;
     error_chain! {
@@ -133,8 +127,6 @@ mod errors {
     }
 }
 
-pub mod entry_points;
-
 /// This module only exists to have its name appear in logs.
 /// It marks a process's stdout.
 mod stdout {
@@ -149,16 +141,19 @@ mod stderr {
     { warn!("{}", s) }
 }
 
-pub trait As3<T> {
-    fn as_3(&self) -> (&T, &T, &T);
-}
+use conv::*;
+mod conv {
+    pub trait As3<T> {
+        fn as_3(&self) -> (&T, &T, &T);
+    }
 
-impl<T> As3<T> for [T; 3] {
-    fn as_3(&self) -> (&T, &T, &T)
-    { (&self[0], &self[1], &self[2]) }
-}
+    impl<T> As3<T> for [T; 3] {
+        fn as_3(&self) -> (&T, &T, &T)
+        { (&self[0], &self[1], &self[2]) }
+    }
 
-impl<T> As3<T> for (T, T, T) {
-    fn as_3(&self) -> (&T, &T, &T)
-    { (&self.0, &self.1, &self.2) }
+    impl<T> As3<T> for (T, T, T) {
+        fn as_3(&self) -> (&T, &T, &T)
+        { (&self.0, &self.1, &self.2) }
+    }
 }
