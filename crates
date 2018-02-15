@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 import os
 import sys
+import warnings
 
 import pytoml as toml
 
@@ -19,6 +20,7 @@ import pytoml as toml
 
 CARGO_TOMLS_DIR = Path('crates.d')
 MASTER_CFG_PATH = Path('crates.d/crates.toml')
+MASTER_USER_CFG_PATH = Path('crates.d/config.toml')
 # something long enough for people to grep and find this script
 INSERTION_POINT_TEXT = "#!!INSERTION POINT FOR NEW CRATES!!#"
 
@@ -71,6 +73,7 @@ class Gen:
 
         with pushd(search_for_root(parser.error)):
             data = read_master_config(parser.error)
+            user_conf = read_master_user_config(parser.error)
             crates = data.pop('crates')
             preferred_versions = data.pop('preferred-versions')
 
@@ -125,14 +128,27 @@ class Gen:
             # Also link together configuration directories for subcrates.
             root_package_name = get_root_package(parser.error)
 
-            ensure_not_symlink('target')
-            (Path('.subcrate-cfg') / '.idea').mkdir(parents=True, exist_ok=True)
-            (Path('.subcrate-cfg') / '.vscode').mkdir(parents=True, exist_ok=True)
+            # prepare the root crate first
+            if user_conf.shared_target:
+                ensure_not_symlink('target')
+
+            if user_conf.shared_dot_idea:
+                (Path('.subcrate-cfg') / '.idea').mkdir(parents=True, exist_ok=True)
+
+            if user_conf.shared_dot_vscode:
+                (Path('.subcrate-cfg') / '.vscode').mkdir(parents=True, exist_ok=True)
+
+            # link the rest
             for (name, path) in crates.items():
                 if name != root_package_name:
-                    maybe_ensure_target_link('.', path)
-                    maybe_ensure_target_link('.subcrate-cfg', path, filename='.idea')
-                    maybe_ensure_target_link('.subcrate-cfg', path, filename='.vscode')
+                    if user_conf.shared_target:
+                        maybe_ensure_target_link('.', path)
+
+                    if user_conf.shared_dot_idea:
+                        maybe_ensure_target_link('.subcrate-cfg', path, filename='.idea')
+
+                    if user_conf.shared_dot_vscode:
+                        maybe_ensure_target_link('.subcrate-cfg', path, filename='.vscode')
 
             # generate modified forms of each Cargo.toml
             for (name, path) in crates.items():
@@ -469,6 +485,21 @@ class Edit:
         # regenerate
         Gen.run(parser, None)
 
+#------------
+
+class UserConfig:
+    def __init__(self, d):
+        d = dict(d)
+        config = d.pop('config')
+        for key in d:
+            warnings.warn(f"Unrecognized user-config section: {key}")
+
+        d = dict(config)
+        self.shared_target = d.pop('shared-target', True)
+        self.shared_dot_idea = d.pop('shared-dot-idea', False)
+        self.shared_dot_vscode = d.pop('shared-dot-vscode', False)
+        for key in d:
+            warnings.warn(f"Unrecognized user-config key: config.{key}")
 
 #------------
 
@@ -478,6 +509,15 @@ def read_master_config(fail):
         d = toml.load(f)
     d['crates'] = {k: Path(v) for (k, v) in d['crates'].items()}
     return d
+
+def read_master_user_config(fail):
+    root = search_for_root(fail)
+    try:
+        with open(root / MASTER_USER_CFG_PATH) as f:
+            d = toml.load(f)
+        return UserConfig(d)
+    except FileNotFoundError:
+        return UserConfig({'config': {}})
 
 def get_internal_crates_and_root_rel_paths(fail):
     # There used to be logic in here that branched on whether each

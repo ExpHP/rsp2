@@ -8,3 +8,5 @@ perf.data*
 
 .subcrate-cfg
 .secret-test-dir
+
+crates.d/config.toml

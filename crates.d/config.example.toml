@@ -1,0 +1,9 @@
+# User config file template for crates in this workspace.
+#
+# You can copy it to crates.d/config.toml
+
+[config]
+
+# shared-target = true
+# shared-dot-idea = false
+# shared-dot-vscode = false
