@@ -10,7 +10,6 @@ pub(crate) mod trial;
 
 use ::errors::{Error, ErrorKind, Result, ok};
 use ::rsp2_tasks_config::{self as cfg, Settings, NormalizationMode, SupercellSpec};
-use ::util::push_dir;
 use ::traits::AsPath;
 use ::phonopy::{DirWithBands, DirWithDisps, DirWithForces};
 
@@ -27,9 +26,8 @@ use ::rsp2_structure::{Part, Partition};
 use ::rsp2_structure_gen::Assemble;
 use ::phonopy::Builder as PhonopyBuilder;
 
-use ::ui::logging::GlobalLogger;
 use ::util::CanonicalPath;
-use ::rsp2_fs_util::{open, create, create_dir, rm_rf};
+use ::rsp2_fs_util::{open, create, rm_rf};
 
 use ::std::io::{Write};
 use ::std::path::{Path};
@@ -1037,19 +1035,6 @@ fn dot_mat_vec_dumb(mat: &[&[f64]], vec: &[f64]) -> Vec<f64>
 
 //=================================================================
 
-pub fn run_symmetry_test(input: &Path) -> Result<()>
-{ok({
-    use ::rsp2_structure_io::poscar;
-
-    GlobalLogger::default().apply()?;
-
-    let poscar = poscar::load(open(input)?)?;
-    let symmops = PhonopyBuilder::new().symmetry(&poscar)?;
-    ::rsp2_structure::dumb_symmetry_test(&poscar.map_metadata_to(|_| ()), &symmops, 1e-6)?;
-})}
-
-//=================================================================
-
 impl Trial {
     pub(crate) fn run_energy_surface(
         self,
@@ -1207,18 +1192,15 @@ extension_trait! {
 
 //=================================================================
 
-pub fn run_save_bands_after_the_fact(
-    settings: &Settings, // FIXME no longer needed, can read from pre-existing trial dir
-    dir: &AsPath,
-) -> Result<()>
-{Ok({
-    use ::rsp2_structure_io::poscar;
+impl Trial {
+    pub(crate) fn run_save_bands_after_the_fact(
+        self,
+        settings: &Settings,
+    ) -> Result<()>
+    {Ok({
+        use ::rsp2_structure_io::poscar;
 
-    let lmp = LammpsBuilder::new(&settings.threading, &settings.potential.kind);
-
-    {
-        // dumb/lazy solution to ensuring all output files go in the dir
-        let cwd_guard = push_dir(dir.as_path())?;
+        let lmp = LammpsBuilder::new(&settings.threading, &settings.potential.kind);
 
         let original = poscar::load(open("./final.vasp")?)?;
         let phonopy = phonopy_builder_from_settings(&settings.phonons, &original);
@@ -1228,52 +1210,50 @@ pub fn run_save_bands_after_the_fact(
             Some(SAVE_BANDS_DIR.as_ref()),
             &[Q_GAMMA, Q_K],
         )?;
-
-        cwd_guard.pop()?;
-    }
-})}
+    })}
+}
 
 //=================================================================
 
-#[allow(warnings)]
-pub fn make_force_sets(
-    conf: Option<&AsRef<Path>>,
-    poscar: &AsRef<Path>,
-    outdir: &AsRef<Path>,
-) -> Result<()>
-{ok({
-    use ::rsp2_structure_io::poscar;
-    use ::std::io::BufReader;
+// #[allow(warnings)]
+// pub fn make_force_sets(
+//     conf: Option<&AsRef<Path>>,
+//     poscar: &AsRef<Path>,
+//     outdir: &AsRef<Path>,
+// ) -> Result<()>
+// {ok({
+//     use ::rsp2_structure_io::poscar;
+//     use ::std::io::BufReader;
 
-    let potential = panic!("TODO: potential in make_force_sets");
-    unreachable!();
+//     let potential = panic!("TODO: potential in make_force_sets");
+//     unreachable!();
 
-    let mut phonopy = PhonopyBuilder::new();
-    if let Some(conf) = conf {
-        phonopy = phonopy.conf_from_file(BufReader::new(open(conf)?))?;
-    }
+//     let mut phonopy = PhonopyBuilder::new();
+//     if let Some(conf) = conf {
+//         phonopy = phonopy.conf_from_file(BufReader::new(open(conf)?))?;
+//     }
 
-    let structure = poscar::load(open(poscar)?)?;
+//     let structure = poscar::load(open(poscar)?)?;
 
-    let lmp = LammpsBuilder::new(&cfg::Threading::Lammps, &potential);
+//     let lmp = LammpsBuilder::new(&cfg::Threading::Lammps, &potential);
 
-    create_dir(&outdir)?;
-    {
-        // dumb/lazy solution to ensuring all output files go in the dir
-        let cwd_guard = push_dir(outdir)?;
-        GlobalLogger::default()
-            .path("rsp2.log")
-            .apply()?;
+//     create_dir(&outdir)?;
+//     {
+//         // dumb/lazy solution to ensuring all output files go in the dir
+//         let cwd_guard = push_dir(outdir)?;
+//         GlobalLogger::default()
+//             .path("rsp2.log")
+//             .apply()?;
 
-        poscar::dump(create("./input.vasp")?, "", &structure)?;
+//         poscar::dump(create("./input.vasp")?, "", &structure)?;
 
-        let disp_dir = phonopy.displacements(&structure)?;
-        let force_sets = do_force_sets_at_disps(&lmp, &cfg::Threading::Rayon, &disp_dir)?;
-        disp_dir.make_force_dir_in_dir(&force_sets, ".")?;
+//         let disp_dir = phonopy.displacements(&structure)?;
+//         let force_sets = do_force_sets_at_disps(&lmp, &cfg::Threading::Rayon, &disp_dir)?;
+//         disp_dir.make_force_dir_in_dir(&force_sets, ".")?;
 
-        cwd_guard.pop()?;
-    }
-})}
+//         cwd_guard.pop()?;
+//     }
+// })}
 
 //=================================================================
 

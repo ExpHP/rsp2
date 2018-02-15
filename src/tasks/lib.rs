@@ -29,6 +29,7 @@ extern crate serde;
 extern crate ansi_term;
 extern crate fern;
 #[macro_use] extern crate clap;
+#[macro_use] extern crate lazy_static;
 extern crate rsp2_kets;
 extern crate serde_yaml;
 #[macro_use] extern crate serde_json;
@@ -68,7 +69,7 @@ mod types;
 
 pub mod entry_points;
 
-use errors::{Result, ResultExt, Error, ErrorKind, StdResult, IoResult};
+use errors::{Result, Error, ErrorKind, IoResult};
 mod errors {
     use ::std::path::PathBuf;
     error_chain! {
@@ -77,6 +78,7 @@ mod errors {
             Yaml(::serde_yaml::Error);
             Json(::serde_json::Error);
             SetLogger(::log::SetLoggerError);
+            ParseInt(::std::num::ParseIntError);
         }
 
         links {
@@ -139,6 +141,29 @@ mod stdout {
 mod stderr {
     pub fn log(s: &str)
     { warn!("{}", s) }
+}
+
+mod env {
+    use super::*;
+    use ::std::env;
+
+    fn var(key: &str) -> Result<Option<String>>
+    { match ::std::env::var(key) {
+        Ok(s) => Ok(Some(s)),
+        Err(env::VarError::NotPresent) => Ok(None),
+        Err(env::VarError::NotUnicode(s)) => bail!("env var not unicode: {}={:?}", key, s),
+    }}
+
+    /// Verbosity, as a signed integer env var.
+    ///
+    /// This is an env var for ease of implementation, so that the fern logger
+    /// can be started eagerly rather than waiting until after we parse arguments.
+    pub fn verbosity() -> Result<i32>
+    {Ok({
+        var("RSP2_VERBOSITY")?
+            .unwrap_or_else(|| "0".into())
+            .parse::<i32>()?
+    })}
 }
 
 use conv::*;

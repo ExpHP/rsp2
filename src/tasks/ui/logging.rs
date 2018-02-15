@@ -1,30 +1,52 @@
 use ::errors::{Result, ok};
 
 use ::std::fmt;
-use ::std::path::{Path, PathBuf};
-use ::log::LogLevel;
+use ::std::fs::File;
+use ::std::path::{Path};
+use ::log::{LogLevel, LogRecord};
+use ::fern::FernLog;
 
-/// Builder-style setup for logging
-#[derive(Debug, Clone, Default)]
-pub struct GlobalLogger {
-    path: Option<PathBuf>,
-    verbosity: Verbosity,
-}
+pub use self::fern::{DelayedLogFile, GLOBAL_LOGFILE};
+mod fern {
+    use super::*;
+    use ::std::sync::RwLock;
+    use ::std::io::prelude::*;
 
-impl GlobalLogger {
-    /// NOTE: Relative paths will not be resolved until apply() is called.
-    pub fn path<P: AsRef<Path>>(&mut self, path: P) -> &mut Self
-    { self.path = Some(path.as_ref().to_owned()); self }
+    /// A log file for fern that can be created *after* logger initialization.
+    #[derive(Debug, Default)]
+    pub struct DelayedLogFile {
+        // (the lock is only to make it safe to insert or replace the file)
+        // (the hungarian is because 'file.read()' would be misleading)
+        file_rw: RwLock<Option<File>>,
+    }
 
-    /// Any integer will be accepted; the level will be truncated
-    /// to the most extreme value supported.
-    pub fn verbosity(&mut self, level: i32) -> &mut Self
-    {
-        self.verbosity = match level > 0 {
-            true => Verbosity::Loud,
-            false => Verbosity::Default,
-        };
-        self
+    lazy_static! {
+        /// The DelayedLogFile given to fern.
+        pub static ref GLOBAL_LOGFILE: DelayedLogFile = Default::default();
+    }
+
+    impl DelayedLogFile {
+        pub fn start<P: AsRef<Path>>(&self, path: P) -> Result<()> {
+            // (note: the Err case here is PoisonError)
+            if let Ok(mut file) = self.file_rw.write() {
+                if file.is_some() {
+                    bail!("The logfile has already been created!");
+                }
+                *file = Some(::fern::log_file(path)?);
+            }
+            Ok(())
+        }
+    }
+
+    impl FernLog for &'static DelayedLogFile {
+        fn log_args(&self, payload: &fmt::Arguments, _original: &LogRecord) {
+            // (note: the Err case here is PoisonError)
+            if let Ok(file) = self.file_rw.read() {
+                if let Some(mut file) = (*file).as_ref() {
+                    let _ = writeln!(file, "{}", payload);
+                }
+            }
+        }
     }
 }
 
@@ -35,43 +57,54 @@ impl Default for Verbosity {
     fn default() -> Self { Verbosity::Default }
 }
 
-impl GlobalLogger {
-    /// NOTE: I'm not sure what happens (or don't particularly care)
-    ///       if this is called multiple times. It won't be UB, but
-    ///       it probably also won't make sense.
-    pub fn apply(&mut self) -> Result<()>
-    {ok({
-        use ::std::time::Instant;
-        use ::log::LogLevelFilter as LevelFilter;
+impl Verbosity {
+    /// Any integer will be accepted; the level will be truncated
+    /// to the most extreme value supported.
+    fn from_int(level: i32) -> Self
+    { match level > 0 {
+        true => Verbosity::Loud,
+        false => Verbosity::Default,
+    }}
 
-        let start = Instant::now();
-        let mut fern = ::fern::Dispatch::new();
-        fern = fern.format(move |out, message, record| {
-                let t = start.elapsed();
-                out.finish(format_args!("[{:>4}.{:03}s][{}][{}] {}",
-                    t.as_secs(),
-                    t.subsec_nanos() / 1_000_000,
-                    record.target(),
-                    ColorizedLevel(record.level()),
-                    message))
-            })
-            .level(LevelFilter::Debug)
-            .level_for("rsp2_tasks", LevelFilter::Trace)
-            .level_for("rsp2_minimize", LevelFilter::Trace)
-            .level_for("rsp2_phonopy_io", LevelFilter::Trace)
-            .level_for("rsp2_minimize::exact_ls", match self.verbosity {
-                Verbosity::Default => LevelFilter::Debug,
-                Verbosity::Loud => LevelFilter::Trace,
-            })
-            .chain(::std::io::stdout());
-
-        if let Some(path) = self.path.as_ref() {
-            fern = fern.chain(::fern::log_file(path)?);
-        }
-
-        fern.apply()?;
-    })}
+    pub fn from_env() -> Result<Self>
+    { ::env::verbosity().map(Self::from_int) }
 }
+
+/// Set the global logger, enabling the use of `log!()` macros.
+/// This can only be done once.
+pub fn init_global_logger() -> Result<()>
+{ok({
+    use ::std::time::Instant;
+    use ::log::LogLevelFilter as LevelFilter;
+
+    let verbosity = Verbosity::from_env()?;
+
+    let start = Instant::now();
+    let mut fern = ::fern::Dispatch::new();
+    fern = fern.format(move |out, message, record| {
+            let t = start.elapsed();
+            out.finish(format_args!("[{:>4}.{:03}s][{}][{}] {}",
+                t.as_secs(),
+                t.subsec_nanos() / 1_000_000,
+                record.target(),
+                ColorizedLevel(record.level()),
+                message))
+        })
+        .level(LevelFilter::Debug)
+        .level_for("rsp2_tasks", LevelFilter::Trace)
+        .level_for("rsp2_minimize", LevelFilter::Trace)
+        .level_for("rsp2_phonopy_io", LevelFilter::Trace)
+        .level_for("rsp2_minimize::exact_ls", match verbosity {
+            Verbosity::Default => LevelFilter::Debug,
+            Verbosity::Loud => LevelFilter::Trace,
+        })
+        // Yes, this really is deliberately boxing a reference (a 'static one).
+        // The reason is simply because chain asks for a Box.
+        .chain(Box::new(&*GLOBAL_LOGFILE) as Box<FernLog>)
+        .chain(::std::io::stdout());
+
+    fern.apply()?;
+})}
 
 #[derive(Debug, Copy, Clone)]
 pub struct ColorizedLevel(pub LogLevel);

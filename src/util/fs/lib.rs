@@ -57,6 +57,41 @@ pub fn canonicalize<P: AsRef<Path>>(dir: P) -> Result<PathBuf>
         .chain_err(|| format!("could not normalize: '{}'", dir.as_ref().display()))
 }
 
+/// Canonicalizes a path where the final component need not exist.
+///
+/// NOTE: will behave strangely for paths that end in ..
+///       due to how Path::parent is defined
+pub fn canonicalize_parent<P: AsRef<Path>>(path: P) -> Result<PathBuf>
+{
+    let path = path.as_ref();
+    if path.exists() {
+        return canonicalize(path);
+    }
+    match split(path) {
+        None => Ok(path.into()),
+        Some((parent, name)) => {
+            canonicalize(parent).map(|p| p.join(name))
+        },
+    }
+}
+
+fn split(path: &Path) -> Option<(&Path, &::std::ffi::OsStr)>
+{ path.file_name().map(|name| (path.parent().unwrap(), name)) }
+
+/// Wrapper around `std::fs::remove_file` that adds context.
+pub fn remove_dir<P: AsRef<Path>>(dir: P) -> Result<()>
+{
+    fs::remove_dir(dir.as_ref())
+        .chain_err(|| format!("could not remove directory: '{}'", dir.as_ref().display()))
+}
+
+/// Wrapper around `std::fs::remove_file` that adds context.
+pub fn remove_file<P: AsRef<Path>>(dir: P) -> Result<()>
+{
+    fs::remove_file(dir.as_ref())
+        .chain_err(|| format!("could not remove file: '{}'", dir.as_ref().display()))
+}
+
 // Error-chaining wrapper around `hard_link`
 pub fn hard_link<P: AsRef<Path>, Q: AsRef<Path>>(src: P, dest: Q) -> Result<()>
 {

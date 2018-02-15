@@ -30,11 +30,25 @@ macro_rules! arg_impl {
     (#start# $($rest:tt)*)
     => {arg_impl!{ #required# $($rest)* }};
 
+    //--- error helpers ---
+    (!expected! ($expected:expr) $first:tt $($rest:tt)*)
+    => { compile_error!{concat!("expected ", $expected, ", found '", stringify!(first), "'")} };
+    (!expected! ($expected:expr))
+    => { compile_error!{concat!("expected ", $expected, ", found EOF")} };
+
     //--- #required# ---
     // required status and name
     // * name  - required
     // ? name  - optional
     //   name  - infer based on option/positional
+
+    (#required# $name:ident $uhoh:ident $($rest:tt)*)
+    => {
+        compile_error!{concat!{
+            "found two consecutive idents, did you mean to write '",
+            stringify!($name), "=", stringify!($uhoh), "'?"
+        }}
+    };
 
     (#required# * $name:ident $($rest:tt)*)
     => {arg_impl!{ [(*)($name)] #construct# $($rest)* }};
@@ -44,6 +58,9 @@ macro_rules! arg_impl {
 
     (#required#   $name:ident $($rest:tt)*)
     => {arg_impl!{ [()($name)] #construct# $($rest)* }};
+
+    (#required# $($kaboom:tt)*)
+    => {arg_impl!{ !expected! ("'*', '?', or ident") $($kaboom)* }};
 
     //--- #construct# ---
     // Handle the name.
@@ -163,6 +180,12 @@ macro_rules! arg_impl {
     => { $b };
     (($b:expr) [] #help# $help:expr)
     => { $b.help($help) };
+    (($($kaboom:tt)*) [] #help#)
+    => {
+        // (so many optional pieces of syntax have gone by that it's
+        //  hard to say what should have been here)
+        arg_impl!{ !expected! ("something valid") $($kaboom)* }
+    };
 
     //------------------------
     // Helpers that expand to `expr`

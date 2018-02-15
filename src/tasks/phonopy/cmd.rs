@@ -134,7 +134,10 @@ impl Builder {
         DirWithDisps::from_existing(dir)?
     })}
 
-    // FIXME: Should return a new DirWithSymmetry type
+    // FIXME: Should return a new DirWithSymmetry type.
+    // FIXME: The 'symmetry-test' was the only binary shim that used this and
+    //        I removed it,  was removed during a refactor but
+    //        this is nontrivial.  I'd rather re-add the shim.
     pub fn symmetry(
         &self,
         structure: &ElementStructure,

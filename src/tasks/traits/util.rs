@@ -38,6 +38,7 @@ pub unsafe trait IsNewtype<T: ?Sized> {
 /// Behavior is undefined if A and B differ in sizedness.
 /// (and of course, plenty of other undefined behavior is possible
 ///  depending on what type B is...)
+#[allow(dead_code)]
 unsafe fn transmute_copy_ref<A: ?Sized, B: ?Sized>(borrow: &A) -> &B
 {
     #![allow(unused_unsafe)]
@@ -53,6 +54,7 @@ unsafe fn transmute_copy_ref<A: ?Sized, B: ?Sized>(borrow: &A) -> &B
 /// Behavior is undefined if A and B differ in sizedness.
 /// (and of course, plenty of other undefined behavior is possible
 ///  depending on what type B is...)
+#[allow(dead_code)]
 unsafe fn transmute_copy_mut<A: ?Sized, B: ?Sized>(borrow: &mut A) -> &mut B
 {
     #![allow(unused_unsafe)]

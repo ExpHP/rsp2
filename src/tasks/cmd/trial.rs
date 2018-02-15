@@ -4,79 +4,24 @@ use ::Result;
 #[allow(unused)] // rust-lang/rust#45268
 use ::traits::{Save, AsPath};
 use ::traits::save::{Json, Yaml};
+
+use ::ui::cfg_merging::ConfigSources;
+use ::ui::logging::{GLOBAL_LOGFILE, init_global_logger};
+use ::util::{CanonicalPath, canonicalize, canonicalize_parent};
+use ::util::{LockfilePath, LockfileGuard};
+use ::util::ArgMatchesExt;
+
 use ::clap;
 
 use ::std::sync::atomic::{AtomicBool, ATOMIC_BOOL_INIT, Ordering};
 use ::std::path::{Path, PathBuf};
 
-use ::ui::cfg_merging::ConfigSources;
+use ::serde_yaml::Value as YamlValue;
 
-/// Arguments shared in common by all rsp2 binaries that use the Trial API.
-pub struct CommonArgs {
-    output_dir: PathBuf,
-    config_sources: ConfigSources,
-    err_if_existing: bool,
-    verbosity: i32,
-}
-
-impl CommonArgs {
-    /// Used to construct CommonArgs. (this is done in two stages, hence the callback)
-    ///
-    /// # Usage
-    ///
-    /// ```rust,ignore
-    /// // (the name resolve_common_args is suggested on the basis that the callback
-    /// //  not only deserializes from ArgMatches, but it will also resolve relative
-    /// //  paths in the common arguments and may possibly even open and read files)
-    /// let (app, resolve_common_args) = augment_clap_app(app);
-    /// let matches = app.get_matches();
-    /// let common_args = resolve_common_args(&matches)?;
-    /// ```
-    pub fn augment_clap_app<'a, 'b>(app: clap::App<'a, 'b>) -> (clap::App<'a, 'b>, fn(&clap::ArgMatches) -> Result<Self>) {
-        let app = app.args(&[
-            arg!(*output [-o][--output]=OUTDIR "output directory"),
-            arg!(*config [-c][--config]=CONFIG... "\
-                config yaml, provided as either a filepath, or as an embedded literal \
-                (via syntax described below). \
-                When provided multiple times, the configs are merged according to some fairly \
-                dumb strategy, with preference to the values supplied in later arguments. \
-                Any string containing ':' is interpreted as a literal (no mechanism is provided \
-                for escaping this character in a path).  The part after the colon must be a valid \
-                yaml value, and there may optionally be a '.'-separated sequence of string keys \
-                before the colon (as sugar for constructing a nested mapping). \
-            "),
-            arg!( verbose_minus [-q][--quiet]... "reduce verbosity level"),
-            arg!( verbose_plus [-v][--verbose]... "increase verbosity level"),
-            arg!( force [-f][--force] "replace existing output directories"),
-        ]);
-
-        // Note: deliberately not exposed directly as a pub static method,
-        //       so that you are forced to call the surrounding method first.
-        fn resolve_common_args(matches: &clap::ArgMatches) -> Result<CommonArgs> {
-            let path = |s: &str| { let s: &Path = s.as_ref(); s.to_owned() };
-            Ok(CommonArgs {
-                output_dir: path(matches.value_of("output").expect("BUG! (output was required)")),
-                config_sources: {
-                    ConfigSources::resolve_from_args({
-                        matches.values_of("config").expect("BUG! (config was required)")
-                    })?
-                },
-                err_if_existing: !matches.is_present("force"),
-                verbosity: {
-                    let plus = matches.occurrences_of("verbose_plus") as i32;
-                    let minus = matches.occurrences_of("verbose_minus") as i32;
-                    plus - minus
-                },
-            })
-        };
-
-        (app, resolve_common_args)
-    }
-}
+use ::rsp2_fs_util as fsx;
 
 pub use self::global::{Trial, TheOnlyGlobalTrial};
 mod global {
-    use ::ui::logging::GlobalLogger;
     use super::*;
 
     /// I regret to inform you that this exists.
@@ -97,7 +42,7 @@ mod global {
     /// functions are now self-evident. All things told, rsp2_tasks was *already*
     /// doing all of these horrible things in its trial functions; only now, the
     /// risk can more clearly be seen in the binary shims.
-    pub struct TheOnlyGlobalTrial(CommonArgs);
+    pub struct TheOnlyGlobalTrial(());
 
     pub use self::trial::Trial;
     mod trial {
@@ -120,51 +65,82 @@ mod global {
     }
 
     impl TheOnlyGlobalTrial {
-        pub fn from_args(args: CommonArgs) -> Self
-        { TheOnlyGlobalTrial(args) }
-
-        pub fn will_now_commence<B, F>(self, f: F) -> Result<B>
-        where F: FnOnce(Trial, ::serde_yaml::Value) -> Result<B>,
+        pub fn run_in_new_dir<B, F>(args: NewTrialDirArgs, f: F) -> Result<B>
+        where F: FnOnce(Trial, YamlValue) -> Result<B>,
         {
-            use ::rsp2_fs_util as fsx;
-
-            let TheOnlyGlobalTrial(CommonArgs {
-                output_dir, config_sources, err_if_existing, verbosity,
-            }) = self;
+            let NewTrialDirArgs {
+                trial_dir, config_sources, err_if_existing,
+            } = args;
 
             let token = Trial::new_only()?;
+            let trial_dir = TrialDir::resolve_from_path(&trial_dir)?;
 
-            // Trials always create a fresh output directory, where all files go.
-            if !err_if_existing {
-                fsx::rm_rf(&output_dir)?;
+            if !err_if_existing  {
+                fsx::rm_rf(&trial_dir)?;
             }
-            fsx::create_dir(&output_dir)?;
-            let cwd_guard = ::util::push_dir(output_dir)?;
+            fsx::create_dir(&trial_dir)?;
 
-            // Log file in the output directory.
-            GlobalLogger::default()
-                .path("rsp2.log")
-                .verbosity(verbosity)
-                .apply()?;
+            // Obtain a lock before writing anything to the directory.
+            let lockfile_guard = {
+                match trial_dir.lockfile().try_lock()? {
+                    None => bail!("the lockfile was stolen from under our feet!"),
+                    Some(g) => g,
+                }
+            };
 
             // Make some files that detail as much information as possible about how
             // rsp2 was invoked, solely for the user's benefit.
             {
                 let args_file: Vec<_> = ::std::env::args().collect();
-                Json(args_file).save("input-cli-args.json")?;
+                Json(args_file).save(trial_dir.join("input-cli-args.json"))?;
             }
 
-            // NOTE: It doesn't feel right for config handling to be a responsibility of
-            //       this function, but I always want these files to be saved, so... bleh.
-            Yaml(&config_sources).save("input-config-sources.yaml")?;
+            Yaml(&config_sources).save(trial_dir.join("input-config-sources.yaml"))?;
             let config = config_sources.into_effective_yaml();
+
             // This file is saved not just for the user's benefit, but also to allow some
             // commands to operate on an existing output directory.
-            Yaml(&config).save("settings.yaml")?;
+            Yaml(&config).save(trial_dir.settings_path())?;
+
+            TheOnlyGlobalTrial::_run_in_dir(trial_dir, token, &lockfile_guard, f)
+        }
+
+        pub fn run_in_existing_dir<B, F>(args: ExistingTrialDirArgs, f: F) -> Result<B>
+        where F: FnOnce(Trial, YamlValue) -> Result<B>,
+        {
+            let ExistingTrialDirArgs { trial_dir } = args;
+
+            let token = Trial::new_only()?;
+            let trial_dir = TrialDir::resolve_from_path(&trial_dir)?;
+
+            let lockfile_guard = {
+                match trial_dir.lockfile().try_lock()? {
+                    None => bail!("could not obtain a lock on the trial directory"),
+                    Some(g) => g,
+                }
+            };
+
+            TheOnlyGlobalTrial::_run_in_dir(trial_dir, token, &lockfile_guard, f)
+        }
+
+        fn _run_in_dir<B, F>(
+            trial_dir: TrialDir,
+            token: Trial,
+            _: &LockfileGuard,
+            f: F,
+        ) -> Result<B>
+        where F: FnOnce(Trial, YamlValue) -> Result<B>,
+        {
+            GLOBAL_LOGFILE.start(trial_dir.new_logfile_path()?)?;
+
+            init_global_logger()?;
+
+            let config = trial_dir.read_settings()?;
 
             // let the shim call a `self` function on the trial token.
+            // let it pretend to live in the trial directory.
+            let cwd_guard = ::util::push_dir(trial_dir.path())?;
             let out = f(token, config)?;
-
             cwd_guard.pop()?;
 
             Ok(out)
@@ -172,25 +148,169 @@ mod global {
     }
 }
 
-pub use self::existing::ExistingTrial;
-mod existing {
+pub use self::trial_dir::TrialDir;
+mod trial_dir {
     use super::*;
     use ::rsp2_tasks_config::YamlRead;
 
-    pub struct ExistingTrial(PathBuf);
+    pub struct TrialDir(PathBuf);
 
-    impl ExistingTrial {
+    impl ::std::ops::Deref for TrialDir {
+        type Target = Path;
+        fn deref(&self) -> &Path { &self.0 }
+    }
+
+    impl AsRef<Path> for TrialDir {
+        fn as_ref(&self) -> &Path { &self.0 }
+    }
+
+    impl TrialDir {
         pub fn resolve_from_path(path: &Path) -> Result<Self> {
             let path = ::util::canonicalize(path)?;
-            Ok(ExistingTrial(path.to_path_buf()))
+            Ok(TrialDir(path.to_path_buf()))
         }
+
+        pub fn path(&self) -> &Path
+        { &self.0 }
+
+        pub fn lockfile(&self) -> LockfilePath
+        { LockfilePath(self.0.join("rsp2.lock")) }
+
+        /// # Errors
+        ///
+        /// This uses a lockfile (not the same as 'lockfile()'), and will fail if
+        /// it cannot be created for some reason other than being locked.
+        pub fn new_logfile_path(&self) -> Result<PathBuf>
+        {
+            use ::rsp2_fs_util as fsx;
+
+            let paths = {
+                ::std::iter::once("rsp2.log".into())
+                    .chain((0..).map(|i| format!("rsp2.{}.log", i)))
+                    .map(|s| self.0.join(s))
+            };
+
+            // there *shouldn't* be any other processes making logfiles, but w/e
+            let _guard = LockfilePath(self.0.join("logfile-naming-lock")).lock()?;
+            for path in paths {
+                let path: &Path = path.as_ref();
+                if path.exists() { continue }
+
+                // create it now while the lockfile is still held, for atomicity.
+                let _ = fsx::create(path)?;
+
+                return Ok(path.to_owned());
+            }
+            panic!("gee, that's an awful lot of log files you have there");
+        }
+
+        pub fn settings_path(&self) -> PathBuf
+        { self.0.join("settings.yaml") }
 
         pub fn read_settings<T>(&self) -> Result<T>
         where T: YamlRead,
         {
             use ::rsp2_fs_util as fsx;
-            let file = fsx::open(self.0.join("settings.yaml"))?;
+            let file = fsx::open(self.settings_path())?;
             Ok(YamlRead::from_reader(file)?)
         }
     }
+}
+
+pub trait CliDeserialize: Sized {
+    fn augment_clap_app<'a, 'b>(app: clap::App<'a, 'b>) -> (clap::App<'a, 'b>, ClapDeserializer<Self>)
+    {
+        let app = Self::_augment_clap_app(app);
+        let token = ClapDeserializer(Default::default());
+        (app, token)
+    }
+
+    /// Don't use this. Call 'augment_clap_app' instead.
+    fn _augment_clap_app<'a, 'b>(app: clap::App<'a, 'b>) -> clap::App<'a, 'b>;
+    /// Don't use this. Call 'resolve_args' on the ClapDeserializer instead.
+    fn _resolve_args(matches: &clap::ArgMatches) -> Result<Self>;
+}
+
+/// Token of "proof" that a clap app was augmented to be capable of deserializing A.
+///
+/// (note this requirement can be easily circumvented; it's just a speed bump to
+///  catch stupid mistakes)
+pub struct ClapDeserializer<A>(::std::marker::PhantomData<A>);
+
+impl<A> ClapDeserializer<A>
+where A: CliDeserialize,
+{
+    /// Deserialize the arguments.  This may perform IO such as eagerly reading input files.
+    ///
+    /// (that said, implementations of the trait are highly discouraged from doing things
+    ///  that would cause the behavior of arg resolution to depend on the order in which
+    ///  multiple CliDeserialize instances are handled)
+    pub fn resolve_args(self, matches: &clap::ArgMatches) -> Result<A>
+    { A::_resolve_args(matches) }
+}
+
+// Tuple as product combinator
+impl<A, B> CliDeserialize for (A, B)
+where
+    A: CliDeserialize,
+    B: CliDeserialize,
+{
+    fn _augment_clap_app<'a, 'b>(app: clap::App<'a, 'b>) -> clap::App<'a, 'b>
+    {
+        let app = A::_augment_clap_app(app);
+        let app = B::_augment_clap_app(app);
+        app
+    }
+
+    fn _resolve_args(matches: &clap::ArgMatches) -> Result<Self>
+    { Ok((A::_resolve_args(matches)?, B::_resolve_args(matches)?)) }
+}
+
+pub struct NewTrialDirArgs {
+    trial_dir: Box<CanonicalPath>,
+    config_sources: ConfigSources,
+    err_if_existing: bool,
+}
+
+impl CliDeserialize for NewTrialDirArgs {
+    fn _augment_clap_app<'a, 'b>(app: clap::App<'a, 'b>) -> clap::App<'a, 'b> {
+        app.args(&[
+            arg!(*trial_dir [-o][--output]=OUTDIR "output trial directory"),
+            arg!( force [-f][--force] "replace existing output directories"),
+            arg!(*config [-c][--config]=CONFIG... "\
+                config yaml, provided as either a filepath, or as an embedded literal \
+                (via syntax described below). \
+                When provided multiple times, the configs are merged according to some fairly \
+                dumb strategy, with preference to the values supplied in later arguments. \
+                Any string containing ':' is interpreted as a literal (no mechanism is provided \
+                for escaping this character in a path).  The part after the colon must be a valid \
+                yaml value, and there may optionally be a '.'-separated sequence of string keys \
+                before the colon (as sugar for constructing a nested mapping). \
+            "),
+        ])
+    }
+
+    fn _resolve_args(m: &clap::ArgMatches) -> Result<Self>
+    { Ok(NewTrialDirArgs {
+        config_sources: ConfigSources::resolve_from_args(m.expect_values_of("config"))?,
+        err_if_existing: !m.is_present("force"),
+        trial_dir: canonicalize_parent(m.expect_value_of("trial_dir"))?,
+    })}
+}
+
+pub struct ExistingTrialDirArgs {
+    trial_dir: Box<CanonicalPath>,
+}
+
+impl CliDeserialize for ExistingTrialDirArgs {
+    fn _augment_clap_app<'a, 'b>(app: clap::App<'a, 'b>) -> clap::App<'a, 'b> {
+        app.args(&[
+            arg!( trial_dir=TRIAL_DIR "existing trial directory"),
+        ])
+    }
+
+    fn _resolve_args(m: &clap::ArgMatches) -> Result<Self>
+    { Ok(ExistingTrialDirArgs {
+        trial_dir: canonicalize(m.expect_value_of("trial_dir"))?,
+    })}
 }

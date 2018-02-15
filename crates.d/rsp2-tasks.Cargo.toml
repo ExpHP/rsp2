@@ -30,6 +30,7 @@ path = "lib.rs"
 !!fern
 !!extension-trait
 !!itertools
+!!lazy-static
 !!ansi-term
 !!rayon
 !!error-chain

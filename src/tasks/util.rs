@@ -106,3 +106,91 @@ pub(crate) fn canonicalize<P: ::traits::AsPath>(path: P) -> ::Result<Box<Canonic
     let path = path.into_boxed_path();
     Ok(CanonicalPath::wrap_box(path))
 }
+
+// Canonicalize a path where the last component need not exist
+pub(crate) fn canonicalize_parent<P: ::traits::AsPath>(path: P) -> ::Result<Box<CanonicalPath>> {
+    let path = ::rsp2_fs_util::canonicalize_parent(path.as_path())?;
+    let path = path.into_boxed_path();
+    Ok(CanonicalPath::wrap_box(path))
+}
+
+pub(crate) use self::lockfile::{LockfilePath, LockfileGuard};
+mod lockfile {
+    use ::Result;
+    use ::std::fs::{OpenOptions};
+    use ::std::io;
+    use ::rsp2_fs_util as fsx;
+    use ::std::path::{Path, PathBuf};
+
+    /// Handle with methods for creating a lockfile without race conditions.
+    #[derive(Debug, Clone)]
+    pub struct LockfilePath(pub PathBuf);
+
+    /// RAII guard for a lockfile.
+    #[derive(Debug)]
+    pub struct LockfileGuard(PathBuf);
+
+    #[allow(dead_code)]
+    impl LockfilePath {
+        pub fn try_lock(&self) -> Result<Option<LockfileGuard>> {
+            let path = ::util::canonicalize_parent(&self.0)?.to_path_buf();
+            // 'create_new' is the magic sauce for avoiding race conditions
+            let result = OpenOptions::new().write(true)
+                                           .create_new(true)
+                                           .open(&path);
+            match result {
+                Err(e) => {
+                    match e.kind() {
+                        io::ErrorKind::AlreadyExists => Ok(None),
+                        _ => bail!(e),
+                    }
+                },
+                Ok(_) => Ok(Some(LockfileGuard(self.0.clone()))),
+            }
+        }
+
+        pub fn lock(&self) -> Result<Option<LockfileGuard>> {
+            let mut lock = self.try_lock()?;
+            while lock.is_none() {
+                ::std::thread::sleep(Default::default());
+                lock = self.try_lock()?;
+            }
+            Ok(lock)
+        }
+
+        pub fn path(&self) -> &Path
+        { &self.0 }
+    }
+
+    #[allow(dead_code)]
+    impl LockfileGuard {
+        pub fn drop(self) -> Result<()>
+        { self._drop() }
+
+        fn _drop(&self) -> Result<()>
+        { Ok(fsx::remove_file(&self.0)?) }
+
+        #[allow(dead_code)]
+        pub fn path(&self) -> &Path
+        { &self.0 }
+    }
+
+    #[allow(dead_code)]
+    impl Drop for LockfileGuard {
+        fn drop(&mut self) {
+            let _ = self._drop();
+        }
+    }
+}
+
+extension_trait!{
+    <'a> pub ArgMatchesExt<'a> for ::clap::ArgMatches<'a> {
+        // For when the value ought to exist because it was 'required(true)'
+        // (and therefore clap would have panicked if it were missing)
+        fn expect_value_of(&self, s: &str) -> String
+        { self.value_of(s).unwrap_or_else(|| panic!("BUG! ({} was required)", s)).into() }
+
+        fn expect_values_of(&self, s: &str) -> Vec<String>
+        { self.values_of(s).unwrap_or_else(|| panic!("BUG! ({} was required)", s)).map(Into::into).collect() }
+    }
+}

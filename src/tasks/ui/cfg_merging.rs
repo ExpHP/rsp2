@@ -84,7 +84,9 @@ mod resolve_from_arg {
         value
     }
 
+    #[cfg(test)]
     macro_rules! m { ($($arg:tt)*) => { Value::Mapping(vec![$($arg)*].into_iter().collect()) }; }
+    #[cfg(test)]
     macro_rules! s { ($($arg:tt)*) => { Value::Sequence(vec![$($arg)*]) }; }
 
     #[test]
