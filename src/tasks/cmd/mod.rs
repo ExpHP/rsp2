@@ -122,7 +122,7 @@ impl Trial {
             }
 
             trace!("Computing eigensystem info");
-            let einfos = get_eigensystem_info(
+            let einfos = get_gamma_eigensystem_info(
                 &evals, &evecs, &layers[..], &structure, Some(&layer_sc_mats),
             );
             write_eigen_info_for_machines(&einfos, create(format!("eigenvalues.{:02}", iteration))?)?;
@@ -196,7 +196,7 @@ impl Trial {
         // );
 
         // write_summary_file(settings, &lmp, &einfos, &kinfos)?;
-        write_summary_file(settings, &lmp, &einfos, None)?;
+        write_summary_file(settings, &lmp, &einfos)?;
     })}
 }
 
@@ -221,6 +221,7 @@ fn do_relax(
     multi_threshold_deconstruct(sc_token, 1e-10, 1e-3, supercell)?
 })}
 
+#[allow(unused)]
 fn do_diagonalize_at_gamma(
     lmp: &LammpsBuilder,
     threading: &cfg::Threading,
@@ -412,7 +413,7 @@ fn multi_threshold_deconstruct(
 
 // FIXME write_gamma_info
 fn write_eigen_info_for_humans(
-    einfos: &[GammaInfo],
+    einfos: &[EigenmodeInfo],
     writeln: &mut FnMut(&::std::fmt::Display) -> Result<()>,
 ) -> Result<()>
 {ok({
@@ -447,7 +448,7 @@ fn write_eigen_info_for_humans(
 })}
 
 fn write_eigen_info_for_machines<W: Write>(
-    einfos: &[GammaInfo],
+    einfos: &[EigenmodeInfo],
     mut file: W,
 ) -> Result<()>
 {ok({
@@ -467,38 +468,33 @@ fn write_eigen_info_for_machines<W: Write>(
 fn write_summary_file(
     settings: &Settings,
     lmp: &LammpsBuilder,
-    ginfos: &[GammaInfo],
-    kinfos: Option<&[KInfo]>,
+    gamma_infos: &[EigenmodeInfo],
 ) -> Result<()>
 {Ok({
-    use self::summary::{Modes, GammaModes, KModes, Summary, EnergyPerAtom};
-    use self::eigen_info::GammaInfo;
+    use self::summary::{Modes, GammaModes, Summary, EnergyPerAtom};
     use ::rsp2_structure_io::poscar;
 
-    let acoustic = ginfos.iter().filter(|x| x.is_acoustic()).map(GammaInfo::frequency).collect();
-    let shear = ginfos.iter().filter(|x| x.is_shear()).map(GammaInfo::frequency).collect();
-    let layer_breathing = ginfos.iter().filter(|x| x.is_layer_breathing()).map(GammaInfo::frequency).collect();
-    let layer_gammas = ginfos.iter().next().unwrap().layer_gamma_probs.as_ref().map(|_| { // all this to check if they're present
-        ginfos.iter().enumerate()
+    fn filtered_freqs<Pred>(modes: &[EigenmodeInfo], pred: Pred) -> Vec<f64>
+    where Pred: Fn(&EigenmodeInfo) -> bool
+    { modes.iter().filter(|&mode| pred(mode)).map(EigenmodeInfo::frequency).collect() }
+
+    let acoustic = filtered_freqs(gamma_infos, EigenmodeInfo::is_acoustic);
+    let shear = filtered_freqs(gamma_infos, EigenmodeInfo::is_shear);
+    let layer_breathing = filtered_freqs(gamma_infos, EigenmodeInfo::is_layer_breathing);
+
+    // FIXME: this mess is due to an awkward choice of representation;
+    //        we have an array of structures where either all of the
+    //        'layer_gamma_props' members are present, or none of them are.
+    let layer_gammas = gamma_infos.iter().next().unwrap().layer_gamma_probs.as_ref().map(|_| {
+        gamma_infos.iter().enumerate()
             .filter(|&(_,x)| x.layer_gamma_probs.as_ref().unwrap()[0] > settings.layer_gamma_threshold)
             .map(|(i,x)| (i, x.frequency()))
             .collect()
     });
     let gamma_modes = GammaModes { acoustic, shear, layer_breathing, layer_gammas };
 
-    let k_modes = kinfos.map(|kinfos| {
-        let layer_ks = kinfos.iter().next().unwrap().layer_k_probs.as_ref().map(|_| {  // all this to check if they're present
-            kinfos.iter().enumerate()
-                .filter(|&(_,x)| x.layer_k_probs.as_ref().unwrap()[0] > settings.layer_gamma_threshold)
-                .map(|(i,x)| (i, x.frequency()))
-                .collect()
-        });
-        KModes { layer_ks }
-    });
-
     let modes = Modes {
         gamma: gamma_modes,
-        k: k_modes,
     };
 
     let energy_per_atom = {
@@ -714,7 +710,7 @@ pub(crate) fn optimize_layer_parameters(
 //-----------------------------------
 
 
-pub fn get_eigensystem_info<L: Ord + Clone, M>(
+pub fn get_gamma_eigensystem_info<L: Ord + Clone, M>(
     evals: &[f64],
     evecs: &Basis3,
     layers: &[L],
@@ -723,9 +719,15 @@ pub fn get_eigensystem_info<L: Ord + Clone, M>(
     structure: &Structure<M>,
     // unfolding is only done when this is provided
     layer_supercell_matrices: Option<&[::math::bands::ScMatrix]>,
-) -> Vec<GammaInfo>
+) -> Vec<EigenmodeInfo>
 {
-    use ::math::bands::UnfolderAtQ;
+    use ::math::bands::GammaUnfolder;
+
+    for evec in &evecs.0 {
+        assert!(
+            evec.imag.flat().iter().all(|&x| x == 0.0),
+            "clearly not a gamma eigenket!");
+    }
 
     let part = Part::from_ord_keys(layers);
     let layer_structures = structure
@@ -734,18 +736,17 @@ pub fn get_eigensystem_info<L: Ord + Clone, M>(
             .collect_vec();
 
     // precomputed data applicable to all kets
-    let layer_gamma_unfolders: Option<Vec<UnfolderAtQ>> =
+    let layer_gamma_unfolders: Option<Vec<GammaUnfolder>> =
         layer_supercell_matrices.map(|layer_supercell_matrices| {
             izip!(&layer_structures, layer_supercell_matrices)
                 .map(|(layer_structure, layer_sc_mat)| {
-                    UnfolderAtQ::from_config(
+                    GammaUnfolder::from_config(
                         &from_json!({
                             "fbz": "reciprocal-cell",
                             "sampling": { "plain": [4, 4, 1] },
                         }),
                         &layer_structure,
                         layer_sc_mat,
-                        &Q_GAMMA, // eigenvector q
                     )
                 }).collect()
         });
@@ -770,7 +771,7 @@ pub fn get_eigensystem_info<L: Ord + Clone, M>(
                 }).collect()
         });
 
-        out.push(GammaInfo {
+        out.push(EigenmodeInfo {
             frequency, acousticness, layer_acousticness, polarization, layer_gamma_probs,
         })
     }
@@ -780,131 +781,40 @@ pub fn get_eigensystem_info<L: Ord + Clone, M>(
 // HACK:
 // These are only valid for a hexagonal system represented
 // with the [[a, 0], [-a/2, a sqrt(3)/2]] lattice convention
-const Q_GAMMA: [f64; 3] = [0.0, 0.0, 0.0];
-const Q_K: [f64; 3] = [1f64/3.0, 1.0/3.0, 0.0];
-const Q_K_PRIME: [f64; 3] = [2.0 / 3f64, 2.0 / 3f64, 0.0];
+#[allow(unused)] const Q_GAMMA: [f64; 3] = [0.0, 0.0, 0.0];
+#[allow(unused)] const Q_K: [f64; 3] = [1f64/3.0, 1.0/3.0, 0.0];
+#[allow(unused)] const Q_K_PRIME: [f64; 3] = [2.0 / 3f64, 2.0 / 3f64, 0.0];
 
-// FIXME not sure how to generalize
-pub fn get_k_eigensystem_info<L: Ord + Clone, M>(
-    evals: &[f64],
-    evecs: &Basis3,
-    layers: &[L],
-    // (M gets tossed out, but we don't take Structure<L> because it could
-    //  unintentionally accept Element as our layer type)
-    structure: &Structure<M>,
-    // unfolding is only done when this is provided
-    layer_supercell_matrices: Option<&[::math::bands::ScMatrix]>,
-) -> Vec<KInfo>
-{
-    use ::math::bands::UnfolderAtQ;
-
-    let part = Part::from_ord_keys(layers);
-    let layer_structures = structure
-            .map_metadata_to(|_| ())
-            .into_unlabeled_partitions(&part)
-            .collect_vec();
-
-    struct LayerKData {
-        unfolder: UnfolderAtQ,
-        k_equiv_indices: Vec<usize>,
-    }
-
-    // precomputed data applicable to all kets
-    let layer_k_data: Option<Vec<LayerKData>> =
-        layer_supercell_matrices.map(|layer_supercell_matrices| {
-            izip!(&layer_structures, layer_supercell_matrices)
-                .map(|(layer_structure, layer_sc_mat)| {
-                    let unfolder = UnfolderAtQ::from_config(
-                        &from_json!({
-                                "fbz": "reciprocal-cell",
-                                "sampling": { "plain": [4, 4, 1] },
-                            }),
-                        &layer_structure,
-                        layer_sc_mat,
-                        &Q_K, // eigenvector q
-                    );
-                    let k_equiv_indices = vec![
-                        unfolder.lookup_q_index(&Q_K, 1e-4).expect("no Q close to K?"),
-                        unfolder.lookup_q_index(&Q_K_PRIME, 1e-4).expect("no Q close to K'?"),
-                    ];
-
-                    LayerKData { unfolder, k_equiv_indices }
-                }).collect::<Vec<_>>()
-        });
-
-
-    // now do each ket
-    let mut out = vec![];
-    for (&frequency, evec) in izip!(evals, &evecs.0) {
-        // split the evs up by layer (without renormalizing)
-        let layer_evecs: Vec<_> = evec.clone().into_unlabeled_partitions(&part).collect();
-
-        let polarization = evec.polarization();
-
-        let layer_k_probs = layer_k_data.as_ref().map(|layer_k_data| {
-            izip!(&layer_k_data[..], &layer_evecs)
-                .map(|(&LayerKData { ref unfolder, ref k_equiv_indices }, ket)| {
-                    let probs = unfolder.unfold_phonon(ket.to_ket().as_ref());
-                    izip!(0.., probs)
-                        .filter(|&(idx, _)| k_equiv_indices.contains(&idx))
-                        .fold(0.0, |acc, (_, x)| acc + x)
-                }).collect()
-        });
-
-        out.push(KInfo { frequency, polarization, layer_k_probs })
-    }
-    out
+/// Properties for characterizing an eigenvector in layered graphene.
+pub struct EigenmodeInfo {
+    pub frequency: f64,
+    pub acousticness: f64,
+    pub layer_acousticness: f64,
+    pub polarization: [f64; 3],
+    pub layer_gamma_probs: Option<Vec<f64>>,
 }
 
-use self::eigen_info::{GammaInfo, KInfo};
-pub mod eigen_info {
-    pub struct GammaInfo {
-        pub frequency: f64,
-        pub acousticness: f64,
-        pub layer_acousticness: f64,
-        pub polarization: [f64; 3],
-        pub layer_gamma_probs: Option<Vec<f64>>,
-    }
+impl EigenmodeInfo {
+    pub fn frequency(&self) -> f64
+    { self.frequency }
 
-    impl GammaInfo {
-        pub fn frequency(&self) -> f64
-        { self.frequency }
+    pub fn is_acoustic(&self) -> bool
+    { self.acousticness > 0.95 }
 
-        pub fn is_acoustic(&self) -> bool
-        { self.acousticness > 0.95 }
+    pub fn is_xy_polarized(&self) -> bool
+    { self.polarization[0] + self.polarization[1] > 0.9 }
 
-        pub fn is_xy_polarized(&self) -> bool
-        { self.polarization[0] + self.polarization[1] > 0.9 }
+    pub fn is_z_polarized(&self) -> bool
+    { self.polarization[2] > 0.9 }
 
-        pub fn is_z_polarized(&self) -> bool
-        { self.polarization[2] > 0.9 }
+    pub fn is_layer_acoustic(&self) -> bool
+    { self.layer_acousticness > 0.95 && !self.is_acoustic() }
 
-        pub fn is_layer_acoustic(&self) -> bool
-        { self.layer_acousticness > 0.95 && !self.is_acoustic() }
+    pub fn is_shear(&self) -> bool
+    { self.is_layer_acoustic() && self.is_xy_polarized() }
 
-        pub fn is_shear(&self) -> bool
-        { self.is_layer_acoustic() && self.is_xy_polarized() }
-
-        pub fn is_layer_breathing(&self) -> bool
-        { self.is_layer_acoustic() && self.is_z_polarized() }
-    }
-
-    pub struct KInfo {
-        pub frequency: f64,
-        pub polarization: [f64; 3],
-        pub layer_k_probs: Option<Vec<f64>>,
-    }
-
-    impl KInfo {
-        pub fn frequency(&self) -> f64
-        { self.frequency }
-
-        pub fn is_xy_polarized(&self) -> bool
-        { self.polarization[0] + self.polarization[1] > 0.9 }
-
-        pub fn is_z_polarized(&self) -> bool
-        { self.polarization[2] > 0.9 }
-    }
+    pub fn is_layer_breathing(&self) -> bool
+    { self.is_layer_acoustic() && self.is_z_polarized() }
 }
 
 mod summary {
@@ -928,7 +838,9 @@ mod summary {
     #[serde(rename_all="kebab-case")]
     pub struct Modes {
         pub gamma: GammaModes,
-        pub k: Option<KModes>,
+        // Even though there's only one member,
+        // this struct remains for legacy purposes
+        // (to preserve the shape of the output YAML)
     }
 
     #[derive(Serialize, Deserialize)]
@@ -1018,7 +930,7 @@ fn lammps_constrained_diff_fn<'a>(
 
 //----------------------
 // a slice of slices is a really dumb representation for a matrix
-// but hey; what works, works
+// but we do not require performance where this is used, so whatever
 
 fn dot_vec_mat_dumb(vec: &[f64], mat: &[&[f64]]) -> Vec<f64>
 {
@@ -1075,7 +987,7 @@ impl Trial {
                     assert!(nlayer >= 2);
 
                     trace!("Computing eigensystem info");
-                    let einfos = get_eigensystem_info(&evals, &evecs, &layers, &structure, None);
+                    let einfos = get_gamma_eigensystem_info(&evals, &evecs, &layers, &structure, None);
 
                     write_eigen_info_for_humans(&einfos, &mut |s| ok(info!("{}", s)))?;
 

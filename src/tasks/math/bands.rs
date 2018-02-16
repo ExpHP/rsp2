@@ -4,9 +4,25 @@ use ::rsp2_array_utils::{dot, map_arr};
 use ::rsp2_kets::{Ket, KetRef, Rect};
 use ::rsp2_array_utils::{arr_from_fn};
 
-
 use ::std::f64::consts::PI;
 use ::itertools::Itertools;
+
+//---------------------------
+// NOTE: (2018-02-16) (gamma-point)
+//
+// Historically this code was intended to be used for unfolding
+// bands at a user-specified Q point in the primitive reciprocal FBZ.
+// However, this implementation appears to be buggy for non-gamma
+// q-points, and I was never able to find the issue.
+//
+// While I *could* try to pull out all the details related to
+// user-specified Q-points, it would affect a large portion of the code
+// and I'd be tempted to rewrite half of the thing.
+//
+// Hence, I have chosen to leave these details in---correct or not---and
+// simply limit the API to only support gamma point.
+//  - ML
+//---------------------------
 
 pub use self::config::Config;
 pub mod config {
@@ -26,10 +42,11 @@ pub mod config {
         /// Parallelepiped defined by the reciprocal vectors.
         ReciprocalCell,
 
-        /// Voronoi cell in reciprocal space.
+        /// Voronoi cell in reciprocal space.  I.e. the ACTUAL Brillouin Zone.
         ///
-        /// I don't think you need this.
-        /// Also, it's not implemented.
+        /// I don't think you need this. Also, it's not implemented.
+        /// This is only here to document the fact that this code does not
+        /// use the true FBZ.
         Voronoi,
     }
 
@@ -118,19 +135,23 @@ impl ScMatrix {
 /// This code is largely based on Zheng, Fawei; Zhang, Ping (2017),
 /// “Phonon Unfolding: A program for unfolding phonon dispersions of materials”,
 ///   Mendeley Data, v1 http://dx.doi.org/10.17632/3hpx6zmxhg.1
-pub fn unfold_phonon(
+// NOTE: This only exists for convenience.
+//       If you have many eigenvectors, use GammaUnfolder directly for
+//       much better performance.
+#[allow(unused)]
+pub fn unfold_gamma_phonon(
     config: &Config,
     // Takes CoordStructure because I think there might be a case for
     // supporting <M: Eq + Hash>, with the semantics that atoms with
     // non-equal metadata are "distinct" and contributions between
     // them to a projection cannot cancel.
     superstructure: &CoordStructure,
-    eigenvector_q: &SuperFracQ,
+    // eigenvector_q: &SuperFracQ, // NOTE: only gamma now
     eigenvector: KetRef,
     supercell_matrix: &ScMatrix,
 ) -> Vec<([u32; 3], f64)>
 {
-    let unfolder = UnfolderAtQ::from_config(config, superstructure, supercell_matrix, eigenvector_q);
+    let unfolder = GammaUnfolder::from_config(config, superstructure, supercell_matrix);
     let indices = unfolder.q_indices().iter().cloned();
     let probs = unfolder.unfold_phonon(eigenvector);
     izip!(indices, probs).collect()
@@ -141,7 +162,7 @@ pub fn unfold_phonon(
 ///
 /// This speeds up the unfolding of many eigenvectors computed
 /// at the same q point.
-pub struct UnfolderAtQ {
+pub struct GammaUnfolder {
     /// `[sc_recip_index] -> index` (3D index of sc reciprocal lattice point)
     sc_indices: Vec<[u32; 3]>,
     /// `[pc_recip_index][sc_recip_index] -> q_ket`
@@ -150,19 +171,20 @@ pub struct UnfolderAtQ {
     // HACK: these are only here to service the code that uses UnfolderAtQ
     /// `[sc_recip_index] -> q` (reduced into primitive cell)
     sc_qs_frac: Vec<PrimFracQ>,
-    ev_q_frac: PrimFracQ,
-    pc_recip_lattice: [[f64; 3]; 3],
 }
 
-impl UnfolderAtQ {
+impl GammaUnfolder {
     pub fn from_config(
         config: &Config,
         superstructure: &CoordStructure,
         supercell_matrix: &ScMatrix,
-        eigenvector_q: &[f64; 3], // reduced by sc lattice
-    ) -> UnfolderAtQ
+        // eigenvector_q: &[f64; 3], // reduced by sc lattice
+    ) -> GammaUnfolder
     {
         use ::rsp2_array_utils::{inv, map_mat, mat_from_fn, arr_from_fn};
+
+        // HACK: ctrl-F "gamma-point" for more info
+        let eigenvector_q = &[0.0; 3];
 
         // FIXME expected behavior unclear when the following does not hold.
         //       especially so if it lies outside the (larger) primitive reciprocal cell.
@@ -205,7 +227,7 @@ impl UnfolderAtQ {
                     warn!("Untested code path: 9fc15058-7199-45d2-80ec-630ceb575d3d");
                 }
 
-                UnfolderAtQ {
+                GammaUnfolder {
                     sc_indices: quotient_indices,
                     q_kets_by_pc_sc: pc_recip_vecs.iter().map(|sample_q| {
                         quotient_vecs.iter().map(|quotient_q| {
@@ -219,54 +241,18 @@ impl UnfolderAtQ {
                         let pc_recip = Lattice::new(&pc_recip);
                         Coords::Carts(quotient_vecs.clone()).to_fracs(&pc_recip)
                     },
-                    pc_recip_lattice: pc_recip,
-                    ev_q_frac: {
-                        use ::rsp2_array_utils::dot;
-                        let q = eigenvector_q_cart;
-                        let q = dot(&q, &inv(&pc_recip));
-                        q
-                    }
                 }
             },
         }
     }
 
+    #[allow(unused)]
     pub fn q_indices(&self) -> &[[u32; 3]]
     { &self.sc_indices }
 
+    #[allow(unused)]
     pub fn q_fracs(&self) -> &[[f64; 3]]
     { &self.sc_qs_frac }
-
-    pub fn lookup_q_index(&self, q: &PrimFracQ, tol: f64) -> Option<usize>
-    {
-        use ::rsp2_array_utils::arr_from_fn;
-
-        debug!("EVQ: {:?}", self.ev_q_frac);
-        for q in &self.sc_qs_frac {
-            debug!("QQQ: {:?}", q);
-        }
-
-        let dq: [_; 3] = arr_from_fn(|k| {
-            let mut d = q[k] - self.ev_q_frac[k];
-            d -= d.floor();
-            d -= d.floor(); // for -EPSILON < d < 0
-            d
-        });
-
-        let mut sc_qs_frac = self.sc_qs_frac.to_vec();
-        for row in &mut sc_qs_frac {
-            for k in 0..3 {
-                row[k] -= dq[k];
-            }
-        }
-
-        let sc_qs_cart =
-            Coords::Fracs(sc_qs_frac.to_vec())
-                .into_carts(&Lattice::new(&self.pc_recip_lattice));
-
-
-        index_of_shortest_with_nearest_27(&sc_qs_cart, &self.pc_recip_lattice, tol)
-    }
 
     pub fn unfold_phonon(&self, eigenvector: KetRef) -> Vec<f64>
     {
@@ -307,35 +293,9 @@ impl UnfolderAtQ {
 fn q_ket(carts: &[[f64; 3]], q: &[f64; 3]) -> Ket
 { carts.iter().map(|x| Rect::from_phase(-dot(x, q) * 2.0 * PI)).collect() }
 
+#[allow(unused)]
 type SuperFracQ = [f64; 3];
 type PrimFracQ = [f64; 3];
-
-/// Shortest vector in consideration of the 27 images around them.
-// FIXME this shouldn't be just some util function, it is a common mathematical problem and
-//   there are nontrivial criteria that must be met for this function to even be useful.
-//  (e.g. the given cell must be reduced enough for the 27 images to cover the voronoi cell)
-//  (It also could make much better use of SIMD, but that's for another time)
-fn index_of_shortest_with_nearest_27(
-    carts: &[[f64; 3]],
-    lattice: &[[f64; 3]; 3],
-    tol: f64,
-) -> Option<usize>
-{
-    use ::rsp2_array_utils::arr_from_fn;
-
-    assert!(carts.len() > 0);
-    let mut all_carts = carts.to_vec();
-    for row in lattice {
-        let mut new_carts = Vec::with_capacity(all_carts.len() * 3);
-        new_carts.extend(all_carts.iter().cloned());
-        new_carts.extend(all_carts.iter().map(|v| arr_from_fn::<[_; 3], _>(|k| v[k] - row[k])));
-        new_carts.extend(all_carts.iter().map(|v| arr_from_fn::<[_; 3], _>(|k| v[k] + row[k])));
-        all_carts = new_carts;
-    }
-
-    ::util::index_of_shortest(&all_carts[..], tol)
-        .map(|i| i % carts.len()) // of original, not of image
-}
 
 #[cfg(test)]
 #[deny(dead_code)]
@@ -372,7 +332,7 @@ mod tests {
                 &map_arr(sc_vec, |x| x as u32),
             );
             for config in &configs {
-                let unfolded = unfold_phonon(config, structure, &GAMMA, eigenvector.as_ref(), &sc_mat);
+                let unfolded = unfold_gamma_phonon(config, structure, eigenvector.as_ref(), &sc_mat);
 
                 // expect that all of the nonzero probability is distributed among
                 // those entries in expect_index, and that the total is 1
@@ -559,7 +519,6 @@ mod tests {
         //--------------------------------------------
 
         // TODO: Test with non-perfect supercell
-        // TODO: Test with eigenvector_q not at gamma
         // TODO: Test with non-diagonal supercell
     }
 }

@@ -67,9 +67,11 @@ impl Builder {
     pub fn conf<K: AsRef<str>, V: AsRef<str>>(mut self, key: K, value: V) -> Self
     { self.conf.0.insert(key.as_ref().to_owned(), value.as_ref().to_owned()); self }
 
-    /// Read configuration from a phonopy .conf file,
-    /// overwriting existing values.
+    /// Extend with configuration lines from a phonopy .conf file.
+    /// If the file defines a value that was already set, the new
+    ///  value from the file will take precedence.
     // FIXME: Result<Self>... oh, THAT's why the general recommendation is for &mut Self
+    #[allow(unused)]
     pub fn conf_from_file<R: BufRead>(self, file: R) -> Result<Self>
     {Ok({
         let mut me = self;
@@ -138,6 +140,7 @@ impl Builder {
     // FIXME: The 'symmetry-test' was the only binary shim that used this and
     //        I removed it,  was removed during a refactor but
     //        this is nontrivial.  I'd rather re-add the shim.
+    #[allow(unused)]
     pub fn symmetry(
         &self,
         structure: &ElementStructure,
