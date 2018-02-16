@@ -1048,7 +1048,7 @@ impl Trial {
     })}
 }
 
-// HACK: These used to be inherent methods but the type was relocated to another crate
+// These were historically inherent methods, but the type was relocated to another crate
 extension_trait!{
     SupercellSpecExt for SupercellSpec {
         fn dim_for_unitcell(&self, prim: &Lattice) -> [u32; 3] {

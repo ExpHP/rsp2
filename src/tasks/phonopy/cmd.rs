@@ -217,14 +217,14 @@ macro_rules! declare_poison_pair {
 
         impl<$($generics)*> $Type<$($generics)*> where $($bounds)*
         {
-            // modify self if not poisoned
+            /// modify self if not poisoned
             fn inner_mut(&mut self) -> &mut $Impl<$($generics)*>
             { match self.0 {
                 Some(ref mut inner) => inner,
                 None => $poisoned,
             }}
 
-            // poisons self
+            /// poisons self
             fn into_inner(&mut self) -> $Impl<$($generics)*>
             { match self.0.take() {
                 Some(inner) => inner,
