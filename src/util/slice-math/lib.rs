@@ -36,7 +36,7 @@ use ::std::ops::{ Add, Sub, Mul, Div, Rem, Neg, Deref, DerefMut };
 macro_rules! impl_binary {
     ($Op:ident::$op:ident, $OpAssign:ident::$op_assign:ident)
     => {
-        // vector + scalar
+        // scalar + vector
         impl $Op<VOwn> for f64 {
             type Output = VOwn;
             fn $op(self, mut u: VOwn) -> VOwn {
@@ -52,7 +52,7 @@ macro_rules! impl_binary {
             }
         }
 
-        // scalar + vector
+        // vector + scalar
         impl $Op<f64> for VOwn {
             type Output = VOwn;
             fn $op(mut self, s: f64) -> VOwn {
