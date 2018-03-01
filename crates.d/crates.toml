@@ -87,3 +87,4 @@ rayon = "0.8"
 failure = "0.1.0"
 failure_derive = "0.1.0"
 vasp-poscar = "0.1.1"
+path_abs = { commit = "e14c4d9eec6b636b025", git = "https://github.com/vitiral/path_abs" }

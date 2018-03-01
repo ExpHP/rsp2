@@ -1,14 +1,51 @@
+use ::Result;
 use ::std::path::Path;
 use ::std::io::Result as IoResult;
 use ::std::path::PathBuf;
 use ::rsp2_tempdir::TempDir;
+use ::path_abs::{FileRead, FileWrite};
 
 /// AsRef<Path> with more general impls on smart pointer types.
 ///
-/// (for instance, `Box<AsPath>` and `Rc<TempDir>` both implement
-///  the trait)
+/// (for instance, `Box<AsPath>` and `Rc<TempDir>` both implement the trait)
 pub trait AsPath {
     fn as_path(&self) -> &Path;
+
+    fn to_path_buf(&self) -> PathBuf
+    { self.as_path().to_path_buf() }
+
+    fn join<Q: AsPath>(&self, path: Q) -> PathBuf
+    where Self: Sized, // generic functions are not object-safe
+    { self.as_path().join(path.as_path()) }
+
+//    fn exists(&self) -> bool
+//    { self.as_path().exists() }
+}
+
+pub trait DirLike: AsPath {
+
+    fn create_file(&self, name: &Path) -> Result<FileWrite>
+    { Ok(FileWrite::create(self.as_path().join(name))?) }
+
+    fn open(&self, name: &Path) -> Result<FileRead>
+    { Ok(FileRead::read(self.as_path().join(name))?) }
+
+    fn append_file(&self, name: &Path) -> Result<FileWrite>
+    { Ok(FileWrite::append(self.as_path().join(name.as_path()))?) }
+
+    // // A form of 'join' where path is verified to be a relative path.
+    // // (however, it makes no further guarantee that `self.join(path)`
+    // // points to a location inside `self`)
+    // fn _descend(&self, path: &Path) -> Result<PathArc>
+    // {
+    //     if path.is_absolute() {
+    //         bail!("Did not expect an absolute path: {}", path.display());
+    //     }
+    //     PathArc::new(self.as_path().join(path))
+    // }
+
+//    fn exists(&self) -> bool
+//    { self.as_path().exists() }
 }
 
 macro_rules! as_path_impl {
@@ -47,7 +84,9 @@ as_path_impl!{
     (by Deref) [P: AsPath + ?Sized] ::std::rc::Rc<P>;
     (by Deref) [P: AsPath + ?Sized] ::std::sync::Arc<P>;
     (by Deref) ['p, P: AsPath + ToOwned + ?Sized] ::std::borrow::Cow<'p, P>;
-    (by Deref) [] ::util::CanonicalPath;
+    (by Deref) [] ::path_abs::PathArc;
+    (by Deref) [] ::path_abs::PathFile;
+    (by Deref) [] ::path_abs::PathDir;
 }
 
 impl<'p, P: AsPath + ?Sized> AsPath for &'p P

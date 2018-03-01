@@ -24,10 +24,11 @@ use ::rsp2_structure_io::poscar;
 use ::std::io::prelude::*;
 use ::std::process::Command;
 use ::std::path::{Path, PathBuf};
-use ::rsp2_fs_util::{open, open_text, create, copy, hard_link, mv};
+use ::rsp2_fs_util::mv;
 use ::rsp2_tempdir::TempDir;
 
 use ::rsp2_kets::Basis;
+use ::rsp2_fs_util::{open, create, open_text, copy, hard_link};
 use ::rsp2_structure::{ElementStructure, Element};
 use ::rsp2_structure::{FracRot, FracTrans, FracOp};
 use ::rsp2_phonopy_io::npy;

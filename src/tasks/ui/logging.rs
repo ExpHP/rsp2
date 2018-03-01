@@ -1,10 +1,9 @@
 use ::errors::{Result, ok};
 
 use ::std::fmt;
-use ::std::fs::File;
-use ::std::path::{Path};
 use ::log::{LogLevel, LogRecord};
 use ::fern::FernLog;
+use ::path_abs::{FileWrite, PathFile};
 
 pub use self::fern::{DelayedLogFile, GLOBAL_LOGFILE};
 mod fern {
@@ -15,9 +14,7 @@ mod fern {
     /// A log file for fern that can be created *after* logger initialization.
     #[derive(Debug, Default)]
     pub struct DelayedLogFile {
-        // (the lock is only to make it safe to insert or replace the file)
-        // (the hungarian is because 'file.read()' would be misleading)
-        file_rw: RwLock<Option<File>>,
+        file_rw: RwLock<Option<FileWrite>>,
     }
 
     lazy_static! {
@@ -26,13 +23,15 @@ mod fern {
     }
 
     impl DelayedLogFile {
-        pub fn start<P: AsRef<Path>>(&self, path: P) -> Result<()> {
-            // (note: the Err case here is PoisonError)
+        pub fn start(&self, path: PathFile) -> Result<()> {
             if let Ok(mut file) = self.file_rw.write() {
                 if file.is_some() {
-                    bail!("The logfile has already been created!");
+                    bail!("The logfile has already been set!");
                 }
-                *file = Some(::fern::log_file(path)?);
+                *file = Some(path.append()?);
+            } else {
+                // PoisonError. In the highly unlikely event this occurs, something else
+                // will probably catch it. If we try to be a hero, we risk a double-panic.
             }
             Ok(())
         }
@@ -40,11 +39,13 @@ mod fern {
 
     impl FernLog for &'static DelayedLogFile {
         fn log_args(&self, payload: &fmt::Arguments, _original: &LogRecord) {
-            // (note: the Err case here is PoisonError)
-            if let Ok(file) = self.file_rw.read() {
-                if let Some(mut file) = (*file).as_ref() {
+            if let Ok(mut file) = self.file_rw.write() {
+                if let Some(mut file) = (*file).as_mut() {
                     let _ = writeln!(file, "{}", payload);
                 }
+            } else {
+                // PoisonError. In the highly unlikely event this occurs, something else
+                // will probably catch it. If we try to be a hero, we risk a double-panic.
             }
         }
     }
@@ -71,8 +72,11 @@ impl Verbosity {
 }
 
 /// Set the global logger, enabling the use of `log!()` macros.
-/// This can only be done once.
-pub fn init_global_logger() -> Result<()>
+/// This can be done at any time, but it can only be done once.
+///
+/// It returns an object for setting up `GLOBAL_LOGFILE`, leveraging the
+/// "unused variable" lint to help remind you to do this once possible.
+pub fn init_global_logger() -> Result<SetGlobalLogfile>
 {ok({
     use ::std::time::Instant;
     use ::log::LogLevelFilter as LevelFilter;
@@ -104,6 +108,8 @@ pub fn init_global_logger() -> Result<()>
         .chain(::std::io::stdout());
 
     fern.apply()?;
+
+    SetGlobalLogfile(())
 })}
 
 #[derive(Debug, Copy, Clone)]
@@ -119,4 +125,13 @@ impl fmt::Display for ColorizedLevel {
         };
         write!(f, "{}", ::ui::color::gpaint(style, self.0))
     }
+}
+
+/// Returned by `init_global_logger` to remind you to set the logfile once possible.
+/// (which can be done by calling the `start` method)
+#[must_use = "The logfile has not been set up!"]
+pub struct SetGlobalLogfile(());
+impl SetGlobalLogfile {
+    pub fn start(self, path: PathFile) -> Result<()>
+    { GLOBAL_LOGFILE.start(path) }
 }

@@ -1,8 +1,10 @@
 use ::Result;
 use ::traits::{Save, Load, AsPath};
-use ::rsp2_fs_util::{open, open_text, create};
+use ::traits::save::Json;
 
 use ::rsp2_phonopy_io::{symmetry_yaml, disp_yaml, conf};
+use ::std::io::BufReader;
+use ::path_abs::{FileRead, FileWrite};
 
 mod cmd;
 pub use self::cmd::*;
@@ -30,12 +32,12 @@ impl Load for DispYaml {
 pub struct Conf(pub ::rsp2_phonopy_io::Conf);
 impl Load for Conf {
     fn load<P: AsPath>(path: P) -> Result<Self>
-    { Ok(conf::read(open_text(path.as_path())?)?).map(Conf) }
+    { Ok(conf::read(open_text(path.as_path())?).map(Conf)?) }
 }
 
 impl Save for Conf {
     fn save<P: AsPath>(&self, path: P) -> Result<()>
-    {Ok({ conf::write(create(path.as_path())?, &self.0)?; })}
+    { Ok(conf::write(create(path.as_path())?, &self.0)?) }
 }
 
 //--------------------------------------------------------
@@ -59,12 +61,12 @@ where
 
 impl Load for Args {
     fn load<P: AsPath>(path: P) -> Result<Self>
-    { Ok(::serde_json::from_reader(open(path.as_path())?)?) }
+    { Load::load(path).map(|Json(x)| x) }
 }
 
 impl Save for Args {
     fn save<P: AsPath>(&self, path: P) -> Result<()>
-    {Ok({ ::serde_json::to_writer(create(path.as_path())?, self)?; })}
+    { Json(self).save(path) }
 }
 
 //--------------------------------------------------------
@@ -78,12 +80,12 @@ pub(crate) struct OtherSettings {
 
 impl Load for OtherSettings {
     fn load<P: AsPath>(path: P) -> Result<Self>
-    { Ok(::serde_json::from_reader(open(path.as_path())?)?) }
+    { Load::load(path).map(|Json(x)| x) }
 }
 
 impl Save for OtherSettings {
     fn save<P: AsPath>(&self, path: P) -> Result<()>
-    {Ok({ ::serde_json::to_writer(create(path.as_path())?, self)?; })}
+    { Json(self).save(path) }
 }
 
 impl OtherSettings {
@@ -102,10 +104,21 @@ pub(crate) struct QPositions(Vec<[f64; 3]>);
 
 impl Load for QPositions {
     fn load<P: AsPath>(path: P) -> Result<Self>
-    { Ok(::serde_json::from_reader(open(path.as_path())?)?) }
+    { Load::load(path).map(|Json(x)| x) }
 }
 
 impl Save for QPositions {
     fn save<P: AsPath>(&self, path: P) -> Result<()>
-    {Ok({ ::serde_json::to_writer(create(path.as_path())?, self)?; })}
+    { Json(self).save(path) }
 }
+
+//--------------------------------------------------------
+
+fn open<P: AsPath>(path: P) -> Result<FileRead>
+{ Ok(FileRead::read(path.as_path())?) }
+
+fn open_text<P: AsPath>(path: P) -> Result<BufReader<FileRead>>
+{ open(path).map(BufReader::new) }
+
+fn create<P: AsPath>(path: P) -> Result<FileWrite>
+{ Ok(FileWrite::create(path.as_path())?) }

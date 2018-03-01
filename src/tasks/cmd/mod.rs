@@ -5,32 +5,33 @@ pub(crate) mod integrate_2d;
 use self::lammps::{Lammps, LammpsBuilder};
 mod lammps;
 
-use self::trial::Trial;
+use self::trial::TrialDir;
 pub(crate) mod trial;
 
 use ::errors::{Error, ErrorKind, Result, ok};
 use ::rsp2_tasks_config::{self as cfg, Settings, NormalizationMode, SupercellSpec};
-use ::traits::AsPath;
+use ::traits::{AsPath};
 use ::phonopy::{DirWithBands, DirWithDisps, DirWithForces};
 
 use ::types::{Basis3};
 
+use ::path_abs::{PathFile, PathDir, FileWrite};
 use ::rsp2_structure::consts::CARBON;
 use ::rsp2_slice_math::{v, V, vdot, vnorm};
 
 use ::slice_of_array::prelude::*;
 use ::rsp2_array_utils::arr_from_fn;
 use ::rsp2_structure::supercell::{self, SupercellToken};
-use ::rsp2_structure::{Lattice, Coords, CoordStructure, Structure, ElementStructure};
+use ::rsp2_structure::{CoordStructure, ElementStructure, Structure};
+use ::rsp2_structure::{Lattice, Coords};
 use ::rsp2_structure::{Part, Partition};
 use ::rsp2_structure_gen::Assemble;
 use ::phonopy::Builder as PhonopyBuilder;
 
-use ::util::CanonicalPath;
-use ::rsp2_fs_util::{open, create, rm_rf};
+use ::rsp2_fs_util::{rm_rf};
 
 use ::std::io::{Write};
-use ::std::path::{Path};
+use ::std::path::{Path, PathBuf};
 
 use ::itertools::Itertools;
 
@@ -41,11 +42,11 @@ pub struct CliArgs {
     pub save_bands: bool,
 }
 
-impl Trial {
+impl TrialDir {
     pub(crate) fn run_relax_with_eigenvectors(
         self,
         settings: &Settings,
-        input: &CanonicalPath,
+        input: &PathFile,
         cli: CliArgs,
     ) -> Result<()>
     {ok({
@@ -61,19 +62,19 @@ impl Trial {
             use ::rsp2_structure_gen::load_layers_yaml;
             use ::rsp2_structure_gen::layer_sc_info_from_layers_yaml;
 
-            let builder = load_layers_yaml(open(&input)?)?;
+            let builder = load_layers_yaml(input.read()?)?;
             let builder = optimize_layer_parameters(&settings.scale_ranges, &lmp, builder)?;
             let structure = carbon(&builder.assemble());
 
             let layer_sc_mats =
-                layer_sc_info_from_layers_yaml(open(&input)?)?.into_iter()
+                layer_sc_info_from_layers_yaml(input.read()?)?.into_iter()
                 .map(|(matrix, periods, _)| ::math::bands::ScMatrix::new(&matrix, &periods))
                 .collect_vec();
 
             (structure, layer_sc_mats)
         };
 
-        poscar::dump(create("./initial.vasp")?, "", &original)?;
+        poscar::dump(self.create_file("initial.vasp")?, "", &original)?;
         let phonopy = phonopy_builder_from_settings(&settings.phonons, &original);
         let phonopy = phonopy.use_sparse_sets(settings.tweaks.sparse_sets);
 
@@ -113,10 +114,10 @@ impl Trial {
             trace!("Finished relaxation # {}", iteration);
 
             {
-                let fname = format!("./structure-{:02}.1.vasp", iteration);
-                trace!("Writing '{}'", &fname);
+                let path = self.join(format!("structure-{:02}.1.vasp", iteration));
+                trace!("Writing '{}'", path.nice()?);
                 poscar::dump(
-                    create(fname)?,
+                    FileWrite::create(path)?,
                     &format!("Structure after CG round {}", iteration),
                     &structure)?;
             }
@@ -125,8 +126,11 @@ impl Trial {
             let einfos = get_gamma_eigensystem_info(
                 &evals, &evecs, &layers[..], &structure, Some(&layer_sc_mats),
             );
-            write_eigen_info_for_machines(&einfos, create(format!("eigenvalues.{:02}", iteration))?)?;
-            write_eigen_info_for_humans(&einfos, &mut |s| ok(info!("{}", s)))?;
+            {
+                let path = self.join(format!("eigenvalues.{:02}", iteration));
+                write_eigen_info_for_machines(&einfos, FileWrite::create(path)?)?;
+                write_eigen_info_for_humans(&einfos, &mut |s| ok(info!("{}", s)))?;
+            }
 
             let mut structure = structure;
             let bad_evs: Vec<_> = izip!(1.., &einfos, &evecs.0)
@@ -148,10 +152,10 @@ impl Trial {
             }
 
             {
-                let fname = format!("./structure-{:02}.2.vasp", iteration);
-                trace!("Writing '{}'", &fname);
+                let path = self.join(format!("./structure-{:02}.2.vasp", iteration));
+                trace!("Writing '{}'", path.nice()?);
                 poscar::dump(
-                    create(fname)?,
+                    FileWrite::create(path)?,
                     &format!("Structure after eigenmode-chasing round {}", iteration),
                     &structure)?;
             }
@@ -186,9 +190,9 @@ impl Trial {
         }; // (structure, einfos, final_bands_dir)
 
 
-        poscar::dump(create("./final.vasp")?, "", &structure)?;
+        poscar::dump(self.create_file("final_vasp")?, "", &structure)?;
 
-        write_eigen_info_for_machines(&einfos, create("eigenvalues.final")?)?;
+        write_eigen_info_for_machines(&einfos, self.create_file("eigenvalues.final")?)?;
 
         // let (k_evals, k_evecs) = read_eigensystem(&bands_dir, &Q_K)?;
         // let kinfos = get_k_eigensystem_info(
@@ -196,7 +200,7 @@ impl Trial {
         // );
 
         // write_summary_file(settings, &lmp, &einfos, &kinfos)?;
-        write_summary_file(settings, &lmp, &einfos)?;
+        self.write_summary_file(settings, &lmp, &einfos)?;
     })}
 }
 
@@ -465,62 +469,64 @@ fn write_eigen_info_for_machines<W: Write>(
     }
 })}
 
-fn write_summary_file(
-    settings: &Settings,
-    lmp: &LammpsBuilder,
-    gamma_infos: &[EigenmodeInfo],
-) -> Result<()>
-{Ok({
-    use self::summary::{Modes, GammaModes, Summary, EnergyPerAtom};
-    use ::rsp2_structure_io::poscar;
+impl TrialDir {
+    fn write_summary_file(
+        &self,
+        settings: &Settings,
+        lmp: &LammpsBuilder,
+        gamma_infos: &[EigenmodeInfo],
+    ) -> Result<()>
+    {Ok({
+        use self::summary::{Modes, GammaModes, Summary, EnergyPerAtom};
+        use ::rsp2_structure_io::poscar;
 
-    fn filtered_freqs<Pred>(modes: &[EigenmodeInfo], pred: Pred) -> Vec<f64>
-    where Pred: Fn(&EigenmodeInfo) -> bool
-    { modes.iter().filter(|&mode| pred(mode)).map(EigenmodeInfo::frequency).collect() }
+        fn filtered_freqs<Pred>(modes: &[EigenmodeInfo], pred: Pred) -> Vec<f64>
+        where Pred: Fn(&EigenmodeInfo) -> bool
+        { modes.iter().filter(|&mode| pred(mode)).map(EigenmodeInfo::frequency).collect() }
 
-    let acoustic = filtered_freqs(gamma_infos, EigenmodeInfo::is_acoustic);
-    let shear = filtered_freqs(gamma_infos, EigenmodeInfo::is_shear);
-    let layer_breathing = filtered_freqs(gamma_infos, EigenmodeInfo::is_layer_breathing);
+        let acoustic = filtered_freqs(gamma_infos, EigenmodeInfo::is_acoustic);
+        let shear = filtered_freqs(gamma_infos, EigenmodeInfo::is_shear);
+        let layer_breathing = filtered_freqs(gamma_infos, EigenmodeInfo::is_layer_breathing);
 
-    // FIXME: this mess is due to an awkward choice of representation;
-    //        we have an array of structures where either all of the
-    //        'layer_gamma_props' members are present, or none of them are.
-    let layer_gammas = gamma_infos.iter().next().unwrap().layer_gamma_probs.as_ref().map(|_| {
-        gamma_infos.iter().enumerate()
-            .filter(|&(_,x)| x.layer_gamma_probs.as_ref().unwrap()[0] > settings.layer_gamma_threshold)
-            .map(|(i,x)| (i, x.frequency()))
-            .collect()
-    });
-    let gamma_modes = GammaModes { acoustic, shear, layer_breathing, layer_gammas };
-
-    let modes = Modes {
-        gamma: gamma_modes,
-    };
-
-    let energy_per_atom = {
-        let f = |structure: ElementStructure| ok({
-            let na = structure.num_atoms() as f64;
-            lmp.build(structure)?.compute_value()? / na
+        // FIXME: this mess is due to an awkward choice of representation;
+        //        we have an array of structures where either all of the
+        //        'layer_gamma_props' members are present, or none of them are.
+        let layer_gammas = gamma_infos.iter().next().unwrap().layer_gamma_probs.as_ref().map(|_| {
+            gamma_infos.iter().enumerate()
+                .filter(|&(_,x)| x.layer_gamma_probs.as_ref().unwrap()[0] > settings.layer_gamma_threshold)
+                .map(|(i,x)| (i, x.frequency()))
+                .collect()
         });
-        let f_path = |s: &AsRef<Path>| ok(f(poscar::load(open(s)?)?)?);
+        let gamma_modes = GammaModes { acoustic, shear, layer_breathing, layer_gammas };
 
-        let initial = f_path(&"initial.vasp")?;
-        let final_ = f_path(&"final.vasp")?;
-        let before_ev_chasing = f_path(&"structure-01.1.vasp")?;
-        EnergyPerAtom { initial, final_, before_ev_chasing }
-    };
+        let modes = Modes {
+            gamma: gamma_modes,
+        };
 
-    let summary = Summary { modes, energy_per_atom };
+        let energy_per_atom = {
+            let f = |structure: ElementStructure| ok({
+                let na = structure.num_atoms() as f64;
+                lmp.build(structure)?.compute_value()? / na
+            });
+            let f_path = |s: &AsPath| ok(f(poscar::load(self.open(s)?)?)?);
 
-    ::serde_yaml::to_writer(create("summary.yaml")?, &summary)?;
-})}
+            let initial = f_path(&"initial.vasp")?;
+            let final_ = f_path(&"final.vasp")?;
+            let before_ev_chasing = f_path(&"structure-01.1.vasp")?;
+            EnergyPerAtom { initial, final_, before_ev_chasing }
+        };
+
+        let summary = Summary { modes, energy_per_atom };
+
+        ::serde_yaml::to_writer(self.create_file("summary.yaml")?, &summary)?;
+    })}
+}
 
 fn phonopy_builder_from_settings<M>(
     settings: &cfg::Phonons,
     // the structure is needed to resolve the correct supercell size
     structure: &Structure<M>,
-) -> PhonopyBuilder
-{
+) -> PhonopyBuilder {
     PhonopyBuilder::new()
         .symmetry_tolerance(settings.symmetry_tolerance)
         .conf("DISPLACEMENT_DISTANCE", format!("{:e}", settings.displacement_distance))
@@ -860,7 +866,7 @@ mod summary {
 }
 
 // HACK: These adapters are temporary to help the existing code
-//       (written only with carbon in mind) adapt to ElementStructure.
+//       (written only with carbon in mind) adapt to Structure.
 #[allow(unused)]
 fn carbon(structure: &CoordStructure) -> ElementStructure
 {
@@ -947,11 +953,11 @@ fn dot_mat_vec_dumb(mat: &[&[f64]], vec: &[f64]) -> Vec<f64>
 
 //=================================================================
 
-impl Trial {
+impl TrialDir {
     pub(crate) fn run_energy_surface(
         self,
         settings: &cfg::EnergyPlotSettings,
-        input: &CanonicalPath,
+        input: &PathDir,
     ) -> Result<()>
     {ok({
         // support either a force dir or a bands dir as input
@@ -1044,7 +1050,7 @@ impl Trial {
         eprintln!();
 
         let chunked: Vec<_> = data.chunks(w).collect();
-        ::serde_json::to_writer_pretty(create("out.json")?, &chunked)?;
+        ::serde_json::to_writer_pretty(self.create_file("out.json")?, &chunked)?;
     })}
 }
 
@@ -1104,7 +1110,23 @@ extension_trait! {
 
 //=================================================================
 
-impl Trial {
+extension_trait! {
+    PathBufExt for PathBuf {
+        // make a path "nice" for display
+        fn nice(&self) -> Result<String> {
+            let cwd = PathDir::current_dir()?;
+            let absolute = cwd.join(self);
+            match absolute.as_path().strip_prefix(&cwd) {
+                Ok(path) => Ok(format!("{}", path.display())),
+                Err(_) => Ok(format!("{}", self.display())),
+            }
+        }
+    }
+}
+
+//=================================================================
+
+impl TrialDir {
     pub(crate) fn run_save_bands_after_the_fact(
         self,
         settings: &Settings,
@@ -1114,7 +1136,7 @@ impl Trial {
 
         let lmp = LammpsBuilder::new(&settings.threading, &settings.potential.kind);
 
-        let original = poscar::load(open("./final.vasp")?)?;
+        let original = poscar::load(self.open("./final.vasp")?)?;
         let phonopy = phonopy_builder_from_settings(&settings.phonons, &original);
         let phonopy = phonopy.use_sparse_sets(settings.tweaks.sparse_sets);
         do_diagonalize(

@@ -1,10 +1,9 @@
 use ::Result;
 
-use ::rsp2_fs_util::{open};
 use ::rsp2_tasks_config::YamlRead;
 
 use ::serde_yaml::{Value, Mapping};
-use ::std::path::{Path, PathBuf};
+use ::path_abs::PathFile;
 
 /// A list of config yamls that can be merged into a single effective config.
 ///
@@ -26,7 +25,7 @@ pub(crate) struct Config {
 #[derive(Debug, Clone)]
 #[serde(rename_all = "kebab-case")]
 enum ConfigSource {
-    File(PathBuf),
+    File(PathFile),
     Argument,
 }
 
@@ -65,13 +64,9 @@ mod resolve_from_arg {
 
     // May do path resolution and file IO
     fn read_file_from_arg(path: &str) -> Result<Config> {
-        let path: &Path = path.as_ref();
-
-        let path = path.canonicalize()?;
-        let file = open(&path)?;
-
+        let path = PathFile::new(path)?;
+        let yaml = YamlRead::from_reader(path.read()?)?;
         let source = ConfigSource::File(path);
-        let yaml = YamlRead::from_reader(file)?;
         Ok(Config { yaml, source })
     }
 

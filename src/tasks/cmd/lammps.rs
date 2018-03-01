@@ -1,5 +1,5 @@
 // The purpose of this module is to wrap `rsp2_lammps_wrap` with code specific to
-// the potentials we care about using.
+// the potentials we care about using, and to support ElementStructure.
 //
 // This is where we decide e.g. atom type assignments and `pair_coeff` commands.
 // (which are decisions that `rsp2_lammps_wrap` has largely chosen to defer)
@@ -7,7 +7,7 @@
 use ::Result;
 use ::rsp2_lammps_wrap::{InitInfo, Potential, AtomType, PairCommand};
 use ::rsp2_lammps_wrap::Builder as InnerBuilder;
-use ::rsp2_structure::{Structure, Element, ElementStructure, Layers};
+use ::rsp2_structure::{Layers, Element, Structure, ElementStructure};
 use ::rsp2_tasks_config as cfg;
 
 const REBO_MASS_HYDROGEN: f64 =  1.00;
@@ -120,7 +120,7 @@ mod airebo {
             sym => panic!("Unexpected element in Airebo: {}", sym),
         }).collect() }
 
-        fn init_info(&self, _: &Structure<Self::Meta>) -> InitInfo
+        fn init_info(&self, _: &ElementStructure) -> InitInfo
         {
             InitInfo {
                 masses: vec![REBO_MASS_HYDROGEN, REBO_MASS_CARBON],
@@ -199,7 +199,7 @@ mod kc_z {
                 .collect()
         }
 
-        fn init_info(&self, structure: &Structure<Self::Meta>) -> InitInfo
+        fn init_info(&self, structure: &ElementStructure) -> InitInfo
         {
             let layers = match self.find_layers(structure).per_unit_cell() {
                 None => panic!("kolmogorov/crespi/z is only supported for layered materials"),

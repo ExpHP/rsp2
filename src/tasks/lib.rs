@@ -5,6 +5,7 @@
 // Basically, everything in this crate is purely ad-hoc.
 
 #![recursion_limit="256"] // for error chain...
+#![deny(unused_must_use)]
 
 extern crate rsp2_tasks_config;
 
@@ -31,6 +32,7 @@ extern crate fern;
 #[macro_use] extern crate clap;
 #[macro_use] extern crate lazy_static;
 extern crate rsp2_kets;
+extern crate path_abs;
 extern crate serde_yaml;
 #[macro_use] extern crate serde_json;
 #[macro_use] extern crate serde_derive;
@@ -79,6 +81,7 @@ mod errors {
             Json(::serde_json::Error);
             SetLogger(::log::SetLoggerError);
             ParseInt(::std::num::ParseIntError);
+            PathAbs(::path_abs::Error);
         }
 
         links {

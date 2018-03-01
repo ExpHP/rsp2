@@ -70,6 +70,7 @@ unsafe fn transmute_copy_mut<A: ?Sized, B: ?Sized>(borrow: &mut A) -> &mut B
 /// Behavior is undefined if A and B differ in sizedness.
 /// (and of course, plenty of other undefined behavior is possible
 ///  depending on what type B is...)
+#[allow(dead_code)]
 unsafe fn transmute_copy_box<A: ?Sized, B: ?Sized>(x: Box<A>) -> Box<B>
 {
     #![allow(unused_unsafe)]

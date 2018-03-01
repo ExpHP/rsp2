@@ -2,7 +2,7 @@ use ::traits::AsPath;
 use ::Result;
 
 use ::traits::IsNewtype;
-use ::rsp2_fs_util::{open, create};
+use ::path_abs::{FileRead, FileWrite};
 
 pub trait Load: Sized {
     fn load<P>(path: P) -> Result<Self> where P: AsPath;
@@ -26,7 +26,7 @@ unsafe impl<T: ?Sized> IsNewtype<T> for Yaml<T> { }
 
 impl<T> Load for Json<T> where T: for<'de> ::serde::Deserialize<'de> {
     fn load<P: AsPath>(path: P) -> Result<Json<T>>
-    {Ok(::serde_json::from_reader(open(path.as_path())?)?).map(Json)}
+    {Ok(::serde_json::from_reader(FileRead::read(path.as_path())?)?).map(Json)}
 }
 
 // impl<T> Load for Yaml<T> where T: for<'de> ::serde::Deserialize<'de> {
@@ -36,10 +36,10 @@ impl<T> Load for Json<T> where T: for<'de> ::serde::Deserialize<'de> {
 
 impl<T> Save for Json<T> where T: ::serde::Serialize {
     fn save<P: AsPath>(&self, path: P) -> Result<()>
-    {Ok(::serde_json::to_writer(create(path.as_path())?, &self.0)?)}
+    {Ok(::serde_json::to_writer(FileWrite::create(path.as_path())?, &self.0)?)}
 }
 
 impl<T> Save for Yaml<T> where T: ::serde::Serialize {
     fn save<P: AsPath>(&self, path: P) -> Result<()>
-    {Ok(::serde_yaml::to_writer(create(path.as_path())?, &self.0)?)}
+    {Ok(::serde_yaml::to_writer(FileWrite::create(path.as_path())?, &self.0)?)}
 }
