@@ -321,38 +321,8 @@ class Mv:
 
     @staticmethod
     def run(parser, args):
+        do_mv_or_rm(parser, curdir=args.CURDIR, destdir=args.DESTDIR)
 
-        if not is_root('.'):
-            # (I'm too lazy to work out the correct relative paths
-            # to be written to crates.toml)
-            parser.error("The 'mv' subcommand must be run from the root.")
-
-        curdir = Path(args.CURDIR)
-        destdir = Path(args.DESTDIR)
-        if destdir.exists():
-            parser.error(f'"{destdir}": path already exists')
-        if not curdir.exists():
-            parser.error(f'"{curdir}": path does not exist')
-
-        crate = crate_name_from_path(curdir)
-
-        # Edit the line in crates.toml without destroying formatting
-        # (do this now for earlier exits on error)
-        with open(MASTER_CFG_PATH) as f:
-            lines = list(f)
-        lines = master_config_textual_set_path(lines, crate, destdir, fail=parser.error)
-
-        # move the directory
-        curdir.rename(destdir)
-
-        with open_tmp(MASTER_CFG_PATH) as f:
-            f.writelines(lines)
-
-        # regenerate
-        Gen.run(parser, None)
-
-
-#------------
 
 @register
 class Rm:
@@ -365,32 +335,46 @@ class Rm:
 
     @staticmethod
     def run(parser, args):
-        # FIXME copy-pasta from 'mv' command
+        do_mv_or_rm(parser, curdir=args.DIR, destdir=None)
 
-        if not is_root('.'):
-            # (I'm too lazy to work out the correct relative paths
-            # to be written to crates.toml)
-            parser.error("The 'rm' subcommand must be run from the root.")
+# Shared implementation for mv and rm.
+# When distdir is None, this deletes.
+def do_mv_or_rm(parser, curdir, destdir):
+    curdir = Path(curdir)
+    if destdir is not None:
+        destdir = Path(destdir)
 
-        curdir = Path(args.DIR)
-        if not curdir.exists():
-            parser.error(f'"{curdir}": path does not exist')
+    if not is_root('.'):
+        # (I'm too lazy to work out the correct relative paths
+        # to be written to crates.toml)
+        cmd_name = 'rm' if destdir is None else 'mv'
+        parser.error(f"The '{cmd_name}' subcommand must be run from the root.")
+    root = Path('.')
 
-        crate = crate_name_from_path(curdir)
+    if destdir is not None and destdir.exists():
+        parser.error(f'"{destdir}": path already exists')
+    if not curdir.exists():
+        parser.error(f'"{curdir}": path does not exist')
 
-        # Edit the line in crates.toml without destroying formatting
-        # (do this now for earlier exits on error)
-        with open(MASTER_CFG_PATH) as f:
-            lines = list(f)
-        lines = master_config_textual_set_path(lines, crate, None, fail=parser.error)
+    crate = crate_name_from_path(curdir)
 
+    # Edit the line in crates.toml without destroying formatting
+    # (do this now for earlier exits on error)
+    with open(MASTER_CFG_PATH) as f:
+        lines = list(f)
+    lines = master_config_textual_set_path(lines, crate, destdir, fail=parser.error)
+
+    if destdir is None: # rm
         rm_rf(str(curdir))
+        os.unlink(root / root_rel_src_toml_path(crate))
+    else: # mv
+        curdir.rename(destdir)
 
-        with open_tmp(MASTER_CFG_PATH) as f:
-            f.writelines(lines)
+    with open_tmp(MASTER_CFG_PATH) as f:
+        f.writelines(lines)
 
-        # regenerate
-        Gen.run(parser, None)
+    # regenerate
+    Gen.run(parser, None)
 
 #------------
 
