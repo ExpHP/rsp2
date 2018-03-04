@@ -3,7 +3,10 @@ use ::errors::*;
 use ::oper::{Perm, Permute};
 use ::oper::{Part, Partition};
 use ::oper::part::Unlabeled;
+use ::rsp2_array_types::{V3, Unvee};
+
 use ::std::result::Result as StdResult;
+
 
 /// Pairs [`Coords`] together with their [`Lattice`], and metadata.
 ///
@@ -153,17 +156,17 @@ impl<M> Structure<M> {
     // NOTE: We can produce `Vec<_>` and `&mut [_]`,
     //       but not `&[_]` because the data might not be present.
     //       (`&mut [_]` works because can insert the data)
-    pub fn to_carts(&self) -> Vec<[f64; 3]> { self.coords.to_carts(&self.lattice) }
-    pub fn to_fracs(&self) -> Vec<[f64; 3]> { self.coords.to_fracs(&self.lattice) }
+    pub fn to_carts(&self) -> Vec<V3> { self.coords.to_carts(&self.lattice) }
+    pub fn to_fracs(&self) -> Vec<V3> { self.coords.to_fracs(&self.lattice) }
 
     // `ensure_carts` should be called before this to guarantee that the value is `Some(_)`.
     //
     // Yes, having to unwrap the option sucks, but it's unavoidable; this is simply the
     // only way you will ever be able to borrow positions from a borrowed &Structure.
-    pub fn as_carts_cached(&self) -> Option<&[[f64; 3]]> { self.coords.as_carts_opt() }
-    pub fn as_fracs_cached(&self) -> Option<&[[f64; 3]]> { self.coords.as_fracs_opt() }
+    pub fn as_carts_cached(&self) -> Option<&[V3]> { self.coords.as_carts_opt() }
+    pub fn as_fracs_cached(&self) -> Option<&[V3]> { self.coords.as_fracs_opt() }
 
-    pub fn carts_mut(&mut self) -> &mut [[f64; 3]] {
+    pub fn carts_mut(&mut self) -> &mut [V3] {
         self.ensure_only_carts(); // 'only' because user modifications will invalidate fracs
         match self.coords {
             Coords::Fracs(_) => unreachable!(),
@@ -171,7 +174,7 @@ impl<M> Structure<M> {
         }
     }
 
-    pub fn fracs_mut(&mut self) -> &mut [[f64; 3]] {
+    pub fn fracs_mut(&mut self) -> &mut [V3] {
         self.ensure_only_fracs(); // 'only' because user modifications will invalidate carts
         match self.coords {
             Coords::Fracs(ref mut c) => c,
@@ -187,15 +190,15 @@ impl<M> Structure<M> {
         assert_eq!(self.coords.len(), coords.len());
         self.coords = coords;
     }
-    pub fn set_carts(&mut self, carts: Vec<[f64; 3]>) { self.set_coords(Coords::Carts(carts)); }
-    pub fn set_fracs(&mut self, fracs: Vec<[f64; 3]>) { self.set_coords(Coords::Fracs(fracs)); }
+    pub fn set_carts(&mut self, carts: Vec<V3>) { self.set_coords(Coords::Carts(carts)); }
+    pub fn set_fracs(&mut self, fracs: Vec<V3>) { self.set_coords(Coords::Fracs(fracs)); }
 
 
     /// # Panics
     /// Panics if the length does not match.
     pub fn with_coords(mut self, coords: Coords) -> Self { self.set_coords(coords); self }
-    pub fn with_carts(mut self, carts: Vec<[f64; 3]>) -> Self { self.set_carts(carts); self }
-    pub fn with_fracs(mut self, fracs: Vec<[f64; 3]>) -> Self { self.set_fracs(fracs); self }
+    pub fn with_carts(mut self, carts: Vec<V3>) -> Self { self.set_carts(carts); self }
+    pub fn with_fracs(mut self, fracs: Vec<V3>) -> Self { self.set_fracs(fracs); self }
 
     /// Ensures that the cartesian coordinates are cached if they aren't already.
     pub fn ensure_carts(&mut self) { self.ensure_only_carts(); }
@@ -250,10 +253,10 @@ impl<M: 'static> Partition for Structure<M> {
 }
 
 impl<M> Structure<M> {
-    pub fn translate_frac(&mut self, v: &[f64; 3])
+    pub fn translate_frac(&mut self, v: &V3)
     { ::util::translate_mut_n3_3(self.fracs_mut(), v); }
 
-    pub fn translate_cart(&mut self, v: &[f64; 3])
+    pub fn translate_cart(&mut self, v: &V3)
     { ::util::translate_mut_n3_3(self.carts_mut(), v); }
 
     /// Applies a cartesian transformation matrix.
@@ -328,7 +331,7 @@ impl<M> Structure<M> {
     fn reduce_positions_fast(&mut self)
     {
         use ::slice_of_array::prelude::*;
-        for x in self.fracs_mut().flat_mut() {
+        for x in self.fracs_mut().unvee().flat_mut() {
             *x -= x.floor();
         }
     }

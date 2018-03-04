@@ -1,4 +1,5 @@
 extern crate rsp2_structure;
+extern crate rsp2_array_types;
 
 #[macro_use] extern crate itertools;
 #[macro_use] extern crate error_chain;

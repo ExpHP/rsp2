@@ -1,5 +1,5 @@
 [package]
-name = "rsp2-structure-io"
+name = "rsp2-array-types"
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 
@@ -7,9 +7,4 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 path = "lib.rs"
 
 [dependencies]
-!!itertools
-!!error-chain
-!!vasp-poscar
-
-!!rsp2-structure
-!!rsp2-array-types
+!!rsp2-array-utils

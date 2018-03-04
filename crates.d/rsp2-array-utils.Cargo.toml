@@ -7,6 +7,12 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 path = "lib.rs"
 
 [dependencies]
-!!num-traits
+# HACK: This shouldn't depend on serde, but it does because rsp2-array-types is
+#       implemented in here
+!!serde
+!!serde-derive
 
 !!rsp2-assert-close
+
+[dev-dependencies]
+!!rand

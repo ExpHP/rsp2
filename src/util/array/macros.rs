@@ -110,6 +110,24 @@ macro_rules! gen_each__ {
         {u8} {u16} {u32} {u64} {usize}
     ]] }};
 
+    // PrimitiveFloat types
+    ([@{float} $($rest:tt)*] -> [$($done:tt)*])
+    => { gen_each__!{[$($rest)*] -> [$($done)* [
+        {f32} {f64}
+    ]] }};
+
+    // Fixed sized vector types
+    ([@{Vn} $($rest:tt)*] -> [$($done:tt)*])
+    => { gen_each__!{[$($rest)*] -> [$($done)* [
+        {V2} {V3} {V4}
+    ]] }};
+
+    // ...along with their size
+    ([@{Vn_n} $($rest:tt)*] -> [$($done:tt)*])
+    => { gen_each__!{[$($rest)*] -> [$($done)* [
+        {V2 2} {V3 3} {V4 4}
+    ]] }};
+
     ([@{0...4} $($rest:tt)*] -> [$($done:tt)*])
     => { gen_each__!{[$($rest)*] -> [$($done)* [
         { 0} { 1} { 2} { 3} { 4}

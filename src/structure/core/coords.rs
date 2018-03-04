@@ -3,14 +3,16 @@ use ::oper::{Perm, Permute};
 use ::oper::{Part, Partition};
 use ::oper::part::Unlabeled;
 
+use ::rsp2_array_types::V3;
+
 /// Wrapper type for coordinates used as input to some APIs.
 ///
 /// This allows a function to support either cartesian coordinates,
 /// or fractional coordinates with respect to some lattice.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Coords {
-    Carts(Vec<[f64; 3]>),
-    Fracs(Vec<[f64; 3]>),
+    Carts(Vec<V3>),
+    Fracs(Vec<V3>),
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -20,25 +22,25 @@ impl Coords {
     pub fn len(&self) -> usize
     { self.as_slice().1.len() }
 
-    pub(crate) fn as_slice(&self) -> (Tag, &[[f64; 3]])
+    pub(crate) fn as_slice(&self) -> (Tag, &[V3])
     { match *self {
         Coords::Carts(ref c) => (Tag::Cart, c),
         Coords::Fracs(ref c) => (Tag::Frac, c),
     }}
 
-    pub(crate) fn as_mut_vec(&mut self) -> (Tag, &mut Vec<[f64; 3]>)
+    pub(crate) fn as_mut_vec(&mut self) -> (Tag, &mut Vec<V3>)
     { match *self {
         Coords::Carts(ref mut c) => (Tag::Cart, c),
         Coords::Fracs(ref mut c) => (Tag::Frac, c),
     }}
 
-    pub(crate) fn into_vec(self) -> (Tag, Vec<[f64; 3]>)
+    pub(crate) fn into_vec(self) -> (Tag, Vec<V3>)
     { match self {
         Coords::Carts(c) => (Tag::Cart, c),
         Coords::Fracs(c) => (Tag::Frac, c),
     }}
 
-    pub(crate) fn from_vec(tag: Tag, c: Vec<[f64; 3]>) -> Self
+    pub(crate) fn from_vec(tag: Tag, c: Vec<V3>) -> Self
     { match tag {
         Tag::Cart => Coords::Carts(c),
         Tag::Frac => Coords::Fracs(c),
@@ -47,13 +49,13 @@ impl Coords {
 
 // projections
 impl Coords {
-    pub(crate) fn as_carts_opt(&self) -> Option<&[[f64; 3]]>
+    pub(crate) fn as_carts_opt(&self) -> Option<&[V3]>
     { match *self {
         Coords::Carts(ref x) => Some(x),
         Coords::Fracs(_) => None,
     }}
 
-    pub(crate) fn as_fracs_opt(&self) -> Option<&[[f64; 3]]>
+    pub(crate) fn as_fracs_opt(&self) -> Option<&[V3]>
     { match *self {
         Coords::Carts(_) => None,
         Coords::Fracs(ref x) => Some(x),
@@ -62,38 +64,38 @@ impl Coords {
 
 // conversions
 impl Coords {
-    pub fn into_carts(self, lattice: &Lattice) -> Vec<[f64; 3]>
+    pub fn into_carts(self, lattice: &Lattice) -> Vec<V3>
     { match self {
         Coords::Carts(c) => c,
         Coords::Fracs(c) => ::util::dot_n3_33(&c, &lattice.matrix()),
     }}
 
-    pub fn into_fracs(self, lattice: &Lattice) -> Vec<[f64; 3]>
+    pub fn into_fracs(self, lattice: &Lattice) -> Vec<V3>
     { match self {
         Coords::Carts(c) => ::util::dot_n3_33(&c, &lattice.inverse_matrix()),
         Coords::Fracs(c) => c,
     }}
 
-    pub fn to_carts(&self, lattice: &Lattice) -> Vec<[f64; 3]>
+    pub fn to_carts(&self, lattice: &Lattice) -> Vec<V3>
     { match *self {
         Coords::Carts(ref c) => c.clone(),
         Coords::Fracs(ref c) => ::util::dot_n3_33(c, &lattice.matrix()),
     }}
 
-    pub fn to_fracs(&self, lattice: &Lattice) -> Vec<[f64; 3]>
+    pub fn to_fracs(&self, lattice: &Lattice) -> Vec<V3>
     { match *self {
         Coords::Carts(ref c) => ::util::dot_n3_33(c, &lattice.inverse_matrix()),
         Coords::Fracs(ref c) => c.clone(),
     }}
 
-    pub(crate) fn into_tag(self, tag: Tag, lattice: &Lattice) -> Vec<[f64; 3]>
+    pub(crate) fn into_tag(self, tag: Tag, lattice: &Lattice) -> Vec<V3>
     { match tag {
         Tag::Cart => self.into_carts(lattice),
         Tag::Frac => self.into_fracs(lattice),
     }}
 
     #[allow(unused)]
-    pub(crate) fn to_tag(&self, tag: Tag, lattice: &Lattice) -> Vec<[f64; 3]>
+    pub(crate) fn to_tag(&self, tag: Tag, lattice: &Lattice) -> Vec<V3>
     { match tag {
         Tag::Cart => self.to_carts(lattice),
         Tag::Frac => self.to_fracs(lattice),
@@ -119,6 +121,7 @@ impl Partition for Coords {
 #[cfg(test)]
 #[deny(unused)]
 mod tests {
+    use ::rsp2_array_types::envee;
 
     // make sure the library correctly chooses whether to use the
     // regular matrix, the inverse matrix, or no matrix
@@ -127,7 +130,7 @@ mod tests {
         use ::Lattice;
         use ::Coords::{Fracs, Carts};
 
-        let x = |mag| vec![[mag, 0.0, 0.0]];
+        let x = |mag| envee(vec![[mag, 0.0, 0.0]]);
         let lattice = Lattice::cubic(2.0);
 
         assert_eq!(x(1.0), Fracs(x(1.0)).to_fracs(&lattice));
@@ -156,9 +159,9 @@ mod tests {
 
         // what happens to [1,0,0] when we interpret it in one coord system
         //  and then convert to the other system
-        let input = vec![[1.0, 0.0, 0.0]];
-        let frac_to_cart = vec![[0.0, 1.0, 0.0]];
-        let cart_to_frac = vec![[0.0, 0.0, 1.0]];
+        let input = envee(vec![[1.0, 0.0, 0.0]]);
+        let frac_to_cart = envee(vec![[0.0, 1.0, 0.0]]);
+        let cart_to_frac = envee(vec![[0.0, 0.0, 1.0]]);
 
         assert_eq!(&frac_to_cart, &Fracs(input.clone()).to_carts(&lattice));
         assert_eq!(&frac_to_cart, &Fracs(input.clone()).into_carts(&lattice));

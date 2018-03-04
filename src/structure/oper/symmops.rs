@@ -1,7 +1,12 @@
+#![allow(deprecated)] // HACK: reduce warning-spam at call sites, I only care about the `use`
+
+#[warn(deprecated)]
 use ::rsp2_array_utils::{dot, det};
-use ::rsp2_array_utils::{map_arr, try_map_arr, mat_from_fn, map_mat};
+use ::rsp2_array_utils::{mat_from_fn, map_mat};
 use ::errors::*;
 use ::std::rc::Rc;
+
+use ::rsp2_array_types::V3;
 
 // NOTE: This API is in flux. Some (possibly incorrect) notes:
 //
@@ -30,7 +35,7 @@ pub struct FracTrans (
     ///
     /// Invariants:
     ///  - elements are reduced into the range `0 <= x < 12`.
-    [i32; 3],
+    V3<i32>,
 );
 
 /// A spacegroup operation on a primitive cell.
@@ -109,15 +114,13 @@ impl FracRot {
 
 impl FracTrans {
     pub fn eye() -> Self
-    { FracTrans([0, 0, 0]) }
+    { FracTrans(V3([0, 0, 0])) }
 
-    pub fn from_floats(xs: &[f64; 3]) -> Result<FracTrans>
-    {Ok({
-        FracTrans(try_map_arr(*xs, |x| ::util::Tol(1e-4).unfloat(x * 12.0))?)
-    })}
+    pub fn from_floats(xs: &V3) -> Result<FracTrans>
+    { xs.try_map(|x| ::util::Tol(1e-4).unfloat(x * 12.0)).map(FracTrans) }
 
-    fn float(&self) -> [f64; 3]
-    { map_arr(self.0, |x| f64::from(x) / 12f64) }
+    fn float(&self) -> V3
+    { self.0.map(|x| f64::from(x) / 12f64) }
 }
 
 const FRAC_OP_EYE: [[i32; 4]; 4] = [
@@ -137,7 +140,7 @@ impl FracOp {
         out[0][..3].copy_from_slice(&rot.t[0]);
         out[1][..3].copy_from_slice(&rot.t[1]);
         out[2][..3].copy_from_slice(&rot.t[2]);
-        out[3][..3].copy_from_slice(&trans.0);
+        out[3][..3].copy_from_slice(&*trans.0);
         FracOp { t: out.into() }
     }
 
@@ -186,17 +189,17 @@ impl FracOp {
 }
 
 impl FracRot {
-    pub fn transform_prim(&self, fracs: &[[f64; 3]]) -> Vec<[f64; 3]>
+    pub fn transform_prim(&self, fracs: &[V3]) -> Vec<V3>
     { ::util::dot_n3_33(fracs, &self.float_t()) }
 }
 
 impl FracTrans {
-    pub fn transform_prim_mut(&self, fracs: &mut [[f64; 3]])
+    pub fn transform_prim_mut(&self, fracs: &mut [V3])
     { ::util::translate_mut_n3_3(fracs, &self.float()) }
 }
 
 impl FracOp {
-    pub fn transform_prim(&self, fracs: &[[f64; 3]]) -> Vec<[f64; 3]>
+    pub fn transform_prim(&self, fracs: &[V3]) -> Vec<V3>
     {
         let mut out = self.to_rot().transform_prim(fracs);
         self.to_trans().transform_prim_mut(&mut out);
@@ -208,6 +211,7 @@ impl FracOp {
 #[deny(unused)]
 mod tests {
     use super::*;
+    use ::rsp2_array_types::envee;
 
     #[test]
     fn rot_transform()
@@ -218,8 +222,8 @@ mod tests {
             [0,  0, 1],
         ];
         assert_eq!(
-            FracRot::new(&r).transform_prim(&[[1.0, 5.0, 7.0]]),
-            vec![[-5.0, 1.0, 7.0]]
+            FracRot::new(&r).transform_prim(envee(&[[1.0, 5.0, 7.0]])),
+            envee(vec![[-5.0, 1.0, 7.0]]),
         );
     }
 
@@ -242,11 +246,14 @@ mod tests {
             [1, 0, 0],
             [0, 1, 0],
         ]);
+        // a primitive structure that is sensitive to any permutations of the axes
+        let prim = envee(vec![[1., 2., 3.]]);
         assert_eq!(xy.then(&zx), xyzx);
         assert_eq!(zx.of(&xy), xyzx);
         assert_eq!(
-            zx.transform_prim(&xy.transform_prim(&[[1., 2., 3.]])),
-            xyzx.transform_prim(&[[1., 2., 3.]]));
+            zx.transform_prim(&xy.transform_prim(&prim)),
+            xyzx.transform_prim(&prim),
+        );
 
         let t = FracTrans::eye();
         let xy = FracOp::new(&xy, &t);
@@ -255,9 +262,9 @@ mod tests {
         assert_eq!(xy.then(&zx), xyzx);
         assert_eq!(zx.of(&xy), xyzx);
         assert_eq!(
-            zx.transform_prim(&xy.transform_prim(&[[1., 2., 3.]])),
-            xyzx.transform_prim(&[[1., 2., 3.]]));
-
+            zx.transform_prim(&xy.transform_prim(&prim)),
+            xyzx.transform_prim(&prim),
+        );
     }
 
     #[test]
@@ -269,7 +276,7 @@ mod tests {
                 [-1,  1, 0],
                 [ 0,  0, 1],
             ]),
-            &FracTrans::from_floats(&[1./3., 2./3., 0.0]).unwrap(),
+            &FracTrans::from_floats(&V3([1./3., 2./3., 0.0])).unwrap(),
         );
         let square = FracOp::new(
             &FracRot::new(&[
@@ -277,7 +284,7 @@ mod tests {
                 [-1, 0, 0],
                 [ 0, 0, 1],
             ]),
-            &FracTrans::from_floats(&[0., 0., 0.]).unwrap(),
+            &FracTrans::from_floats(&V3([0., 0., 0.])).unwrap(),
         );
 
         assert_eq!(op.then(&op), square);

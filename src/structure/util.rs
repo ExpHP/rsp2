@@ -4,14 +4,16 @@
 use ::ordered_float::NotNaN;
 use ::errors::*;
 
+use ::rsp2_array_types::{V3, Envee, Unvee};
+
 #[cfg(test)] use ::std::rc::Rc;
 #[cfg(test)] use ::std::cell::RefCell;
 
 // Multiply on the right
-pub(crate) fn dot_n3_33(coords: &[[f64; 3]], mat: &[[f64; 3]; 3]) -> Vec<[f64; 3]>
+pub(crate) fn dot_n3_33(coords: &[V3], mat: &[[f64; 3]; 3]) -> Vec<V3>
 {
     use ::rsp2_array_utils::dot;
-    coords.iter().map(|v| dot(v, mat)).collect()
+    coords.unvee().iter().map(|v| dot(v, mat)).collect::<Vec<_>>().envee()
 }
 
 pub(crate) fn transpose_33<T: Copy>(m: &[[T; 3]; 3]) -> [[T; 3]; 3]
@@ -26,45 +28,39 @@ pub(crate) fn transpose_33<T: Copy>(m: &[[T; 3]; 3]) -> [[T; 3]; 3]
 // but I have not tested this. - ML
 #[allow(non_snake_case)]
 #[allow(unused)]
-pub(crate) fn dot_n3_33T(coords: &[[f64; 3]], mat: &[[f64; 3]; 3]) -> Vec<[f64; 3]>
+pub(crate) fn dot_n3_33T(coords: &[V3], mat: &[[f64; 3]; 3]) -> Vec<V3>
 {
     use ::rsp2_array_utils::arr_from_fn;
-    coords.iter().map(|v|
-        arr_from_fn(|c| (0..3).map(|k| v[k] * mat[c][k]).sum())
+    coords.unvee().iter().map(|v|
+        V3(arr_from_fn(|c| (0..3).map(|k| v[k] * mat[c][k]).sum()))
     ).collect()
 }
 
-pub(crate) fn translate_mut_n3_3(coords: &mut [[f64; 3]], t: &[f64; 3])
+pub(crate) fn translate_mut_n3_3(coords: &mut [V3], t: &V3)
 {
     for row in coords {
-        for k in 0..3 {
-            row[k] += t[k];
-        }
+        *row += t;
     }
 }
 
-pub(crate) fn translate_mut_n3_n3(coords: &mut [[f64; 3]], by: &[[f64; 3]])
+pub(crate) fn translate_mut_n3_n3(coords: &mut [V3], by: &[V3])
 {
     assert_eq!(coords.len(), by.len());
-    for i in 0..coords.len() {
-        for k in 0..3 {
-            coords[i][k] += by[i][k];
-        }
-    }
+    izip!(coords, by).for_each(|(a, b)| *a += b);
 }
 
 #[cfg(test)]
-pub(crate) fn not_nan_n3(coords: Vec<[f64; 3]>) -> Vec<[NotNaN<f64>; 3]> {
+pub(crate) fn not_nan_n3(coords: Vec<V3>) -> Vec<V3<NotNaN<f64>>> {
     use ::slice_of_array::prelude::*;
     // still a newtype?
     assert_eq!(::std::mem::size_of::<f64>(), ::std::mem::size_of::<NotNaN<f64>>());
     // (NotNaN has undefined behavior for NaN so we must check)
-    assert!(coords.flat().iter().all(|x| !x.is_nan()));
+    assert!(coords.iter().flat_map(|v| v).all((|x| !x.is_nan())));
     unsafe { ::std::mem::transmute(coords) }
 }
 
 #[cfg(test)]
-pub(crate) fn eq_unordered_n3(a: &[[f64; 3]], b: &[[f64; 3]]) -> bool {
+pub(crate) fn eq_unordered_n3(a: &[V3], b: &[V3]) -> bool {
     let mut a = not_nan_n3(a.to_vec()); a.sort();
     let mut b = not_nan_n3(b.to_vec()); b.sort();
     a == b

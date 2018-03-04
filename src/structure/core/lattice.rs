@@ -1,6 +1,11 @@
+#![allow(deprecated)] // HACK: reduce warning-spam at call sites, I only care about the `use`
+
+#[warn(deprecated)]
 use ::rsp2_array_utils::{inv, det, dot, map_arr, map_mat};
 use ::std::ops::Mul;
 use ::std::sync::Arc;
+
+use ::rsp2_array_types::{V3, Unvee, Envee};
 
 /// A 3x3 matrix with a precomputed inverse.
 #[derive(Debug, Clone)]
@@ -20,13 +25,20 @@ impl PartialEq<Lattice> for Lattice {
 
 impl Lattice {
     /// Create a lattice from a matrix where the rows are lattice vectors.
+    #[inline]
     pub fn new(matrix: &[[f64; 3]; 3]) -> Self {
         let inverse = Arc::new(inv(matrix));
         let matrix = Arc::new(*matrix);
         Self { matrix, inverse }
     }
 
+    #[inline(always)]
+    pub fn from_vectors(vectors: &[V3; 3]) -> Self {
+        Self::new(vectors.unvee())
+    }
+
     /// Invert the lattice.
+    #[inline]
     pub fn inverted(&self) -> Self {
         // FIXME: *strictly speaking* this violates the invariant that 'inverse'
         //        is uniquely determined by 'matrix', which our PartialEq
@@ -38,15 +50,24 @@ impl Lattice {
     }
 
     /// Matrix where lattice vectors are rows.
-    pub fn matrix(&self) -> &[[f64; 3]; 3] { &self.matrix }
+    #[inline]
+    pub fn matrix(&self) -> &[[f64; 3]; 3]
+    { &self.matrix }
+
     /// Inverse of the matrix where lattice vectors are rows.
-    pub fn inverse_matrix(&self) -> &[[f64; 3]; 3] { &self.inverse }
+    #[inline]
+    pub fn inverse_matrix(&self) -> &[[f64; 3]; 3]
+    { &self.inverse }
 
-    pub fn lengths(&self) -> [f64; 3]
-    { map_arr(self.quadrances(), |x| x.sqrt()) }
+    #[inline]
+    pub fn vectors(&self) -> &[V3; 3]
+    { self.matrix().envee() }
 
-    pub fn quadrances(&self) -> [f64; 3]
-    { map_arr(*self.matrix, |ref row| dot(row, row)) }
+    pub fn norms(&self) -> [f64; 3]
+    { map_arr(*self.vectors(), |v| v.norm()) }
+
+    pub fn sqnorms(&self) -> [f64; 3]
+    { map_arr(*self.vectors(), |v| v.sqnorm()) }
 
     /// Get the (positive) volume of the lattice cell.
     pub fn volume(&self) -> f64
@@ -86,8 +107,10 @@ impl Lattice {
 /// Helper constructors
 impl Lattice {
     /// The identity lattice.
+    #[inline]
     pub fn eye() -> Self { Self::cubic(1.0) }
 
+    #[inline]
     pub fn diagonal(vec: &[f64; 3]) -> Self { Self::orthorhombic(vec[0], vec[1], vec[2]) }
 
     // NOTE: Currently there are only helpers for bravais lattices whose
@@ -98,9 +121,11 @@ impl Lattice {
     //       the lattice follows the same conventions)
 
     /// A cubic lattice ((a, a, a), (90, 90, 90))
+    #[inline]
     pub fn cubic(a: f64) -> Self { Self::orthorhombic(a, a, a) }
 
     /// An orthorhombic lattice ((a, b, c), (90, 90, 90))
+    #[inline]
     pub fn orthorhombic(a: f64, b: f64, c: f64) -> Self { Self::new(&[[a, 0., 0.], [0., b, 0.], [0., 0., c]]) }
 
     // who needs quickcheck
@@ -124,6 +149,7 @@ impl Lattice {
 
 /// Defaults to the identity matrix.
 impl Default for Lattice {
+    #[inline]
     fn default() -> Lattice { Lattice::eye() }
 }
 
@@ -132,6 +158,7 @@ impl Default for Lattice {
 //       love of row-based matrices. Maybe the '*' operator is just a bad idea.
 impl<'a, 'b> Mul<&'b Lattice> for &'a Lattice {
     type Output = Lattice;
+
     fn mul(self, other: &'b Lattice) -> Lattice {
         // Let the inverse be computed from scratch,
         // for sustained accuracy after many products
@@ -141,6 +168,7 @@ impl<'a, 'b> Mul<&'b Lattice> for &'a Lattice {
 
 impl<'a, 'b> Mul<&'b [[f64; 3]; 3]> for &'a Lattice {
     type Output = Lattice;
+
     fn mul(self, other: &'b [[f64; 3]; 3]) -> Lattice {
         Lattice::new(&dot(self.matrix(), other))
     }
@@ -148,6 +176,7 @@ impl<'a, 'b> Mul<&'b [[f64; 3]; 3]> for &'a Lattice {
 
 impl<'a, 'b> Mul<&'b Lattice> for &'a [[f64; 3]; 3] {
     type Output = Lattice;
+
     fn mul(self, other: &'b Lattice) -> Lattice {
         Lattice::new(&dot(self, other.matrix()))
     }

@@ -1,5 +1,6 @@
 extern crate rsp2_structure;
 extern crate rsp2_array_utils;
+extern crate rsp2_array_types;
 
 extern crate serde;
 extern crate serde_yaml;

@@ -178,10 +178,19 @@ pub(crate) mod internal {
     pub unsafe trait PrimitiveFloat
         : PrimitiveRing
         + SelfDiv + RefDiv
-    { }
+    {
+        fn sqrt(self) -> Self;
+    }
 
-    unsafe impl PrimitiveFloat for f32 {}
-    unsafe impl PrimitiveFloat for f64 {}
+    gen_each!{
+        @{float}
+        impl_primitive_float!({$T:ty})
+        => {
+            unsafe impl PrimitiveFloat for $T {
+                #[inline(always)] fn sqrt(self) -> $T { self.sqrt() }
+            }
+        };
+    }
 }
 
 /// Marker trait for a built-in array type, i.e. `[T; n]`.

@@ -1,6 +1,11 @@
+#![allow(deprecated)] // HACK: reduce warning-spam at call sites, I only care about the `use`
+
 use ::{Lattice, Coords};
+#[warn(deprecated)]
 use ::rsp2_array_utils::{dot, det, map_arr, map_mat};
 use super::reduction::LatticeReduction;
+
+use ::rsp2_array_types::{V3, Unvee};
 
 pub fn lattice_point_group(
     reduction: &LatticeReduction,
@@ -58,7 +63,7 @@ impl Context {
         // (but of course; a rotation must not change a vector's length!)
         //
         // This gives us an *extremely* small search space for valid rotations.
-        let lengths = self.lattice.reduced().lengths();
+        let lengths = self.lattice.reduced().norms();
         let choices_frac = map_arr(lengths, |x| self.lattice_points_of_length(x));
         let choices_cart = map_arr(choices_frac.clone(), |ref choices| {
                 Coords::Fracs(floatify(choices))
@@ -66,12 +71,12 @@ impl Context {
         });
 
         // off diagonal elements of L L^T
-        let metric_off_diags = |m: &[[f64; 3]; 3]| [
-            dot(&m[1], &m[2]),
-            dot(&m[2], &m[0]),
-            dot(&m[0], &m[1]),
+        let metric_off_diags = |m: &[V3; 3]| [
+            V3::dot(&m[1], &m[2]),
+            V3::dot(&m[2], &m[0]),
+            V3::dot(&m[0], &m[1]),
         ];
-        let target_off_diags = metric_off_diags(self.lattice.reduced().matrix());
+        let target_off_diags = metric_off_diags(self.lattice.reduced().vectors());
 
         // Build unimodular matrices from those choices
         let mut unimodulars = vec![];
@@ -82,7 +87,7 @@ impl Context {
                 for (&frac_2, &cart_2) in izip!(&choices_frac[2], &choices_cart[2]) {
 
                     // Most of these matrices won't be unimodular; filter them out.
-                    let unimodular = [frac_0, frac_1, frac_2];
+                    let unimodular = [frac_0, frac_1, frac_2].unvee();
                     if det(&unimodular).abs() != 1 {
                         continue;
                     }
@@ -116,11 +121,11 @@ impl Context {
             .collect()
     }
 
-    fn lattice_points_of_length(&self, target_length: f64) -> Vec<[i32; 3]>
+    fn lattice_points_of_length(&self, target_length: f64) -> Vec<V3<i32>>
     {
         Coords::Fracs(LATTICE_POINTS_FLOAT.clone()).to_carts(&self.lattice.reduced())
             .into_iter()
-            .map(|v| dot(&v, &v).sqrt())
+            .map(|v| v.norm())
             .enumerate()
             .filter(|&(_, r)| (r - target_length).abs() < self.tol * target_length)
             .map(|(i, _)| LATTICE_POINTS_INT[i])
@@ -132,7 +137,7 @@ lazy_static!{
     // a set of fractional lattice coordinates large enough that,
     // for a reduced cell, this will include all vectors equal in length
     // to a cell vector
-    static ref LATTICE_POINTS_INT: Vec<[i32; 3]> = {
+    static ref LATTICE_POINTS_INT: Vec<V3<i32>> = {
         // FIXME: this is a fairly large region for the sake of paranoia
         //         until I can find and verify Le Page's proof.
         const MAX: i32 = 5;
@@ -140,19 +145,15 @@ lazy_static!{
         for i in -MAX..MAX + 1 {
             for j in -MAX..MAX + 1 {
                 for k in -MAX..MAX + 1 {
-                    indices.push([i, j, k]);
+                    indices.push(V3([i, j, k]));
                 }
             }
         }
         indices
     };
 
-    static ref LATTICE_POINTS_FLOAT: Vec<[f64; 3]> = floatify(&LATTICE_POINTS_INT);
+    static ref LATTICE_POINTS_FLOAT: Vec<V3> = floatify(&LATTICE_POINTS_INT);
 }
 
-fn floatify(vs: &[[i32; 3]]) -> Vec<[f64; 3]>
-{
-    vs.iter()
-        .map(|&v| [v[0].into(), v[1].into(), v[2].into()])
-        .collect()
-}
+fn floatify(vs: &[V3<i32>]) -> Vec<V3>
+{ vs.iter().map(|&v| v.map(|x| x.into())).collect() }

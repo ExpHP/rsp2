@@ -3,6 +3,8 @@ use ::std::io::prelude::*;
 
 use ::rsp2_structure::{Element, ElementStructure};
 
+use ::rsp2_array_types::V3;
+
 /// Writes an XYZ frame to an open file.
 ///
 /// You can freely call this multiple times on the same file
@@ -14,7 +16,7 @@ where W: Write,
     _dump(w, title, &structure.to_carts(), structure.metadata())
 }
 
-fn _dump<W>(mut w: W, title: &str, carts: &[[f64; 3]], types: &[Element]) -> Result<()>
+fn _dump<W>(mut w: W, title: &str, carts: &[V3], types: &[Element]) -> Result<()>
 where W: Write,
 {
     assert!(!title.contains("\n"));

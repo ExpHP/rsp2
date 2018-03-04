@@ -12,6 +12,12 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 path = "lib.rs"
 
 [dependencies]
-num-traits = "0.1"
+# HACK: This shouldn't depend on serde, but it does because rsp2-array-types is
+#       implemented in here
+serde = "1"
+serde_derive = "1"
 
 rsp2-assert-close = { path = "../assert-close" }
+
+[dev-dependencies]
+rand = "0.3"

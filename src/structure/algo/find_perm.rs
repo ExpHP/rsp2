@@ -3,6 +3,8 @@ use ::{Lattice, Structure, CoordStructure};
 use ::{FracRot, FracOp};
 use super::group::GroupTree;
 
+use ::rsp2_array_types::{V3, Unvee};
+
 use ::Result;
 use ::{Perm, Permute};
 
@@ -33,38 +35,37 @@ pub fn dumb_symmetry_test(
 // Slow, and not even always correct
 fn dumb_nearest_distance(
     lattice: &Lattice,
-    frac_a: &[f64; 3],
-    frac_b: &[f64; 3],
+    frac_a: &V3,
+    frac_b: &V3,
 ) -> f64
 {
-    use ::rsp2_array_utils::{arr_from_fn, dot};
     use ::Coords;
-    let diff: [_; 3] = arr_from_fn(|k| frac_a[k] - frac_b[k]);
-    let diff: [_; 3] = arr_from_fn(|k| diff[k] - diff[k].round());
+    let diff = (frac_a - frac_b).map(|x| x - x.round());
 
     let mut diffs = vec![];
     for &a in &[-1., 0., 1.] {
         for &b in &[-1., 0., 1.] {
             for &c in &[-1., 0., 1.] {
-                diffs.push([diff[0] + a, diff[1] + b, diff[2] + c]);
+                diffs.push(diff + V3([a, b, c]));
             }
         }
     }
+
     let carts = Coords::Fracs(diffs).to_carts(lattice);
-    carts.into_iter().map(|v| dot(&v, &v).sqrt())
+    carts.into_iter().map(|v| v.norm())
         .min_by(|a, b| a.partial_cmp(b).unwrap()).unwrap()
 }
 
 // Slow, and not even always correct
 fn dumb_validate_equivalent(
     lattice: &Lattice,
-    frac_a: &[[f64; 3]],
-    frac_b: &[[f64; 3]],
+    frac_a: &[V3],
+    frac_b: &[V3],
     tol: f64,
-)
-{
-    for i in 0..frac_a.len() {
-        let d = dumb_nearest_distance(lattice, &frac_a[i], &frac_b[i]);
+) {
+    assert_eq!(frac_a.len(), frac_b.len());
+    for (a, b) in izip!(frac_a, frac_b) {
+        let d = dumb_nearest_distance(lattice, a, b);
         assert!(d < tol * (1.0 + 1e-7));
     }
 }
@@ -153,36 +154,42 @@ pub(crate) fn of_rotation_with_meta<M: Ord>(
 fn of_rotation_impl<M: Ord>(
     lattice: &Lattice,
     meta: &[M],
-    from_fracs: &[[f64; 3]],
-    to_fracs: &[[f64; 3]],
+    from_fracs: &[V3],
+    to_fracs: &[V3],
     tol: f64,
 ) -> Result<Perm>
 {Ok({
-    use ::rsp2_array_utils::dot;
     use ::ordered_float::NotNaN;
     use ::Coords::Fracs;
 
     // Sort both sides by some measure which is likely to produce a small
     // maximum value of (sorted_rotated_index - sorted_original_index).
-    // The C code is optimized for this case, reducing an O(n^2)
-    // search down to ~O(n). (for O(n log n) work overall, including the sort)
+    // This reduces an O(n^2) search down to ~O(n).
+    // (for O(n log n) work overall, including the sort)
     //
     // We choose to sort first by atom type, then by distance to the nearest
     // bravais lattice point.
-    let sort_by_lattice_distance = |fracs: &[[f64; 3]]| {
+    let sort_by_lattice_distance = |fracs: &[V3]| {
         let mut fracs = fracs.to_vec();
-        for x in fracs.flat_mut() {
-            *x -= x.round();
+        for v in &mut fracs {
+            *v -= v.map(f64::round);
         }
 
         let data_to_sort = Fracs(fracs.clone())
+                // NOTE: It's possible that computing distances in fractional space can be
+                //       even more effective than in cartesian space.  See this comment
+                //       and the conversation leading up to it:
+                //
+                //       https://github.com/atztogo/spglib/pull/44#issuecomment-356516736
+                //
+                //       But for now, I'll leave it as is.
                 .to_carts(lattice)
                 .into_iter()
                 .zip(meta)
                 .map(|(x, m)| {
                     (
                         m, // first by atom type
-                        NotNaN::new(dot(&x, &x).sqrt()).unwrap(),
+                        NotNaN::new(x.norm()).unwrap(),
                     )
                 })
                 .collect::<Vec<_>>();
@@ -212,11 +219,11 @@ fn of_rotation_impl<M: Ord>(
 
 // Optimized for permutations near the identity.
 // NOTE: Lattice must be reduced so that the voronoi cell fits
-//       within the four unit cells around the origin
+//       within the eight unit cells around the origin
 fn brute_force_near_identity(
     lattice: &Lattice,
-    from_fracs: &[[f64; 3]],
-    to_fracs: &[[f64; 3]],
+    from_fracs: &[V3],
+    to_fracs: &[V3],
     tol: f64,
 ) -> Result<Perm>
 {Ok({
@@ -255,12 +262,10 @@ fn brute_force_near_identity(
             }
 
             let distance2 = {
-                use ::rsp2_array_utils::{arr_from_fn, dot};
-                let diff: [_; 3] = arr_from_fn(|k| from_fracs[from][k] - to_fracs[to][k]);
-                let diff: [_; 3] = arr_from_fn(|k| diff[k] - diff[k].round());
+                let diff = (from_fracs[from] - to_fracs[to]).map(|x| x - x.round());
 
-                let cart = dot(&diff, lattice.matrix());
-                dot(&cart, &cart)
+                let cart = ::rsp2_array_utils::dot(&diff.0, lattice.matrix());
+                V3(cart).sqnorm()
             };
             if distance2 < tol * tol {
                 perm[to] = from as u32;
@@ -281,20 +286,21 @@ fn brute_force_near_identity(
 #[deny(unused)]
 mod tests {
     use ::Lattice;
-    use super::{Perm, Permute};
+    use super::*;
 
-    use ::slice_of_array::*;
     use ::rand::Rand;
+
+    use ::rsp2_array_types::Envee;
 
     fn random_vec<T: Rand>(n: u32) -> Vec<T>
     { (0..n).map(|_| ::rand::random()).collect() }
 
-    fn random_problem(n: u32) -> (Vec<[f64; 3]>, Perm, Vec<[f64; 3]>)
+    fn random_problem(n: u32) -> (Vec<V3>, Perm, Vec<V3>)
     {
         let original: Vec<[f64; 3]> = random_vec(n);
         let perm = Perm::random(n);
         let permuted = original.clone().permuted_by(&perm);
-        (original, perm, permuted)
+        (original.envee(), perm, permuted.envee())
     }
 
     #[test]

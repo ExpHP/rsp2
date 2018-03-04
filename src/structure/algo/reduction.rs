@@ -15,6 +15,7 @@
 use ::{Lattice};
 
 use ::rsp2_array_utils::{dot, det, inv, arr_from_fn, map_mat};
+use ::rsp2_array_types::{V3, Envee, Unvee};
 
 use ::std::cmp::Ordering;
 
@@ -73,17 +74,18 @@ mod unimodular {
 
     // easier to update
     #[derive(Debug, Clone)]
-    pub(super) struct UnimodularState(pub(super) [[i32; 3]; 3]);
+    pub(super) struct UnimodularState(pub(super) [V3<i32>; 3]);
 
     impl UnimodularState {
         pub fn eye() -> Self
-        { UnimodularState([[1,0,0], [0,1,0], [0,0,1]]) }
+        { UnimodularState([[1,0,0], [0,1,0], [0,0,1]].envee()) }
 
         // steps N1, N2
         /// Swap two rows.
         #[inline]
         pub fn row_swap(&mut self, j: usize, k: usize)
         {
+            // NOTE: Can't mem::swap because of simultaneous indexing
             let ghost = self.0;
             self.0[j] = ghost[k];
             self.0[k] = ghost[j];
@@ -94,30 +96,24 @@ mod unimodular {
         #[inline]
         pub fn row_axpy(&mut self, to: usize, mul: i32, from: usize)
         {
-            assert_ne!(from, to);
-            for k in 0..3 {
-                self.0[to][k] += mul * self.0[from][k];
-            }
+            assert_ne!(from, to, "adding a row to itself is not a unimodular operation");
+            self.0[to] += mul * self.0[from];
         }
 
         // steps N3
         /// Negate a lattice vector.
         #[inline]
         pub fn row_negate(&mut self, row: usize)
-        {
-            for x in &mut self.0[row] {
-                *x *= -1;
-            }
-        }
+        { self.0[row] *= -1; }
 
         pub fn finish(&self) -> Unimodular
         {
             // FIXME it feels cleaner to compute the inverse alongside
             //       the matrix rather than to do a float inversion at the end
-            let floats_inv = inv(&map_mat(self.0, |x| x as f64));
+            let floats_inv = inv(&map_mat(self.0.unvee(), |x| x as f64));
             let inverse = ::util::Tol(1e-6).unfloat_33(&floats_inv).expect("bug!");
 
-            Unimodular { matrix: self.0, inverse }
+            Unimodular { matrix: self.0.unvee(), inverse }
         }
     }
 }
@@ -155,16 +151,17 @@ mod state {
             let original = original.clone();
             let unimodular = unimodular.clone();
 
-            let unimodular_float = map_mat(unimodular.0, Into::into);
+            let unimodular_float = map_mat(unimodular.0.unvee(), Into::into);
             let lattice = dot(&unimodular_float, original.matrix());
+            let vectors = (&lattice).envee();
 
-            let abc = arr_from_fn(|k| dot(&lattice[k], &lattice[k]));
-            let xyz = arr_from_fn(|k| 2.0 * dot(&lattice[(k + 1) % 3], &lattice[(k + 2) % 3]));
+            let abc = arr_from_fn(|k| V3::dot(&vectors[k], &vectors[k]));
+            let xyz = arr_from_fn(|k| 2.0 * V3::dot(&vectors[(k + 1) % 3], &vectors[(k + 2) % 3]));
             State { original, unimodular, lattice, abc, xyz, fuzz }
         }
 
         pub fn lattice_matrix(&self) -> &[[f64; 3]; 3] { &self.lattice }
-        pub fn unimodular_matrix(&self) -> &[[i32; 3]; 3] { &self.unimodular.0 }
+        pub fn unimodular_matrix(&self) -> &[[i32; 3]; 3] { (&self.unimodular.0).unvee() }
         pub fn fuzz(&self) -> Fuzz { self.fuzz }
         pub fn abc(&self) -> &[f64; 3] { &self.abc }
         pub fn xyz(&self) -> &[f64; 3] { &self.xyz }

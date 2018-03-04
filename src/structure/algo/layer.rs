@@ -6,6 +6,8 @@ use ::std::mem;
 use ::itertools::Itertools;
 use ::ordered_float::NotNaN;
 
+use ::rsp2_array_types::{V3, dot};
+
 /// Return type of `find_layers`.
 #[derive(Debug, PartialEq, Clone)]
 pub enum Layers {
@@ -97,7 +99,7 @@ impl LayersPerUnitCell {
 ///
 /// Normal is in fractional coords, and is currently limited such
 /// that it must be one of the lattice vectors.
-pub fn find_layers<M>(structure: &Structure<M>, normal: &[i32; 3], threshold: f64)
+pub fn find_layers<M>(structure: &Structure<M>, normal: &V3<i32>, threshold: f64)
 -> Result<Layers>
 {
     find_layers_impl(
@@ -109,7 +111,7 @@ pub fn find_layers<M>(structure: &Structure<M>, normal: &[i32; 3], threshold: f6
 }
 
 // monomorphic for less codegen
-fn find_layers_impl(fracs: &[[f64; 3]], lattice: &Lattice, normal: &[i32; 3], cart_threshold: f64)
+fn find_layers_impl(fracs: &[V3<f64>], lattice: &Lattice, normal: &V3<i32>, cart_threshold: f64)
 -> Result<Layers>
 {Ok({
     if fracs.len() == 0 {
@@ -119,7 +121,7 @@ fn find_layers_impl(fracs: &[[f64; 3]], lattice: &Lattice, normal: &[i32; 3], ca
     let axis = {
         let mut sorted = *normal;
         sorted.sort_unstable();
-        ensure!(sorted == [0, 0, 1],
+        ensure!(sorted == V3([0, 0, 1]),
             "unsupported layer normal: {:?}", normal);
 
         normal.iter().position(|&x| x == 1).unwrap()
@@ -132,12 +134,11 @@ fn find_layers_impl(fracs: &[[f64; 3]], lattice: &Lattice, normal: &[i32; 3], ca
     //
     //        So let's make sure that is the case:
     { // Safety HACK!
-        use ::rsp2_array_utils::dot;
-        let lengths = lattice.lengths();
-        let vecs = lattice.matrix();
+        let norms = lattice.norms();
+        let vecs = lattice.vectors();
         for k in 0..3 {
             if k != axis {
-                let cos = dot(&vecs[k], &vecs[axis]) / (lengths[k] * lengths[axis]);
+                let cos = dot(&vecs[k], &vecs[axis]) / (norms[k] * norms[axis]);
                 ensure!(cos.abs() < 1e-7,
                     "For your safety, assign_layers is currently limited to \
                     lattices where the normal is perpendicular to the other two \
@@ -161,7 +162,7 @@ fn find_layers_impl(fracs: &[[f64; 3]], lattice: &Lattice, normal: &[i32; 3], ca
     // --(end original text)--
 
     // Transform into units used by the bulk of the algorithm:
-    let periodic_length = lattice.lengths()[axis];
+    let periodic_length = lattice.norms()[axis];
     let frac_values = fracs.iter().map(|f| f[axis]).collect::<Vec<_>>();
     let frac_threshold = cart_threshold / periodic_length;
 
@@ -312,6 +313,7 @@ impl Permute for LayersPerUnitCell {
 mod tests {
     use super::*;
     use ::{Permute, Perm};
+    use ::rsp2_array_types::Envee;
 
     #[test]
     fn layer_separation_eq_one() {
@@ -322,13 +324,13 @@ mod tests {
         let fracs = vec![
             [0.00, 0.25, 0.5],
             [0.25, 0.00, 0.5],
-        ];
+        ].envee();
         let lattice = Lattice::eye();
 
         // deliberately test using exact equality; the periodic length
         // is 1.0 so there should be no rounding difficulties.
         assert_eq!(
-            super::find_layers_impl(&fracs, &lattice, &[0, 0, 1], 0.15).unwrap(),
+            super::find_layers_impl(&fracs, &lattice, &V3([0, 0, 1]), 0.15).unwrap(),
             Layers::PerUnitCell(LayersPerUnitCell {
                 groups: vec![vec![0, 1]],
                 gaps: vec![1.0], // <-- field of greatest interest
@@ -347,7 +349,7 @@ mod tests {
             [0.0, 0.7, 0.0], // a second layer
             [0.0, 0.8, 0.0],
             // (first and last not close enough to meet)
-        ];
+        ].envee();
 
         // NOTE this does try a non-diagonal lattice and even
         //      goes along an awkwardly oriented vector
@@ -366,7 +368,7 @@ mod tests {
         ]);
 
         fn check(
-            (fracs, lattice, normal, cart_tol): (&[[f64; 3]], &Lattice, &[i32; 3], f64),
+            (fracs, lattice, normal, cart_tol): (&[V3], &Lattice, &V3<i32>, f64),
             expected_layers: Layers,
             expected_by_atom: Vec<usize>,
         ) {
@@ -399,7 +401,7 @@ mod tests {
         //        case is actually testing.
 
         check(
-            (&fracs, &lattice, &[0, 1, 0], cart_tol),
+            (&fracs, &lattice, &V3([0, 1, 0]), cart_tol),
             Layers::PerUnitCell(LayersPerUnitCell {
                 groups: vec![vec![0, 1, 2], vec![3, 4]],
                 gaps: scale(vec![0.4, 0.3], ylen),
@@ -411,7 +413,7 @@ mod tests {
         let (fracs, perm) = ::oper::perm::shuffle(&fracs);
 
         check(
-            (&fracs, &lattice, &[0, 1, 0], cart_tol),
+            (&fracs, &lattice, &V3([0, 1, 0]), cart_tol),
             Layers::PerUnitCell(LayersPerUnitCell {
                 groups: vec![vec![0, 1, 2], vec![3, 4]],
                 gaps: scale(vec![0.4, 0.3], ylen),
@@ -421,7 +423,7 @@ mod tests {
 
         // try a smaller tolerance
         check(
-            (&fracs, &lattice, &[0, 1, 0], smaller_tol),
+            (&fracs, &lattice, &V3([0, 1, 0]), smaller_tol),
             Layers::PerUnitCell(LayersPerUnitCell {
                 groups: vec![vec![0], vec![1], vec![2], vec![3], vec![4]],
                 gaps: scale(vec![0.1, 0.1, 0.4, 0.1, 0.3], ylen),
@@ -433,12 +435,12 @@ mod tests {
         //   join the two layers.
         // also, try a position outside the unit cell.
         let (mut fracs, mut perm) = (fracs, perm);
-        fracs.push([0.0, 1.9, 0.0]);
-        fracs.push([0.0, 0.0, 0.0]);
+        fracs.push(V3([0.0, 1.9, 0.0]));
+        fracs.push(V3([0.0, 0.0, 0.0]));
         perm.append_mut(&Perm::eye(2));
 
         check(
-            (&fracs, &lattice, &[0, 1, 0], cart_tol),
+            (&fracs, &lattice, &V3([0, 1, 0]), cart_tol),
             Layers::PerUnitCell(LayersPerUnitCell {
                 groups: vec![
                     vec![
@@ -453,11 +455,11 @@ mod tests {
         );
 
         // try joining the end regions when there are distinct layers
-        fracs.push([0.0, 0.5, 0.0]);
+        fracs.push(V3([0.0, 0.5, 0.0]));
         perm.append_mut(&Perm::eye(1));
 
         check(
-            (&fracs, &lattice, &[0, 1, 0], cart_tol),
+            (&fracs, &lattice, &V3([0, 1, 0]), cart_tol),
             Layers::PerUnitCell(LayersPerUnitCell {
                 groups: vec![
                     vec![
@@ -475,12 +477,12 @@ mod tests {
 
         // try merging all layers into one continuous blob for
         // the NoDistinctLayers case
-        fracs.push([0.0, 0.4, 0.0]);
-        fracs.push([0.0, 0.6, 0.0]);
+        fracs.push(V3([0.0, 0.4, 0.0]));
+        fracs.push(V3([0.0, 0.6, 0.0]));
         perm.append_mut(&Perm::eye(2));
 
         check(
-            (&fracs, &lattice, &[0, 1, 0], cart_tol),
+            (&fracs, &lattice, &V3([0, 1, 0]), cart_tol),
             Layers::NoDistinctLayers {
                 sorted_indices: vec![
                     6 /* y = 0.0 */, 0 /* y = 0.1 */, 1 /* y = 0.2 */,

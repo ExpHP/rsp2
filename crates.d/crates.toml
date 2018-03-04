@@ -48,6 +48,7 @@ rsp2-linalg         = "src/math/linalg"
 rsp2-fs-util        = "src/util/fs"
 rsp2-clap = "src/util/clap"
 rsp2-tasks-config = "src/tasks/config"
+rsp2-array-types = "src/util/array-types"
 #!!INSERTION POINT FOR NEW CRATES!!#
 
 #--------------------------------------------
@@ -70,7 +71,6 @@ lazy_static = "0.2"
 log = "0.3"
 ndarray = "0.10"
 nom = "3"
-num-traits = "0.1"
 ordered-float = "0.5"
 rand = "0.3"
 serde = "1"

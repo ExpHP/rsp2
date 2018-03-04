@@ -8,6 +8,8 @@ use ::rsp2_structure::{Coords, Lattice, CoordStructure};
 use ::rsp2_array_utils::inv;
 use ::std::io::Read;
 
+use ::rsp2_array_types::{V2, V3};
+
 pub fn load_layers_yaml<R: Read>(mut file: R) -> Result<Assemble>
 { _load_layers_yaml(&mut file) }
 
@@ -38,7 +40,7 @@ pub struct Assemble {
     pub vacuum_sep: f64,
     // a lattice with a dummy z length, and without 'scale' taken into account
     lattice: [[f64; 2]; 2],
-    frac_sites: Vec<Vec<[f64; 2]>>,
+    frac_sites: Vec<Vec<V2>>,
     layer_seps: Vec<f64>,
 }
 
@@ -58,9 +60,9 @@ impl Assemble {
         let mut full_carts = vec![];
         for (xy_fracs, z_cart) in self.frac_sites.iter().zip(layer_zs) {
             let mut structure =
-                CoordStructure::new_coords(lattice.clone(), Coords::Fracs(vec_2_to_3(xy_fracs)));
+                CoordStructure::new_coords(lattice.clone(), Coords::Fracs(v2_to_v3(xy_fracs)));
 
-            structure.translate_cart(&[0.0, 0.0, z_cart]);
+            structure.translate_cart(&V3([0.0, 0.0, z_cart]));
             full_carts.extend(structure.to_carts());
         }
 
@@ -88,6 +90,8 @@ impl Assemble {
 }
 
 mod cereal {
+    use super::*;
+
     #[derive(Debug, Clone)]
     #[derive(Serialize, Deserialize)]
     #[serde(rename_all = "kebab-case")]
@@ -113,8 +117,8 @@ mod cereal {
     #[serde(rename_all = "kebab-case")]
     pub struct Layer {
         // NOTE: units of layer lattice
-        pub frac_sites: Option<Vec<[f64; 2]>>,
-        pub cart_sites: Option<Vec<[f64; 2]>>,
+        pub frac_sites: Option<Vec<V2>>,
+        pub cart_sites: Option<Vec<V2>>,
         // NOTE: units of superlattice
         pub frac_lattice: Option<[[f64; 2]; 2]>,
         pub cart_lattice: Option<[[f64; 2]; 2]>,
@@ -144,6 +148,8 @@ mod cereal {
 
 // intermediate form of data that is easier to work with than cereal
 mod middle {
+    use super::*;
+
     #[derive(Debug, Clone)]
     pub struct Layers {
         pub full_lattice: [[f64; 3]; 3],
@@ -157,10 +163,10 @@ mod middle {
     pub struct Layer {
         pub frac_lattice: ::rsp2_structure::Lattice,
         pub cart_lattice: ::rsp2_structure::Lattice,
-        pub cart_sites: Vec<[f64; 3]>,
+        pub cart_sites: Vec<V3>,
         pub transform: [[f64; 3]; 3],
         pub repeat: [u32; 3],
-        pub shift: [f64; 3],
+        pub shift: V3,
     }
 }
 
@@ -212,7 +218,7 @@ fn interpret_cereal(cereal: self::cereal::Root) -> Result<middle::Layers>
         };
         let cart_sites = match resolve_units("sites", cart_sites, frac_sites)? {
             (units, x) => {
-                let x = vec_2_to_3(&x);
+                let x = v2_to_v3(&x);
                 match units {
                     Units::Frac => Coords::Fracs(x).into_carts(&cart_lattice),
                     Units::Cart => x,
@@ -221,7 +227,7 @@ fn interpret_cereal(cereal: self::cereal::Root) -> Result<middle::Layers>
         };
 
         let transform = mat_22_to_33(&transform);
-        let shift = [shift[0], shift[1], 0.0];
+        let shift = V3([shift[0], shift[1], 0.0]);
         let repeat = [repeat[0], repeat[1], 1];
         middle::Layer { cart_lattice, frac_lattice, cart_sites, transform, repeat, shift }
     })}).collect::<Result<Vec<_>>>()?;
@@ -255,7 +261,7 @@ fn assemble_from_cereal(cereal: self::cereal::Root) -> Result<Assemble>
             Coords::Carts(structure.to_carts()),
         );
         structure.reduce_positions();
-        frac_sites.push(vec_3_to_2(&structure.to_fracs()));
+        frac_sites.push(v3_to_v2(&structure.to_fracs()));
     }
 
     Assemble {
@@ -310,13 +316,13 @@ fn mat_33_to_22(mat: &[[f64; 3]; 3]) -> [[f64; 2]; 2]
     ]
 }
 
-fn vec_2_to_3(xs: &[[f64; 2]]) -> Vec<[f64; 3]>
-{ xs.iter().map(|v| [v[0], v[1], 0.0]).collect() }
+fn v2_to_v3(xs: &[V2]) -> Vec<V3>
+{ xs.iter().map(|v| V3([v[0], v[1], 0.0])).collect() }
 
-fn vec_3_to_2(xs: &[[f64; 3]]) -> Vec<[f64; 2]>
+fn v3_to_v2(xs: &[V3]) -> Vec<V2>
 { xs.iter().map(|v| {
     assert_eq!(v[2], 0.0);
-    [v[0], v[1]]
+    V2([v[0], v[1]])
 }).collect() }
 
 // fn zip_eq<As, Bs>(a: As, b: Bs) -> ::std::iter::Zip<As::IntoIter, Bs::IntoIter>

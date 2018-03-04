@@ -7,6 +7,7 @@ use ::{arr_from_fn, mat_from_fn};
 use ::traits::{IsArray, Semiring};
 use ::traits::internal::PrimitiveSemiring;
 
+#[deprecated = "Use V2/V3/V4 (alternative for vec * matrix is coming)"]
 pub fn dot<A,B,C>(a: &A, b: &B) -> C
   where A: Dot<B, Output=C>,
 { Dot::dot(a, b) }
@@ -85,6 +86,7 @@ gen_each!{
         }
     };
 }
+
 
 #[cfg(test)]
 mod tests {

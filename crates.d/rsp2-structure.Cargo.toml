@@ -8,6 +8,7 @@ path = "lib.rs"
 
 [dependencies]
 !!rsp2-array-utils
+!!rsp2-array-types
 !!rsp2-assert-close
 
 !!error-chain

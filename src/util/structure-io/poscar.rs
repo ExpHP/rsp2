@@ -6,6 +6,7 @@ use ::itertools::Itertools;
 
 use ::rsp2_structure::{Element, ElementStructure};
 use ::rsp2_structure::{Lattice, Coords};
+use ::rsp2_array_types::{Envee, Unvee};
 
 use ::vasp_poscar::{Poscar, RawPoscar, ScaleLine};
 
@@ -30,7 +31,7 @@ where W: Write
         comment: title.into(),
         scale: ScaleLine::Factor(1.0),
         lattice_vectors: *structure.lattice().matrix(),
-        positions: ::vasp_poscar::Coords::Cart(structure.to_carts()),
+        positions: ::vasp_poscar::Coords::Cart(structure.to_carts().unvee()),
         group_symbols: Some(group_symbols),
         group_counts,
         velocities: None,
@@ -73,8 +74,8 @@ where R: BufRead,
     assert_eq!(scale, ScaleLine::Factor(1.0));
     let lattice = Lattice::new(&lattice_vectors);
     let coords = match positions {
-        ::vasp_poscar::Coords::Cart(p) => Coords::Carts(p),
-        ::vasp_poscar::Coords::Frac(p) => Coords::Fracs(p),
+        ::vasp_poscar::Coords::Cart(p) => Coords::Carts(p.envee()),
+        ::vasp_poscar::Coords::Frac(p) => Coords::Fracs(p.envee()),
     };
 
     let group_symbols = group_symbols.expect("symbols are required").into_iter()

@@ -40,6 +40,7 @@ rsp2-linalg = { path = "src/math/linalg" }
 rsp2-fs-util = { path = "src/util/fs" }
 rsp2-clap = { path = "src/util/clap" }
 rsp2-tasks-config = { path = "src/tasks/config" }
+rsp2-array-types = { path = "src/util/array-types" }
 
 # Deps of examples/ and tests/.
 # Some of these could be dev-dependencies, however currently

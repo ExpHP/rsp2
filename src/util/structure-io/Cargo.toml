@@ -17,3 +17,4 @@ error-chain = "0.11"
 vasp-poscar = "0.1.1"
 
 rsp2-structure = { path = "../../structure" }
+rsp2-array-types = { path = "../array-types" }

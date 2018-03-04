@@ -23,13 +23,13 @@
 //!   *G*<sup>op</sup>, where the operations compose in reverse.
 //!   See https://github.com/ExpHP/rsp2/issues/1#issuecomment-340279243
 
-use ::rsp2_array_utils::{dot, map_arr};
+use ::rsp2_array_utils::{dot};
 use ::{Perm, FracRot};
-#[allow(unused)]
-use ::Permute; // FIXME I do not know why this
+
+use ::rsp2_array_types::{V3, Envee};
 
 /// Type of positions being acted upon.
-type X = Vec<[f64; 3]>;
+type X = Vec<V3>;
 
 //-------------------------------------------------------------------
 // Define an initial input vector.
@@ -40,22 +40,22 @@ lazy_static! {
 
 // ascribes an index to each vertex of the cube whose vertices
 // lie on `{-1, 1}^3`.
-fn index_from_point(point: [f64; 3]) -> u32
+fn index_from_point(point: V3) -> u32
 {
     assert!(point.iter().all(|x| x.abs() == 1.0));
-    let (a, b, c) = tup3(point);
-    // binary encoding of bits `k => (point[k] + 1) / 2`
-    ((4 * (a as i32 + 1) + 2 * (b as i32 + 1) + (c as i32 + 1)) / 2) as u32
+
+    let bits = point.map(|x| (x as i32 + 1) / 2);
+    V3::dot(&V3([4, 2, 1]), &bits) as u32 // binary encoding
 }
 
 // inverse of `index_from_point`
-fn point_from_index(index: u32) -> [f64; 3]
+fn point_from_index(index: u32) -> V3
 {
     let index = index as i32;
     let c = ((index / 1) % 2) * 2 - 1;
     let b = ((index / 2) % 2) * 2 - 1;
     let a = ((index / 4) % 2) * 2 - 1;
-    [a as f64, b as f64, c as f64]
+    V3([a, b, c]).map(Into::into)
 }
 
 // interpret a rotation as a permutation on INIT_X
@@ -66,9 +66,6 @@ fn vertex_perm_from_rot(rot: &FracRot) -> Perm
     Perm::from_vec(indices).unwrap()
 }
 
-fn tup3<T: Clone>(a: [T; 3]) -> (T, T, T)
-{ (a[0].clone(), a[1].clone(), a[2].clone()) }
-
 //-------------------------------------------------------------------
 // A special representation unique to this group,
 // just to add more redundancy to our tests.
@@ -77,23 +74,23 @@ fn tup3<T: Clone>(a: [T; 3]) -> (T, T, T)
 /// as a signed permutation of the XYZ axes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SignedPerm {
-    signs: [i32; 3],
-    perm: [i32; 3],
+    signs: V3<i32>,
+    perm: V3<i32>,
 }
 
 impl SignedPerm {
     pub fn eye() -> Self
-    { SignedPerm { signs: [1, 1, 1], perm: [0, 1, 2] } }
+    { SignedPerm { signs: V3([1, 1, 1]), perm: V3([0, 1, 2]) } }
 
     pub fn from_rot(rot: &FracRot) -> Self
     {
         let m = ::util::transpose_33(&rot.float_t());
 
         // (stupid hat trick...)
-        let v: [f64; 3] = dot(&m, &[1.0, 2.0, 3.0]);
+        let v: V3 = V3(dot(&m, &[1.0, 2.0, 3.0]));
         SignedPerm {
-            signs: map_arr(v, |x| x.signum() as i32),
-            perm: map_arr(v, |x| x.abs() as i32 - 1),
+            signs: v.map(|x| x.signum() as i32),
+            perm: v.map(|x| x.abs() as i32 - 1),
         }
     }
 
@@ -108,8 +105,8 @@ impl SignedPerm {
 
     pub fn then(&self, next: &SignedPerm) -> SignedPerm
     {
-        let mut perm = [0x0B0E; 3];
-        let mut signs = [0x0B0E; 3];
+        let mut perm = V3([0x0B0E; 3]);
+        let mut signs = V3([0x0B0E; 3]);
         for k in 0..3 {
             perm[k] = self.perm[next.perm[k] as usize];
             signs[k] = self.signs[next.perm[k] as usize];
@@ -118,7 +115,7 @@ impl SignedPerm {
         SignedPerm { perm, signs }
     }
 
-    pub fn transform(&self, points: &[[f64; 3]]) -> Vec<[f64; 3]>
+    pub fn transform(&self, points: &[V3]) -> Vec<V3>
     { self.to_rot().transform_prim(points) }
 }
 
@@ -153,9 +150,9 @@ lazy_static! {
 
     static ref SIGNED_PERM_GENERATORS: [SignedPerm; N_GENERATORS] = {
         [
-            SignedPerm { signs: [ 1, 1, 1], perm: [1, 2, 0] }, // x -> y -> z
-            SignedPerm { signs: [ 1, 1, 1], perm: [1, 0, 2] }, // x <-> y
-            SignedPerm { signs: [-1, 1, 1], perm: [0, 1, 2] }, // mirror x
+            SignedPerm { signs: V3([ 1, 1, 1]), perm: V3([1, 2, 0]) }, // x -> y -> z
+            SignedPerm { signs: V3([ 1, 1, 1]), perm: V3([1, 0, 2]) }, // x <-> y
+            SignedPerm { signs: V3([-1, 1, 1]), perm: V3([0, 1, 2]) }, // mirror x
         ]
     };
 
@@ -182,7 +179,7 @@ lazy_static! {
                 [-1.0,  1.0,  1.0],
                 [ 1.0, -1.0,  1.0],
                 [ 1.0,  1.0,  1.0],
-            ],
+            ].envee(),
             // x <-> y
             vec![
                 [-1.0, -1.0, -1.0],
@@ -193,7 +190,7 @@ lazy_static! {
                 [-1.0,  1.0,  1.0],
                 [ 1.0,  1.0, -1.0],
                 [ 1.0,  1.0,  1.0],
-            ],
+            ].envee(),
             // mirror x
             vec![
                 [ 1.0, -1.0, -1.0],
@@ -204,7 +201,7 @@ lazy_static! {
                 [-1.0, -1.0,  1.0],
                 [-1.0,  1.0, -1.0],
                 [-1.0,  1.0,  1.0],
-            ],
+            ].envee(),
         ]
     };
 }
@@ -214,6 +211,7 @@ lazy_static! {
 mod tests {
     use super::*;
     use ::algo::group::generate_finite_group;
+    use ::Permute;
 
     use ::std::fmt::Debug;
     use ::std::hash::Hash;
