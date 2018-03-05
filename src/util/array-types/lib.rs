@@ -22,10 +22,9 @@ mod ops;
 
 mod traits;
 
-// Expose neatly-named modules, but let the .rs files have names that are close alphabetically.
-#[doc(hidden)] pub mod methods_v;
-#[doc(hidden)] pub mod methods_m;
-pub use self::methods_v as vee;
-pub use self::methods_m as mat;
+#[path = "./methods_v.rs"]
+pub mod vee;
+#[path = "./methods_m.rs"]
+pub mod mat;
 
-pub use self::methods_v::dot;
+pub use vee::dot;
