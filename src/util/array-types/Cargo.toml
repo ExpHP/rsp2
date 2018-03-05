@@ -13,3 +13,11 @@ path = "lib.rs"
 
 [dependencies]
 rsp2-array-utils = { path = "../array" }
+
+serde = "1"
+serde_derive = "1"
+slice-of-array = "0.1"
+
+[dev-dependencies]
+rsp2-assert-close = { path = "../assert-close" }
+rand = "0.3"

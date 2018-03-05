@@ -12,12 +12,3 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 path = "lib.rs"
 
 [dependencies]
-# HACK: These are public dependencies of rsp2-array-types and shouldn't be here
-serde = "1"
-serde_derive = "1"
-slice-of-array = "0.1"
-
-rsp2-assert-close = { path = "../assert-close" }
-
-[dev-dependencies]
-rand = "0.3"

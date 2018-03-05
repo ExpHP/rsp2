@@ -8,3 +8,11 @@ path = "lib.rs"
 
 [dependencies]
 !!rsp2-array-utils
+
+!!serde
+!!serde-derive
+!!slice-of-array
+
+[dev-dependencies]
+!!rsp2-assert-close
+!!rand

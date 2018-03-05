@@ -63,10 +63,8 @@ impl<A: IsArray> DoubleEndedIterator for MoveIter<A> {
     }
 }
 
-gen_each!{
-    @{0...32}
-    impl_iter_move!({$n:expr})
-    => {
+macro_rules! impl_iter_move {
+    ($n:expr) => {
         impl<T> ArrayMoveIterExt for [T; $n] {
             #[inline]
             fn move_iter(self) -> MoveIter<[T; $n]>
@@ -75,6 +73,8 @@ gen_each!{
     };
 }
 
+each_array_size!{ impl_iter_move!{0...32} }
+
 #[cfg(test)]
 #[deny(dead_code)]
 mod tests {
@@ -82,6 +82,8 @@ mod tests {
 
     use ::std::cell::RefCell;
     use super::*;
+
+    // FIXME there ought to be tests of panic safety, using catch_unwind
 
     #[test]
     fn is_fused() {

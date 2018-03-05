@@ -1,9 +1,31 @@
+
 extern crate rsp2_array_utils;
+#[cfg(test)]
+#[macro_use]
+extern crate rsp2_assert_close;
 
-// HACK: The contents of this crate actually live in rsp2_array_utils because
-//       they make use of traits and macros internal to that crate.
+extern crate serde;
+#[macro_use] extern crate serde_derive;
+extern crate slice_of_array;
+#[cfg(test)] extern crate rand;
 
-// I want these things to be in a separate crate because they have very different
-// implications for the code that depends on them; `rsp2_array_utils` is generally
-// used like a private dependency, while these types are used like public dependency.
-pub use rsp2_array_utils::_rsp2_array_types_impl::*;
+#[macro_use] mod macros;
+
+pub use self::types::*;
+mod types;
+
+pub use self::conv::*;
+mod conv;
+
+pub use self::ops::*;
+mod ops;
+
+mod traits;
+
+// Expose neatly-named modules, but let the .rs files have names that are close alphabetically.
+#[doc(hidden)] pub mod methods_v;
+#[doc(hidden)] pub mod methods_m;
+pub use self::methods_v as vee;
+pub use self::methods_m as mat;
+
+pub use self::methods_v::dot;

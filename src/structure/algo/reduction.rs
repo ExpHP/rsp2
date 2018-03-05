@@ -14,7 +14,7 @@
 
 use ::{Lattice};
 
-use ::rsp2_array_utils::{arr_from_fn, map_mat};
+use ::rsp2_array_utils::{arr_from_fn};
 use ::rsp2_array_types::{V3, M33, Envee, Unvee, dot, mat};
 
 use ::std::cmp::Ordering;

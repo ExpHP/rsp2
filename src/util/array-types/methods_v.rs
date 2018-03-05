@@ -22,6 +22,12 @@ gen_each!{
         {$Vn:ident}
     ) => {
         impl<X> $Vn<X> {
+            /// Construct a fixed-size vector from a function on indices.
+            #[inline(always)]
+            pub fn from_fn<B, F>(f: F) -> Self
+            where Self: FromFn<F>, F: FnMut(usize) -> B,
+            { FromFn::from_fn(f) }
+
             /// Get the inner product of two vectors.
             #[inline(always)]
             pub fn dot<B>(&self, other: &B) -> DotT<Self, B>
@@ -62,19 +68,19 @@ gen_each!{
             #[inline(always)]
             pub fn map<B, F>(self, f: F) -> $Vn<B>
             where F: FnMut(X) -> B,
-            { $Vn(::map_arr(self.0, f)) }
+            { $Vn(::rsp2_array_utils::map_arr(self.0, f)) }
 
             /// Apply a fallible function to each element, with short-circuiting.
             #[inline(always)]
             pub fn try_map<E, B, F>(self, f: F) -> Result<$Vn<B>, E>
             where F: FnMut(X) -> Result<B, E>,
-            { ::try_map_arr(self.0, f).map($Vn) }
+            { ::rsp2_array_utils::try_map_arr(self.0, f).map($Vn) }
 
             /// Apply a fallible function to each element, with short-circuiting.
             #[inline(always)]
             pub fn opt_map<B, F>(self, f: F) -> Option<$Vn<B>>
             where F: FnMut(X) -> Option<B>,
-            { ::opt_map_arr(self.0, f).map($Vn) }
+            { ::rsp2_array_utils::opt_map_arr(self.0, f).map($Vn) }
         }
     }
 }
@@ -109,7 +115,7 @@ gen_each!{
         {
             #[inline]
             fn from_fn(f: F) -> Self
-            { $Vn(::arr_from_fn(f)) }
+            { $Vn(::rsp2_array_utils::arr_from_fn(f)) }
         }
     }
 }
@@ -256,7 +262,6 @@ gen_each!{
         }
     }
 }
-
 
 // ---------------------------------------------------------------------------
 

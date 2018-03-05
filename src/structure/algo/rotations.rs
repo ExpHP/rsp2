@@ -1,5 +1,5 @@
 use ::{Lattice, Coords};
-use ::rsp2_array_utils::{map_arr, map_mat};
+use ::rsp2_array_utils::{map_arr};
 use super::reduction::LatticeReduction;
 
 use ::rsp2_array_types::{M33, M3, V3, Unvee, dot};

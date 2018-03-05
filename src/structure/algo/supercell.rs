@@ -1,5 +1,3 @@
-#![allow(deprecated)] // HACK: reduce warning-spam at call sites, I only care about the `use`
-
 use ::{Structure, Lattice, Coords};
 use ::{Result, Error, ErrorKind};
 

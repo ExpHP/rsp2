@@ -3,7 +3,6 @@ use ::traits::{IsArray, WithElement};
 use ::std::mem::{ManuallyDrop, uninitialized};
 use ::std::ptr;
 
-
 /// Map an array by value.
 ///
 /// `V` should be an array type, like `[T; n]`.
@@ -62,13 +61,12 @@ pub trait ArrayMapExt<B>: IsArray + WithElement<B>
     // let's stick to awkward and obscure method names for now
     #[inline]
     fn map_the_thing<F>(self, mut f: F) -> Brother!{Self, B}
-    where
-        F: FnMut(Self::Element) -> B,
+    where F: FnMut(Self::Element) -> B,
     { self.try_map_the_thing(|x| Ok::<_, ()>(f(x))).ok().unwrap() }
 
     #[inline]
     fn try_map_the_thing<E, F>(self, mut f: F) -> Result<Brother!{Self, B}, E>
-    where F: FnMut(Self::Element) -> Result<B, E>
+    where F: FnMut(Self::Element) -> Result<B, E>,
     {
         // SAFETY:
         //  - uninitialized() data must never be read; beware of drops!
@@ -141,6 +139,7 @@ pub trait ArrayFromFunctionExt: IsArray + WithElement<usize>
 impl<V: WithElement<usize>> ArrayFromFunctionExt for V
 where Brother!{Self, usize}: ArrayMapExt<Self::Element>,
 {
+    #[inline(always)]
     fn array_of_indices() -> Brother!{Self, usize}
     {
         let p = &INDICES[0..Self::array_len()];
@@ -148,47 +147,21 @@ where Brother!{Self, usize}: ArrayMapExt<Self::Element>,
         unsafe { ::std::ptr::read(p) }
     }
 
+    #[inline(always)]
     fn from_fn<F>(f: F) -> Self
     where F: FnMut(usize) -> Self::Element
     { Self::array_of_indices().map_the_thing(f) }
 
+    #[inline(always)]
     fn try_from_fn<E, F>(f: F) -> Result<Self, E>
     where F: FnMut(usize) -> Result<Self::Element, E>
     { Self::array_of_indices().try_map_the_thing(f) }
 
+    #[inline(always)]
     fn opt_from_fn<F>(f: F) -> Option<Self>
     where F: FnMut(usize) -> Option<Self::Element>
     { Self::array_of_indices().opt_map_the_thing(f) }
 }
-
-/// Extension trait for folding arrays by value.
-///
-/// The `Copy` bound is a temporary(?) crutch for safety considerations;
-/// it prevents usage with types that have a non-trivial `Drop`.
-pub trait ArrayFoldExt: IsArray
-  where Self::Element: Copy
-{
-    fn fold<B, F>(self, initial: B, mut f: F) -> B
-    where F: FnMut(B, Self::Element) -> B {
-        // SAFETY:
-        //  - ptr::read argument must be aligned
-        //  - ptr::read creates the potential for double-drops
-
-        let array = ManuallyDrop::new(self);
-        let mut acc = initial;
-        for p in array.array_as_slice() {
-            // f() can panic.  If this happens, acc is dropped (not a problem),
-            // and then the array is leaked using ManuallyDrop to avoid double-drops
-            // of previously-read elements.
-            acc = f(acc, unsafe { ptr::read(p) });
-        }
-        acc
-    }
-}
-
-impl<V: IsArray> ArrayFoldExt for V
-  where V::Element: Copy,
-{ }
 
 const INDICES: [usize; 65] = [
      0,  1,  2,  3,  4,  5,  6,  7,  8,  9,

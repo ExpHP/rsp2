@@ -102,17 +102,3 @@ mod envee_generic_impls {
         }
     }
 }
-
-/// Casts a sequence of arrays into `V2`/`V3`/`V4`s.
-///
-/// This is basically just `Envee::envee` as a free function,
-/// because sometimes it's easier to use that way.
-#[deprecated = "use Envee::{envee_ref, envee_mut}"]
-pub fn envee<V: Envee>(v: V) -> V::En where V::En: Sized { v.envee() }
-
-/// Casts a sequence of `V2`/`V3`/`V4`s into arrays.
-///
-/// This is basically just `Unvee::unvee` as a free function,
-/// because sometimes it's easier to use that way.
-#[deprecated = "use Unvee::{unvee_ref, unvee_mut}"]
-pub fn unvee<V: Unvee>(v: V) -> V::Un where V::Un: Sized { v.unvee() }
