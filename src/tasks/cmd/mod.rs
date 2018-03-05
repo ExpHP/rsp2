@@ -14,6 +14,7 @@ use ::traits::{AsPath};
 use ::phonopy::{DirWithBands, DirWithDisps, DirWithForces};
 
 use ::types::{Basis3};
+use ::math::bonds::Bonds;
 
 use ::path_abs::{PathFile, PathDir, FileWrite};
 use ::rsp2_structure::consts::CARBON;
@@ -92,6 +93,12 @@ impl TrialDir {
             layers.by_atom()
         };
 
+        // (just dump bond info for now)
+        if let Some(bond_radius) = settings.bond_radius {
+            trace!("Computing bonds, just for kicks.");
+            let bonds = Bonds::from_brute_force_very_dumb(&original, bond_radius)?;
+            ::serde_yaml::to_writer(FileWrite::create(self.join("bonds.yaml"))?, &bonds)?;
+        };
 
         let mut from_structure = original.clone();
         let mut iteration = 1;

@@ -1,9 +1,9 @@
 
 // NOTE: This is really part of rsp2-array-types.
 
-use ::std::ops::Mul;
-use ::traits::{Semiring, Field};
-use ::traits::internal::{PrimitiveSemiring, PrimitiveFloat};
+use ::std::ops::{Mul, Div};
+use ::traits::{Semiring, Ring, Field};
+use ::traits::internal::{PrimitiveSemiring, PrimitiveRing, PrimitiveFloat};
 
 use super::types::*;
 
@@ -32,37 +32,48 @@ gen_each!{
             #[inline(always)]
             pub fn dot<B>(&self, other: &B) -> DotT<Self, B>
             where Self: Dot<B>,
-            { <Self as Dot<B>>::dot(self, other) }
+            { Dot::dot(self, other) }
 
             /// Get the vector's squared magnitude.
             #[inline(always)]
             pub fn sqnorm(&self) -> SqnormT<Self>
             where Self: Sqnorm,
-            { <Self as Sqnorm>::sqnorm(self) }
+            { Sqnorm::sqnorm(self) }
 
             /// Get the vector's magnitude.
             #[inline(always)]
             pub fn norm(&self) -> NormT<Self>
             where Self: Norm,
-            { <Self as Norm>::norm(self) }
+            { Norm::norm(self) }
+
+            /// Normalize the vector.
+            #[inline(always)]
+            pub fn unit(&self) -> Self
+            where Self: Unit,
+            { Unit::unit(self) }
 
             /// Get the shortest angle (as a value in `[0, pi]`) between this vector and another.
             #[inline(always)]
             pub fn angle_to(&self, other: &Self) -> AngleToT<Self>
             where Self: AngleTo,
-            { <Self as AngleTo>::angle_to(self, other) }
+            { AngleTo::angle_to(self, other) }
 
             /// Get the part of the vector that is parallel to `r`.
             #[inline(always)]
             pub fn par(&self, r: &Self) -> Self
             where Self: Par,
-            { <Self as Par>::par(self, r) }
+            { Par::par(self, r) }
 
             /// Get the part of the vector that is perpendicular to `r`.
+            ///
+            /// Be aware that chained calls to `perp` can have **spectacularly bad**
+            /// numerical stability issues; you cannot trust that `c.perp(a).perp(b)`
+            /// is even *remotely* orthogonal to `a`.
+            /// (for 3d vectors, try `c.par(a.cross(b))` instead.)
             #[inline(always)]
             pub fn perp(&self, r: &Self) -> Self
             where Self: Perp,
-            { <Self as Perp>::perp(self, r) }
+            { Perp::perp(self, r) }
 
             /// Apply a function to each element.
             #[inline(always)]
@@ -83,6 +94,14 @@ gen_each!{
             { ::rsp2_array_utils::opt_map_arr(self.0, f).map($Vn) }
         }
     }
+}
+
+impl<X> V3<X> {
+    /// Cross-product. Only defined on 3-dimensional vectors.
+    #[inline(always)]
+    pub fn cross(&self, other: &Self) -> Self
+    where Self: Cross,
+    { Cross::cross(self, other) }
 }
 
 /// Inner product of vectors.
@@ -196,6 +215,28 @@ gen_each!{
 
 // ---------------------------------------------------------------------------
 
+/// Implementation detail of the inherent method `{V2,V3,V4}::unit`.
+///
+/// > **_Fuggedaboudit._**
+pub trait Unit {
+    fn unit(&self) -> Self;
+}
+
+gen_each!{
+    @{Vn}
+    impl_v_unit!( {$Vn:ident} ) => {
+        impl<X: Field> Unit for $Vn<X>
+          where X: PrimitiveFloat, for<'a> &'a Self: Div<X, Output=Self>,
+        {
+            #[inline]
+            fn unit(&self) -> Self
+            { self / self.norm() }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+
 /// Output of `angle_to`. Probably a float with the same precision as the vector.
 pub type AngleToT<A> = <A as AngleTo>::Output;
 
@@ -217,7 +258,11 @@ gen_each!{
 
             #[inline]
             fn angle_to(&self, other: &Self) -> Self::Output
-            { <$X>::acos(self.dot(other) / <$X>::sqrt(self.sqnorm() * other.sqnorm())) }
+            {
+                let arg = self.dot(other) / <$X>::sqrt(self.sqnorm() * other.sqnorm());
+                let out = arg.min(1.0).max(-1.0).acos();
+                out
+            }
         }
     }
 }
@@ -265,6 +310,28 @@ gen_each!{
 
 // ---------------------------------------------------------------------------
 
+/// Implementation detail of the inherent method `V3::cross`.
+///
+/// > **_Fuggedaboudit._**
+pub trait Cross {
+    fn cross(&self, other: &Self) -> Self;
+}
+
+impl<X: Ring> Cross for V3<X>
+    where X: PrimitiveRing,
+{
+    #[inline]
+    fn cross(&self, other: &Self) -> Self {
+        V3([
+            self[1] * other[2] - self[2] * other[1],
+            self[2] * other[0] - self[0] * other[2],
+            self[0] * other[1] - self[1] * other[0],
+        ])
+    }
+}
+
+// ---------------------------------------------------------------------------
+
 // slice-of-array integration.
 
 // because `x.nest::<[_; 3]>().envee()` (turbofish required) really sucks.
@@ -300,7 +367,7 @@ mod tests {
     #[test]
     fn angle() {
         let a: V3 = V3([0.5, 0.0,  0.0]);
-        let b: V3 = V3([2.0, 0.0, -2.0]);
+        let b: V3 = V3([8.0, 0.0, -8.0]);
 
         assert_close!(45.0, a.angle_to(&b).to_degrees());
     }
@@ -313,6 +380,16 @@ mod tests {
             (a.perp(&b) + a.par(&b) - a).iter().for_each(|&x| {
                 assert_close!(abs=1e-10, 0.0, x);
             });
+        }
+    }
+
+    #[test]
+    fn prop_par_is_par() {
+        for _ in 0..10 {
+            let a: V3 = V3(::rand::random());
+            let b: V3 = V3(::rand::random());
+            let par = a.par(&b);
+            assert_close!(abs=1e-4, 0.0, par.angle_to(&b));
         }
     }
 

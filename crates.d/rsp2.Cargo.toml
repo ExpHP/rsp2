@@ -15,6 +15,10 @@ path = "src/binary-shims/shear-plot.rs"
 name = "rsp2-save-bands"
 path = "src/binary-shims/save-bands.rs"
 
+[[bin]]
+name = "rsp2-bond-test"
+path = "src/binary-shims/bond-test.rs"
+
 [dependencies]
 
 # Workspace members

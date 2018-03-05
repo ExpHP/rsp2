@@ -41,13 +41,13 @@ gen_each!{
             #[inline(always)]
             pub fn inv(&self) -> Self
             where Self: Inv,
-            { <Self as Inv>::inv(self) }
+            { Inv::inv(self) }
 
             /// Matrix determinant.
             #[inline(always)]
             pub fn det(&self) -> DetT<Self>
             where Self: Det,
-            { <Self as Det>::det(self) }
+            { Det::det(self) }
         }
     }
 }
@@ -62,27 +62,26 @@ gen_each!{
             #[inline(always)]
             pub fn t(&self) -> TransposeT<Self>
             where Self: Transpose,
-            { <Self as Transpose>::t(self) }
+            { Transpose::t(self) }
 
             /// Cast into a plain `[[T; m]; n]`.
             #[inline(always)]
             pub fn into_array(self) -> ArrayT<Self>
             where Self: IntoArray,
-            { <Self as IntoArray>::into_array(self) }
+            { IntoArray::into_array(self) }
 
             /// Cast into a plain `&[[T; m]; n]`.
             #[inline(always)]
             pub fn as_array(&self) -> &ArrayT<Self>
             where Self: IntoArray,
-            { <Self as IntoArray>::as_array(self) }
+            { IntoArray::as_array(self) }
 
             /// Cast into a plain `&mut [[T; m]; n]`.
             #[inline(always)]
             pub fn as_array_mut(&mut self) -> &mut ArrayT<Self>
             where Self: IntoArray,
-            { <Self as IntoArray>::as_array_mut(self) }
+            { IntoArray::as_array_mut(self) }
         }
-
     }
 }
 

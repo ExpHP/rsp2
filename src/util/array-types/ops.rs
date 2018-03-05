@@ -3,6 +3,7 @@
 
 use ::std::ops::{Add, Sub, AddAssign, SubAssign, Neg};
 use ::std::ops::{Mul, Div, Rem, MulAssign, DivAssign, RemAssign};
+use ::std::fmt;
 use ::traits::{Semiring, Ring};
 use ::traits::internal::{PrimitiveSemiring, PrimitiveRing};
 
@@ -224,6 +225,40 @@ gen_each!{
             #[inline]
             fn mul(self, other: &'b M![$k, V![$c, X]]) -> Self::Output {
                 mat::from_fn(|r,c| (0..$k).map(|i| self[r][i] * other[i][c]).sum())
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+
+// fmt traits apply the format to each element for convenience.
+gen_each!{
+    [
+        {V2 X} {V3 X} {V4 X}
+        {M2 V} {M3 V} {M4 V}
+    ]
+    [
+        // Note: the inclusion of Display in this list is a necessary evil, because
+        //       there's no other way to get output like `[1.0000, 0.3333]`,
+        //       which is kind of, you know, THE motivating use-case.
+        {Binary} {LowerExp} {LowerHex} {Display}
+        {Octal} {Pointer} {UpperExp} {UpperHex}
+    ]
+    impl_mat_vec_mul!(
+        {$Cn:ident $T:ident}
+        {$Format:ident}
+    ) => {
+        impl<$T: fmt::$Format> fmt::$Format for $Cn<$T> {
+            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                write!(f, "[")?;
+                fmt::$Format::fmt(&self[0], f)?;
+                for x in &self[1..] {
+                    write!(f, ", ")?;
+                    fmt::$Format::fmt(x, f)?;
+                }
+                write!(f, "]")?;
+                Ok(())
             }
         }
     }

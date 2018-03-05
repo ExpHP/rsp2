@@ -131,3 +131,38 @@ pub fn save_bands_after_the_fact() {
         trial.run_save_bands_after_the_fact(&settings)
     });
 }
+
+pub fn bond_test() {
+    wrap_result_main(|| {
+        let _logfile = init_global_logger()?;
+
+        let (app, de) = CliDeserialize::augment_clap_app({
+            ::clap::App::new("rsp2-bond-test")
+                .version("negative 0.00.3-734.bubbles")
+                .author(crate_authors!{", "})
+                .about("blah")
+                .args(&[
+                    arg!( input=STRUCTURE ""),
+                ])
+        });
+        let matches = app.get_matches();
+        let () = de.resolve_args(&matches)?;
+
+        use ::rsp2_structure_gen::load_layers_yaml;
+
+        let input = PathFile::new(matches.expect_value_of("input"))?;
+        let structure = {
+            let mut builder = load_layers_yaml(input.read()?)?;
+            builder.scale = 2.46;
+            for sep in builder.layer_seps() {
+                *sep = 3.38;
+            }
+            builder.assemble()
+        };
+
+        let bonds = ::math::bonds::Bonds::from_brute_force_very_dumb(&structure, 1.8);
+
+        println!("{:?}", bonds);
+        Ok(())
+    });
+}

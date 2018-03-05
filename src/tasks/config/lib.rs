@@ -78,11 +78,11 @@ pub struct Settings {
     pub cg: Acgsd,
     pub phonons: Phonons,
     pub ev_chase: EigenvectorChase,
+    /// `None` disables bond graph.
+    #[serde(default)] pub bond_radius: Option<f64>,
     pub layer_gamma_threshold: f64,
-    #[serde(default)]
-    pub ev_loop: EvLoop,
-    #[serde(default)]
-    pub tweaks: Tweaks,
+    #[serde(default)] pub ev_loop: EvLoop,
+    #[serde(default)] pub tweaks: Tweaks,
 }
 derive_yaml_read!{Settings}
 
