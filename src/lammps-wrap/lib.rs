@@ -5,11 +5,14 @@
 
 extern crate slice_of_array;
 extern crate rsp2_structure;
+extern crate rsp2_array_types;
 extern crate lammps_sys;
 #[macro_use] extern crate log;
 #[macro_use] extern crate error_chain;
 #[macro_use] extern crate lazy_static;
 extern crate chrono;
+
+use ::rsp2_array_types::{V3, Unvee, Envee};
 
 use std::fmt;
 
@@ -598,7 +601,7 @@ impl<P: Potential> Lammps<P> {
         *self.structure.get_mut() = new;
     })}
 
-    pub fn set_carts(&mut self, new: &[[f64; 3]]) -> Result<()>
+    pub fn set_carts(&mut self, new: &[V3]) -> Result<()>
     {Ok({
         self.structure.get_mut().set_carts(new.to_vec());
     })}
@@ -669,7 +672,7 @@ impl<P: Potential> Lammps<P> {
         let carts = self.structure.get().to_carts();
         assert_eq!(carts.len(), self.ptr.borrow_mut().get_natoms());
 
-        unsafe { self.ptr.borrow_mut().scatter_atoms_f("x", carts.flat()) }?;
+        unsafe { self.ptr.borrow_mut().scatter_atoms_f("x", carts.unvee_ref().flat()) }?;
     })}
 
     fn send_lmp_lattice(&mut self) -> Result<()>
@@ -816,7 +819,7 @@ impl<P: Potential> Lammps<P> {
 //       the method was designed for such usage.
 impl<P: Potential> Lammps<P> {
 
-    pub fn compute(&mut self) -> Result<(f64, Vec<[f64; 3]>)>
+    pub fn compute(&mut self) -> Result<(f64, Vec<V3>)>
     {Ok({
         self.update_computation()?;
 
@@ -830,21 +833,21 @@ impl<P: Potential> Lammps<P> {
         unsafe { self.ptr.borrow_mut().extract_compute_0d("RSP2_PE") }?
     })}
 
-    pub fn compute_force(&mut self) -> Result<Vec<[f64; 3]>>
+    pub fn compute_force(&mut self) -> Result<Vec<V3>>
     {Ok({
         self.update_computation()?;
 
         let grad = unsafe { self.ptr.borrow_mut().gather_atoms_f("f", 3)? };
-        grad.nest().to_vec()
+        grad.nest::<[_; 3]>().to_vec().envee()
     })}
 
-    pub fn compute_grad(&mut self) -> Result<Vec<[f64; 3]>>
+    pub fn compute_grad(&mut self) -> Result<Vec<V3>>
     {Ok({
         self.update_computation()?;
 
         let mut grad = self.compute_force()?;
-        for x in grad.flat_mut() {
-            *x *= -1.0;
+        for v in &mut grad {
+            *v *= -1.0;
         }
         grad
     })}
@@ -897,7 +900,7 @@ mod tests {
         use ::rsp2_structure::Coords;
         let structure = Structure::new(
             Lattice::eye(),
-            Coords::Fracs(vec![[0.0; 3]]),
+            Coords::Fracs(vec![V3([0.0; 3])]),
             vec![()],
         );
         Builder::new().build(Default::default(), structure).unwrap()

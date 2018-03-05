@@ -23,7 +23,6 @@
 //!   *G*<sup>op</sup>, where the operations compose in reverse.
 //!   See https://github.com/ExpHP/rsp2/issues/1#issuecomment-340279243
 
-use ::rsp2_array_utils::{dot};
 use ::{Perm, FracRot};
 
 use ::rsp2_array_types::{V3, Envee};
@@ -84,13 +83,11 @@ impl SignedPerm {
 
     pub fn from_rot(rot: &FracRot) -> Self
     {
-        let m = ::util::transpose_33(&rot.float_t());
-
         // (stupid hat trick...)
-        let v: V3 = V3(dot(&m, &[1.0, 2.0, 3.0]));
+        let v = V3([0.001, 1.0, 2.0]) * &rot.float_t();
         SignedPerm {
             signs: v.map(|x| x.signum() as i32),
-            perm: v.map(|x| x.abs() as i32 - 1),
+            perm: v.map(|x| x.abs() as i32),
         }
     }
 
@@ -100,7 +97,7 @@ impl SignedPerm {
         for k in 0..3 {
             m[k][self.perm[k] as usize] = self.signs[k];
         }
-        FracRot::new(&m)
+        FracRot::from(&m)
     }
 
     pub fn then(&self, next: &SignedPerm) -> SignedPerm
@@ -128,19 +125,19 @@ lazy_static! {
     static ref ROTATION_GENERATORS: [FracRot; N_GENERATORS] = {
         [
             // x -> y -> z
-            FracRot::new(&[
+            FracRot::from(&[
                 [ 0, 1, 0],
                 [ 0, 0, 1],
                 [ 1, 0, 0],
             ]),
             // x <-> y
-            FracRot::new(&[
+            FracRot::from(&[
                 [ 0, 1, 0],
                 [ 1, 0, 0],
                 [ 0, 0, 1],
             ]),
             // mirror x
-            FracRot::new(&[
+            FracRot::from(&[
                 [-1, 0, 0],
                 [ 0, 1, 0],
                 [ 0, 0, 1],

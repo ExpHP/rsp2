@@ -19,20 +19,22 @@ mod test_util;
 
 // HACK: The contents of array-types actually live in this crate because
 //       they make use of traits and macros internal to this crate.
-mod vee;
+mod types;
 pub mod _rsp2_array_types_impl {
-    pub use vee::*;
+    pub use types::*;
 }
 
 // FIXME actually put thought into the public API layout.
 
-pub use ::small_mat::det;
-pub use ::small_mat::inv;
+// Matrix and vector operations on fixed-size array types.
+#[deprecated = "vector math should use rsp2-array-types"] pub use ::small_mat::det;
+#[deprecated = "vector math should use rsp2-array-types"] pub use ::small_mat::inv;
+#[deprecated = "vector math should use rsp2-array-types"] pub use ::dot::dot;
+
+#[deprecated = "this is pointless, use an iterator. (this crate even has a move iter if you really need it)"]
 pub use ::small_arr::ArrayFoldExt;
 
-// Matrix and vector operations on fixed-size array types.
 pub use ::traits::{Field, Ring, Semiring};
-pub use ::dot::dot;
 
 // Functional operations on arrays.
 pub use ::small_arr::{map_arr, try_map_arr, opt_map_arr};
@@ -42,5 +44,3 @@ pub use ::small_mat::{mat_from_fn, try_mat_from_fn, opt_mat_from_fn};
 
 // Iterators on arrays
 pub use ::iter::ArrayMoveIterExt;
-
-pub use ::vee::{V2, V3, V4, Envee, Unvee, envee, unvee};

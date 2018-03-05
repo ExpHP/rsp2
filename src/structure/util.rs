@@ -4,37 +4,10 @@
 use ::ordered_float::NotNaN;
 use ::errors::*;
 
-use ::rsp2_array_types::{V3, Envee, Unvee};
+use ::rsp2_array_types::{V3, M33, M3};
 
 #[cfg(test)] use ::std::rc::Rc;
 #[cfg(test)] use ::std::cell::RefCell;
-
-// Multiply on the right
-pub(crate) fn dot_n3_33(coords: &[V3], mat: &[[f64; 3]; 3]) -> Vec<V3>
-{
-    use ::rsp2_array_utils::dot;
-    coords.unvee().iter().map(|v| dot(v, mat)).collect::<Vec<_>>().envee()
-}
-
-pub(crate) fn transpose_33<T: Copy>(m: &[[T; 3]; 3]) -> [[T; 3]; 3]
-{
-    use ::rsp2_array_utils::mat_from_fn;
-    mat_from_fn(|r, c| m[c][r])
-}
-
-// Multiply by transpose on the right
-//
-// I think this one is more likely to be able to use SIMD
-// but I have not tested this. - ML
-#[allow(non_snake_case)]
-#[allow(unused)]
-pub(crate) fn dot_n3_33T(coords: &[V3], mat: &[[f64; 3]; 3]) -> Vec<V3>
-{
-    use ::rsp2_array_utils::arr_from_fn;
-    coords.unvee().iter().map(|v|
-        V3(arr_from_fn(|c| (0..3).map(|k| v[k] * mat[c][k]).sum()))
-    ).collect()
-}
 
 pub(crate) fn translate_mut_n3_3(coords: &mut [V3], t: &V3)
 {
@@ -51,11 +24,10 @@ pub(crate) fn translate_mut_n3_n3(coords: &mut [V3], by: &[V3])
 
 #[cfg(test)]
 pub(crate) fn not_nan_n3(coords: Vec<V3>) -> Vec<V3<NotNaN<f64>>> {
-    use ::slice_of_array::prelude::*;
     // still a newtype?
     assert_eq!(::std::mem::size_of::<f64>(), ::std::mem::size_of::<NotNaN<f64>>());
     // (NotNaN has undefined behavior for NaN so we must check)
-    assert!(coords.iter().flat_map(|v| v).all((|x| !x.is_nan())));
+    assert!(coords.iter().flat_map(|v| v).all(|x| !x.is_nan()));
     unsafe { ::std::mem::transmute(coords) }
 }
 
@@ -79,11 +51,11 @@ impl Tol {
         r as i32
     })}
 
-    pub(crate) fn unfloat_3(&self, v: &[f64; 3]) -> Result<[i32; 3]>
-    { ::rsp2_array_utils::try_map_arr(*v, |x| self.unfloat(x)) }
+    pub(crate) fn unfloat_v3(&self, v: &V3) -> Result<V3<i32>>
+    { v.try_map(|x| self.unfloat(x)) }
 
-    pub(crate) fn unfloat_33(&self, m: &[[f64; 3]; 3]) -> Result<[[i32; 3]; 3]>
-    { ::rsp2_array_utils::try_map_mat(*m, |x| self.unfloat(x)) }
+    pub(crate) fn unfloat_m33(&self, m: &M33) -> Result<M33<i32>>
+    { ::rsp2_array_utils::try_map_arr(m.0, |v| self.unfloat_v3(&v)).map(M3) }
 }
 
 pub(crate) fn zip_eq<As, Bs>(a: As, b: Bs) -> ::std::iter::Zip<As::IntoIter, Bs::IntoIter>

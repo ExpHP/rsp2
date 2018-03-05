@@ -3,7 +3,7 @@ use ::errors::*;
 use ::oper::{Perm, Permute};
 use ::oper::{Part, Partition};
 use ::oper::part::Unlabeled;
-use ::rsp2_array_types::{V3, Unvee};
+use ::rsp2_array_types::{M33, V3, Unvee};
 
 use ::std::result::Result as StdResult;
 
@@ -263,7 +263,7 @@ impl<M> Structure<M> {
     ///
     /// This will keep fractional positions fixed
     /// by rotating the lattice instead.
-    pub fn transform(&mut self, m: &[[f64; 3]; 3])
+    pub fn transform(&mut self, m: &M33)
     {
         self.ensure_only_fracs();
         self.lattice = self.lattice.transformed_by(m);
@@ -281,15 +281,14 @@ impl<M> Structure<M> {
     /// # Panics
     ///
     /// Panics if `abs(det(m)) != 1`.
-    pub fn apply_unimodular(&mut self, m: &[[i32; 3]; 3])
+    pub fn apply_unimodular(&mut self, m: &M33<i32>)
     {
         warn!("Untested code path: 1e58907e-ae0b-4af8-8653-f003d88c262d");
-        use ::rsp2_array_utils::det;
 
         // Cartesian - not fractional - coords are preserved under unimodular transforms.
         self.ensure_only_carts();
 
-        assert_eq!(det(m).abs(), 1, "Matrix is not unimodular: {:?}", m);
+        assert_eq!(m.det().abs(), 1, "Matrix is not unimodular: {:?}", m);
         self.lattice = self.lattice.linear_combination(&m);
     }
 
@@ -309,9 +308,9 @@ impl<M> Structure<M> {
     {Ok({
         warn!("Untested code path: 1650857f-42df-47e4-8ff0-cdd9dcb85020");
         let unimodular = &self.lattice * target_lattice.inverse_matrix();
-        let unimodular = match ::util::Tol(tol).unfloat_33(unimodular.matrix()) {
+        let unimodular = match ::util::Tol(tol).unfloat_m33(unimodular.matrix()) {
             Ok(m) => m,
-            Err(_) => bail!(ErrorKind::NonEquivalentLattice(*unimodular.matrix()))
+            Err(_) => bail!(ErrorKind::NonEquivalentLattice(unimodular.matrix().into_array()))
         };
         self.apply_unimodular(&unimodular);
     })}

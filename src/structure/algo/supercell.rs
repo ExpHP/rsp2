@@ -3,10 +3,9 @@
 use ::{Structure, Lattice, Coords};
 use ::{Result, Error, ErrorKind};
 
-#[warn(deprecated)]
-use ::rsp2_array_utils::{dot, try_arr_from_fn};
+use ::rsp2_array_utils::{try_arr_from_fn};
 
-use ::rsp2_array_types::V3;
+use ::rsp2_array_types::{V3};
 
 pub fn diagonal<M>(dims: (u32,u32,u32), structure: Structure<M>)
 -> (Structure<M>, SupercellToken)
@@ -246,7 +245,7 @@ fn sc_indices(periods: [u32; 3]) -> Vec<V3<u32>> {
 // supercell image offsets in the library's preferred order
 fn sc_lattice_vecs(periods: [u32; 3], lattice: &Lattice) -> Vec<V3> {
     sc_indices(periods).into_iter()
-        .map(|idx| V3(dot(&idx.map(|x| x as f64).0, lattice.matrix())))
+        .map(|idx| idx.map(|x| x as f64) * lattice.matrix())
         .collect()
 }
 
@@ -284,18 +283,18 @@ mod tests {
         use ::{Coords, Structure, Lattice};
 
         // nondiagonal lattice so that matrix multiplication order matters
-        let lattice = [
+        let lattice = Lattice::from(&[
             [2.0, 2.0, 0.0],
             [0.0, 4.0, 0.0],
             [0.0, 0.0, 2.0],
-        ];
+        ]);
 
         let coords = Coords::Fracs(envee(vec![
             [ 0.5, -0.5, 0.0], // cart: [+1.0, -1.0,  0.0]
             [ 0.0,  0.5, 0.5], // cart: [ 0.0, +1.0, +1.0]
         ]));
 
-        let original = Structure::new_coords(Lattice::new(&lattice), coords);
+        let original = Structure::new_coords(lattice, coords);
         let (supercell, sc_token) = ::supercell::diagonal((4, 2, 2), original.clone());
         let deconstructed = sc_token.deconstruct(1e-10, supercell.clone()).unwrap();
 

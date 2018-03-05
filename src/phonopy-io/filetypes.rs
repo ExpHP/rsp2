@@ -2,33 +2,35 @@ use ::{Result};
 use ::std::io::prelude::*;
 use ::std::collections::HashMap;
 
+use ::rsp2_structure::Structure;
+use ::rsp2_array_types::{V3, M33};
 
 // why is this pub(crate)? I don't remember...
-pub(crate) type Displacements = Vec<(usize, [f64; 3])>;
+pub(crate) type Displacements = Vec<(usize, V3)>;
 pub mod disp_yaml {
     use super::*;
 
-    use ::rsp2_structure::{Structure};
-
     mod cereal {
+        use super::*;
+
         #[derive(Deserialize)]
         pub(super) struct DispYaml {
             pub displacements: Vec<Displacement>,
-            pub lattice: [[f64; 3]; 3],
+            pub lattice: M33,
             pub points: Vec<Point>,
         }
 
         #[derive(Deserialize)]
         pub(super) struct Displacement {
             pub atom: u32,
-            pub direction: [f64; 3],
-            pub displacement: [f64; 3],
+            pub direction: V3,
+            pub displacement: V3,
         }
 
         #[derive(Deserialize)]
         pub(super) struct Point {
             pub symbol: String,
-            pub coordinates: [f64; 3],
+            pub coordinates: V3,
             pub mass: f64,
         }
     }
@@ -48,16 +50,11 @@ pub mod disp_yaml {
     // helper for generating displaced structures
     pub fn apply_displacement<M: Clone>(
         structure: &Structure<M>,
-        (atom, disp): (usize, [f64; 3]),
+        (atom, disp): (usize, V3),
     ) -> Structure<M>
     {
         let mut structure = structure.clone();
-        {
-            let coords = structure.carts_mut();
-            for k in 0..3 {
-                coords[atom][k] += disp[k];
-            }
-        }
+        structure.carts_mut()[atom] += disp;
         structure
     }
 
@@ -140,15 +137,13 @@ pub mod conf {
 }
 
 pub mod symmetry_yaml {
-    use ::Result;
-
-    use ::std::io::prelude::*;
+    use super::*;
 
     /// Spacegroup operator from disp.yaml
     #[derive(Deserialize)]
     pub struct Operation {
         pub rotation: [[i32; 3]; 3],
-        pub translation: [f64; 3],
+        pub translation: V3,
     }
 
     /// A parsed --sym output
@@ -172,23 +167,20 @@ pub mod symmetry_yaml {
 }
 
 pub mod force_sets {
+    use super::*;
     // Adapted from code by Colin Daniels.
-
-    use ::Result;
-
-    use ::std::io::prelude::*;
 
     /// Write a FORCE_SETS file.
     pub fn write<W, Vs>(
         mut w: W,
-        displacements: &[(usize, [f64; 3])],
+        displacements: &[(usize, V3)],
         force_sets: Vs,
     ) -> Result<()>
     where
         W: Write,
         Vs: IntoIterator,
         <Vs as IntoIterator>::IntoIter: ExactSizeIterator,
-        <Vs as IntoIterator>::Item: AsRef<[[f64; 3]]>,
+        <Vs as IntoIterator>::Item: AsRef<[V3]>,
     {
         let mut force_sets = force_sets.into_iter().peekable();
 
@@ -216,9 +208,7 @@ pub mod force_sets {
 }
 
 pub mod sparse_sets {
-    use ::Result;
-
-    use ::std::io::prelude::*;
+    use super::*;
 
     #[derive(Serialize, Deserialize)]
     #[derive(Debug, Clone)]
@@ -233,22 +223,22 @@ pub mod sparse_sets {
     #[serde(rename_all = "kebab-case")]
     pub struct Forces {
         atom: usize,
-        displacement: [f64; 3],
+        displacement: V3,
         partners: Vec<usize>,
-        vectors: Vec<[f64; 3]>,
+        vectors: Vec<V3>,
     }
 
     /// Write a SPARSE_SETS file.
     pub fn write<W, Vs>(
         mut w: W,
-        displacements: &[(usize, [f64; 3])],
+        displacements: &[(usize, V3)],
         force_sets: Vs,
     ) -> Result<()>
         where
             W: Write,
             Vs: IntoIterator,
             <Vs as IntoIterator>::IntoIter: ExactSizeIterator,
-            <Vs as IntoIterator>::Item: AsRef<[[f64; 3]]>,
+            <Vs as IntoIterator>::Item: AsRef<[V3]>,
     {
         let mut force_sets = force_sets.into_iter().peekable();
         let n_atom = force_sets.peek().expect("no force sets!?").as_ref().len();
@@ -262,7 +252,7 @@ pub mod sparse_sets {
                     // sparsify
                     let (partners, vectors) =
                         force.as_ref().iter().cloned().enumerate()
-                            .filter(|&(_, x)| x != [0.0; 3])
+                            .filter(|&(_, x)| x != V3([0.0; 3]))
                             .map(|(i, x)| (i + 1, x)) // to 1-based
                             .unzip();
 

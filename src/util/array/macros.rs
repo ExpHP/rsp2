@@ -13,9 +13,14 @@ macro_rules! Brother {
     => { <$Array as WithElement<$E>>::Type };
 }
 
+macro_rules! Element {
+    ($Arr: ty)
+    => { <$Arr as IsArray>::Element };
+}
+
 macro_rules! MatrixElement {
     ($Mat: ty)
-    => { <<$Mat>::Element as IsArray>::Element };
+    => { Element![Element![$Mat]] };
 }
 
 /// Higher-order macro that iterates over a cartesian product.
@@ -128,6 +133,18 @@ macro_rules! gen_each__ {
         {V2 2} {V3 3} {V4 4}
     ]] }};
 
+    // Matrices of generic width, and their number of rows
+    ([@{Mn_n} $($rest:tt)*] -> [$($done:tt)*])
+    => { gen_each__!{[$($rest)*] -> [$($done)* [
+        {M2 2} {M3 3} {M4 4}
+    ]] }};
+
+    // Square matrices, their vector types, and size
+    ([@{Mnn_Mn_Vn_n} $($rest:tt)*] -> [$($done:tt)*])
+    => { gen_each__!{[$($rest)*] -> [$($done)* [
+        {M22 M2 V2 2} {M33 M3 V3 3} {M44 M4 V4 4}
+    ]] }};
+
     ([@{0...4} $($rest:tt)*] -> [$($done:tt)*])
     => { gen_each__!{[$($rest)*] -> [$($done)* [
         { 0} { 1} { 2} { 3} { 4}
@@ -206,6 +223,20 @@ macro_rules! gen_each__ {
             $mac!$($defn_args)*
         }
     };
+}
+
+/// Synthesize a `Vn` vector type from a `tt` of the size.
+macro_rules! V {
+    (2, $X:ty) => { V2<$X> };
+    (3, $X:ty) => { V3<$X> };
+    (4, $X:ty) => { V4<$X> };
+}
+
+/// Synthesize an `Mn` matrix type from a `tt` of the size.
+macro_rules! M {
+    (2, $V:ty) => { M2<$V> };
+    (3, $V:ty) => { M3<$V> };
+    (4, $V:ty) => { M4<$V> };
 }
 
 #[cfg(test)]

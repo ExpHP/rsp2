@@ -8,6 +8,7 @@ path = "lib.rs"
 
 [dependencies]
 !!rsp2-structure
+!!rsp2-array-types
 !!lammps-sys
 
 !!log

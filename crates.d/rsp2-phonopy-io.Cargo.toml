@@ -15,6 +15,7 @@ path = "lib.rs"
 !!serde-json
 
 !!rsp2-structure
+!!rsp2-array-types
 !!rsp2-byte-tools-plus-float
 
 !!rsp2-kets

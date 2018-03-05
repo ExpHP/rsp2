@@ -47,7 +47,7 @@ pub fn try_mat_from_fn<M, E, F>(mut f: F) -> Result<M, E>
 ///
 /// `M` should be a 2D array type, like `[[T; n]; m]`, and the
 /// function must have the signature `fn(row: usize, col: usize) -> Option<T>`.
-pub fn opt_mat_from_fn<M, E, F>(mut f: F) -> Option<M>
+pub fn opt_mat_from_fn<M, F>(mut f: F) -> Option<M>
   where
     M: ArrayFromFunctionExt,
     M::Element: ArrayFromFunctionExt,
@@ -107,7 +107,7 @@ where
 /// and the function must have the signature `fn(A) -> Option<B>`.
 /// It will produce a value of type `Option<[[B; n]; m]>`.
 /// Elements are mapped in row major order.
-pub fn opt_map_mat<B, M, E, F>(m: M, mut f: F) -> Option<Brother!{M, Brother!{M::Element, B}}>
+pub fn opt_map_mat<B, M, F>(m: M, mut f: F) -> Option<Brother!{M, Brother!{M::Element, B}}>
 where
     M: ArrayMapExt<Brother!{<M as IsArray>::Element, B}>,
     M::Element: ArrayMapExt<B> + WithElement<B>,

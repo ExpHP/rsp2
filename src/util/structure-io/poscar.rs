@@ -30,7 +30,7 @@ where W: Write
     let poscar = RawPoscar {
         comment: title.into(),
         scale: ScaleLine::Factor(1.0),
-        lattice_vectors: *structure.lattice().matrix(),
+        lattice_vectors: structure.lattice().matrix().into_array(),
         positions: ::vasp_poscar::Coords::Cart(structure.to_carts().unvee()),
         group_symbols: Some(group_symbols),
         group_counts,
@@ -72,7 +72,7 @@ where R: BufRead,
     // FIXME use Poscar::scaled_lattice_vectors() once it is available
     // FIXME use Poscar::scaled_cart_positions() once it is available
     assert_eq!(scale, ScaleLine::Factor(1.0));
-    let lattice = Lattice::new(&lattice_vectors);
+    let lattice = Lattice::from(&lattice_vectors);
     let coords = match positions {
         ::vasp_poscar::Coords::Cart(p) => Coords::Carts(p.envee()),
         ::vasp_poscar::Coords::Frac(p) => Coords::Fracs(p.envee()),

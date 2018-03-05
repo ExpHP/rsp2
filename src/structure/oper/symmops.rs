@@ -1,12 +1,7 @@
-#![allow(deprecated)] // HACK: reduce warning-spam at call sites, I only care about the `use`
-
-#[warn(deprecated)]
-use ::rsp2_array_utils::{dot, det};
-use ::rsp2_array_utils::{mat_from_fn, map_mat};
 use ::errors::*;
 use ::std::rc::Rc;
 
-use ::rsp2_array_types::V3;
+use ::rsp2_array_types::{V3, M33, M44, M4, V4, mat};
 
 // NOTE: This API is in flux. Some (possibly incorrect) notes:
 //
@@ -23,7 +18,7 @@ pub struct FracRot {
     ///
     /// Invariants:
     ///  - `abs(det(t)) == 1`
-    t: [[i32; 3]; 3],
+    t: M33<i32>,
 }
 
 /// The translation part of a spacegroup operation on a primitive cell.
@@ -49,7 +44,7 @@ pub struct FracOp {
     /// Invariants:
     ///  - translation elements are reduced into the range `0 <= x < 12`.
     ///  - final element is 1
-    t: Rc<[[i32; 4]; 4]>,
+    t: Rc<M44<i32>>,
 }
 
 impl Default for FracOp {
@@ -79,21 +74,21 @@ impl From<FracRot> for FracOp {
 
 impl FracRot {
     pub fn eye() -> Self
-    { Self { t: [[1, 0, 0], [0, 1, 0], [0, 0, 1]] } }
+    { Self { t: mat::from_array([[1, 0, 0], [0, 1, 0], [0, 0, 1]]) } }
 
     /// Construct from a matrix.
     ///
     /// The input should be a matrix `R` such that `X R^T ~ X`,
     /// where the rows of `X` are fractional positions.
-    pub fn new(mat: &[[i32; 3]; 3]) -> FracRot
+    pub fn new(mat: &M33<i32>) -> FracRot
     {
-        assert_eq!(det(mat).abs(), 1);
-        FracRot { t: mat_from_fn(|r, c| mat[c][r]) }
+        assert_eq!(mat.det().abs(), 1);
+        FracRot { t: mat.t() }
     }
 
     // transposed float matrix
-    pub(crate) fn float_t(&self) -> [[f64; 3]; 3]
-    { map_mat(self.t, Into::into) }
+    pub(crate) fn float_t(&self) -> M33
+    { self.t.map(Into::into) }
 }
 
 impl FracRot {
@@ -104,7 +99,7 @@ impl FracRot {
     pub fn then(&self, other: &FracRot) -> FracRot
     {
         // (since these are transposes, this is the natural order of application)
-        FracRot { t: dot(&self.t, &other.t) }
+        FracRot { t: &self.t * &other.t }
     }
 
     /// Conventional group operator.
@@ -123,12 +118,12 @@ impl FracTrans {
     { self.0.map(|x| f64::from(x) / 12f64) }
 }
 
-const FRAC_OP_EYE: [[i32; 4]; 4] = [
-    [1, 0, 0, 0],
-    [0, 1, 0, 0],
-    [0, 0, 1, 0],
-    [0, 0, 0, 1],
-];
+const FRAC_OP_EYE: M44<i32> = M4([
+    V4([1, 0, 0, 0]),
+    V4([0, 1, 0, 0]),
+    V4([0, 0, 1, 0]),
+    V4([0, 0, 0, 1]),
+]);
 
 impl FracOp {
     pub fn eye() -> Self
@@ -137,9 +132,9 @@ impl FracOp {
     pub fn new(rot: &FracRot, trans: &FracTrans) -> Self
     {
         let mut out = FRAC_OP_EYE;
-        out[0][..3].copy_from_slice(&rot.t[0]);
-        out[1][..3].copy_from_slice(&rot.t[1]);
-        out[2][..3].copy_from_slice(&rot.t[2]);
+        out[0][..3].copy_from_slice(&*rot.t[0]);
+        out[1][..3].copy_from_slice(&*rot.t[1]);
+        out[2][..3].copy_from_slice(&*rot.t[2]);
         out[3][..3].copy_from_slice(&*trans.0);
         FracOp { t: out.into() }
     }
@@ -169,7 +164,7 @@ impl FracOp {
     pub fn then(&self, other: &FracOp) -> FracOp
     {
         // this is the natural order of application for transposes
-        let mut t = dot(&*self.t, &*other.t);
+        let mut t = &*self.t * &*other.t;
 
         // reduce the translation for a unique representation
         for x in &mut t[3][..3] {
@@ -190,7 +185,12 @@ impl FracOp {
 
 impl FracRot {
     pub fn transform_prim(&self, fracs: &[V3]) -> Vec<V3>
-    { ::util::dot_n3_33(fracs, &self.float_t()) }
+    { fracs.iter().map(|v| v * &self.float_t()).collect() }
+}
+
+impl<'a> From<&'a [[i32; 3]; 3]> for FracRot {
+    fn from(m: &'a [[i32; 3]; 3]) -> Self
+    { FracRot::new(&mat::from_array(*m))}
 }
 
 impl FracTrans {
@@ -211,7 +211,7 @@ impl FracOp {
 #[deny(unused)]
 mod tests {
     use super::*;
-    use ::rsp2_array_types::envee;
+    use ::rsp2_array_types::Envee;
 
     #[test]
     fn rot_transform()
@@ -222,8 +222,8 @@ mod tests {
             [0,  0, 1],
         ];
         assert_eq!(
-            FracRot::new(&r).transform_prim(envee(&[[1.0, 5.0, 7.0]])),
-            envee(vec![[-5.0, 1.0, 7.0]]),
+            FracRot::from(&r).transform_prim([[1.0, 5.0, 7.0]].envee_ref()),
+            vec![[-5.0, 1.0, 7.0]].envee(),
         );
     }
 
@@ -231,23 +231,23 @@ mod tests {
     fn two_transform()
     {
         // two operations that don't commute
-        let xy = FracRot::new(&[
+        let xy = FracRot::from(&[
             [0, 1, 0],
             [1, 0, 0],
             [0, 0, 1],
         ]);
-        let zx = FracRot::new(&[
+        let zx = FracRot::from(&[
             [0, 0, 1],
             [0, 1, 0],
             [1, 0, 0],
         ]);
-        let xyzx = FracRot::new(&[
+        let xyzx = FracRot::from(&[
             [0, 0, 1],
             [1, 0, 0],
             [0, 1, 0],
         ]);
         // a primitive structure that is sensitive to any permutations of the axes
-        let prim = envee(vec![[1., 2., 3.]]);
+        let prim = vec![[1., 2., 3.]].envee();
         assert_eq!(xy.then(&zx), xyzx);
         assert_eq!(zx.of(&xy), xyzx);
         assert_eq!(
@@ -271,7 +271,7 @@ mod tests {
     fn symmop_mul()
     {
         let op = FracOp::new(
-            &FracRot::new(&[
+            &FracRot::from(&[
                 [ 0,  1, 0],
                 [-1,  1, 0],
                 [ 0,  0, 1],
@@ -279,7 +279,7 @@ mod tests {
             &FracTrans::from_floats(&V3([1./3., 2./3., 0.0])).unwrap(),
         );
         let square = FracOp::new(
-            &FracRot::new(&[
+            &FracRot::from(&[
                 [-1, 1, 0],
                 [-1, 0, 0],
                 [ 0, 0, 1],

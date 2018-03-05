@@ -361,7 +361,7 @@ mod tests {
         let smaller_tol = 0.09 * ylen;  // makes all atoms look separate
 
         const IR2: f64 = ::std::f64::consts::FRAC_1_SQRT_2;
-        let lattice = Lattice::new(&[
+        let lattice = Lattice::from(&[
             [ ylen * IR2, ylen *  IR2,  0.0],
             [ ylen * IR2, ylen * -IR2,  0.0], // (axis we're using)
             [        0.0,         0.0, 13.0],

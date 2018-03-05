@@ -3,7 +3,7 @@ use ::oper::{Perm, Permute};
 use ::oper::{Part, Partition};
 use ::oper::part::Unlabeled;
 
-use ::rsp2_array_types::V3;
+use ::rsp2_array_types::{V3, M33};
 
 /// Wrapper type for coordinates used as input to some APIs.
 ///
@@ -67,24 +67,24 @@ impl Coords {
     pub fn into_carts(self, lattice: &Lattice) -> Vec<V3>
     { match self {
         Coords::Carts(c) => c,
-        Coords::Fracs(c) => ::util::dot_n3_33(&c, &lattice.matrix()),
+        Coords::Fracs(c) => dot_n3_33(&c, lattice.matrix()),
     }}
 
     pub fn into_fracs(self, lattice: &Lattice) -> Vec<V3>
     { match self {
-        Coords::Carts(c) => ::util::dot_n3_33(&c, &lattice.inverse_matrix()),
+        Coords::Carts(c) => dot_n3_33(&c, lattice.inverse_matrix()),
         Coords::Fracs(c) => c,
     }}
 
     pub fn to_carts(&self, lattice: &Lattice) -> Vec<V3>
     { match *self {
         Coords::Carts(ref c) => c.clone(),
-        Coords::Fracs(ref c) => ::util::dot_n3_33(c, &lattice.matrix()),
+        Coords::Fracs(ref c) => dot_n3_33(c, lattice.matrix()),
     }}
 
     pub fn to_fracs(&self, lattice: &Lattice) -> Vec<V3>
     { match *self {
-        Coords::Carts(ref c) => ::util::dot_n3_33(c, &lattice.inverse_matrix()),
+        Coords::Carts(ref c) => dot_n3_33(c, lattice.inverse_matrix()),
         Coords::Fracs(ref c) => c.clone(),
     }}
 
@@ -101,6 +101,9 @@ impl Coords {
         Tag::Frac => self.to_fracs(lattice),
     }}
 }
+
+fn dot_n3_33(c: &[V3], m: &M33) -> Vec<V3>
+{ c.iter().map(|v| v * m).collect() }
 
 impl Permute for Coords {
     fn permuted_by(self, perm: &Perm) -> Coords
@@ -121,16 +124,17 @@ impl Partition for Coords {
 #[cfg(test)]
 #[deny(unused)]
 mod tests {
-    use ::rsp2_array_types::envee;
+    use ::Lattice;
+    use ::Coords::{Fracs, Carts};
+
+    use ::rsp2_array_types::Envee;
 
     // make sure the library correctly chooses whether to use the
     // regular matrix, the inverse matrix, or no matrix
     #[test]
     fn div_vs_mul() {
-        use ::Lattice;
-        use ::Coords::{Fracs, Carts};
 
-        let x = |mag| envee(vec![[mag, 0.0, 0.0]]);
+        let x = |mag| vec![[mag, 0.0, 0.0]].envee();
         let lattice = Lattice::cubic(2.0);
 
         assert_eq!(x(1.0), Fracs(x(1.0)).to_fracs(&lattice));
@@ -147,11 +151,9 @@ mod tests {
     // make sure matrix multiplication is done in the correct order
     #[test]
     fn multiplication_order() {
-        use ::Lattice;
-        use ::Coords::{Fracs, Carts};
 
         // a matrix not equal to its transpose
-        let lattice = Lattice::new(&[
+        let lattice = Lattice::from(&[
             [0.0, 1.0, 0.0],
             [0.0, 0.0, 1.0],
             [1.0, 0.0, 0.0],
@@ -159,9 +161,9 @@ mod tests {
 
         // what happens to [1,0,0] when we interpret it in one coord system
         //  and then convert to the other system
-        let input = envee(vec![[1.0, 0.0, 0.0]]);
-        let frac_to_cart = envee(vec![[0.0, 1.0, 0.0]]);
-        let cart_to_frac = envee(vec![[0.0, 0.0, 1.0]]);
+        let input = vec![[1.0, 0.0, 0.0]].envee();
+        let frac_to_cart = vec![[0.0, 1.0, 0.0]].envee();
+        let cart_to_frac = vec![[0.0, 0.0, 1.0]].envee();
 
         assert_eq!(&frac_to_cart, &Fracs(input.clone()).to_carts(&lattice));
         assert_eq!(&frac_to_cart, &Fracs(input.clone()).into_carts(&lattice));

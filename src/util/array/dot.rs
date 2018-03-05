@@ -7,7 +7,6 @@ use ::{arr_from_fn, mat_from_fn};
 use ::traits::{IsArray, Semiring};
 use ::traits::internal::PrimitiveSemiring;
 
-#[deprecated = "Use V2/V3/V4 (alternative for vec * matrix is coming)"]
 pub fn dot<A,B,C>(a: &A, b: &B) -> C
   where A: Dot<B, Output=C>,
 { Dot::dot(a, b) }
@@ -73,7 +72,7 @@ gen_each!{
     [{2} {3} {4}]
     [{2} {3} {4}]
     [{2} {3} {4}]
-    impl_vec_mat_dot!({$r:expr} {$k:expr} {$c:expr})
+    impl_mat_mat_dot!({$r:expr} {$k:expr} {$c:expr})
     => {
         // (r, k) x (k, c) -> (r, c)
         impl<T: Semiring> Dot<nd![T; $k; $c]> for nd![T; $r; $k]

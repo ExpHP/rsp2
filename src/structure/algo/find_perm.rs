@@ -1,9 +1,8 @@
-use ::slice_of_array::prelude::*;
 use ::{Lattice, Structure, CoordStructure};
 use ::{FracRot, FracOp};
 use super::group::GroupTree;
 
-use ::rsp2_array_types::{V3, Unvee};
+use ::rsp2_array_types::V3;
 
 use ::Result;
 use ::{Perm, Permute};
@@ -263,9 +262,8 @@ fn brute_force_near_identity(
 
             let distance2 = {
                 let diff = (from_fracs[from] - to_fracs[to]).map(|x| x - x.round());
-
-                let cart = ::rsp2_array_utils::dot(&diff.0, lattice.matrix());
-                V3(cart).sqnorm()
+                let cart = diff * lattice.matrix();
+                cart.sqnorm()
             };
             if distance2 < tol * tol {
                 perm[to] = from as u32;
@@ -306,7 +304,7 @@ mod tests {
     #[test]
     fn brute_force_works() {
         let (original, perm, permuted) = random_problem(20);
-        let lattice = Lattice::new(random_vec(3).as_array());
+        let lattice = Lattice::random_uniform(1.0);
 
         let output = super::brute_force_near_identity(
             &lattice, &original, &permuted, 1e-5,
@@ -318,7 +316,7 @@ mod tests {
     #[test]
     fn of_rotation_impl_works() {
         let (original, perm, permuted) = random_problem(20);
-        let lattice = Lattice::new(random_vec(3).as_array());
+        let lattice = Lattice::random_uniform(1.0);
 
         let output = super::of_rotation_impl(
             &lattice, &[(); 20], &original, &permuted, 1e-5,

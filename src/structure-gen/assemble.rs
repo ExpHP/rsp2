@@ -5,10 +5,9 @@
 use ::{Result, ok};
 
 use ::rsp2_structure::{Coords, Lattice, CoordStructure};
-use ::rsp2_array_utils::inv;
 use ::std::io::Read;
 
-use ::rsp2_array_types::{V2, V3};
+use ::rsp2_array_types::{M22, M33, V2, V3, mat};
 
 pub fn load_layers_yaml<R: Read>(mut file: R) -> Result<Assemble>
 { _load_layers_yaml(&mut file) }
@@ -21,14 +20,14 @@ fn _load_layers_yaml(file: &mut Read) -> Result<Assemble>
 }
 
 // FIXME this really doesn't belong here, but it's the easiest reuse of code
-pub fn layer_sc_info_from_layers_yaml<R: Read>(mut file: R) -> Result<Vec<([[i32; 3]; 3], [u32; 3], usize)>>
+pub fn layer_sc_info_from_layers_yaml<R: Read>(mut file: R) -> Result<Vec<(M33<i32>, [u32; 3], usize)>>
 { _layer_sc_info_from_layers_yaml(&mut file) }
 
 // Monomorphized to ensure YAML parsing code is generated in this crate
-fn _layer_sc_info_from_layers_yaml(file: &mut Read) -> Result<Vec<([[i32; 3]; 3], [u32; 3], usize)>>
+fn _layer_sc_info_from_layers_yaml(file: &mut Read) -> Result<Vec<(M33<i32>, [u32; 3], usize)>>
 {
     let cereal = ::serde_yaml::from_reader(file)?;
-    layer_sc_info_from_cereal(cereal).map(|a| a)
+    layer_sc_info_from_cereal(cereal)
 }
 
 /// A partially assembled structure for which
@@ -39,7 +38,7 @@ pub struct Assemble {
     /// separation across periodic boundary
     pub vacuum_sep: f64,
     // a lattice with a dummy z length, and without 'scale' taken into account
-    lattice: [[f64; 2]; 2],
+    lattice: M22,
     frac_sites: Vec<Vec<V2>>,
     layer_seps: Vec<f64>,
 }
@@ -52,7 +51,7 @@ impl Assemble {
     {
         let lattice = {
             let scales = [self.scale, self.scale, self.get_z_length()];
-            let lattice = Lattice::new(&mat_22_to_33(&self.lattice));
+            let lattice = Lattice::new(&m22_to_m33(&self.lattice));
             &Lattice::diagonal(&scales) * &lattice
         };
         let layer_zs = self.get_z_positions();
@@ -98,7 +97,7 @@ mod cereal {
     pub struct Root {
         #[serde(default = "defaults::a")]
         pub a: f64,
-        pub lattice: [[f64; 2]; 2],
+        pub lattice: M22,
         pub layer: Vec<Layer>,
         #[serde(default = "defaults::layer_sep")]
         pub layer_sep: Either<f64, Vec<f64>>,
@@ -120,28 +119,32 @@ mod cereal {
         pub frac_sites: Option<Vec<V2>>,
         pub cart_sites: Option<Vec<V2>>,
         // NOTE: units of superlattice
-        pub frac_lattice: Option<[[f64; 2]; 2]>,
-        pub cart_lattice: Option<[[f64; 2]; 2]>,
+        pub frac_lattice: Option<M22>,
+        pub cart_lattice: Option<M22>,
         #[serde(default = "defaults::layer::transform")]
-        pub transform: [[f64; 2]; 2],
+        pub transform: M22,
         // Number of unique images to generate along each layer lattice vector
         #[serde(default = "defaults::layer::repeat")]
         pub repeat: [u32; 2],
         // Common translation for all positions in layer.
         // NOTE: units of layer lattice
         #[serde(default = "defaults::layer::shift")]
-        pub shift: [f64; 2],
+        pub shift: V2,
     }
 
     mod defaults {
         use super::*;
+
         pub fn a() -> f64 { 1.0 }
         pub fn vacuum_sep() -> f64 { 10.0 }
         pub fn layer_sep() -> Either<f64, Vec<f64>> { Either::A(1.0) }
+
         pub mod layer {
-            pub fn transform() -> [[f64; 2]; 2] { [[1.0, 0.0], [0.0, 1.0]] }
+            use super::*;
+
+            pub fn transform() -> M22 { mat::eye() }
             pub fn repeat() -> [u32; 2] { [1, 1] }
-            pub fn shift() -> [f64; 2] { [0.0, 0.0] }
+            pub fn shift() -> V2 { V2([0.0, 0.0]) }
         }
     }
 }
@@ -152,7 +155,7 @@ mod middle {
 
     #[derive(Debug, Clone)]
     pub struct Layers {
-        pub full_lattice: [[f64; 3]; 3],
+        pub full_lattice: M33,
         pub layers: Vec<Layer>,
         pub layer_seps: Vec<f64>,
         pub vacuum_sep: f64,
@@ -164,7 +167,7 @@ mod middle {
         pub frac_lattice: ::rsp2_structure::Lattice,
         pub cart_lattice: ::rsp2_structure::Lattice,
         pub cart_sites: Vec<V3>,
-        pub transform: [[f64; 3]; 3],
+        pub transform: M33,
         pub repeat: [u32; 3],
         pub shift: V3,
     }
@@ -178,7 +181,7 @@ fn interpret_cereal(cereal: self::cereal::Root) -> Result<middle::Layers>
         lattice: full_lattice,
         layer_sep, vacuum_sep,
     } = cereal;
-    let full_lattice = mat_22_to_33(&full_lattice);
+    let full_lattice = m22_to_m33(&full_lattice);
 
     let layer_seps = match layer_sep {
         self::cereal::Either::A(x) => vec![x; layers.len() - 1],
@@ -209,10 +212,10 @@ fn interpret_cereal(cereal: self::cereal::Root) -> Result<middle::Layers>
 
         let (cart_lattice, frac_lattice) = match resolve_units("lattice", cart_lattice, frac_lattice)? {
             (units, x) => {
-                let x = Lattice::new(&mat_22_to_33(&x));
+                let x = Lattice::new(&m22_to_m33(&x));
                 match units {
                     Units::Frac => (&x * &full_lattice, x),
-                    Units::Cart => (x.clone(), &x * &inv(&full_lattice)),
+                    Units::Cart => (x.clone(), &x * &full_lattice.inv()),
                 }
             }
         };
@@ -226,7 +229,7 @@ fn interpret_cereal(cereal: self::cereal::Root) -> Result<middle::Layers>
             }
         };
 
-        let transform = mat_22_to_33(&transform);
+        let transform = m22_to_m33(&transform);
         let shift = V3([shift[0], shift[1], 0.0]);
         let repeat = [repeat[0], repeat[1], 1];
         middle::Layer { cart_lattice, frac_lattice, cart_sites, transform, repeat, shift }
@@ -266,13 +269,13 @@ fn assemble_from_cereal(cereal: self::cereal::Root) -> Result<Assemble>
 
     Assemble {
         scale: lattice_a,
-        lattice: mat_33_to_22(&full_lattice),
+        lattice: m33_to_m22(&full_lattice),
         frac_sites, layer_seps, vacuum_sep,
     }
 })}
 
 // FIXME this really doesn't belong here, but it's the easiest reuse of code
-fn layer_sc_info_from_cereal(cereal: cereal::Root) -> Result<Vec<([[i32; 3]; 3], [u32; 3], usize)>>
+fn layer_sc_info_from_cereal(cereal: cereal::Root) -> Result<Vec<(M33<i32>, [u32; 3], usize)>>
 {Ok({
 
     let middle::Layers {
@@ -282,7 +285,7 @@ fn layer_sc_info_from_cereal(cereal: cereal::Root) -> Result<Vec<([[i32; 3]; 3],
 
     layers.into_iter().map(|layer| ok({
         let matrix = *layer.frac_lattice.inverse_matrix();
-        let matrix = ::rsp2_array_utils::try_map_mat(matrix, |x| ok({
+        let matrix = matrix.try_map(|x| ok({
             let r = x.round();
             ensure!((x - r).abs() <= 1e-3,
                 "layers file does not look like a true supercell of each layer (error est: {:e})",
@@ -296,24 +299,24 @@ fn layer_sc_info_from_cereal(cereal: cereal::Root) -> Result<Vec<([[i32; 3]; 3],
     })).collect::<Result<Vec<_>>>()?
 })}
 
-fn mat_22_to_33(mat: &[[f64; 2]; 2]) -> [[f64; 3]; 3]
-{[
+fn m22_to_m33(mat: &M22) -> M33
+{mat::from_array([
     [mat[0][0], mat[0][1], 0.0],
     [mat[1][0], mat[1][1], 0.0],
     [0.0, 0.0, 1.0],
-]}
+])}
 
-fn mat_33_to_22(mat: &[[f64; 3]; 3]) -> [[f64; 2]; 2]
+fn m33_to_m22(mat: &M33) -> M22
 {
     assert_eq!(mat[0][2], 0.0);
     assert_eq!(mat[1][2], 0.0);
     assert_eq!(mat[2][0], 0.0);
     assert_eq!(mat[2][1], 0.0);
     assert_eq!(mat[2][2], 1.0);
-    [
+    mat::from_array([
         [mat[0][0], mat[0][1]],
         [mat[1][0], mat[1][1]],
-    ]
+    ])
 }
 
 fn v2_to_v3(xs: &[V2]) -> Vec<V3>

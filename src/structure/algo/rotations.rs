@@ -1,16 +1,13 @@
-#![allow(deprecated)] // HACK: reduce warning-spam at call sites, I only care about the `use`
-
 use ::{Lattice, Coords};
-#[warn(deprecated)]
-use ::rsp2_array_utils::{dot, det, map_arr, map_mat};
+use ::rsp2_array_utils::{map_arr, map_mat};
 use super::reduction::LatticeReduction;
 
-use ::rsp2_array_types::{V3, Unvee};
+use ::rsp2_array_types::{M33, M3, V3, Unvee, dot};
 
 pub fn lattice_point_group(
     reduction: &LatticeReduction,
     tol: f64,
-) -> Vec<[[i32; 3]; 3]>
+) -> Vec<M33<i32>>
 {
     Context {
         lattice: reduction.clone(),
@@ -37,19 +34,23 @@ struct Context {
 
 impl Context {
 
-    fn lattice_point_group(&self) -> Vec<[[i32; 3]; 3]>
+    fn lattice_point_group(&self) -> Vec<M33<i32>>
     {
         // coefficient matrix;  L = C L_reduced
+        // FIXME: Should probably clarify the relationship between `transform` and `C` here,
+        //        since having `_mat` be the inverse is kinda suspicious?
+        //        (and possibly even wrong? I think this is currently dead code)
+        warn!("untested/suspicious looking codepath: 8f471f0f-22df-41eb-84a8-0361647ff8f8");
         let c_mat = self.lattice.transform().inverse_matrix();
         let c_inv = self.lattice.transform().matrix();
 
         self.reduced_lattice_point_group()
             .iter()
-            .map(|m| dot(c_mat, &dot(m, c_inv)))
+            .map(|m| &(c_mat * m) * c_inv)
             .collect()
     }
 
-    fn reduced_lattice_point_group(&self) -> Vec<[[i32; 3]; 3]>
+    fn reduced_lattice_point_group(&self) -> Vec<M33<i32>>
     {
         // For a given lattice, each rotation operator has a corresponding
         //  unimodular transform:
@@ -72,9 +73,9 @@ impl Context {
 
         // off diagonal elements of L L^T
         let metric_off_diags = |m: &[V3; 3]| [
-            V3::dot(&m[1], &m[2]),
-            V3::dot(&m[2], &m[0]),
-            V3::dot(&m[0], &m[1]),
+            dot(&m[1], &m[2]),
+            dot(&m[2], &m[0]),
+            dot(&m[0], &m[1]),
         ];
         let target_off_diags = metric_off_diags(self.lattice.reduced().vectors());
 
@@ -87,8 +88,8 @@ impl Context {
                 for (&frac_2, &cart_2) in izip!(&choices_frac[2], &choices_cart[2]) {
 
                     // Most of these matrices won't be unimodular; filter them out.
-                    let unimodular = [frac_0, frac_1, frac_2].unvee();
-                    if det(&unimodular).abs() != 1 {
+                    let unimodular = M3([frac_0, frac_1, frac_2]);
+                    if unimodular.det().abs() != 1 {
                         continue;
                     }
 
@@ -114,10 +115,10 @@ impl Context {
         let l_mat = self.lattice.reduced().matrix();
 
         unimodulars.into_iter()
-            .map(move |u| map_mat(u, |x| x as f64))
-            .map(|u| dot(l_inv, &dot(&u, l_mat)))
+            .map(|u| u.map(|x| x as f64))
+            .map(|ref u| l_inv * &(u * l_mat))
             // FIXME: when might this fail? (bug? user error?)
-            .map(|u| ::util::Tol(1e-3).unfloat_33(&u).unwrap())
+            .map(|u| ::util::Tol(1e-3).unfloat_m33(&u).unwrap())
             .collect()
     }
 
