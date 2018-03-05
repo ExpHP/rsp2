@@ -21,6 +21,7 @@ import pytoml as toml
 CARGO_TOMLS_DIR = Path('crates.d')
 MASTER_CFG_PATH = Path('crates.d/crates.toml')
 MASTER_USER_CFG_PATH = Path('crates.d/config.toml')
+MASTER_USER_CFG_EXAMPLE_PATH = Path('crates.d/config.example.toml')
 # something long enough for people to grep and find this script
 INSERTION_POINT_TEXT = "#!!INSERTION POINT FOR NEW CRATES!!#"
 
@@ -419,7 +420,8 @@ def ensure_test_replica_exists(test_root):
 
     for path in map(Path, ['src', 'tests', 'examples']):
         test_path = test_root / path
-        if not test_path.exists():
+        effective_path = test_root / '..' / path
+        if effective_path.exists() and not test_path.exists():
             test_path.symlink_to('..' / path)
 
     test_cargo = test_root / 'Cargo.toml'
@@ -488,19 +490,31 @@ class Edit:
 
     @staticmethod
     def configure(sub):
-        sub.add_argument('CRATE_OR_PATH', default='.')
+        sub.add_argument('CRATE_OR_PATH', default='.',
+            help="Accepts a crate name or a path to a crate directory."
+            " You can also do 'edit crates' to edit crates.toml,"
+            " or 'edit config' to edit config.toml.")
 
     @staticmethod
     def run(parser, args):
         import subprocess
-
-        if args.CRATE_OR_PATH in get_internal_crate_names(parser.error):
-            crate = args.CRATE_OR_PATH
-        else:
-            crate = crate_name_from_path(args.CRATE_OR_PATH)
+        import shutil
 
         root = search_for_root(parser.error)
-        toml_path = root / root_rel_src_toml_path(crate)
+
+        if args.CRATE_OR_PATH == 'crates':
+            toml_path = root / MASTER_CFG_PATH
+        elif args.CRATE_OR_PATH == 'config':
+            toml_path = root / MASTER_USER_CFG_PATH
+            if not toml_path.exists():
+                shutil.copyfile(root / MASTER_USER_CFG_EXAMPLE_PATH, toml_path)
+                print(f"Created new config file at '{toml_path}'.", file=sys.stderr)
+        else:
+            if args.CRATE_OR_PATH in get_internal_crate_names(parser.error):
+                crate = args.CRATE_OR_PATH
+            else:
+                crate = crate_name_from_path(args.CRATE_OR_PATH)
+            toml_path = root / root_rel_src_toml_path(crate)
 
         editor = os.environ.get('EDITOR') or 'vim'
         if subprocess.run([editor, toml_path]).returncode != 0:
@@ -576,7 +590,7 @@ def master_config_textual_add(lines, line, fail):
     lines = list(lines)
     stripped = [x.strip() for x in lines]
     try: i = stripped.index(INSERTION_POINT_TEXT)
-    except: fail(f'''
+    except ValueError: fail(f'''
 Failed to find the new crate insertion point in '{MASTER_CFG_PATH}'
 It should look like the following:
     {INSERTION_POINT_TEXT}
