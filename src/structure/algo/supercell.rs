@@ -251,13 +251,13 @@ fn sc_lattice_vecs(periods: [u32; 3], lattice: &Lattice) -> Vec<V3> {
 #[deny(unused)]
 mod tests {
 
-    use ::rsp2_array_types::envee;
+    use ::rsp2_array_types::Envee;
 
     #[test]
     fn diagonal_supercell_smoke_test() {
         use ::{Coords, Structure, Lattice};
 
-        let coords = Coords::Fracs(envee(vec![[0.0, 0.0, 0.0]]));
+        let coords = Coords::Fracs(vec![[0.0, 0.0, 0.0]].envee());
 
         let original = Structure::new_coords(Lattice::eye(), coords);
         let (supercell, sc_token) = ::supercell::diagonal((2, 2, 2), original.clone());
@@ -265,10 +265,10 @@ mod tests {
         assert_eq!(supercell.num_atoms(), 8);
         assert_eq!(supercell.lattice(), &Lattice::cubic(2.0));
 
-        assert!(::util::eq_unordered_n3(&supercell.to_carts(), envee(&[
+        assert!(::util::eq_unordered_n3(&supercell.to_carts(), [
             [0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [0.0, 1.0, 1.0],
             [1.0, 0.0, 0.0], [1.0, 0.0, 1.0], [1.0, 1.0, 0.0], [1.0, 1.0, 1.0],
-        ])));
+        ].envee_ref()));
 
         let deconstructed = sc_token.deconstruct(1e-10, supercell).unwrap();
 
@@ -287,10 +287,10 @@ mod tests {
             [0.0, 0.0, 2.0],
         ]);
 
-        let coords = Coords::Fracs(envee(vec![
+        let coords = Coords::Fracs(vec![
             [ 0.5, -0.5, 0.0], // cart: [+1.0, -1.0,  0.0]
             [ 0.0,  0.5, 0.5], // cart: [ 0.0, +1.0, +1.0]
-        ]));
+        ].envee());
 
         let original = Structure::new_coords(lattice, coords);
         let (supercell, sc_token) = ::supercell::diagonal((4, 2, 2), original.clone());
