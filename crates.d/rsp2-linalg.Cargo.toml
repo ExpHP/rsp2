@@ -2,6 +2,7 @@
 name = "rsp2-linalg"
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
+description = "killlllllllllllll meeeeeeeeeeee"
 
 [lib]
 path = "lib.rs"

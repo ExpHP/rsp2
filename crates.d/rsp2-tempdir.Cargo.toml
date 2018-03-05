@@ -2,6 +2,7 @@
 name = "rsp2-tempdir"
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
+description = "Wrapper around tempdir that keeps the directory on panic."
 
 [lib]
 path = "lib.rs"

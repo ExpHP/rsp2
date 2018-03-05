@@ -2,6 +2,7 @@
 name = "rsp2-array-types"
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
+description = "Provides mathematical vector and matrix types used throughout rsp2."
 
 [lib]
 path = "lib.rs"
@@ -13,6 +14,7 @@ path = "lib.rs"
 !!serde-derive
 !!slice-of-array
 
-[dev-dependencies]
+# FIXME make this dev-dependencies once rust-lang-nursery/rls#169 is fixed
 !!rsp2-assert-close
+# FIXME make this dev-dependencies once rust-lang-nursery/rls#169 is fixed
 !!rand

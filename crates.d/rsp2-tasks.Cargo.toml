@@ -2,6 +2,7 @@
 name = "rsp2-tasks"
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
+description = "Where madness reigns eternal."
 
 [lib]
 path = "lib.rs"

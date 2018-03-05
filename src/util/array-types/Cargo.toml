@@ -7,6 +7,7 @@
 name = "rsp2-array-types"
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
+description = "Provides mathematical vector and matrix types used throughout rsp2."
 
 [lib]
 path = "lib.rs"
@@ -18,6 +19,7 @@ serde = "1"
 serde_derive = "1"
 slice-of-array = "0.1"
 
-[dev-dependencies]
+# FIXME make this dev-dependencies once rust-lang-nursery/rls#169 is fixed
 rsp2-assert-close = { path = "../assert-close" }
+# FIXME make this dev-dependencies once rust-lang-nursery/rls#169 is fixed
 rand = "0.3"

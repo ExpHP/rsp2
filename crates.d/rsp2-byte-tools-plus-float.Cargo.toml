@@ -2,6 +2,7 @@
 name = "rsp2-byte-tools-plus-float"
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
+description = "killllllll meeeeeeeeeee"
 
 [lib]
 path = "lib.rs"

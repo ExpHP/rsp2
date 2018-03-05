@@ -2,6 +2,7 @@
 name = "rsp2-array-utils"
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
+description = "Provides safe abstractions for moving data out of arrays."
 
 [lib]
 path = "lib.rs"

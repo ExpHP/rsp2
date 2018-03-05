@@ -2,6 +2,7 @@
 name = "rsp2-assert-close"
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
+description = "Fuzzy assertion macros for floats."
 
 [lib]
 path = "lib.rs"
