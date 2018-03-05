@@ -256,7 +256,7 @@ mod geometry {
     }
 
     impl PointNormalPlane {
-        /// NOTE: The direction of the normal is randomly chosen among the two possibilities
+        /// NOTE: The direction of the normal is arbitrarily chosen
         pub fn from_span_and_point((a, b): (V3, V3), point: V3) -> Self {
             PointNormalPlane {
                 normal: V3::cross(&a, &b).unit(),
