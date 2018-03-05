@@ -2,7 +2,7 @@
 use ::rsp2_structure::{Coords, Lattice, CoordStructure};
 use ::rsp2_kets::{Ket, KetRef, Rect};
 use ::rsp2_array_utils::{arr_from_fn};
-use ::rsp2_array_types::{V3, M33, dot, mat};
+use ::rsp2_array_types::{V3, M33, dot};
 
 use ::std::f64::consts::PI;
 use ::itertools::Itertools;
@@ -301,7 +301,7 @@ mod tests {
     use super::*;
     use ::slice_of_array::prelude::*;
     use ::rsp2_structure::{Coords, Lattice};
-    use ::rsp2_array_types::Envee;
+    use ::rsp2_array_types::{Envee, mat};
 
     #[test]
     fn simple_unfold() {
