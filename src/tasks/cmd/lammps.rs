@@ -9,6 +9,7 @@ use ::rsp2_lammps_wrap::{InitInfo, Potential, AtomType, PairCommand};
 use ::rsp2_lammps_wrap::Builder as InnerBuilder;
 use ::rsp2_structure::{Layers, Element, Structure, ElementStructure};
 use ::rsp2_tasks_config as cfg;
+use ::rsp2_array_types::V3;
 
 const REBO_MASS_HYDROGEN: f64 =  1.00;
 const REBO_MASS_CARBON:   f64 = 12.01;
@@ -175,7 +176,7 @@ mod kc_z {
         //       the potential, but IMO it's just cleaner if we don't need to.
         fn find_layers<M>(&self, structure: &Structure<M>) -> Layers
         {
-            ::rsp2_structure::find_layers(&structure, &[0, 0, 1], 0.25)
+            ::rsp2_structure::find_layers(&structure, &V3([0, 0, 1]), 0.25)
                 .unwrap_or_else(|e| {
                     panic!("Failure to determine layers when using kolmogorov/crespi/z: {}", e);
                 })

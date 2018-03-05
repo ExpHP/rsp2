@@ -5,6 +5,7 @@ use ::traits::save::Json;
 use ::rsp2_phonopy_io::{symmetry_yaml, disp_yaml, conf};
 use ::std::io::BufReader;
 use ::path_abs::{FileRead, FileWrite};
+use ::rsp2_array_types::V3;
 
 mod cmd;
 pub use self::cmd::*;
@@ -100,7 +101,7 @@ impl OtherSettings {
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, Default)]
-pub(crate) struct QPositions(Vec<[f64; 3]>);
+pub(crate) struct QPositions(Vec<V3>);
 
 impl Load for QPositions {
     fn load<P: AsPath>(path: P) -> Result<Self>

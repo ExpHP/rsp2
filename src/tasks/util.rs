@@ -2,6 +2,7 @@ use ::std::sync::atomic::AtomicUsize;
 use ::std::sync::atomic::Ordering::SeqCst;
 use ::std::sync::Arc;
 use ::std::fmt;
+use ::rsp2_array_types::{V3};
 
 #[derive(Clone)]
 pub(crate) struct AtomicCounter(Arc<AtomicUsize>);
@@ -32,12 +33,10 @@ where
 
 //--------------------------------------------------------
 
-pub(crate) fn index_of_nearest(carts: &[[f64; 3]], needle: &[f64; 3], tol: f64) -> Option<usize>
+pub(crate) fn index_of_nearest(carts: &[V3], needle: &V3, tol: f64) -> Option<usize>
 {
-    use ::rsp2_array_utils::{arr_from_fn, dot};
     carts.into_iter()
-        .map(|v| arr_from_fn(|k| v[k] - needle[k]))
-        .map(|v: [_; 3]| dot(&v, &v))
+        .map(|v| (v - needle).sqnorm())
         .enumerate()
         .filter(|&(_, sq)| sq <= tol)
         .min_by(|&(_, v1), &(_, v2)| v1.partial_cmp(&v2).expect("NaN"))
@@ -45,8 +44,8 @@ pub(crate) fn index_of_nearest(carts: &[[f64; 3]], needle: &[f64; 3], tol: f64) 
 }
 
 #[allow(unused)]
-pub(crate) fn index_of_shortest(carts: &[[f64; 3]], tol: f64) -> Option<usize>
-{ index_of_nearest(carts, &[0.0; 3], tol) }
+pub(crate) fn index_of_shortest(carts: &[V3], tol: f64) -> Option<usize>
+{ index_of_nearest(carts, &V3([0.0; 3]), tol) }
 
 //--------------------------------------------------------
 pub(crate) use self::lockfile::{LockfilePath, LockfileGuard};

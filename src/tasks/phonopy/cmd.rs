@@ -33,6 +33,8 @@ use ::rsp2_structure::{ElementStructure, Element};
 use ::rsp2_structure::{FracRot, FracTrans, FracOp};
 use ::rsp2_phonopy_io::npy;
 
+use ::rsp2_array_types::V3;
+
 use ::slice_of_array::prelude::*;
 
 const THZ_TO_WAVENUMBER: f64 = 33.35641;
@@ -257,7 +259,7 @@ pub struct DirWithDisps<P: AsPath> {
     // These are cached in memory from `disp.yaml` due to the likelihood
     // that code using `DirWithDisps` will need them.
     pub(crate) superstructure: ElementStructure,
-    pub(crate) displacements: Vec<(usize, [f64; 3])>,
+    pub(crate) displacements: Vec<(usize, V3)>,
     pub(crate) settings: OtherSettings,
 }
 
@@ -294,7 +296,7 @@ impl<P: AsPath> DirWithDisps<P> {
     #[allow(unused)]
     pub fn superstructure(&self) -> &ElementStructure
     { &self.superstructure }
-    pub fn displacements(&self) -> &[(usize, [f64; 3])]
+    pub fn displacements(&self) -> &[(usize, V3)]
     { &self.displacements }
 
     /// Due to the "StreamingIterator problem" this iterator must return
@@ -317,7 +319,7 @@ impl<P: AsPath> DirWithDisps<P> {
     where
         Vs: IntoIterator,
         <Vs as IntoIterator>::IntoIter: ExactSizeIterator,
-        <Vs as IntoIterator>::Item: AsRef<[[f64; 3]]>,
+        <Vs as IntoIterator>::Item: AsRef<[V3]>,
     {Ok({
         let out = TempDir::new("rsp2")?;
         trace!("Force sets dir: '{}'...", out.path().display());
@@ -334,7 +336,7 @@ impl<P: AsPath> DirWithDisps<P> {
         Q: AsPath,
         Vs: IntoIterator,
         <Vs as IntoIterator>::IntoIter: ExactSizeIterator,
-        <Vs as IntoIterator>::Item: AsRef<[[f64; 3]]>,
+        <Vs as IntoIterator>::Item: AsRef<[V3]>,
     {Ok({
         self.prepare_force_dir(forces, path.as_path())?;
         DirWithForces::from_existing(path)?
@@ -345,7 +347,7 @@ impl<P: AsPath> DirWithDisps<P> {
     where
         Vs: IntoIterator,
         <Vs as IntoIterator>::IntoIter: ExactSizeIterator,
-        <Vs as IntoIterator>::Item: AsRef<[[f64; 3]]>,
+        <Vs as IntoIterator>::Item: AsRef<[V3]>,
     {Ok({
         let disp_dir = self.path();
 
@@ -464,7 +466,7 @@ impl<'p, P: AsPath> BandsBuilder<'p, P> {
     pub fn eigenvectors(&mut self, b: bool) -> &mut Self
     { self.inner_mut().eigenvectors = b; self }
 
-    pub fn compute(&mut self, q_points: &[[f64; 3]]) -> Result<DirWithBands<TempDir>>
+    pub fn compute(&mut self, q_points: &[V3]) -> Result<DirWithBands<TempDir>>
     {Ok({
         let me = self.into_inner();
         let dir = TempDir::new("rsp2")?;
@@ -596,7 +598,7 @@ impl<P: AsPath> DirWithBands<P> {
     pub fn structure(&self) -> Result<ElementStructure>
     { Ok(poscar::load(open_text(self.path().join("POSCAR"))?)?) }
 
-    pub fn q_positions(&self) -> Result<Vec<[f64; 3]>>
+    pub fn q_positions(&self) -> Result<Vec<V3>>
     { Ok(QPositions::load(self.path().join("q-positions.json"))?.0) }
 
     /// This will be `None` if `.eigenvectors(true)` was not set prior
@@ -624,7 +626,7 @@ impl<P: AsPath> DirWithBands<P> {
 
 //-----------------------------
 
-fn band_string(ks: &[[f64; 3]]) -> String
+fn band_string(ks: &[V3]) -> String
 { ks.flat().iter().map(|x| x.to_string()).collect::<Vec<_>>().join(" ") }
 
 fn round_checked(x: f64, tol: f64) -> Result<i32>

@@ -2,6 +2,7 @@ use ::rsp2_kets::{Ket, Basis, AsKetRef};
 use ::rsp2_structure::{Perm, Permute};
 use ::rsp2_structure::{Part, Partition, Unlabeled};
 
+use ::rsp2_array_types::V3;
 use ::slice_of_array::prelude::*;
 
 // alternative types to those in rsp2_kets which are defined in terms of 3-vectors
@@ -13,8 +14,8 @@ pub struct Basis3(pub(crate) Vec<Ket3>);
 // of 3-vectors and implement Permute for it, etc
 #[derive(Debug, Clone)]
 pub struct Ket3 {
-    pub(crate) real: Vec<[f64; 3]>,
-    pub(crate) imag: Vec<[f64; 3]>,
+    pub(crate) real: Vec<V3>,
+    pub(crate) imag: Vec<V3>,
 }
 
 impl Basis3 {
@@ -108,17 +109,14 @@ impl Ket3 {
     /// eigenvector lies along.
     pub fn polarization(&self) -> [f64; 3]
     {
-        let mut acc = [0f64; 3];
+        let mut acc = V3([0f64; 3]);
         for row in ichain!(&self.real, &self.imag,) {
-            for c in 0..3 {
-                acc[c] += row[c] * row[c];
-            }
+            acc += row.map(|x| x * x);
         }
-
-        [acc[0], acc[1], acc[2]]
+        acc.0
     }
 
-    pub fn as_real_checked(&self) -> &[[f64; 3]]
+    pub fn as_real_checked(&self) -> &[V3]
     {
         assert!(self.imag.flat().iter().all(|&x| x == 0.0));
         &self.real

@@ -142,7 +142,7 @@ pub mod symmetry_yaml {
     /// Spacegroup operator from disp.yaml
     #[derive(Deserialize)]
     pub struct Operation {
-        pub rotation: [[i32; 3]; 3],
+        pub rotation: M33<i32>,
         pub translation: V3,
     }
 

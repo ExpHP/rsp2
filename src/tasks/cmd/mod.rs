@@ -21,6 +21,7 @@ use ::rsp2_slice_math::{v, V, vdot, vnorm};
 
 use ::slice_of_array::prelude::*;
 use ::rsp2_array_utils::arr_from_fn;
+use ::rsp2_array_types::{V3, Unvee};
 use ::rsp2_structure::supercell::{self, SupercellToken};
 use ::rsp2_structure::{CoordStructure, ElementStructure, Structure};
 use ::rsp2_structure::{Lattice, Coords};
@@ -82,7 +83,7 @@ impl TrialDir {
         trace!("Finding layers");
         let layers = {
             let layers =
-                ::rsp2_structure::find_layers(&original, &[0, 0, 1], 0.25)?
+                ::rsp2_structure::find_layers(&original, &V3([0, 0, 1]), 0.25)?
                     .per_unit_cell().expect("Structure is not layered?");
 
             if let Some(expected) = settings.layers {
@@ -244,7 +245,7 @@ fn do_diagonalize(
     phonopy: &PhonopyBuilder,
     structure: &ElementStructure,
     save_bands: Option<&Path>,
-    points: &[[f64; 3]],
+    points: &[V3],
 ) -> Result<DirWithBands<Box<AsPath>>>
 {ok({
     let disp_dir = phonopy.displacements(&structure)?;
@@ -269,7 +270,7 @@ fn do_eigenvector_chase(
     chase_settings: &cfg::EigenvectorChase,
     potential_settings: &cfg::Potential,
     mut structure: ElementStructure,
-    bad_evecs: &[(String, &[[f64; 3]])],
+    bad_evecs: &[(String, &[V3])],
 ) -> Result<ElementStructure>
 {ok({
     match *chase_settings {
@@ -303,7 +304,7 @@ fn do_cg_along_evecs<V, I>(
     evecs: I,
 ) -> Result<ElementStructure>
 where
-    V: AsRef<[[f64; 3]]>,
+    V: AsRef<[V3]>,
     I: IntoIterator<Item=V>,
 {ok({
     let evecs: Vec<_> = evecs.into_iter().collect();
@@ -316,7 +317,7 @@ fn _do_cg_along_evecs(
     cg_settings: &cfg::Acgsd,
     potential_settings: &cfg::Potential,
     structure: ElementStructure,
-    evecs: &[&[[f64; 3]]],
+    evecs: &[&[V3]],
 ) -> Result<ElementStructure>
 {ok({
     let sc_dims = tup3(potential_settings.supercell.dim_for_unitcell(structure.lattice()));
@@ -342,7 +343,7 @@ fn do_minimize_along_evec(
     lmp: &LammpsBuilder,
     settings: &cfg::Potential,
     structure: ElementStructure,
-    evec: &[[f64; 3]],
+    evec: &[V3],
 ) -> Result<(f64, ElementStructure)>
 {ok({
     let sc_dims = tup3(settings.supercell.dim_for_unitcell(structure.lattice()));
@@ -538,7 +539,7 @@ fn do_force_sets_at_disps<P: AsPath + Send + Sync>(
     lmp: &LammpsBuilder,
     threading: &cfg::Threading,
     disp_dir: &DirWithDisps<P>,
-) -> Result<Vec<Vec<[f64; 3]>>>
+) -> Result<Vec<Vec<V3>>>
 {ok({
     use ::std::io::prelude::*;
     use ::rayon::prelude::*;
@@ -570,7 +571,7 @@ fn do_force_sets_at_disps<P: AsPath + Send + Sync>(
 
 fn read_eigensystem<P: AsPath>(
     bands_dir: &DirWithBands<P>,
-    q: &[f64; 3],
+    q: &V3,
 ) -> Result<(Vec<f64>, Basis3)>
 {Ok({
     let index = ::util::index_of_nearest(&bands_dir.q_positions()?, q, 1e-4);
@@ -787,16 +788,16 @@ pub fn get_gamma_eigensystem_info<L: Ord + Clone, M>(
 // HACK:
 // These are only valid for a hexagonal system represented
 // with the [[a, 0], [-a/2, a sqrt(3)/2]] lattice convention
-#[allow(unused)] const Q_GAMMA: [f64; 3] = [0.0, 0.0, 0.0];
-#[allow(unused)] const Q_K: [f64; 3] = [1f64/3.0, 1.0/3.0, 0.0];
-#[allow(unused)] const Q_K_PRIME: [f64; 3] = [2.0 / 3f64, 2.0 / 3f64, 0.0];
+#[allow(unused)] const Q_GAMMA: V3 = V3([0.0, 0.0, 0.0]);
+#[allow(unused)] const Q_K: V3 = V3([1f64/3.0, 1.0/3.0, 0.0]);
+#[allow(unused)] const Q_K_PRIME: V3 = V3([2.0 / 3f64, 2.0 / 3f64, 0.0]);
 
 /// Properties for characterizing an eigenvector in layered graphene.
 pub struct EigenmodeInfo {
     pub frequency: f64,
     pub acousticness: f64,
     pub layer_acousticness: f64,
-    pub polarization: [f64; 3],
+    pub polarization: [f64; 3], // not a vector
     pub layer_gamma_probs: Option<Vec<f64>>,
 }
 
@@ -889,7 +890,7 @@ fn lammps_flat_diff_fn<'a>(lmp: &'a mut Lammps)
 {
     Box::new(move |pos| ok({
         lmp.set_carts(pos.nest())?;
-        lmp.compute().map(|(v,g)| (v, g.flat().to_vec()))?
+        lmp.compute().map(|(v, g)| (v, g.unvee().flat().to_vec()))?
     }))
 }
 
@@ -986,7 +987,7 @@ impl TrialDir {
                     trace!("Finding layers");
                     let (layers, nlayer) = {
                         let layers =
-                            ::rsp2_structure::find_layers(&structure, &[0, 0, 1], 0.25)?
+                            ::rsp2_structure::find_layers(&structure, &V3([0, 0, 1]), 0.25)?
                                 .per_unit_cell().expect("Structure is not layered?");
                         (layers.by_atom(), layers.len())
                     };
@@ -1061,7 +1062,7 @@ extension_trait!{
             match *self {
                 SupercellSpec::Dim(d) => d,
                 SupercellSpec::Target(targets) => {
-                    let unit_lengths = prim.lengths();
+                    let unit_lengths = prim.norms();
                     arr_from_fn(|k| {
                         (targets[k] / unit_lengths[k]).ceil().max(1.0) as u32
                     })
@@ -1073,12 +1074,12 @@ extension_trait!{
 
 extension_trait! {
     NormalizationModeExt for NormalizationMode {
-        fn norm(&self, ev: &[[f64; 3]]) -> f64
+        fn norm(&self, ev: &[V3]) -> f64
         {
-            let atom_rs = || ev.iter().map(|v| vnorm(v)).collect::<Vec<_>>();
+            let atom_rs = || ev.iter().map(V3::norm).collect::<Vec<_>>();
 
             match *self {
-                NormalizationMode::CoordNorm => vnorm(ev.flat()),
+                NormalizationMode::CoordNorm => vnorm(ev.unvee().flat()),
                 NormalizationMode::AtomMean => {
                     let rs = atom_rs();
                     rs.iter().sum::<f64>() / (rs.len() as f64)
@@ -1095,13 +1096,13 @@ extension_trait! {
             }
         }
 
-        fn normalize(&self, ev: &[[f64; 3]]) -> Vec<[f64; 3]>
+        fn normalize(&self, ev: &[V3]) -> Vec<V3>
         {
             let norm = self.norm(ev);
 
             let mut ev = ev.to_vec();
-            for x in ev.flat_mut() {
-                *x /= norm;
+            for v in &mut ev {
+                *v /= norm;
             }
             ev
         }

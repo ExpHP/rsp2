@@ -16,6 +16,7 @@ path = "lib.rs"
 !!rsp2-structure-gen
 !!rsp2-phonopy-io
 !!rsp2-array-utils
+!!rsp2-array-types
 !!rsp2-slice-math
 !!rsp2-tempdir
 !!rsp2-util-macros

@@ -257,6 +257,35 @@ gen_each!{
     }
 }
 
+
+// ---------------------------------------------------------------------------
+
+// slice-of-array integration.
+
+// because `x.nest::<[_; 3]>().envee()` (turbofish required) really sucks.
+
+// NOTE: IsSliceomorphic was never intended to be implemented by crates outside
+//       slice_of_array, and the requirements for safety are left "unspecified".
+//
+//       That said, speaking as the maintainer of slice_of_array, I will say that
+//       the following fact is sufficient for safety:
+//
+//       * It is safe to pointer-cast between `&[V3<X>]` and `&[[X; 3]]`.
+//
+//       - ML
+
+gen_each!{
+    @{Vn_n}
+    impl_is_sliceomorphic!( {$Vn:ident $n:tt} ) => {
+        unsafe impl<X> ::slice_of_array::IsSliceomorphic for $Vn<X> {
+            type Element = X;
+
+            #[inline(always)]
+            fn array_len() -> usize { $n }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]

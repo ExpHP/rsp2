@@ -7,6 +7,8 @@ extern crate rand;
 // HACK: This crate shouldn't depend on serde (it's for rsp2-array-types)
 extern crate serde;
 #[macro_use] extern crate serde_derive;
+// HACK: Same deal as serde.
+extern crate slice_of_array;
 
 #[macro_use] mod macros;
 mod traits;

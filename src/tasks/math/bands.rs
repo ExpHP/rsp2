@@ -1,8 +1,8 @@
 
 use ::rsp2_structure::{Coords, Lattice, CoordStructure};
-use ::rsp2_array_utils::{dot, map_arr};
 use ::rsp2_kets::{Ket, KetRef, Rect};
 use ::rsp2_array_utils::{arr_from_fn};
+use ::rsp2_array_types::{V3, M33, dot, mat};
 
 use ::std::f64::consts::PI;
 use ::itertools::Itertools;
@@ -79,7 +79,7 @@ pub mod config {
 }
 
 impl self::config::SampleType {
-    fn signed_indices(&self) -> Vec<[i32; 3]>
+    fn signed_indices(&self) -> Vec<V3<i32>>
     {
         use self::config::SampleType::*;
         let ax = |k: usize| match *self {
@@ -87,14 +87,14 @@ impl self::config::SampleType {
             Plain(arr) => 0..arr[k] as i32,
         };
 
-        iproduct!(ax(0), ax(1), ax(2)).map(|(i,j,k)| [i,j,k]).collect()
+        iproduct!(ax(0), ax(1), ax(2)).map(|(i,j,k)| V3([i,j,k])).collect()
     }
 
-    fn points(&self, lattice: &[[f64; 3]; 3]) -> Vec<[f64; 3]>
+    fn points(&self, lattice: &M33) -> Vec<V3>
     {
         self.signed_indices().into_iter()
-            .map(|a| map_arr(a, f64::from))
-            .map(|v| dot(&v, lattice))
+            .map(|a| a.map(f64::from))
+            .map(|v| v * lattice)
             .collect::<Vec<_>>()
     }
 }
@@ -107,17 +107,16 @@ impl self::config::SampleType {
 /// This only exists for now because I am still too lazy to
 /// properly incorporate an HNF search into this codebase...
 pub struct ScMatrix {
-    matrix: [[i32; 3]; 3],
+    matrix: M33<i32>,
     periods: [u32; 3],
 }
 
 impl ScMatrix {
-    pub fn new(matrix: &[[i32; 3]; 3], periods: &[u32; 3]) -> Self
+    pub fn new(matrix: &M33<i32>, periods: &[u32; 3]) -> Self
     {
-        use ::rsp2_array_utils::det;
         // sanity check
         // (NOTE: this condition is neccessary, but not sufficient)
-        assert_eq!(det(matrix).abs() as u32, periods[0] * periods[1] * periods[2]);
+        assert_eq!(matrix.det().abs() as u32, periods[0] * periods[1] * periods[2]);
         ScMatrix { matrix: *matrix, periods: *periods }
     }
 }
@@ -178,13 +177,11 @@ impl GammaUnfolder {
         config: &Config,
         superstructure: &CoordStructure,
         supercell_matrix: &ScMatrix,
-        // eigenvector_q: &[f64; 3], // reduced by sc lattice
+        // eigenvector_q: &V3, // reduced by sc lattice
     ) -> GammaUnfolder
     {
-        use ::rsp2_array_utils::{inv, map_mat, mat_from_fn, arr_from_fn};
-
         // HACK: ctrl-F "gamma-point" for more info
-        let eigenvector_q = &[0.0; 3];
+        let eigenvector_q = &V3([0.0; 3]);
 
         // FIXME expected behavior unclear when the following does not hold.
         //       especially so if it lies outside the (larger) primitive reciprocal cell.
@@ -201,10 +198,10 @@ impl GammaUnfolder {
                 //  - supercell reciprocal lattice vectors (which we are trying to project onto)
                 let sc_lattice = superstructure.lattice().matrix();
                 let sc_inverse = superstructure.lattice().inverse_matrix();
-                let pc_lattice = dot(&inv(&map_mat(supercell_matrix.matrix, |x| x as f64)), sc_lattice);
-                let pc_inverse = inv(&pc_lattice);
-                let sc_recip = mat_from_fn(|r, c| sc_inverse[c][r]);
-                let pc_recip = mat_from_fn(|r, c| pc_inverse[c][r]);
+                let pc_lattice = &supercell_matrix.matrix.map(|x| x as f64).inv() * sc_lattice;
+                let pc_inverse = pc_lattice.inv();
+                let sc_recip = sc_inverse.t();
+                let pc_recip = pc_inverse.t();
 
                 // lattice points of interest
                 let sc_periods = supercell_matrix.periods;
@@ -212,17 +209,18 @@ impl GammaUnfolder {
                 let quotient_sample_spec = self::config::SampleType::Plain(sc_periods);
                 let quotient_indices: Vec<_> =
                     quotient_sample_spec.signed_indices()
-                        .into_iter().map(|v| {
-                        arr_from_fn(|k| (v[k] + sc_periods[k] as i32) as u32 % sc_periods[k])
-                    }).collect();
+                        .into_iter()
+                        .map(|v| {
+                            arr_from_fn(|k| (v[k] + sc_periods[k] as i32) as u32 % sc_periods[k])
+                        }).collect();
                 assert!(quotient_indices.len() > 0, "no points to sample against");
 
                 let quotient_vecs = quotient_sample_spec.points(&sc_recip);
                 let pc_recip_vecs = config.sampling.points(&pc_recip);
 
                 // into recip cartesian space
-                let eigenvector_q_cart = dot(eigenvector_q, &sc_recip);
-                if eigenvector_q.iter().any(|&x| x != 0.0) {
+                let eigenvector_q_cart = eigenvector_q * &sc_recip;
+                if eigenvector_q != &V3([0.0; 3]) {
                     // (I currently always run this code on gamma eigenvectors...)
                     warn!("Untested code path: 9fc15058-7199-45d2-80ec-630ceb575d3d");
                 }
@@ -233,7 +231,7 @@ impl GammaUnfolder {
                         quotient_vecs.iter().map(|quotient_q| {
                             q_ket(
                                 &superstructure.to_carts(),
-                                &arr_from_fn(|k| eigenvector_q_cart[k] + sample_q[k] + quotient_q[k]),
+                                &(eigenvector_q_cart + sample_q + quotient_q),
                             )
                         }).collect()
                     }).collect(),
@@ -251,7 +249,7 @@ impl GammaUnfolder {
     { &self.sc_indices }
 
     #[allow(unused)]
-    pub fn q_fracs(&self) -> &[[f64; 3]]
+    pub fn q_fracs(&self) -> &[V3]
     { &self.sc_qs_frac }
 
     pub fn unfold_phonon(&self, eigenvector: KetRef) -> Vec<f64>
@@ -290,12 +288,12 @@ impl GammaUnfolder {
 }
 
 // NOTE: a Ket of length N_a rather than 3 * N_a
-fn q_ket(carts: &[[f64; 3]], q: &[f64; 3]) -> Ket
+fn q_ket(carts: &[V3], q: &V3) -> Ket
 { carts.iter().map(|x| Rect::from_phase(-dot(x, q) * 2.0 * PI)).collect() }
 
 #[allow(unused)]
-type SuperFracQ = [f64; 3];
-type PrimFracQ = [f64; 3];
+type SuperFracQ = V3;
+type PrimFracQ = V3;
 
 #[cfg(test)]
 #[deny(dead_code)]
@@ -303,17 +301,15 @@ mod tests {
     use super::*;
     use ::slice_of_array::prelude::*;
     use ::rsp2_structure::{Coords, Lattice};
+    use ::rsp2_array_types::Envee;
 
     #[test]
-    fn simple_unfold()
-    {
-        const GAMMA: [f64; 3] = [0.0, 0.0, 0.0];
-
+    fn simple_unfold() {
         fn do_it(
             structure: &CoordStructure,
-            sc_vec: [i32; 3],
+            sc_vec: V3<i32>,
             expect_index: &[[u32; 3]],
-            eigenvector: Vec<[f64; 3]>,
+            eigenvector: Vec<V3>,
         ) {
 
             let configs = vec![
@@ -328,8 +324,8 @@ mod tests {
             ];
             let eigenvector: Ket = eigenvector.flat().iter().map(|&r| Rect::from(r)).collect();
             let sc_mat = ScMatrix::new(
-                &[[sc_vec[0], 0, 0], [0, sc_vec[1], 0], [0, 0, sc_vec[2]]],
-                &map_arr(sc_vec, |x| x as u32),
+                &mat::from_array([[sc_vec[0], 0, 0], [0, sc_vec[1], 0], [0, 0, sc_vec[2]]]),
+                &sc_vec.map(|x| x as u32),
             );
             for config in &configs {
                 let unfolded = unfold_gamma_phonon(config, structure, eigenvector.as_ref(), &sc_mat);
@@ -359,9 +355,9 @@ mod tests {
                 [0.0, 0.0, 1.0],
                 [0.0, 0.0, 2.0],
                 [0.0, 0.0, 3.0],
-            ]),
+            ].envee()),
         );
-        let sc_vec = [1, 1, 4];
+        let sc_vec = V3([1, 1, 4]);
         let go_do_it = |expected, eigenvector|
             do_it(&structure, sc_vec, expected, eigenvector);
 
@@ -370,7 +366,7 @@ mod tests {
             [0.0, 0.0, -0.5],
             [0.0, 0.0, -0.5],
             [0.0, 0.0, -0.5],
-        ]);
+        ].envee());
 
         // phase rotation of 2/4 tau (i.e. `-1`) per unit cell
         go_do_it(&[[0, 0, 2]], vec![
@@ -378,7 +374,7 @@ mod tests {
             [0.0, 0.0, -0.5],
             [0.0, 0.0,  0.5],
             [0.0, 0.0, -0.5],
-        ]);
+        ].envee());
 
         // phase rotation of 1/4 tau (i.e. `i`) per unit cell.
         // because gamma eigenvectors are always real, we end up
@@ -389,7 +385,7 @@ mod tests {
             [0.0, 0.0,  0.5],
             [0.0, 0.0, -0.5],
             [0.0, 0.0, -0.5],
-        ]);
+        ].envee());
 
         //--------------------------------------------
         // supercell along multiple dimensions
@@ -401,9 +397,9 @@ mod tests {
                 [0.0, 1.0, 0.0],
                 [1.0, 0.0, 0.0],
                 [1.0, 1.0, 0.0],
-            ]),
+            ].envee()),
         );
-        let sc_vec = [2, 2, 1];
+        let sc_vec = V3([2, 2, 1]);
 
         let go_do_it = |expected, eigenvector|
             do_it(&structure, sc_vec, expected, eigenvector);
@@ -415,7 +411,7 @@ mod tests {
             [ p,  p, 0.0],
             [ p,  p, 0.0],
             [ p,  p, 0.0],
-        ]);
+        ].envee());
 
         // non-gamma along one axis
         let p = 8_f64.sqrt().recip();
@@ -424,7 +420,7 @@ mod tests {
             [ p, -p, 0.0],
             [-p,  p, 0.0],
             [ p, -p, 0.0],
-        ]);
+        ].envee());
 
         // non-gamma along multiple axis.
         let p = 8_f64.sqrt().recip();
@@ -433,7 +429,7 @@ mod tests {
             [ p, -p, 0.0],
             [ p, -p, 0.0],
             [-p,  p, 0.0],
-        ]);
+        ].envee());
 
         //--------------------------------------------
         // non-diagonal lattice.
@@ -441,7 +437,7 @@ mod tests {
         //   usage of matrices vs their transpose.
         // 1 atom per primitive cell
         let structure = CoordStructure::new_coords(
-            Lattice::new(&[
+            Lattice::from(&[
                 [1.0, 0.0, 0.0],
                 [-0.5, 0.5 * 3_f64.sqrt(), 0.0],
                 [0.0, 0.0, 1.0],
@@ -451,9 +447,9 @@ mod tests {
                 [0.0, 0.5, 0.0],
                 [0.5, 0.0, 0.0],
                 [0.5, 0.5, 0.0],
-            ]),
+            ].envee()),
         );
-        let sc_vec = [2, 2, 1];
+        let sc_vec = V3([2, 2, 1]);
 
         let go_do_it = |expected, eigenvector|
             do_it(&structure, sc_vec, expected, eigenvector);
@@ -463,12 +459,12 @@ mod tests {
             [0.0, 0.0,  0.5],
             [0.0, 0.0,  0.5],
             [0.0, 0.0, -0.5],
-        ]);
+        ].envee());
 
         //--------------------------------------------
         // primitive structure with more than one atom
         let structure = CoordStructure::new_coords(
-            Lattice::new(&[
+            Lattice::from(&[
                 // graphene cell (2 atoms per primitive),
                 // doubled along b (4 atoms per supercell)
                 [1.0, 0.0, 0.0],
@@ -481,9 +477,9 @@ mod tests {
                 [1.0/3.0, 0.0, 0.0],
                 [    0.0, 0.5, 0.0],
                 [1.0/3.0, 0.5, 0.0],
-            ]),
+            ].envee()),
         );
-        let sc_vec = [1, 2, 1];
+        let sc_vec = V3([1, 2, 1]);
 
         let go_do_it = |expected, eigenvector|
             do_it(&structure, sc_vec, expected, eigenvector);
@@ -494,7 +490,7 @@ mod tests {
             [0.0, 0.0,  0.5],
             [0.0, 0.0,  0.5],
             [0.0, 0.0,  0.5],
-        ]);
+        ].envee());
 
         // the less obvious gamma vec
         // (sign only changes within the primitive cell)
@@ -506,7 +502,7 @@ mod tests {
             [0.0, 0.0, -0.5],
             [0.0, 0.0,  0.5],
             [0.0, 0.0, -0.5],
-        ]);
+        ].envee());
 
         // a non-gamma vec
         go_do_it(&[[0, 1, 0]], vec![
@@ -514,7 +510,7 @@ mod tests {
             [0.0, 0.0,  0.5],
             [0.0, 0.0, -0.5],
             [0.0, 0.0, -0.5],
-        ]);
+        ].envee());
 
         //--------------------------------------------
 

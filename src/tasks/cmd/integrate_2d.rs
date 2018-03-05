@@ -6,16 +6,17 @@ use ::std::collections::HashSet;
 
 use ::slice_of_array::prelude::*;
 use ::rsp2_slice_math::{v, V, vdot};
+use ::rsp2_array_types::{V3};
 
 pub fn integrate_two_eigenvectors<E, F>(
     dims: (usize, usize),
-    init_pos: &[[f64; 3]],
+    init_pos: &[V3],
     ranges: (Range<f64>, Range<f64>),
-    eigenvecs: (&[[f64; 3]], &[[f64; 3]]),
+    eigenvecs: (&[V3], &[V3]),
     compute_grad: F,
 ) -> Result<Vec<f64>, E>
 where
-    F: Fn(&[[f64; 3]]) -> Result<Vec<[f64; 3]>, E> + Sync,
+    F: Fn(&[V3]) -> Result<Vec<V3>, E> + Sync,
     E: Send,
 {
     let xs = linspace(ranges.0, dims.0);
@@ -40,7 +41,7 @@ where
             // trapezoid
             let V(grad) = 0.5 * (v(grad1) + v(grad2));
             let V(d_pos) = v(pos2) - v(pos1);
-            vdot(&grad, &d_pos)
+            vdot(&grad[..], &d_pos)
         })},
     )
 }

@@ -7,10 +7,10 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 path = "lib.rs"
 
 [dependencies]
-# HACK: This shouldn't depend on serde, but it does because rsp2-array-types is
-#       implemented in here
+# HACK: These are public dependencies of rsp2-array-types and shouldn't be here
 !!serde
 !!serde-derive
+!!slice-of-array
 
 !!rsp2-assert-close
 

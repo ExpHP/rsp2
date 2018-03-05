@@ -16,6 +16,7 @@ extern crate rsp2_structure_io;
 extern crate rsp2_structure_gen;
 extern crate rsp2_phonopy_io;
 extern crate rsp2_array_utils;
+extern crate rsp2_array_types;
 extern crate rsp2_slice_math;
 extern crate rsp2_tempdir;
 extern crate rsp2_fs_util;
@@ -169,19 +170,16 @@ mod env {
     })}
 }
 
-use conv::*;
-mod conv {
-    pub trait As3<T> {
-        fn as_3(&self) -> (&T, &T, &T);
-    }
+pub trait As3<T> {
+    fn as_3(&self) -> (&T, &T, &T);
+}
 
-    impl<T> As3<T> for [T; 3] {
-        fn as_3(&self) -> (&T, &T, &T)
-        { (&self[0], &self[1], &self[2]) }
-    }
+impl<T> As3<T> for [T; 3] {
+    fn as_3(&self) -> (&T, &T, &T)
+    { (&self[0], &self[1], &self[2]) }
+}
 
-    impl<T> As3<T> for (T, T, T) {
-        fn as_3(&self) -> (&T, &T, &T)
-        { (&self.0, &self.1, &self.2) }
-    }
+impl<T> As3<T> for (T, T, T) {
+    fn as_3(&self) -> (&T, &T, &T)
+    { (&self.0, &self.1, &self.2) }
 }
