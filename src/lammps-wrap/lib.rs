@@ -17,10 +17,6 @@ use ::rsp2_array_types::{V3, Unvee, Envee};
 use std::fmt;
 
 error_chain! {
-    foreign_links {
-        NulError(::std::ffi::NulError);
-    }
-
     errors {
         Lammps(severity: Severity, message: String) {
             description("LAMMPS threw an exception"),

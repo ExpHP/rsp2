@@ -1,7 +1,6 @@
 
 use ::{Result, Error, ErrorKind};
 
-use ::std::ffi::{CString};
 use ::std::sync::Mutex;
 use ::std::os::raw::{c_int, c_void, c_double, c_char};
 
@@ -118,7 +117,7 @@ impl Drop for LammpsOwner {
 impl LammpsOwner {
     pub fn new(argv: &[&str]) -> Result<LammpsOwner>
     {Ok({
-        let mut argv = CArgv::from_strs(argv)?;
+        let mut argv = CArgv::from_strs(argv);
         let mut ptr: *mut c_void = ::std::ptr::null_mut();
 
         {
@@ -164,7 +163,7 @@ impl LammpsOwner {
         let ret = unsafe {
             with_temporary_c_str(cmd, |cmd| {
                 ::lammps_sys::lammps_command(self.ptr, cmd)
-            })? // NulError
+            })
         };
 
         // NOTE: supposing that ret points into our argument (which has been
@@ -321,7 +320,7 @@ impl LammpsOwner {
                 self.ptr, name, ty.into(), count as c_int,
                 buf.as_mut_ptr() as *mut c_void,
             );
-        })?;
+        });
 
         // NOTE: Known cases where this is Err:
         // * None so far.
@@ -392,7 +391,7 @@ impl LammpsOwner {
                 self.ptr, name, ty.into(), count as c_int,
                 data.as_mut_ptr() as *mut c_void,
             );
-        })?;
+        });
 
         // NOTE: Known cases where this is Err:
         // * None so far.
@@ -415,7 +414,7 @@ impl LammpsOwner {
                 ComputeStyle::Global.into(),
                 ComputeType::Scalar.into(),
             )}
-        })? as *mut c_double;
+        }) as *mut c_double;
 
         // NOTE: Known cases where this produces Err:
         // * None so far.
@@ -446,7 +445,7 @@ impl LammpsOwner {
                 style.into(),
                 ComputeType::Vector.into(),
             )}
-        })? as *mut c_double;
+        }) as *mut c_double;
 
         // NOTE: See extract_compute_0d for a breakdown of the error cases.
         self.pop_error_as_result()?;
@@ -506,15 +505,39 @@ fn string_from_utf8_prefix(buf: Vec<u8>) -> String
         })
 }
 
-// Temporarily allocate a c string for the duration of a closure.
-unsafe fn with_temporary_c_str<B, F>(s: &str, f: F) -> Result<B>
+// Temporarily allocate a C string for the duration of a closure.
+//
+// The closure may make arbitrary modifications to the string's
+// content (including writes of interior NUL bytes), but must not
+// write beyond the `s.len() + 1` allocated bytes for the C string.
+fn with_temporary_c_str<B, F>(s: &str, f: F) -> B
 where F: FnOnce(*mut c_char) -> B
-{Ok({
-    let p = CString::new(s)?.into_raw();
-    let out = f(p);
-    let _ = CString::from_raw(p); // free memory
-    out
-})}
+{
+    // It is not safe to use CString here; LAMMPS may write NUL bytes
+    // that change the length of the string.
+    let mut bytes = s.to_string().into_bytes();
+    bytes.push(0);
+    f(bytes.as_mut_ptr() as *mut c_char)
+}
+
+use self::black_hole::BlackHole;
+mod black_hole {
+    use std::fmt;
+
+    /// Contains something that is dangerous to obtain references to.
+    ///
+    /// It will never be seen again (except to be dropped).
+    pub struct BlackHole<T>(T);
+    impl<T> BlackHole<T> {
+        pub fn entrap(x: T) -> BlackHole<T> { BlackHole(x) }
+    }
+
+    impl<T> fmt::Debug for BlackHole<T> {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            write!(f, "BlackHole(_)")
+        }
+    }
+}
 
 /// An argv for C ffi, allocated and managed by rust code.
 ///
@@ -522,33 +545,35 @@ where F: FnOnce(*mut c_char) -> B
 /// pointers; only dropping the CArgv will invalidate the pointers.
 /// It is expressly NOT CLONE.
 #[derive(Debug)]
-pub(crate) struct CArgv(Vec<*mut c_char>);
+pub(crate) struct CArgv {
+    ptrs: Vec<*mut c_char>,
+    _allocs: BlackHole<Vec<Box<[u8]>>>,
+}
 
 impl CArgv {
-    pub(crate) fn from_strs(strs: &[&str]) -> Result<Self> {
-        // do all the nul-checking up front before we leak anything
-        let strs: Vec<_> = strs.iter().map(|&s| Ok(CString::new(s)?)).collect::<Result<_>>()?;
+    pub(crate) fn from_strs(strs: &[&str]) -> Self {
+        let mut allocs = strs.iter().map(|&s| {
+            let mut bytes = s.to_string().into_bytes();
+            bytes.push(0);
+            bytes.into_boxed_slice() as Box<[_]>
+        }).collect::<Vec<_>>();
 
-        Ok(CArgv(strs.into_iter().map(|s| s.into_raw()).collect()))
+        let ptrs = allocs.iter_mut()
+            .map(|x| x.as_mut_ptr()) // to *mut [u8]
+            .map(|x: *mut u8| x) // CoerceUnsized to *mut u8
+            .map(|x| x as *mut c_char)
+            .collect();
+
+        CArgv { _allocs: BlackHole::entrap(allocs), ptrs }
     }
 
-    pub(crate) fn len(&self) -> usize { self.0.len() }
+    pub(crate) fn len(&self) -> usize
+    { self.ptrs.len() }
 
     // Exposes the argv pointer.
     //
-    // NOTE: For safety, it is important not to modify the inner '*mut' pointers
-    //       to point to different memory.  This is not possible without the use
-    //       of unsafe code.
-    pub(crate) fn as_argv_ptr(&mut self) -> *mut *mut c_char { self.0.as_mut_ptr() }
-}
-
-impl Drop for CArgv {
-    fn drop(&mut self) {
-        // Unleak each inner pointer to free its memory.
-        while let Some(s) = self.0.pop() {
-            // Assuming the inner pointers were never modified,
-            // this is safe because each pointer was allocated by rust.
-            unsafe { let _ = CString::from_raw(s); }
-        }
-    }
+    // NOTE: the returned pointers (both the strings and the vector holding
+    //       them) will become invalid when the CArgv is dropped.
+    pub(crate) fn as_argv_ptr(&mut self) -> *mut *mut c_char
+    { self.ptrs.as_mut_ptr() }
 }
