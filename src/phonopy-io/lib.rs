@@ -1,11 +1,11 @@
 extern crate rsp2_kets;
 extern crate rsp2_structure;
 extern crate rsp2_array_types;
-extern crate rsp2_byte_tools_plus_float as byte_tools;
 
 #[macro_use] extern crate error_chain;
 #[macro_use] extern crate nom;
 #[macro_use] extern crate serde_derive;
+extern crate byte_tools;
 extern crate serde_json;
 extern crate serde_yaml;
 

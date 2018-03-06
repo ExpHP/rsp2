@@ -5,9 +5,11 @@
 #![allow(unused_parens)]
 
 use ::Result;
-use ::std::io::Read;
-
 use ::rsp2_kets::Basis;
+use ::nom::*;
+use ::std::io::Read;
+use ::std::mem::size_of;
+
 
 pub fn read_eigenvector_npy<R: Read>(mut r: R) -> Result<Vec<Basis>> {
     let bytes = {
@@ -51,11 +53,7 @@ named!(digits<&str>, map_res!(digit, ::std::str::from_utf8));
 named!(integer<usize>, map_res!(digits, str::parse::<usize>));
 
 mod parse_eigenvector_npy {
-    use ::nom::*;
-    use ::std::mem::size_of;
-    use ::rsp2_kets::Basis;
-
-    use super::{chunk_evenly, integer};
+    use super::*;
 
     // Make no mistake; this file makes no attempt to actually implement the spec,
     //   which contains such phrases as "a [python] object that can be passed
@@ -106,7 +104,7 @@ mod parse_eigenvector_npy {
 
             >> ({
                 let mut floats = vec![0f64; blob_size/size_of::<f64>()];
-                ::byte_tools::read_f64v_le(&mut floats, blob);
+                read_f64v_le(&mut floats, blob);
                 let floats = floats;
 
                 // move atoms to the last dimension
@@ -150,10 +148,7 @@ mod parse_eigenvector_npy {
 //   * eigenvector.npy is shape (l, m, n, n, 2)
 //   * eigenvalue.npy  is shape (l, m, n)
 mod parse_eigenvalue_npy {
-    use ::nom::*;
-    use ::std::mem::size_of;
-
-    use super::{chunk_evenly, integer};
+    use super::*;
 
     // Make no mistake; this file makes no attempt to actually implement the spec,
     //   which contains such phrases as "a [python] object that can be passed
@@ -203,7 +198,7 @@ mod parse_eigenvalue_npy {
 
             >> ({
                 let mut floats = vec![0f64; blob_size/size_of::<f64>()];
-                ::byte_tools::read_f64v_le(&mut floats, blob);
+                read_f64v_le(&mut floats, blob);
                 let floats = floats;
 
                 // no need to reorder axes
@@ -239,5 +234,17 @@ mod parse_eigenvalue_npy {
                 at_each_qpoint
             })
         )
+    }
+}
+
+/// Read a vector of bytes into a vector of f64s. The values are read in
+/// little-endian format.
+fn read_f64v_le(dst: &mut [f64], src: &[u8]) {
+    let mut u64s = vec![0u64; dst.len()];
+
+    ::byte_tools::read_u64v_le(&mut u64s, src);
+
+    for (f, i) in dst.iter_mut().zip(u64s) {
+        *f = f64::from_bits(i);
     }
 }

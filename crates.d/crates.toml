@@ -41,7 +41,6 @@ rsp2-structure      = "src/structure"
 rsp2-structure-gen  = "src/structure-gen"
 rsp2-structure-io   = "src/util/structure-io"
 rsp2-slice-math     = "src/util/slice-math"
-rsp2-byte-tools-plus-float = "src/util/byte-tools-plus-float"
 rsp2-util-macros    = "src/util/macros"
 rsp2-tempdir        = "src/util/tempdir"
 rsp2-linalg         = "src/math/linalg"
@@ -59,6 +58,7 @@ rsp2-array-types = "src/util/array-types"
 # This also makes it easier to migrate the entire workspace
 # to a new version of a dependency.
 [preferred-versions]
+byte-tools = "0.2.0"
 clap = "2"
 chrono = "0.4"
 either = "1"
