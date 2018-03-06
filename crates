@@ -132,6 +132,7 @@ class Gen:
             # prepare the root crate first
             if user_conf.shared_target:
                 ensure_not_symlink('target')
+                Path('target').mkdir(parents=True, exist_ok=True)
 
             if user_conf.shared_dot_idea:
                 (Path('.subcrate-cfg') / '.idea').mkdir(parents=True, exist_ok=True)
