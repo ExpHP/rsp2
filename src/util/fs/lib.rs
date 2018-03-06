@@ -2,12 +2,18 @@ use ::std::path::{Path, PathBuf};
 use ::std::fs::{self, File};
 use ::std::io::{self, BufReader};
 
+pub use cp_mv::{cp_a, mv, Copy, Move};
 mod cp_mv;
 
-pub use cp_mv::{cp_a, mv, Copy, Move};
+pub use tempdir::{ActualTempDir, TempDir};
+mod tempdir;
 
 #[macro_use]
 extern crate error_chain;
+extern crate tempdir as tempdir_crate;
+#[macro_use]
+extern crate log;
+
 error_chain! {
     foreign_links {
         Io(io::Error);

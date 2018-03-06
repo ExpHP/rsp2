@@ -9,4 +9,6 @@ path = "lib.rs"
 
 [dependencies]
 !!error-chain
+!!tempdir
+!!log
 

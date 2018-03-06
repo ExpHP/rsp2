@@ -18,7 +18,6 @@ extern crate rsp2_phonopy_io;
 extern crate rsp2_array_utils;
 extern crate rsp2_array_types;
 extern crate rsp2_slice_math;
-extern crate rsp2_tempdir;
 extern crate rsp2_fs_util;
 #[macro_use] extern crate rsp2_util_macros;
 #[macro_use] extern crate rsp2_clap;

@@ -24,8 +24,7 @@ use ::rsp2_structure_io::poscar;
 use ::std::io::prelude::*;
 use ::std::process::Command;
 use ::std::path::{Path, PathBuf};
-use ::rsp2_fs_util::mv;
-use ::rsp2_tempdir::TempDir;
+use ::rsp2_fs_util::{mv, TempDir};
 
 use ::rsp2_kets::Basis;
 use ::rsp2_fs_util::{open, create, open_text, copy, hard_link};

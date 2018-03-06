@@ -2,7 +2,7 @@ use ::Result;
 use ::std::path::Path;
 use ::std::io::Result as IoResult;
 use ::std::path::PathBuf;
-use ::rsp2_tempdir::TempDir;
+use ::rsp2_fs_util::TempDir;
 use ::path_abs::{FileRead, FileWrite};
 
 /// AsRef<Path> with more general impls on smart pointer types.
@@ -72,7 +72,8 @@ macro_rules! as_path_impl {
 as_path_impl!{
     (by AsRef) [] ::std::path::Path;
     (by Deref) [] ::std::path::PathBuf;
-    (by AsRef) [] ::rsp2_tempdir::TempDir;
+    (by AsRef) [] ::rsp2_fs_util::ActualTempDir;
+    (by AsRef) [] ::rsp2_fs_util::TempDir;
     (by AsRef) [] ::std::ffi::OsString;
     (by AsRef) [] ::std::ffi::OsStr;
     (by AsRef) [] str;

@@ -1,11 +1,4 @@
-//! Shim around the `tempdir` crate which doesn't delete the
-//! directories on unwind, in order to facilitate debugging.
-extern crate tempdir;
-extern crate rsp2_fs_util as fsx;
-#[macro_use]
-extern crate log;
-
-pub use tempdir::TempDir as ActualTempDir;
+pub use ::tempdir_crate::TempDir as ActualTempDir;
 
 use ::std::io::Result;
 use ::std::path::{Path, PathBuf};
@@ -88,7 +81,7 @@ impl Drop for TempDir {
             let dest_file = dest.join(name);
             let dest_file: &Path = dest_file.as_ref();
 
-            match ::fsx::mv(temp, dest_file) {
+            match ::mv(temp, dest_file) {
                 Err(e) => warn!("failed to move during panic: from '{}' to '{}': {}", temp.display(), dest_file.display(), e),
                 Ok(_) => info!("recovered tempdir during panic: {}", dest_file.display()),
             }
