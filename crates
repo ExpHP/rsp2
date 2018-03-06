@@ -112,10 +112,12 @@ class Gen:
 
             # build a dash-insensitive lookup table of callbacks
             lookup_d = {
+                # builtin macros
                 'WORKSPACE-MEMBERS-AS-PATH-DEPS': gen_members_as_pathdeps,
             }
-            lookup_put = lambda k, v: lookup_d.__setitem__(k.replace('_', '-'), v)
-            lookup_get = lambda k: lookup_d.get(k.replace('_', '-'))
+            # for defining new macros
+            lookup_put = lambda k, v: lookup_d.__setitem__(canonicalize_crate(k), v)
+            lookup_get = lambda k: lookup_d.get(canonicalize_crate(k))
 
             for (name, path) in crates.items():
                 lookup_put(name, gen_relpath_to(name, path))
@@ -213,6 +215,10 @@ def line_as_macro(line):
 
 def format_macro(name):
     return '!!' + name
+
+# crates are generally compared as dash-insensitive
+def canonicalize_crate(crate_name):
+    return crate_name.replace('_', '-')
 
 # tries to have a crate's target symlink back to the root crate's target,
 # but may fail. (no big deal)
@@ -527,6 +533,39 @@ class Edit:
 
 #------------
 
+@register
+class UnusedDeps:
+    cmd = 'unused'
+    parser_kw = dict(
+        description="List unused external crate dependencies."
+    )
+
+    @staticmethod
+    def configure(sub):
+        pass
+
+    @staticmethod
+    def run(parser, _args):
+
+        with pushd(search_for_root(parser.error)):
+            data = read_master_config(parser.error)
+            our_crates = list(data.pop('crates'))
+            unused_deps = set(map(canonicalize_crate, data.pop('preferred-versions')))
+
+            for crate in our_crates:
+                with open(root_rel_src_toml_path(crate)) as f:
+                    lines = list(f)
+
+                # note: this set will include a None thanks to the lines
+                #       that are not macros, but this is harmless.
+                unused_deps -= set([canonicalize_crate(line_as_macro(x)) for x in lines])
+
+            for dep in unused_deps:
+                print(dep)
+
+
+#------------
+
 class UserConfig:
     def __init__(self, d):
         d = dict(d)
@@ -604,10 +643,10 @@ It should look like the following:
 # 'path = None' deletes
 def master_config_textual_set_path(lines, name, path, fail):
     lines = list(lines)
-    name = name.replace('_', '-')
+    name = canonicalize_crate(name)
 
     for (i,line) in enumerate(lines):
-        if line.strip().replace('_', '-').startswith(name):
+        if canonicalize_crate(line.strip()).startswith(name):
             # expect exactly two, paired quotes
             quotes = list(find_all_indices_of_any("\"'", line))
             if not (len(quotes) == 2 and line[quotes[0]] == line[quotes[1]]):
