@@ -16,7 +16,7 @@ use ::phonopy::{DirWithBands, DirWithDisps, DirWithForces};
 use ::types::{Basis3};
 use ::math::bonds::Bonds;
 
-use ::path_abs::{PathFile, PathDir, FileWrite};
+use ::path_abs::{PathFile, PathDir};
 use ::rsp2_structure::consts::CARBON;
 use ::rsp2_slice_math::{v, V, vdot, vnorm};
 
@@ -97,7 +97,7 @@ impl TrialDir {
         if let Some(bond_radius) = settings.bond_radius {
             trace!("Computing bonds, just for kicks.");
             let bonds = Bonds::from_brute_force_very_dumb(&original, bond_radius)?;
-            ::serde_yaml::to_writer(FileWrite::create(self.join("bonds.yaml"))?, &bonds)?;
+            ::serde_yaml::to_writer(self.create_file("bonds.yaml")?, &bonds)?;
         };
 
         let mut from_structure = original.clone();
@@ -122,10 +122,10 @@ impl TrialDir {
             trace!("Finished relaxation # {}", iteration);
 
             {
-                let path = self.join(format!("structure-{:02}.1.vasp", iteration));
-                trace!("Writing '{}'", path.nice()?);
+                let file = self.create_file(format!("structure-{:02}.1.vasp", iteration))?;
+                trace!("Writing '{}'", file.path().nice()?);
                 poscar::dump(
-                    FileWrite::create(path)?,
+                    file,
                     &format!("Structure after CG round {}", iteration),
                     &structure)?;
             }
@@ -135,8 +135,8 @@ impl TrialDir {
                 &evals, &evecs, &layers[..], &structure, Some(&layer_sc_mats),
             );
             {
-                let path = self.join(format!("eigenvalues.{:02}", iteration));
-                write_eigen_info_for_machines(&einfos, FileWrite::create(path)?)?;
+                let file = self.create_file(format!("eigenvalues.{:02}", iteration))?;
+                write_eigen_info_for_machines(&einfos, file)?;
                 write_eigen_info_for_humans(&einfos, &mut |s| ok(info!("{}", s)))?;
             }
 
@@ -160,10 +160,10 @@ impl TrialDir {
             }
 
             {
-                let path = self.join(format!("./structure-{:02}.2.vasp", iteration));
-                trace!("Writing '{}'", path.nice()?);
+                let file = self.create_file(format!("./structure-{:02}.2.vasp", iteration))?;
+                trace!("Writing '{}'", file.path().nice()?);
                 poscar::dump(
-                    FileWrite::create(path)?,
+                    file,
                     &format!("Structure after eigenmode-chasing round {}", iteration),
                     &structure)?;
             }
