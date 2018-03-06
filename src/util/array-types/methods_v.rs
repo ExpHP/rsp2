@@ -163,7 +163,7 @@ gen_each!{
 
             #[inline]
             fn dot(&self, other: &$Vn<X>) -> Self::Output
-            { (0..$n).map(|i| self[i] * other[i]).sum() }
+            { (1..$n).fold(self[0] * other[0], |s, i| s + self[i] * other[i]) }
         }
     }
 }
