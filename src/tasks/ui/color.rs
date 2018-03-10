@@ -15,36 +15,20 @@ macro_rules! each_fmt_trait {
     }
 }
 
-/// Specialized display impl for numbers that from 0 to 1 and may be
-/// extremely close to either 0 or 1
-#[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
-pub struct DisplayProb(pub f64);
-impl fmt::Display for DisplayProb {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let log10_1p = |x: f64| x.ln_1p() / ::std::f64::consts::LN_10;
-        assert!(0.0 < self.0 && self.0 < 1.0 + 1e-5,
-            "bad probability: {}", self.0);
 
-        if self.0 >= 1.0 {
-            write!(f, "{:>7}", 1.0)
-        } else if self.0 <= 1e-3 {
-            write!(f, "  1e{:03}", self.0.log10().round())
-        } else if self.0 + 1e-3 >= 1.0 {
-            write!(f, "1-1e{:03}", log10_1p(-self.0).round())
-        } else {
-            write!(f, "{:<7.5}", self.0)
-        }
-    }
+/// A thing that might colorize text based on a value.
+pub trait PaintAs<D, C> {
+    fn paint_as(&self, compared: &C, displayed: D) -> String;
 }
 
 pub struct ColorByRange<T> {
     pub divs: Vec<(T, Style)>,
     pub lowest: Style,
 }
+
 impl<T> ColorByRange<T> {
-    pub fn new(divs: Vec<(T, Style)>, lowest: Style) -> ColorByRange<T> {
-        ColorByRange { divs, lowest }
-    }
+    pub fn new(divs: Vec<(T, Style)>, lowest: Style) -> ColorByRange<T>
+    { ColorByRange { divs, lowest } }
 
     fn style_of(&self, x: &T) -> Style
     where T: PartialOrd,
@@ -55,22 +39,31 @@ impl<T> ColorByRange<T> {
         return self.lowest;
     }
 
-    pub fn paint<'a, U>(&self, x: U) -> Wrapper<U, T>
-    where
-        T: PartialOrd + 'a,
-        U: ::std::borrow::Borrow<T> + 'a,
-    {
-        gpaint(self.style_of(x.borrow()), x)
-    }
-
-    pub fn paint_as<'a, U>(&self, compare_me: &T, show_me: U) -> Wrapper<U, U>
-    where T: PartialOrd,
-    {
-        paint(self.style_of(compare_me), show_me)
-    }
+    // pub fn paint<'a, U>(&self, x: U) -> Wrapper<U, T>
+    // where
+    //     T: PartialOrd + 'a,
+    //     U: ::std::borrow::Borrow<T> + 'a,
+    // { gpaint(self.style_of(x.borrow()), x) }
 }
 
-// hack for type  inference issues
+impl<D, C> PaintAs<D, C> for ColorByRange<C>
+  where C: PartialOrd, D: fmt::Display,
+{
+    fn paint_as(&self, compared: &C, displayed: D) -> String
+    { paint(self.style_of(compared), displayed).to_string() }
+}
+
+/// Does not colorize.
+pub struct NullPainter;
+
+impl<D, C> PaintAs<D, C> for NullPainter
+  where C: PartialOrd, D: fmt::Display,
+{
+    fn paint_as(&self, _: &C, displayed: D) -> String
+    { displayed.to_string() }
+}
+
+// hack for type inference issues
 pub fn paint<T>(
     style: ::ansi_term::Style,
     value: T,
@@ -85,7 +78,9 @@ pub fn gpaint<U, T>(
 
 /// A wrapper for colorizing all formatting traits like `Display`.
 ///
-/// Except `Debug`.
+/// It has two parameters so that it can `borrow()` `U` as `T` when it wants to.
+/// (otherwise, it would have to store `&T`, making it virtually impossible to
+///  return one of these from a function)
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct Wrapper<U, T=U> {
     style: ::ansi_term::Style,

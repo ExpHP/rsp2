@@ -70,15 +70,6 @@ mod resolve_from_arg {
         Ok(Config { yaml, source })
     }
 
-    fn make_nested_mapping(path: &[&str], mut value: Value) -> Value {
-        for &key in path.iter().rev() {
-            let mut mapping = Mapping::new();
-            mapping.insert(Value::String(key.into()), value);
-            value = Value::Mapping(mapping);
-        }
-        value
-    }
-
     #[cfg(test)]
     macro_rules! m { ($($arg:tt)*) => { Value::Mapping(vec![$($arg)*].into_iter().collect()) }; }
     #[cfg(test)]
@@ -143,4 +134,26 @@ fn dumb_config_merge(a: Value, b: Value) -> Value {
         },
         (_, b) => b,
     }
+}
+
+// FIXME: These functions for summary.yaml probably don't belong here,
+//        but `merge_summaries` is here to use a private function.
+/// Merges summary.yaml files for output.
+pub fn merge_summaries(a: Value, b: Value) -> Value {
+    // Reuse the dumb algorithm because is actually perfect for this use case.
+    // Summaries should continue to use the dumb algorithm even if config files
+    // get a redesigned algorithm at some point.
+    dumb_config_merge(a, b)
+}
+
+/// Make an empty summary.
+pub fn no_summary() -> Value { Value::Mapping(Default::default()) }
+
+/// Constructs a Yaml like `{a: {b: {c: value}}}`
+pub fn make_nested_mapping(path: &[&str], value: Value) -> Value {
+    path.iter().rev().fold(value, |value, &key| {
+        let mut mapping = Mapping::new();
+        mapping.insert(Value::String(key.into()), value);
+        Value::Mapping(mapping)
+    })
 }

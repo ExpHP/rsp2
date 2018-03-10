@@ -5,6 +5,13 @@ pub(crate) mod integrate_2d;
 use self::lammps::{Lammps, LammpsBuilder};
 mod lammps;
 
+mod ev_analyses;
+//mod ev_analyses3;
+//use self::ev_analyses3 as ev_analyses;
+
+use self::ev_analyses::GammaSystemAnalysis;
+//mod ev_analyses;
+
 use self::trial::TrialDir;
 pub(crate) mod trial;
 
@@ -26,7 +33,6 @@ use ::rsp2_array_types::{V3, Unvee};
 use ::rsp2_structure::supercell::{self, SupercellToken};
 use ::rsp2_structure::{CoordStructure, ElementStructure, Structure};
 use ::rsp2_structure::{Lattice, Coords};
-use ::rsp2_structure::{Part, Partition};
 use ::rsp2_structure_gen::Assemble;
 use ::phonopy::Builder as PhonopyBuilder;
 
@@ -82,7 +88,7 @@ impl TrialDir {
 
         // (we can expect that the layers assignments will not change, so we do this early...)
         trace!("Finding layers");
-        let layers = {
+        let atom_layers = {
             let layers =
                 ::rsp2_structure::find_layers(&original, &V3([0, 0, 1]), 0.25)?
                     .per_unit_cell().expect("Structure is not layered?");
@@ -104,7 +110,7 @@ impl TrialDir {
         let mut iteration = 1;
         // HACK to stop one iteration AFTER all non-acoustics are positive
         let mut all_ok_count = 0;
-        let (structure, einfos) = loop { // NOTE: we use break with value
+        let (structure, ev_analysis) = loop { // NOTE: we use break with value
 
             let structure = do_relax(&lmp, &settings.cg, &settings.potential, from_structure)?;
             let bands_dir = do_diagonalize(
@@ -131,22 +137,40 @@ impl TrialDir {
             }
 
             trace!("Computing eigensystem info");
-            let einfos = get_gamma_eigensystem_info(
-                &evals, &evecs, &layers[..], &structure, Some(&layer_sc_mats),
-            );
+            let ev_analysis = {
+                use self::ev_analyses::*;
+
+                // (NOTE: all these Options look pointless now, but the layer
+                //        stuff shall soon become optional.
+                //        ...
+                //        The other Options *are* kind of pointless, but they simplifies the
+                //        design of the analysis module)
+                gamma_system_analysis::Input {
+                    atom_coords:     &Some(AtomCoordinates(structure.map_metadata_to(|_| ()))),
+                    atom_layers:     &Some(AtomLayers(atom_layers.clone())),
+                    layer_sc_mats:   &Some(LayerScMatrices(layer_sc_mats.clone())),
+                    ev_frequencies:  &Some(EvFrequencies(evals.clone())),
+                    ev_eigenvectors: &Some(EvEigenvectors(evecs.clone())),
+                }.compute()?
+            };
+
             {
                 let file = self.create_file(format!("eigenvalues.{:02}", iteration))?;
-                write_eigen_info_for_machines(&einfos, file)?;
-                write_eigen_info_for_humans(&einfos, &mut |s| ok(info!("{}", s)))?;
+                write_eigen_info_for_machines(&ev_analysis, file)?;
+                write_eigen_info_for_humans(&ev_analysis, &mut |s| ok(info!("{}", s)))?;
             }
 
             let mut structure = structure;
-            let bad_evs: Vec<_> = izip!(1.., &einfos, &evecs.0)
-                .filter(|&(_, ref info, _)| info.frequency < 0.0 && !info.is_acoustic())
-                .map(|(i, info, evec)| {
-                    let name = format!("band {} ({})", i, info.frequency);
-                    (name, evec.as_real_checked())
-                }).collect();
+            let bad_evs: Vec<_> = {
+                let acousticness = ev_analysis.ev_acousticness.as_ref().expect("(bug) always computed!");
+                izip!(1.., &evals, &evecs.0, &acousticness.0)
+                    .take_while(|&(_, &freq, _, _)| freq < 0.0)
+                    .filter(|&(_, _, _, &acousticness)| acousticness < 0.95)
+                    .map(|(i, freq, evec, _)| {
+                        let name = format!("band {} ({})", i, freq);
+                        (name, evec.as_real_checked())
+                    }).collect()
+            };
 
             if !bad_evs.is_empty() {
                 trace!("Chasing eigenvectors...");
@@ -173,7 +197,7 @@ impl TrialDir {
             if bad_evs.is_empty() {
                 all_ok_count += 1;
                 if all_ok_count >= settings.ev_loop.min_positive_iter {
-                    break (structure, einfos /*, bands_dir */);
+                    break (structure, ev_analysis /*, bands_dir */);
                 }
             }
 
@@ -190,17 +214,17 @@ impl TrialDir {
                     bail!("Too many relaxation steps!");
                 } else {
                     warn!("Too many relaxation steps!");
-                    break (structure, einfos /*, bands_dir */);
+                    break (structure, ev_analysis /*, bands_dir */);
                 }
             }
 
             from_structure = structure;
-        }; // (structure, einfos, final_bands_dir)
+        }; // (structure, ev_analysis, final_bands_dir)
 
 
-        poscar::dump(self.create_file("final_vasp")?, "", &structure)?;
+        poscar::dump(self.create_file("final.vasp")?, "", &structure)?;
 
-        write_eigen_info_for_machines(&einfos, self.create_file("eigenvalues.final")?)?;
+        write_eigen_info_for_machines(&ev_analysis, self.create_file("eigenvalues.final")?)?;
 
         // let (k_evals, k_evecs) = read_eigensystem(&bands_dir, &Q_K)?;
         // let kinfos = get_k_eigensystem_info(
@@ -208,7 +232,7 @@ impl TrialDir {
         // );
 
         // write_summary_file(settings, &lmp, &einfos, &kinfos)?;
-        self.write_summary_file(settings, &lmp, &einfos)?;
+        self.write_summary_file(settings, &lmp, &ev_analysis)?;
     })}
 }
 
@@ -423,95 +447,49 @@ fn multi_threshold_deconstruct(
     }
 })}
 
-// FIXME write_gamma_info
 fn write_eigen_info_for_humans(
-    einfos: &[EigenmodeInfo],
-    writeln: &mut FnMut(&::std::fmt::Display) -> Result<()>,
+    analysis: &GammaSystemAnalysis,
+    writeln: &mut FnMut(String) -> Result<()>,
 ) -> Result<()>
-{ok({
-    use ::ansi_term::Colour::{Red, Cyan, Yellow, Black};
-    use ::ui::color::{ColorByRange, DisplayProb};
-
-    let color_range = ColorByRange::new(vec![
-        (0.999, Cyan.bold()),
-        (0.9, Cyan.normal()),
-        (0.1, Yellow.normal()),
-        (1e-4, Red.bold()),
-        (1e-10, Red.normal()),
-    ], Black.normal());
-    let dp = |x: f64| color_range.paint_as(&x, DisplayProb(x));
-    let pol = |x: f64| color_range.paint(x);
-
-    let nlayer = einfos.iter().next().unwrap().layer_gamma_probs.as_ref().map(|v| v.len()).unwrap_or(0);
-    writeln(&format_args!("{:27}  {:^7}  {:^7}  {} [{:^4}, {:^4}, {:^4}]",
-        "# Frequency (cm^-1)", "Acoustc", "Layer",
-        (1..nlayer+1).map(|i| format!("GammaL{}", i)).join(" "),
-        "X", "Y", "Z"))?;
-    for item in einfos.iter() {
-        let eval = item.frequency;
-        let acou = dp(item.acousticness);
-        let layer = dp(item.layer_acousticness);
-        let (x, y, z) = tup3(item.polarization);
-        let gammas = item.layer_gamma_probs.as_ref().unwrap_or(&vec![]).iter().map(|&p| dp(p)).join(" ");
-
-        writeln(&format_args!("{:27}  {}  {}  {} [{:4.2}, {:4.2}, {:4.2}]",
-            eval, acou, layer, gammas, pol(x), pol(y), pol(z)))?;
-    }
-})}
+{
+    analysis.make_columns(ev_analyses::ColumnsMode::ForHumans)
+        .expect("(bug) no columns, not even frequency?")
+        .into_iter().map(writeln).collect()
+}
 
 fn write_eigen_info_for_machines<W: Write>(
-    einfos: &[EigenmodeInfo],
+    analysis: &GammaSystemAnalysis,
     mut file: W,
 ) -> Result<()>
-{ok({
-    writeln!(file, "{:27}  {:4}  {:4}  {:^4} {:^4} {:^4}",
-        "# Frequency (cm^-1)", "Acou", "Layr", "X", "Y", "Z")?;
-    for item in einfos.iter() {
-        // don't use DisplayProb, keep things parsable
-        let eval = item.frequency;
-        let acou = item.acousticness;
-        let layer = item.layer_acousticness;
-        let (x, y, z) = tup3(item.polarization);
-        writeln!(file, "{:27}  {:4.2}  {:4.2}  {:4.2} {:4.2} {:4.2}",
-            eval, acou, layer, x, y, z)?;
-    }
-})}
+{
+    analysis.make_columns(ev_analyses::ColumnsMode::ForMachines)
+        .expect("(bug) no columns, not even frequency?")
+        .into_iter().map(|s| ok(writeln!(file, "{}", s)?)).collect()
+}
 
 impl TrialDir {
     fn write_summary_file(
         &self,
         settings: &Settings,
         lmp: &LammpsBuilder,
-        gamma_infos: &[EigenmodeInfo],
-    ) -> Result<()>
-    {Ok({
-        use self::summary::{Modes, GammaModes, Summary, EnergyPerAtom};
+        ev_analysis: &GammaSystemAnalysis,
+    ) -> Result<()> {ok({
+        use ::ui::cfg_merging::{make_nested_mapping, no_summary, merge_summaries};
         use ::rsp2_structure_io::poscar;
 
-        fn filtered_freqs<Pred>(modes: &[EigenmodeInfo], pred: Pred) -> Vec<f64>
-        where Pred: Fn(&EigenmodeInfo) -> bool
-        { modes.iter().filter(|&mode| pred(mode)).map(EigenmodeInfo::frequency).collect() }
+        #[derive(Serialize)]
+        struct EnergyPerAtom {
+            initial: f64,
+            final_: f64,
+            before_ev_chasing: f64,
+        }
 
-        let acoustic = filtered_freqs(gamma_infos, EigenmodeInfo::is_acoustic);
-        let shear = filtered_freqs(gamma_infos, EigenmodeInfo::is_shear);
-        let layer_breathing = filtered_freqs(gamma_infos, EigenmodeInfo::is_layer_breathing);
-
-        // FIXME: this mess is due to an awkward choice of representation;
-        //        we have an array of structures where either all of the
-        //        'layer_gamma_props' members are present, or none of them are.
-        let layer_gammas = gamma_infos.iter().next().unwrap().layer_gamma_probs.as_ref().map(|_| {
-            gamma_infos.iter().enumerate()
-                .filter(|&(_,x)| x.layer_gamma_probs.as_ref().unwrap()[0] > settings.layer_gamma_threshold)
-                .map(|(i,x)| (i, x.frequency()))
-                .collect()
-        });
-        let gamma_modes = GammaModes { acoustic, shear, layer_breathing, layer_gammas };
-
-        let modes = Modes {
-            gamma: gamma_modes,
-        };
-
-        let energy_per_atom = {
+        // FIXME: Rather than assuming these files are here, this should perhaps
+        //        be done by saving structures into strongly typed objects
+        //        for the analysis module
+        let mut out = vec![];
+        out.push(ev_analysis.make_summary(settings));
+        out.push({
             let f = |structure: ElementStructure| ok({
                 let na = structure.num_atoms() as f64;
                 lmp.build(structure)?.compute_value()? / na
@@ -521,11 +499,13 @@ impl TrialDir {
             let initial = f_path(&"initial.vasp")?;
             let final_ = f_path(&"final.vasp")?;
             let before_ev_chasing = f_path(&"structure-01.1.vasp")?;
-            EnergyPerAtom { initial, final_, before_ev_chasing }
-        };
 
-        let summary = Summary { modes, energy_per_atom };
+            let cereal = EnergyPerAtom { initial, final_, before_ev_chasing };
+            let value = ::serde_yaml::to_value(&cereal)?;
+            make_nested_mapping(&["energy-per-atom"], value)
+        });
 
+        let summary = out.into_iter().fold(no_summary(), merge_summaries);
         ::serde_yaml::to_writer(self.create_file("summary.yaml")?, &summary)?;
     })}
 }
@@ -723,155 +703,12 @@ pub(crate) fn optimize_layer_parameters(
 
 //-----------------------------------
 
-
-pub fn get_gamma_eigensystem_info<L: Ord + Clone, M>(
-    evals: &[f64],
-    evecs: &Basis3,
-    layers: &[L],
-    // (M gets tossed out, but we don't take Structure<L> because it could
-    //  unintentionally accept Element as our layer type)
-    structure: &Structure<M>,
-    // unfolding is only done when this is provided
-    layer_supercell_matrices: Option<&[::math::bands::ScMatrix]>,
-) -> Vec<EigenmodeInfo>
-{
-    use ::math::bands::GammaUnfolder;
-
-    for evec in &evecs.0 {
-        assert!(
-            evec.imag.flat().iter().all(|&x| x == 0.0),
-            "clearly not a gamma eigenket!");
-    }
-
-    let part = Part::from_ord_keys(layers);
-    let layer_structures = structure
-            .map_metadata_to(|_| ())
-            .into_unlabeled_partitions(&part)
-            .collect_vec();
-
-    // precomputed data applicable to all kets
-    let layer_gamma_unfolders: Option<Vec<GammaUnfolder>> =
-        layer_supercell_matrices.map(|layer_supercell_matrices| {
-            izip!(&layer_structures, layer_supercell_matrices)
-                .map(|(layer_structure, layer_sc_mat)| {
-                    GammaUnfolder::from_config(
-                        &from_json!({
-                            "fbz": "reciprocal-cell",
-                            "sampling": { "plain": [4, 4, 1] },
-                        }),
-                        &layer_structure,
-                        layer_sc_mat,
-                    )
-                }).collect()
-        });
-
-    // now do each ket
-    let mut out = vec![];
-    for (&frequency, evec) in izip!(evals, &evecs.0) {
-        // split the evs up by layer (without renormalizing)
-        let layer_evecs: Vec<_> = evec.clone().into_unlabeled_partitions(&part).collect();
-
-        let acousticness = evec.acousticness();
-        let layer_acousticness = layer_evecs.iter().map(|ev| ev.acousticness()).sum();
-        let polarization = evec.polarization();
-
-        let layer_gamma_probs = layer_gamma_unfolders.as_ref().map(|unfolders| {
-            izip!(&unfolders[..], &layer_evecs)
-                .map(|(unfolder, ket)| {
-                    let probs = unfolder.unfold_phonon(ket.to_ket().as_ref());
-                    izip!(unfolder.q_indices(), probs)
-                        .find(|&(idx, _)| idx == &[0, 0, 0])
-                        .unwrap().1
-                }).collect()
-        });
-
-        out.push(EigenmodeInfo {
-            frequency, acousticness, layer_acousticness, polarization, layer_gamma_probs,
-        })
-    }
-    out
-}
-
 // HACK:
 // These are only valid for a hexagonal system represented
 // with the [[a, 0], [-a/2, a sqrt(3)/2]] lattice convention
 #[allow(unused)] const Q_GAMMA: V3 = V3([0.0, 0.0, 0.0]);
 #[allow(unused)] const Q_K: V3 = V3([1f64/3.0, 1.0/3.0, 0.0]);
 #[allow(unused)] const Q_K_PRIME: V3 = V3([2.0 / 3f64, 2.0 / 3f64, 0.0]);
-
-/// Properties for characterizing an eigenvector in layered graphene.
-pub struct EigenmodeInfo {
-    pub frequency: f64,
-    pub acousticness: f64,
-    pub layer_acousticness: f64,
-    pub polarization: [f64; 3], // not a vector
-    pub layer_gamma_probs: Option<Vec<f64>>,
-}
-
-impl EigenmodeInfo {
-    pub fn frequency(&self) -> f64
-    { self.frequency }
-
-    pub fn is_acoustic(&self) -> bool
-    { self.acousticness > 0.95 }
-
-    pub fn is_xy_polarized(&self) -> bool
-    { self.polarization[0] + self.polarization[1] > 0.9 }
-
-    pub fn is_z_polarized(&self) -> bool
-    { self.polarization[2] > 0.9 }
-
-    pub fn is_layer_acoustic(&self) -> bool
-    { self.layer_acousticness > 0.95 && !self.is_acoustic() }
-
-    pub fn is_shear(&self) -> bool
-    { self.is_layer_acoustic() && self.is_xy_polarized() }
-
-    pub fn is_layer_breathing(&self) -> bool
-    { self.is_layer_acoustic() && self.is_z_polarized() }
-}
-
-mod summary {
-    #[derive(Serialize, Deserialize)]
-    #[serde(rename_all="kebab-case")]
-    pub struct Summary {
-        pub energy_per_atom: EnergyPerAtom,
-        pub modes: Modes,
-    }
-
-    #[derive(Serialize, Deserialize)]
-    #[serde(rename_all="kebab-case")]
-    pub struct EnergyPerAtom {
-        pub initial: f64,
-        pub before_ev_chasing: f64,
-        #[serde(rename = "final")]
-        pub final_: f64,
-    }
-
-    #[derive(Serialize, Deserialize)]
-    #[serde(rename_all="kebab-case")]
-    pub struct Modes {
-        pub gamma: GammaModes,
-        // Even though there's only one member,
-        // this struct remains for legacy purposes
-        // (to preserve the shape of the output YAML)
-    }
-
-    #[derive(Serialize, Deserialize)]
-    #[serde(rename_all="kebab-case")]
-    pub struct GammaModes {
-        pub acoustic: Vec<f64>,
-        pub shear: Vec<f64>,
-        pub layer_breathing: Vec<f64>,
-        pub layer_gammas: Option<Vec<(usize, f64)>>,
-    }
-
-    #[derive(Serialize, Deserialize)]
-    #[serde(rename_all="kebab-case")]
-    pub struct KModes {
-        pub layer_ks: Option<Vec<(usize, f64)>>,
-    }
-}
 
 // HACK: These adapters are temporary to help the existing code
 //       (written only with carbon in mind) adapt to Structure.
@@ -991,29 +828,9 @@ impl TrialDir {
 
             let (i, j) = match settings.ev_indices {
                 Shear => {
-                    trace!("Finding layers");
-                    let (layers, nlayer) = {
-                        let layers =
-                            ::rsp2_structure::find_layers(&structure, &V3([0, 0, 1]), 0.25)?
-                                .per_unit_cell().expect("Structure is not layered?");
-                        (layers.by_atom(), layers.len())
-                    };
-                    assert!(nlayer >= 2);
-
-                    trace!("Computing eigensystem info");
-                    let einfos = get_gamma_eigensystem_info(&evals, &evecs, &layers, &structure, None);
-
-                    write_eigen_info_for_humans(&einfos, &mut |s| ok(info!("{}", s)))?;
-
-                    let mut iter = einfos
-                        .iter().enumerate()
-                        .filter(|&(_, info)| info.is_shear())
-                        .map(|(i, _)| i);
-
-                    match (iter.next(), iter.next()) {
-                        (Some(a), Some(b)) => (a, b),
-                        _ => panic!("Expected at least two shear modes"),
-                    }
+                    // FIXME: This should just find layers, check that there's two
+                    //        and then move one along x and y instead
+                    panic!("energy plot using shear modes is no longer supported")
                 },
                 These(i, j) => (i, j),
             };

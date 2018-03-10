@@ -31,6 +31,24 @@ where
     a.zip(b)
 }
 
+pub(crate) fn transpose_iter_to_vec<Tss, Ts, T>(input: Tss) -> Vec<Vec<T>>
+where
+    Tss: IntoIterator<Item=Ts>,
+    Ts: ExactSizeIterator<Item=T>,
+{
+    let mut input = input.into_iter();
+    let mut out: Vec<_> = input.next()
+        .expect("can't take transpose with no rows") // width is degenerate
+        .map(|x| vec![x]).collect();
+
+    for row in input {
+        for (dest, x) in zip_eq(&mut out, row) {
+            dest.push(x);
+        }
+    }
+    out
+}
+
 //--------------------------------------------------------
 
 pub(crate) fn index_of_nearest(carts: &[V3], needle: &V3, tol: f64) -> Option<usize>

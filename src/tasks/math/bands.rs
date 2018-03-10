@@ -106,6 +106,7 @@ impl self::config::SampleType {
 ///
 /// This only exists for now because I am still too lazy to
 /// properly incorporate an HNF search into this codebase...
+#[derive(Debug, Clone)]
 pub struct ScMatrix {
     matrix: M33<i32>,
     periods: [u32; 3],
