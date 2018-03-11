@@ -139,6 +139,7 @@ impl TrialDir {
             trace!("Computing eigensystem info");
             let ev_analysis = {
                 use self::ev_analyses::*;
+                use self::ev_analyses::option::Just;
 
                 // (NOTE: all these Options look pointless now, but the layer
                 //        stuff shall soon become optional.
@@ -146,23 +147,27 @@ impl TrialDir {
                 //        The other Options *are* kind of pointless, but they simplifies the
                 //        design of the analysis module)
                 gamma_system_analysis::Input {
-                    atom_coords:     &Some(AtomCoordinates(structure.map_metadata_to(|_| ()))),
+                    atom_coords:     &Just(AtomCoordinates(structure.map_metadata_to(|_| ()))),
                     atom_layers:     &Some(AtomLayers(atom_layers.clone())),
                     layer_sc_mats:   &Some(LayerScMatrices(layer_sc_mats.clone())),
-                    ev_frequencies:  &Some(EvFrequencies(evals.clone())),
-                    ev_eigenvectors: &Some(EvEigenvectors(evecs.clone())),
+                    ev_frequencies:  &Just(EvFrequencies(evals.clone())),
+                    ev_eigenvectors: &Just(EvEigenvectors(evecs.clone())),
                 }.compute()?
             };
 
             {
-                let file = self.create_file(format!("eigenvalues.{:02}", iteration))?;
-                write_eigen_info_for_machines(&ev_analysis, file)?;
-                write_eigen_info_for_humans(&ev_analysis, &mut |s| ok(info!("{}", s)))?;
+                let mut file = self.create_file(format!("eigenvalues.{:02}", iteration))?;
+                ev_analysis.make_columns(ev_analyses::ColumnsMode::ForMachines)
+                    .expect("(bug) no columns, not even frequency?")
+                    .into_iter().map(|s| ok(writeln!(file, "{}", s)?)).collect::<Result<()>>()?;
+                ev_analysis.make_columns(ev_analyses::ColumnsMode::ForHumans)
+                    .expect("(bug) no columns, not even frequency?")
+                    .into_iter().map(|s| ok(info!("{}", s))).collect::<Result<()>>()?;
             }
 
             let mut structure = structure;
             let bad_evs: Vec<_> = {
-                let acousticness = ev_analysis.ev_acousticness.as_ref().expect("(bug) always computed!");
+                let acousticness = &ev_analysis.ev_acousticness.0;
                 izip!(1.., &evals, &evecs.0, &acousticness.0)
                     .take_while(|&(_, &freq, _, _)| freq < 0.0)
                     .filter(|&(_, _, _, &acousticness)| acousticness < 0.95)
@@ -224,7 +229,12 @@ impl TrialDir {
 
         poscar::dump(self.create_file("final.vasp")?, "", &structure)?;
 
-        write_eigen_info_for_machines(&ev_analysis, self.create_file("eigenvalues.final")?)?;
+        {
+            let mut file = self.create_file("eigenvalues.final")?;
+            ev_analysis.make_columns(ev_analyses::ColumnsMode::ForMachines)
+                .expect("(bug) no columns, not even frequency?")
+                .into_iter().map(|s| ok(writeln!(file, "{}", s)?)).collect::<Result<()>>()?;
+        }
 
         // let (k_evals, k_evecs) = read_eigensystem(&bands_dir, &Q_K)?;
         // let kinfos = get_k_eigensystem_info(
@@ -232,7 +242,10 @@ impl TrialDir {
         // );
 
         // write_summary_file(settings, &lmp, &einfos, &kinfos)?;
-        self.write_summary_file(settings, &lmp, &ev_analysis)?;
+        {
+            let rest = ev_analysis.make_summary(settings);
+            self.write_summary_file(&lmp, rest)?;
+        }
     })}
 }
 
@@ -447,32 +460,12 @@ fn multi_threshold_deconstruct(
     }
 })}
 
-fn write_eigen_info_for_humans(
-    analysis: &GammaSystemAnalysis,
-    writeln: &mut FnMut(String) -> Result<()>,
-) -> Result<()>
-{
-    analysis.make_columns(ev_analyses::ColumnsMode::ForHumans)
-        .expect("(bug) no columns, not even frequency?")
-        .into_iter().map(writeln).collect()
-}
-
-fn write_eigen_info_for_machines<W: Write>(
-    analysis: &GammaSystemAnalysis,
-    mut file: W,
-) -> Result<()>
-{
-    analysis.make_columns(ev_analyses::ColumnsMode::ForMachines)
-        .expect("(bug) no columns, not even frequency?")
-        .into_iter().map(|s| ok(writeln!(file, "{}", s)?)).collect()
-}
 
 impl TrialDir {
     fn write_summary_file(
         &self,
-        settings: &Settings,
         lmp: &LammpsBuilder,
-        ev_analysis: &GammaSystemAnalysis,
+        rest: ::serde_yaml::Value,
     ) -> Result<()> {ok({
         use ::ui::cfg_merging::{make_nested_mapping, no_summary, merge_summaries};
         use ::rsp2_structure_io::poscar;
@@ -488,7 +481,7 @@ impl TrialDir {
         //        be done by saving structures into strongly typed objects
         //        for the analysis module
         let mut out = vec![];
-        out.push(ev_analysis.make_summary(settings));
+        out.push(rest);
         out.push({
             let f = |structure: ElementStructure| ok({
                 let na = structure.num_atoms() as f64;
