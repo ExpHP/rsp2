@@ -4,8 +4,8 @@
 use ::std::ops::{Add, Sub, AddAssign, SubAssign, Neg};
 use ::std::ops::{Mul, Div, Rem, MulAssign, DivAssign, RemAssign};
 use ::std::fmt;
-use ::traits::{Semiring, Ring};
-use ::traits::internal::{PrimitiveSemiring, PrimitiveRing};
+use ::traits::{Semiring, Ring, Field};
+use ::traits::internal::{PrimitiveSemiring, PrimitiveRing, PrimitiveFloat};
 
 use super::*;
 
@@ -77,11 +77,12 @@ gen_each!{
 // ---------------------------------------------------------------------------
 // vector-scalar ops
 
+// scalar `op` vector
 gen_each!{
     @{Vn}
-    // NOTE: these impls are explitly done for each semiring type rather than
-    //       being generic over X: Semiring so that the orphan rules don't prevent
-    //       us from impling `scalar * vector` multiplication
+    // NOTE: the orphan rules prevent us from impl-ing these ops "for X" so
+    //       we must generate a separate impl for each Semiring type rather than
+    //       being generic over X: Semiring
     @{semiring}
     [ [(   ) (   )] [('a,) (&'a)] ]
     impl_v_scalar_ops!(
@@ -97,33 +98,41 @@ gen_each!{
             fn mul(self, vector: $($ref_a)* $Vn<$X>) -> Self::Output
             { vector * self }
         }
+    }
+}
 
+// vector `op` scalar
+gen_each!{
+    @{Vn}
+    [ [(   ) (   )] [('a,) (&'a)] ]
+    impl_v_scalar_ops!(
+        {$Vn:ident}
+        [ ($($lt_a:tt)*) ($($ref_a:tt)*) ]
+    ) => {
         // vector * scalar
-        impl<$($lt_a)*> Mul<$X> for $($ref_a)* $Vn<$X> {
-            type Output = $Vn<$X>;
+        impl<$($lt_a)* X: Semiring> Mul<X> for $($ref_a)* $Vn<X>
+        where X: PrimitiveSemiring,
+        {
+            type Output = $Vn<X>;
 
             #[inline]
-            fn mul(self, scalar: $X) -> Self::Output
+            fn mul(self, scalar: X) -> Self::Output
             { vee::from_fn(|k| self[k] * scalar) }
         }
 
         // vector / scalar
-        impl<$($lt_a)*> Div<$X> for $($ref_a)* $Vn<$X> {
-            type Output = $Vn<$X>;
+        impl<$($lt_a)* X: Field> Div<X> for $($ref_a)* $Vn<X>
+        where X: PrimitiveFloat,
+        {
+            type Output = $Vn<X>;
 
             #[inline]
-            fn div(self, scalar: $X) -> Self::Output
+            fn div(self, scalar: X) -> Self::Output
             { vee::from_fn(|k| self[k] / scalar) }
         }
 
-        // vector % scalar
-        impl<$($lt_a)*> Rem<$X> for $($ref_a)* $Vn<$X> {
-            type Output = $Vn<$X>;
-
-            #[inline]
-            fn rem(self, scalar: $X) -> Self::Output
-            { vee::from_fn(|k| self[k] % scalar) }
-        }
+        // No modulus, which hardly makes sense for vectors anyways
+        // except for the special case of `% 1.0`.
     }
 }
 
