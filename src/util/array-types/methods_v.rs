@@ -1,7 +1,4 @@
 
-// NOTE: This is really part of rsp2-array-types.
-
-use ::std::ops::{Mul, Div};
 use ::traits::{Semiring, Ring, Field};
 use ::traits::internal::{PrimitiveSemiring, PrimitiveRing, PrimitiveFloat};
 
@@ -30,39 +27,43 @@ gen_each!{
 
             /// Get the inner product of two vectors.
             #[inline(always)]
-            pub fn dot<B>(&self, other: &B) -> DotT<Self, B>
-            where Self: Dot<B>,
+            pub fn dot(&self, other: &Self) -> ScalarT<Self>
+            where Self: Dot,
             { Dot::dot(self, other) }
 
             /// Get the vector's squared magnitude.
             #[inline(always)]
-            pub fn sqnorm(&self) -> SqnormT<Self>
-            where Self: Sqnorm,
-            { Sqnorm::sqnorm(self) }
+            pub fn sqnorm(&self) -> ScalarT<Self>
+            where Self: Dot,
+            { self.dot(self) }
 
             /// Get the vector's magnitude.
             #[inline(always)]
-            pub fn norm(&self) -> NormT<Self>
-            where Self: Norm,
-            { Norm::norm(self) }
+            pub fn norm(&self) -> ScalarT<Self>
+            where Self: Dot, ScalarT<Self>: PrimitiveFloat,
+            { self.sqnorm().sqrt() }
 
             /// Normalize the vector.
             #[inline(always)]
             pub fn unit(&self) -> Self
-            where Self: Unit,
-            { Unit::unit(self) }
+            where X: Field + PrimitiveFloat,
+            { self / self.norm() }
 
             /// Get the shortest angle (as a value in `[0, pi]`) between this vector and another.
             #[inline(always)]
-            pub fn angle_to(&self, other: &Self) -> AngleToT<Self>
-            where Self: AngleTo,
-            { AngleTo::angle_to(self, other) }
+            pub fn angle_to(&self, other: &Self) -> ScalarT<Self>
+            where X: Semiring + PrimitiveFloat,
+            {
+                let arg = self.dot(other) / X::sqrt(self.sqnorm() * other.sqnorm());
+                let out = X::acos(arg.min(X::one()).max(-X::one()));
+                out
+            }
 
             /// Get the part of the vector that is parallel to `r`.
-            #[inline(always)]
+            #[inline]
             pub fn par(&self, r: &Self) -> Self
-            where Self: Par,
-            { Par::par(self, r) }
+            where X: Field + PrimitiveFloat,
+            { r * (self.dot(r) / r.dot(r)) }
 
             /// Get the part of the vector that is perpendicular to `r`.
             ///
@@ -70,10 +71,10 @@ gen_each!{
             /// numerical stability issues; you cannot trust that `c.perp(a).perp(b)`
             /// is even *remotely* orthogonal to `a`.
             /// (for 3d vectors, try `c.par(a.cross(b))` instead.)
-            #[inline(always)]
+            #[inline]
             pub fn perp(&self, r: &Self) -> Self
-            where Self: Perp,
-            { Perp::perp(self, r) }
+            where X: Field + PrimitiveFloat,
+            { self - self.par(r) }
 
             /// Apply a function to each element.
             #[inline(always)]
@@ -96,12 +97,18 @@ gen_each!{
     }
 }
 
-impl<X> V3<X> {
+impl<X: Ring> V3<X>
+where X: PrimitiveRing
+{
     /// Cross-product. Only defined on 3-dimensional vectors.
-    #[inline(always)]
-    pub fn cross(&self, other: &Self) -> Self
-    where Self: Cross,
-    { Cross::cross(self, other) }
+    #[inline]
+    pub fn cross(&self, other: &Self) -> Self {
+        V3([
+            self[1] * other[2] - self[2] * other[1],
+            self[2] * other[0] - self[0] * other[2],
+            self[0] * other[1] - self[1] * other[0],
+        ])
+    }
 }
 
 /// Inner product of vectors.
@@ -109,9 +116,26 @@ impl<X> V3<X> {
 /// This is basically just `{V2,V3,V4}::dot` as a free function,
 /// because everyone loves symmetry.
 #[inline(always)]
-pub fn dot<A, B>(a: &A, b: &B) -> DotT<A, B>
-  where A: Dot<B>,
+pub fn dot<V>(a: &V, b: &V) -> ScalarT<V>
+  where V: Dot,
 { a.dot(b) }
+
+/// Element type of the vector.
+pub type ScalarT<V> = <V as IsV>::Scalar;
+/// Trait that provides associated types for `V2, V3, V4`.
+pub trait IsV {
+    type Scalar;
+}
+
+gen_each!{
+    @{Vn}
+    impl_from_fn!(
+        {$Vn:ident}
+    ) => {
+        impl<X> IsV for $Vn<X>
+        { type Scalar = X; }
+    }
+}
 
 // -------------------------- END PUBLIC API ---------------------------------
 // The rest is implementation and boiler boiler boiiiiler boiilerplaaaaate
@@ -120,6 +144,9 @@ pub fn dot<A, B>(a: &A, b: &B) -> DotT<A, B>
 /// Implementation detail of the free function `vee::from_fn`.
 ///
 /// > **_Fuggedaboudit._**
+///
+/// Without this, the free function `from_fn` could not be generic over different
+/// sizes of V.
 pub trait FromFn<F>: Sized {
     fn from_fn(f: F) -> Self;
 }
@@ -141,192 +168,26 @@ gen_each!{
 
 // ---------------------------------------------------------------------------
 
-/// Output of `dot`.  Probably the scalar type of the vector.
-pub type DotT<A, B> = <A as Dot<B>>::Output;
-
 /// Implementation detail of the inherent method `{V2,V3,V4}::dot`.
 ///
 /// > **_Fuggedaboudit._**
-pub trait Dot<B: ?Sized> {
-    type Output;
-
-    fn dot(&self, b: &B) -> Self::Output;
+///
+/// Without this, the free function `dot` could not be generic over different
+/// sizes of V.
+pub trait Dot: IsV {
+    fn dot(&self, b: &Self) -> ScalarT<Self>;
 }
 
 gen_each!{
     @{Vn_n}
     impl_v_dot!( {$Vn:ident $n:tt} ) => {
-        impl<X: Semiring> Dot<$Vn<X>> for $Vn<X>
+        impl<X: Semiring> Dot for $Vn<X>
           where X: PrimitiveSemiring,
         {
-            type Output = X;
-
             #[inline]
-            fn dot(&self, other: &$Vn<X>) -> Self::Output
+            fn dot(&self, other: &$Vn<X>) -> ScalarT<Self>
             { (1..$n).fold(self[0] * other[0], |s, i| s + self[i] * other[i]) }
         }
-    }
-}
-
-// ---------------------------------------------------------------------------
-
-/// Output of `sqnorm`.  Probably the (real) scalar type of the vector.
-pub type SqnormT<A> = DotT<A, A>;
-
-/// Implementation detail of the inherent method `{V2,V3,V4}::sqnorm`.
-///
-/// > **_Fuggedaboudit._**
-pub trait Sqnorm: Dot<Self> {
-    #[inline(always)]
-    fn sqnorm(&self) -> SqnormT<Self>
-    { self.dot(self) }
-}
-
-/// Output of `norm`.  Probably the (real) scalar type of the vector.
-pub type NormT<A> = <A as Norm>::Output;
-
-/// Implementation detail of the inherent method `{V2,V3,V4}::norm`.
-///
-/// > **_Fuggedaboudit._**
-pub trait Norm {
-    type Output;
-
-    fn norm(&self) -> Self::Output;
-}
-
-gen_each!{
-    @{Vn}
-    impl_v_norm!( {$Vn:ident} ) => {
-        impl<X> Sqnorm for $Vn<X>
-          where $Vn<X>: Dot<$Vn<X>>,
-        { }
-
-        impl<X: Field> Norm for $Vn<X>
-          where X: PrimitiveFloat,
-        {
-            type Output = X;
-
-            #[inline]
-            fn norm(&self) -> Self::Output
-            { self.sqnorm().sqrt() }
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-
-/// Implementation detail of the inherent method `{V2,V3,V4}::unit`.
-///
-/// > **_Fuggedaboudit._**
-pub trait Unit {
-    fn unit(&self) -> Self;
-}
-
-gen_each!{
-    @{Vn}
-    impl_v_unit!( {$Vn:ident} ) => {
-        impl<X: Field> Unit for $Vn<X>
-          where X: PrimitiveFloat, for<'a> &'a Self: Div<X, Output=Self>,
-        {
-            #[inline]
-            fn unit(&self) -> Self
-            { self / self.norm() }
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-
-/// Output of `angle_to`. Probably a float with the same precision as the vector.
-pub type AngleToT<A> = <A as AngleTo>::Output;
-
-/// Implementation detail of the inherent method `{V2,V3,V4}::angle_to`.
-///
-/// > **_Fuggedaboudit._**
-pub trait AngleTo {
-    type Output;
-
-    fn angle_to(&self, other: &Self) -> Self::Output;
-}
-
-gen_each!{
-    @{Vn}
-    [{f32} {f64}]
-    impl_v_angle_to!( {$Vn:ident} {$X:ty} ) => {
-        impl AngleTo for $Vn<$X> {
-            type Output = $X;
-
-            #[inline]
-            fn angle_to(&self, other: &Self) -> Self::Output
-            {
-                let arg = self.dot(other) / <$X>::sqrt(self.sqnorm() * other.sqnorm());
-                let out = arg.min(1.0).max(-1.0).acos();
-                out
-            }
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-
-/// Implementation detail of the inherent method `{V2,V3,V4}::par`.
-///
-/// > **_Fuggedaboudit._**
-pub trait Par {
-    fn par(&self, r: &Self) -> Self;
-}
-
-/// Implementation detail of the inherent method `{V2,V3,V4}::perp`.
-///
-/// > **_Fuggedaboudit._**
-pub trait Perp {
-    fn perp(&self, r: &Self) -> Self;
-}
-
-gen_each!{
-    @{Vn}
-    impl_v_par!( {$Vn:ident} ) => {
-        impl<X: Field> Par for $Vn<X>
-          where
-            X: PrimitiveFloat,
-            for<'b> &'b Self: Mul<X, Output=Self>,
-        {
-            #[inline]
-            fn par(&self, r: &$Vn<X>) -> Self
-            { r * (self.dot(r) / r.dot(r)) }
-        }
-
-        impl<X: Field> Perp for $Vn<X>
-          where
-            X: PrimitiveFloat,
-            for<'b> &'b Self: Mul<X, Output=Self>,
-        {
-            #[inline]
-            fn perp(&self, r: &$Vn<X>) -> Self
-            { self - self.par(r) }
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-
-/// Implementation detail of the inherent method `V3::cross`.
-///
-/// > **_Fuggedaboudit._**
-pub trait Cross {
-    fn cross(&self, other: &Self) -> Self;
-}
-
-impl<X: Ring> Cross for V3<X>
-    where X: PrimitiveRing,
-{
-    #[inline]
-    fn cross(&self, other: &Self) -> Self {
-        V3([
-            self[1] * other[2] - self[2] * other[1],
-            self[2] * other[0] - self[0] * other[2],
-            self[0] * other[1] - self[1] * other[0],
-        ])
     }
 }
 

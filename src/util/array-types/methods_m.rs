@@ -1,5 +1,3 @@
-// NOTE: This is really part of rsp2-array-types.
-
 //! Small fixed-size matrix types, compatible with `V2`/`V3`/`V4`
 //!
 //! This library primarily uses a row-based formalism; matrices are conceptually

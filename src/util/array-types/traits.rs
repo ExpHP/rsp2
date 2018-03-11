@@ -178,7 +178,13 @@ pub(crate) mod internal {
         : PrimitiveRing
         + SelfDiv + RefDiv
     {
-        fn sqrt(self) -> Self;
+        // (allow(unused) because these are arbitrarily added as they're needed,
+        //  and it's annoying to have to remove them only to possibly later have
+        //  to add them back)
+        #[allow(unused)] fn sqrt(self) -> Self;
+        #[allow(unused)] fn min(self, b: Self) -> Self;
+        #[allow(unused)] fn max(self, b: Self) -> Self;
+        #[allow(unused)] fn acos(self) -> Self;
     }
 
     gen_each!{
@@ -187,6 +193,9 @@ pub(crate) mod internal {
         => {
             unsafe impl PrimitiveFloat for $T {
                 #[inline(always)] fn sqrt(self) -> $T { self.sqrt() }
+                #[inline(always)] fn min(self, b: Self) -> $T { self.min(b) }
+                #[inline(always)] fn max(self, b: Self) -> $T { self.max(b) }
+                #[inline(always)] fn acos(self) -> $T { self.acos() }
             }
         };
     }
