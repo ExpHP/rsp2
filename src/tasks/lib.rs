@@ -22,6 +22,7 @@ extern crate rsp2_fs_util;
 #[macro_use] extern crate rsp2_util_macros;
 #[macro_use] extern crate rsp2_clap;
 
+#[macro_use] extern crate frunk;
 #[macro_use] extern crate extension_trait;
 extern crate rayon;
 extern crate rand;

@@ -5,7 +5,7 @@ use ::types::basis::Basis3;
 use ::math::bands::{GammaUnfolder, ScMatrix};
 use ::std::rc::Rc;
 use ::std::mem;
-use ::traits::alternate::{FnOnce};
+use ::traits::alternate::{FnOnce, FnMut, Fn, StdFnMut, CallT};
 use ::std::cell::RefCell;
 use ::rsp2_tasks_config::Settings;
 use ::errors::{StdResult, Result, ok};
@@ -21,6 +21,7 @@ use ::serde_yaml::Value as YamlValue;
 mod cached {
     use super::*;
     use ::traits::alternate::{FnOnce};
+    use self::inductive::hlist::{HList1, HNil};
 
     // NOTE: All clones must be tied to the same cache.
     pub trait Cached: Clone {
@@ -58,14 +59,14 @@ mod cached {
             MidComputation,
         }
 
-        impl<R, F> Cached for Function<R, F> where F: FnOnce<(), Output=Rc<R>> {
+        impl<R, F> Cached for Function<R, F> where F: FnOnce<HNil, Output=Rc<R>> {
             type Value = R;
 
             fn call_cached(&self) -> Rc<R> {
                 let mut inner = self.0.borrow_mut();
                 let result = match mem::replace(&mut *inner, Inner::MidComputation) {
                     Inner::MidComputation => panic!("detected cyclic dependency in Cached objects!"),
-                    Inner::Func(f) => f.call_once(()),
+                    Inner::Func(f) => f.call_once(HNil),
                     Inner::Result(r) => r,
                 };
                 *inner = Inner::Result(result.clone());
@@ -88,17 +89,17 @@ mod cached {
             continuation: F,
         }
 
-        impl<W, A, R, F> FnOnce<()> for Closure<A, F>
-        where A: Cached<Value=W>, F: FnOnce<Rc<W>, Output=Rc<R>>,
+        impl<W, A, R, F> FnOnce<HNil> for Closure<A, F>
+        where A: Cached<Value=W>, F: FnOnce<HList1<Rc<W>>, Output=Rc<R>>,
         {
             type Output = Rc<R>;
 
-            fn call_once(self, (): ()) -> Rc<R>
-            { self.continuation.call_once(self.arg.call_cached()) }
+            fn call_once(self, HNil: HNil) -> Rc<R>
+            { self.continuation.call_once(hlist![self.arg.call_cached()]) }
         }
 
         impl<W, A, R, F> Cached for Map<A, R, F>
-        where A: Cached<Value=W>, F: FnOnce<Rc<W>, Output=Rc<R>>,
+        where A: Cached<Value=W>, F: FnOnce<HList1<Rc<W>>, Output=Rc<R>>,
         {
             type Value = R;
 
@@ -121,17 +122,17 @@ mod cached {
             continuation: F,
         }
 
-        impl<D, W, A, R, F> FnOnce<()> for Closure<A, F>
-        where A: Cached<Value=W>, F: FnOnce<Rc<W>, Output=D>, D: Cached<Value=R>,
+        impl<D, W, A, R, F> FnOnce<HNil> for Closure<A, F>
+        where A: Cached<Value=W>, F: FnOnce<HList1<Rc<W>>, Output=D>, D: Cached<Value=R>,
         {
             type Output = Rc<R>;
 
-            fn call_once(self, (): ()) -> Rc<R>
-            { self.continuation.call_once(self.arg.call_cached()).call_cached() }
+            fn call_once(self, HNil: HNil) -> Rc<R>
+            { self.continuation.call_once(hlist![self.arg.call_cached()]).call_cached() }
         }
 
         impl<D, W, A, R, F> Cached for AndThen<A, R, F>
-        where A: Cached<Value=W>, F: FnOnce<Rc<W>, Output=D>, D: Cached<Value=R>,
+        where A: Cached<Value=W>, F: FnOnce<HList1<Rc<W>>, Output=D>, D: Cached<Value=R>,
         {
             type Value = R;
 
@@ -143,72 +144,314 @@ mod cached {
 
 mod closures {
     use super::*;
+    use self::inductive::hlist::{HList, HNil, HCons, HList1, HList2, h_cons};
 
     #[derive(Debug, Copy, Clone, Default)]
     pub struct Id;
-    impl<X> FnOnce<(X,)> for Id {
-        type Output = X;
+    derive_alternate_fn! {
+        impl[X] Fn<Hlist![X]> for Id {
+            type Output = X;
 
-        fn call_once(self, (x,): (X,)) -> X
-        { x }
+            fn call(&self, hlist_pat![x]: Hlist![X]) -> X
+            { x }
+        }
     }
 
+    /// Variadic function that puts all its arguments into one HList.
+    ///
+    /// This function has no inverse, since a function can only have one output.
+    /// (instead, you must use an HOF adapter like `OnHLists`)
     #[derive(Debug, Copy, Clone, Default)]
-    pub struct FlattenL1;
-    impl<A> FnOnce<(A,)> for FlattenL1 {
-        type Output = (A,);
-        fn call_once(self, (a,): (A,)) -> (A,)
-        { (a,) }
+    pub struct MakeHList;
+    derive_alternate_fn! {
+        impl[X: HList] Fn<X> for MakeHList {
+            type Output = X;
+
+            fn call(&self, x: X) -> X
+            { x }
+        }
     }
 
-    pub type FlattenL2 = Id;
+    #[allow(unused)]
+    pub type SwapT<List> = <Swap as FnOnce<List>>::Output;
 
+    /// Swap the first two elements of an HList.
     #[derive(Debug, Copy, Clone, Default)]
-    pub struct FlattenL3;
-    impl<A, B, C> FnOnce<(((A, B), C),)> for FlattenL3 {
-        type Output = (A, B, C);
+    pub struct Swap;
+    derive_alternate_fn! {
+        impl[A, B, Rest: HList] Fn<HList1<HCons<A, HCons<B, Rest>>>> for Swap {
+            type Output = HCons<B, HCons<A, Rest>>;
 
-        fn call_once(self, (((a, b), c),): (((A, B), C),)) -> (A, B, C)
-        { (a, b, c) }
+            fn call(&self, hlist_pat![list]: HList1<HCons<A, HCons<B, Rest>>>) -> Self::Output {
+                let (a, list) = list.pop();
+                let (b, list) = list.pop();
+                h_cons(b, h_cons(a, list))
+            }
+        }
     }
 
+    /// Make a function of multiple arguments act on one HList.
+    ///
+    /// Similar in spirit to Haskell's `uncurry`.
     #[derive(Debug, Copy, Clone, Default)]
-    pub struct FlattenL4;
-    impl<A, B, C, D> FnOnce<((((A, B), C), D),)> for FlattenL4 {
-        type Output = (A, B, C, D);
+    pub struct OnHLists<F>(pub F);
 
-        fn call_once(self, ((((a, b), c), d),): ((((A, B), C), D),)) -> (A, B, C, D)
-        { (a, b, c, d) }
+    /// Inverse of `OnHLists`. Make a function of HList act on multiple arguments.
+    pub type UnHLists<F> = Of<F, MakeHList>;
+    /// Fake constructor for `UnHLists`.
+    #[allow(bad_style)]
+    pub fn UnHLists<F>(f: F) -> UnHLists<F> { Of(f, MakeHList) }
+
+    impl<F, L: HList> Fn<HList1<L>> for OnHLists<F>
+    where F: Fn<L>,
+    {
+        fn call(&self, hlist_pat![list]: HList1<L>) -> Self::Output
+        { self.0.call(list) }
     }
 
+    impl<F, L: HList> FnMut<HList1<L>> for OnHLists<F>
+    where F: FnMut<L>,
+    {
+        fn call_mut(&mut self, hlist_pat![list]: HList1<L>) -> Self::Output
+        { self.0.call_mut(list) }
+    }
+
+    impl<F, L: HList> FnOnce<HList1<L>> for OnHLists<F>
+    where F: FnOnce<L>,
+    {
+        type Output = F::Output;
+
+        fn call_once(self, hlist_pat![list]: HList1<L>) -> Self::Output
+        { self.0.call_once(list) }
+    }
+
+    /// Flip the first two arguments of a function.
+    ///
+    /// Even though this is just a type alias, you can construct one
+    /// by writing `Flip(f)`.  (this is because in reality, there is
+    /// also a free function with the same name)
+    pub type Flip<F> = UnHLists<Of<OnHLists<F>, Swap>>;
+
+    /// Constructor for the type `Flip<F>`.
+    #[allow(bad_style)]
+    pub fn Flip<F>(f: F) -> Flip<F>
+    { UnHLists(Of(OnHLists(f), Swap)) }
+
+      #[allow(unused)]
+    fn test_on_hlist() {
+        assert_eq!(OnHLists(|a, b| a + b).call_once(hlist![hlist![1, 5]]), 6);
+        assert_eq!(UnHLists(|hlist_pat![a, b]| a + b).call_once(hlist![1, 5]), 6);
+
+        let v = vec![3];
+        assert_eq!(OnHLists(|| v).call_once(hlist![hlist![]]), vec![3]);
+    }
+
+    #[allow(unused)]
+    fn test_swap() {
+        assert_eq!(Swap.call_once(hlist![hlist![1, 5]]), hlist![5, 1]);
+        assert_eq!(Swap.call_once(hlist![hlist![1, 5, 4]]), hlist![5, 1, 4]);
+    }
+
+    #[allow(unused)]
+    fn test_flip() {
+        assert_eq!(Fn::call(&Flip(|a, b|     a - b     ), hlist![1, 5]   ),  4);
+        assert_eq!(Fn::call(&Flip(|a, b, c| (a - b) * c), hlist![1, 5, 7]), 28);
+    }
+
+    #[allow(unused)]
+    pub type OfT<F, G, Args> = <Of<F, G> as FnOnce<Args>>::Output;
     #[derive(Debug, Copy, Clone, Default)]
-    pub struct FlattenL5;
-    impl<A, B, C, D, E> FnOnce<(((((A, B), C), D), E),)> for FlattenL5 {
-        type Output = (A, B, C, D, E);
-
-        fn call_once(self, (((((a, b), c), d), e),): (((((A, B), C), D), E),)) -> (A, B, C, D, E)
-        { (a, b, c, d, e) }
+    pub struct Of<F, G>(pub F, pub G);
+    impl<Args: HList, B, C, F, G> Fn<Args> for Of<F, G>
+    where
+        G: Fn<Args, Output=B>,
+        F: Fn<HList1<B>, Output=C>,
+    {
+        fn call(&self, args: Args) -> C
+        { self.0.call(hlist![self.1.call(args)]) }
     }
 
-    pub trait GetFlattenL {
-        type Closure;
+    impl<Args: HList, B, C, F, G> FnMut<Args> for Of<F, G>
+    where
+        G: FnMut<Args, Output=B>,
+        F: FnMut<HList1<B>, Output=C>,
+    {
+        fn call_mut(&mut self, args: Args) -> C
+        { self.0.call_mut(hlist![self.1.call_mut(args)]) }
     }
 
-    impl GetFlattenL for    ()                { type Closure = FlattenL1; }
-    impl GetFlattenL for   ((), ())           { type Closure = FlattenL2; }
-    impl GetFlattenL for  (((), ()), ())      { type Closure = FlattenL3; }
-    impl GetFlattenL for ((((), ()), ()), ()) { type Closure = FlattenL4; }
+    impl<Args: HList, B, C, F, G> FnOnce<Args> for Of<F, G>
+    where
+        G: FnOnce<Args, Output=B>,
+        F: FnOnce<HList1<B>, Output=C>,
+    {
+        type Output = C;
+
+        fn call_once(self, args: Args) -> C
+        { self.0.call_once(hlist![self.1.call_once(args)]) }
+    }
+
+    #[allow(unused)]
+    fn test_of() {
+        struct A; struct B; struct C;
+        struct F; struct G;
+        impl FnOnce<HList1<A>> for F {
+            type Output = B;
+            fn call_once(self, _: HList1<A>) -> B { B }
+        }
+        impl FnOnce<HList1<B>> for G {
+            type Output = C;
+            fn call_once(self, _: HList1<B>) -> C { C }
+        }
+        let _: B = F.call_once(hlist![A]);
+        let _: C = G.call_once(hlist![B]);
+        let _: C = Of(G, F).call_once(hlist![A]);
+    }
+}
+
+/// Inductive types, to assist traits that simulate variadic generics.
+pub mod inductive {
+    use super::*;
+
+    pub use self::peano::{P0, Succ, IsPeano, Pred};
+    pub mod peano {
+        use super::*;
+
+        pub use self::constants::*;
+        pub mod constants {
+            use super::*;
+            pub use super::P0;
+            #[doc = "Peano integer."] pub type P1 = Succ<P0>;
+            #[doc = "Peano integer."] pub type P2 = Succ<P1>;
+            #[doc = "Peano integer."] pub type P3 = Succ<P2>;
+            #[doc = "Peano integer."] pub type P4 = Succ<P3>;
+            #[doc = "Peano integer."] pub type P5 = Succ<P4>;
+            #[doc = "Peano integer."] pub type P6 = Succ<P5>;
+            #[doc = "Peano integer."] pub type P7 = Succ<P6>;
+            #[doc = "Peano integer."] pub type P8 = Succ<P7>;
+            #[doc = "Peano integer."] pub type P9 = Succ<P8>;
+        }
+
+        /// The Peano integer zero. (base case)
+        #[derive(Debug, Default, Copy, Clone)]
+        pub struct P0;
+
+        /// A Peano integer incremented by 1. (inductive case)
+        #[derive(Debug, Default, Copy, Clone)]
+        pub struct Succ<A: IsPeano>(pub A);
+
+        /// Marker trait for Peano integers, for "type safety" within the type system.
+        pub trait IsPeano {}
+        impl IsPeano for P0 {}
+        impl<N: IsPeano> IsPeano for Succ<N> {}
+
+        /// Subtract 1 from a nonzero Peano integer.
+        ///
+        /// More accurately, this solves the equation `p + 1 = x` for `p`.
+        pub type Pred<A> = <A as Positive>::Pred;
+
+        pub trait Positive: IsPeano {
+            type Pred: IsPeano;
+        }
+
+        impl<N: IsPeano> Positive for Succ<N> {
+            type Pred = N;
+        }
+    }
+
+    pub mod hlist {
+        use super::*;
+
+        pub use frunk::hlist::{HList, HCons, HNil, h_cons};
+
+        // wake me up when clion can parse type macros properly
+        pub type HList1<A>          = HCons<A, HNil>;
+        pub type HList2<A, B>       = HCons<A, HList1<B>>;
+        pub type HList3<A, B, C>    = HCons<A, HList2<B, C>>;
+        pub type HList4<A, B, C, D> = HCons<A, HList3<B, C, D>>;
+
+        //----------------
+
+        #[doc(hidden)]
+        pub type MapT<List, F> = <List as Map<F>>::Output;
+
+        pub trait Map<F>: HList {
+            type Output: HList;
+
+            fn map(self, f: F) -> Self::Output;
+        }
+
+        impl<F> Map<F> for HNil {
+            type Output = HNil;
+
+            #[inline(always)]
+            fn map(self, _: F) -> Self::Output
+            { HNil }
+        }
+
+        impl<A, B, Rest: Map<F>, F> Map<F> for HCons<A, Rest>
+        where F: FnMut<HList1<A>, Output=B>,
+        {
+            type Output = HCons<B, MapT<Rest, F>>;
+
+            #[inline(always)]
+            fn map(self, mut f: F) -> Self::Output {
+                let (a, rest) = self.pop();
+                h_cons(f.call_mut(hlist![a]), rest.map(f))
+            }
+        }
+
+        //----------------
+
+        pub struct HConsClosure;
+        derive_alternate_fn! {
+            impl[A, List: HList] Fn<Hlist![A, List]> for HConsClosure {
+                type Output = HCons<A, List>;
+
+                fn call(&self, hlist_pat![a, list]: Hlist![A, List]) -> Self::Output
+                { h_cons(a, list) }
+            }
+        }
+
+
+        pub struct ReverseClosure;
+        derive_alternate_fn! {
+            impl[List: ::frunk::hlist::IntoReverse] Fn<Hlist![List]> for hlist::ReverseClosure {
+                type Output = List::Output;
+
+                fn call(&self, hlist_pat![list]: Hlist![List]) -> Self::Output
+                { list.into_reverse() }
+            }
+        }
+
+        #[allow(unused)]
+        fn test_reverse() {
+            struct A; struct B; struct C;
+            let hlist_pat![] = ReverseClosure.call_once(hlist![hlist![]]);
+            let hlist_pat![A] = ReverseClosure.call_once(hlist![hlist![A]]);
+            let hlist_pat![B, A] = ReverseClosure.call_once(hlist![hlist![A, B]]);
+            let hlist_pat![C, B, A] = ReverseClosure.call_once(hlist![hlist![A, B, C]]);
+        }
+    }
 }
 
 pub mod option {
     use super::*;
     use ::std::ops::{Deref, DerefMut};
     use ::std::marker::PhantomData;
+    use self::inductive::hlist::{self, HNil, HCons, HList, HList1, HList2};
+
     #[derive(Debug, Copy, Clone, PartialOrd, Ord, PartialEq, Eq, Hash, Default)]
     pub struct Just<T>(pub T);
     #[derive(Debug, PartialOrd, Ord, PartialEq, Eq, Hash)]
     pub struct Nothing<T>(pub PhantomData<T>);
     pub type Maybe<T> = Option<T>;
+
+    // for type-level type-checking
+    pub trait IsMaybe { }
+    impl<T> IsMaybe for Just<T> { }
+    impl<T> IsMaybe for Maybe<T> { }
+    impl<T> IsMaybe for Nothing<T> { }
 
     impl<T> Deref for Just<T> {
         type Target = T;
@@ -227,149 +470,107 @@ pub mod option {
     impl<T> Copy for Nothing<T> { }
 
     #[allow(unused)]
-    pub type ZipT<A, B> = <A as Zip<B>>::Output;
-    pub trait Zip<Rhs: IntoMaybe>: Sized + IntoMaybe {
-        type Output: ExpectFrom<Maybe<(Self::TyArg, Rhs::TyArg)>>;
-
-        fn zip(self, other: Rhs) -> Self::Output {
-            ExpectFrom::expect_from({
-                match (self.into_maybe(), other.into_maybe()) {
-                    (Some(a), Some(b)) => Some((a, b)),
-                    _ => None,
-                }
-            })
-        }
-    }
-
-    pub trait Generic1 { type TyArg1; }
-    impl<A> Generic1 for Maybe<A> { type TyArg1 = A; }
-    impl<A> Generic1 for Just<A> { type TyArg1 = A; }
-    impl<A> Generic1 for Nothing<A> { type TyArg1 = A; }
-
-    #[allow(unused)]
     pub type MapT<A, F> = <A as Map<F>>::Output;
-    pub trait Map<F>: Sized {
+    pub trait Map<F>: Sized + IsMaybe {
         type Output;
 
         fn map(self, f: F) -> Self::Output;
     }
 
-    impl<A, B, F: FnOnce<(A,), Output=B>> Map<F> for Just<A> {
+    impl<A, B, F: FnOnce<HList1<A>, Output=B>> Map<F> for Just<A> {
         type Output = Just<B>;
 
         fn map(self, f: F) -> Self::Output
-        { Just(f.call_once((self.0,))) }
+        { Just(f.call_once(hlist![self.0])) }
     }
 
-    impl<A, B, F: FnOnce<(A,), Output=B>> Map<F> for Maybe<A> {
+    impl<A, B, F: FnOnce<HList1<A>, Output=B>> Map<F> for Maybe<A> {
         type Output = Maybe<B>;
 
         fn map(self, f: F) -> Self::Output
-        { Option::map(self, move |x| f.call_once((x,))) }
+        { Option::map(self, |x| f.call_once(hlist![x])) }
     }
 
-    impl<A, B, F: FnOnce<A, Output=B>> Map<F> for Nothing<A> {
+    impl<A, B, F: FnOnce<HList1<A>, Output=B>> Map<F> for Nothing<A> {
         type Output = Nothing<B>;
 
         fn map(self, _: F) -> Self::Output
         { Default::default() }
     }
 
+//    #[allow(unused)]
+//    pub type ZipT<A, B> = ZipWithT<closures::MakeTuple, A, B>;
+//    pub trait Zip<Rhs: IntoMaybe>: ZipWith<Rhs, closures::MakeTuple> {
+//        fn zip(self, other: Rhs) -> Self::Output;
+//    }
+//    impl<A, B: IntoMaybe> Zip<B> for A where A: ZipWith<B, closures::MakeTuple> {
+//        fn zip(self, other: B) -> Self::Output
+//        { self.zip_with(other, closures::MakeTuple) }
+//    }
+
     #[allow(unused)]
-    pub type ZipNT<Tup> = <() as ZipN<Tup>>::Output;
-    pub trait ZipN<Tup> {
+    pub type ZipWithT<F, A, B> = <A as ZipWith<B, F>>::Output;
+    pub trait ZipWith<Rhs: IntoMaybe, F>: Sized + IntoMaybe {
         type Output;
 
-        fn zip_n(tup: Tup) -> Self::Output;
+        fn zip_with(self, other: Rhs, f: F) -> Self::Output;
     }
 
-    macro_rules! impl_zip_n {
-        // special case first iter to correctly handle MegaZipT
-        (@next [] [] [] <= [$a0:ident : $A0:ident, $Flatten:path] $($more:tt)*) => {
-            impl_zip_n!{@iter [$Flatten] [$A0] [] [[$a0:$A0]] <= $($more)*}
-        };
-        (@next
-            [$MegaZipT:ty] [$($ZipTBounds:tt)*] [$($pairs:tt)*]
-            <= [$a0:ident : $A0:ident, $Flatten:path]
-               $($more:tt)*
-        ) => {
-            impl_zip_n!{@iter
-                // e.g. [ FlattenL4 ]
-                [$Flatten]
+    pub use self::list_zip::{ListZip, ListZipT};
+    mod list_zip {
+        use super::*;
 
-                // e.g. [ ZipT<ZipT<ZipT<A, B>, C>, D> ]
-                [ZipT<$MegaZipT, $A0>]
+        #[allow(unused)]
+        pub type ListZipT<List> = <List as ListZip>::Output;
+        pub trait ListZip: HList {
+            type Output: IsMaybe;
 
-                // e.g. [ A: Zip<B>, ZipT<A, B>: Zip<C>, ZipT<ZipT<A, B>, C>: Zip<D> ]
-                [$($ZipTBounds)* $MegaZipT: Zip<$A0>,]
+            fn list_zip(self) -> Self::Output;
+        }
 
-                // e.g. [ [a:A] [b:B] [c:C] [d:D] ]
-                [$($pairs)* [$a0:$A0]]
+        impl<List: Impl> ListZip for List
+        where
+            ImplT<Self>: Map<hlist::ReverseClosure>,
+            MapT<ImplT<Self>, hlist::ReverseClosure>: IsMaybe,
+        {
+            type Output = MapT<ImplT<Self>, hlist::ReverseClosure>;
 
-                <= $($more)*
-            }
-        };
-        (@next [$MegaZipT:ty] [$($ZipTBounds:tt)*] [$($pairs:tt)*] <= ) => {};
-
-        (@iter $Flatten:tt $MegaZipT:tt $ZipTBounds:tt $pairs:tt <= $($more:tt)*) => {
-            impl_zip_n!{@gen $Flatten $MegaZipT $ZipTBounds $pairs}
-            impl_zip_n!{@next $MegaZipT $ZipTBounds $pairs <= $($more)*}
-        };
-        (@gen
-            [$Flatten:path]
-            [$MegaZipT:ty]
-            [$($ZipTBounds:tt)*]
-            [[$a0:ident: $A0:ident] $([$a:ident: $A:ident])*]
-        ) => {
-            // impl<A, B, C, D, E, R> ZipN<(A, B, C, D, E)> for ()
-            impl<$A0, $($A,)* R> ZipN<($A0, $($A,)*)> for ()
-
-            // where
-            //     A: IntoMaybe,
-            //     B: IntoMaybe,
-            //     C: IntoMaybe,
-            //     D: IntoMaybe,
-            //     E: IntoMaybe,
-            where
-                $A0: IntoMaybe,
-                $( $A: IntoMaybe, )*
-
-            //     A: Zip<B>,
-            //     ZipT<A, B>: Zip<C>,
-            //     ZipT<ZipT<A, B>, C>: Zip<D>,
-            //     ZipT<ZipT<ZipT<A, B>, C>, D>: Zip<E>,
-            //     ZipT<ZipT<ZipT<ZipT<A, B>, C>, D>, E>: Map<closures::FlattenL5, Output=R>,
-                $($ZipTBounds)*
-                $MegaZipT: Map<$Flatten, Output=R>,
-
-            // {
-            //     type Output = R;
-            //
-            //     fn zip_n((a, b, c, d, e): (A, B, C, D, E)) -> Self::Output {
-            //         a.zip(b).zip(c).zip(d).zip(e).map(closures::FlattenL5)
-            //     }
-            // }
+            fn list_zip(self) -> Self::Output
             {
-                type Output = R;
-
-                fn zip_n(($a0, $($a,)*) : ($A0, $($A,)*)) -> Self::Output {
-                    $a0 $(.zip($a))* .map($Flatten)
-                }
+                let maybe_reversed = self.rec(Just(HNil));
+                maybe_reversed.map(hlist::ReverseClosure)
             }
-        };
+        }
 
-        ($($all:tt)*) => {
-            compile_error!{stringify!{$($all)*}}
-        };
-    }
+        pub type ImplInit = Just<HNil>;
+        pub type ImplT<List> = <List as Impl>::Output;
+        pub trait Impl<Acc: IsMaybe = ImplInit>: HList {
+            type Output: IsMaybe;
 
-    impl_zip_n! {
-        @next [] [] [] <=
-        [a: A, closures::FlattenL1]
-        [b: B, closures::Id]
-        [c: C, closures::FlattenL3]
-        [d: D, closures::FlattenL4]
-        [e: E, closures::FlattenL5]
+            fn rec(self, acc: Acc) -> Self::Output;
+        }
+
+        impl<Acc: IsMaybe> Impl<Acc> for HNil {
+            type Output = Acc;
+
+            fn rec(self, acc: Acc) -> Self::Output { acc }
+        }
+
+        impl<
+            A: IntoMaybe<TyArg=AInner> + ZipWith<Acc, hlist::HConsClosure, Output=Z>,
+            Acc: IntoMaybe<TyArg=AccInner>,
+            AccInner,
+            AInner,
+            Z: IsMaybe,
+            Rest: Impl<Z, Output=R>,
+            R: IsMaybe,
+        > Impl<Acc> for HCons<A, Rest>
+        {
+            type Output = R;
+
+            fn rec(self, acc: Acc) -> Self::Output
+            { self.tail.rec(self.head.zip_with(acc, hlist::HConsClosure)) }
+        }
     }
 
     #[allow(unused)]
@@ -401,49 +602,18 @@ pub mod option {
         { Default::default() }
     }
 
-    #[allow(unused)]
-    pub type AsRefsT<Tup> = <Tup as AsRefs>::Output;
-    pub trait AsRefs {
-        type Output;
+    #[derive(Debug, Copy, Clone, Default)]
+    pub struct AsRefClosure;
+    derive_alternate_fn! {
+        impl[A: AsRef] Fn<HList1<A>> for AsRefClosure {
+            type Output = AsRefT<A>;
 
-        fn as_refs(self) -> Self::Output;
+            fn call(&self, hlist_pat![a]: HList1<A>) -> Self::Output
+            { a.as_ref() }
+        }
     }
 
-    macro_rules! impl_as_refs {
-        (@eat [$($prev:tt)*], $a0:ident : $A0:ident, $($more:tt)*) => {
-            impl_as_refs!{@iter [$($prev)* [$a0:$A0]], $($more)*}
-        };
-        (@eat [$($prev:tt)*],) => {};
-
-        (@iter $prev:tt, $($more:tt)*) => {
-            impl_as_refs!{@gen $prev}
-            impl_as_refs!{@eat $prev, $($more)*}
-        };
-        (@gen [$([$a:ident : $A:ident])+]) => {
-            impl<$($A),+> AsRefs for ($($A,)+)
-            where
-                $( $A: AsRef, )+
-            {
-                type Output = ($(AsRefT<$A>,)+);
-
-                fn as_refs(self) -> Self::Output {
-                    let ($($a,)+) = self;
-                    $(
-                        let $a = $a.as_ref();
-                    )+
-                    ($($a,)+)
-                }
-            }
-        };
-    }
-
-    impl_as_refs! {
-        @eat [],
-        a: A, b: B, c: C, d: D,
-        e: E, f: F, g: G, h: H,
-    }
-
-    pub trait IntoMaybe {
+    pub trait IntoMaybe: IsMaybe {
         type TyArg;
 
         fn into_maybe(self) -> Maybe<Self::TyArg>;
@@ -471,20 +641,20 @@ pub mod option {
         fn as_maybe(&self) -> Maybe<&A> { None }
     }
 
-    pub trait ExpectFrom<B> {
-        fn expect_from(b: B) -> Self;
+    pub trait ExpectFromOption<B>: IsMaybe {
+        fn expect_from(b: Option<B>) -> Self;
     }
 
-    impl<A> ExpectFrom<A> for A {
-        fn expect_from(a: A) -> Self { a }
+    impl<A> ExpectFromOption<A> for Maybe<A> {
+        fn expect_from(a: Option<A>) -> Self { a }
     }
 
-    impl<A> ExpectFrom<Maybe<A>> for Just<A> {
-        fn expect_from(a: Maybe<A>) -> Self { Just(a.unwrap()) }
+    impl<A> ExpectFromOption<A> for Just<A> {
+        fn expect_from(a: Option<A>) -> Self { Just(a.unwrap()) }
     }
 
-    impl<A> ExpectFrom<Maybe<A>> for Nothing<A> {
-        fn expect_from(a: Maybe<A>) -> Self
+    impl<A> ExpectFromOption<A> for Nothing<A> {
+        fn expect_from(a: Option<A>) -> Self
         { match a {
             Some(_) => panic!("expect_from: expected nothing, got Some(_)!"),
             None => Default::default(),
@@ -524,36 +694,38 @@ pub mod option {
         { Ok(Default::default()) }
     }
 
-    macro_rules! impl_assoc_ty {
-        ( $( [$($tpar:ident),*] $Trait:ident [$A:ty] => $Output:ty;)* )
+    macro_rules! impl_zip_with {
+        ( $( [$A:ident, $B:ident] => $C:ident;)* )
         => {
             $(
-                impl<$($tpar),*> $Trait for $A {
-                    type Output = $Output;
-                }
-            )*
-        };
-        ( $( [$($tpar:ident),*] $Trait:ident [$A:ty, $B:ty] => $Output:ty;)* )
-        => {
-            $(
-                impl<$($tpar),*> $Trait<$B> for $A {
-                    type Output = $Output;
+                impl<A, B, C, F: FnOnce<HList2<A, B>, Output=C>> ZipWith<$B<B>, F> for $A<A>
+                where F: FnOnce<HList2<A, B>>,
+                {
+                    type Output = $C<C>;
+
+                    fn zip_with(self, other: $B<B>, f: F) -> Self::Output {
+                        ExpectFromOption::expect_from({
+                            match (self.into_maybe(), other.into_maybe()) {
+                                (Some(a), Some(b)) => Some(f.call_once(hlist![a, b])),
+                                _ => None,
+                            }
+                        })
+                    }
                 }
             )*
         };
     }
 
-    impl_assoc_ty!{
-        // a default impl is used for all
-        [A, B] Zip[Nothing<A>, Nothing<B>] => Nothing<(A, B)>;
-        [A, B] Zip[  Maybe<A>, Nothing<B>] => Nothing<(A, B)>;
-        [A, B] Zip[   Just<A>, Nothing<B>] => Nothing<(A, B)>;
-        [A, B] Zip[Nothing<A>,   Maybe<B>] => Nothing<(A, B)>;
-        [A, B] Zip[Nothing<A>,    Just<B>] => Nothing<(A, B)>;
-        [A, B] Zip[  Maybe<A>,   Maybe<B>] =>   Maybe<(A, B)>;
-        [A, B] Zip[  Maybe<A>,    Just<B>] =>   Maybe<(A, B)>;
-        [A, B] Zip[   Just<A>,   Maybe<B>] =>   Maybe<(A, B)>;
-        [A, B] Zip[   Just<A>,    Just<B>] =>    Just<(A, B)>;
+    impl_zip_with!{
+        [Nothing, Nothing] => Nothing;
+        [  Maybe, Nothing] => Nothing;
+        [   Just, Nothing] => Nothing;
+        [Nothing,   Maybe] => Nothing;
+        [Nothing,    Just] => Nothing;
+        [  Maybe,   Maybe] =>   Maybe;
+        [  Maybe,    Just] =>   Maybe;
+        [   Just,   Maybe] =>   Maybe;
+        [   Just,    Just] =>    Just;
     }
 }
 
@@ -567,26 +739,28 @@ pub mod option {
 pub use self::gamma_system_analysis::GammaSystemAnalysis;
 pub mod gamma_system_analysis {
     use super::*;
+    use self::inductive::hlist::{self, HList};
 
-    pub trait Use<F> {
+    pub trait Analyze<F> {
         type Output;
 
-        fn go(self, f: F) -> Self::Output;
+        fn analyze(self, f: F) -> Self::Output;
     }
 
-    impl<'a, F, Z, M, As, Rs, Out> Use<F> for As
+    impl<'a, F, Z, M, As: HList, Rs: HList, Out> Analyze<As> for F
     where
-        As: option::AsRefs<Output=Rs>,
-        (): option::ZipN<Rs, Output=Z>,
-        Z: option::Map<F, Output=M>,
+        As: hlist::Map<option::AsRefClosure, Output=Rs>,
+        Rs: option::ListZip<Output=Z>,
+        Z: option::Map<closures::OnHLists<F>, Output=M>,
         M: option::FoldOk<Output=Out>,
     {
         type Output = Out;
 
-        fn go(self, f: F) -> Self::Output {
-            use self::option::ZipN;
-
-            <()>::zip_n(self.as_refs()).map(f).fold_ok()
+        fn analyze(self, args: As) -> Self::Output {
+            args.map(option::AsRefClosure)
+                .list_zip()
+                .map(closures::OnHLists(self))
+                .fold_ok()
         }
     }
 
@@ -639,31 +813,31 @@ pub mod gamma_system_analysis {
         >>
         where
             InEvFrequencies: Clone,
-            (&'a InEvEigenvectors,): Use<ev_acousticness::Closure, Output=Result<OutEvAcousticness>>,
-            (&'a InEvEigenvectors,): Use<ev_polarization::Closure, Output=Result<OutEvPolarization>>,
-            (&'a InAtomLayers, &'a InAtomCoordinates, &'a InLayerScMatrices, &'a InEvEigenvectors,): Use<ev_layer_gamma_probs::Closure, Output=Result<OutEvLayerGammaProbs>>,
-            (&'a InAtomLayers, &'a InEvEigenvectors,): Use<ev_layer_acousticness::Closure, Output=Result<OutEvLayerAcousticness>>,
-
+            ev_acousticness::Analysis: Analyze<hlist::HList1<&'a InEvEigenvectors>, Output=Result<OutEvAcousticness>>,
+            ev_polarization::Analysis: Analyze<hlist::HList1<&'a InEvEigenvectors>, Output=Result<OutEvPolarization>>,
+            ev_layer_gamma_probs::Analysis: Analyze<hlist::HList4<&'a InAtomLayers, &'a InAtomCoordinates, &'a InLayerScMatrices, &'a InEvEigenvectors>, Output=Result<OutEvLayerGammaProbs>>,
+            ev_layer_acousticness::Analysis: Analyze<hlist::HList2<&'a InAtomLayers, &'a InEvEigenvectors>, Output=Result<OutEvLayerAcousticness>>,
         {ok({
             let Input {
                 atom_coords, atom_layers, layer_sc_mats,
                 ev_frequencies, ev_eigenvectors,
             } = *self;
 
-            // This is a bit repetitive, perhaps, but the upshot is that
-            // it is *impossible* to make a mistake here; it would not compile.
+            let ev_acousticness = ev_acousticness::Analysis.analyze(hlist![
+                ev_eigenvectors,
+            ])?;
 
-            let ev_acousticness = (ev_eigenvectors,).go(ev_acousticness::Closure)?;
+            let ev_polarization = ev_polarization::Analysis.analyze(hlist![
+                ev_eigenvectors,
+            ])?;
 
-            let ev_polarization = (ev_eigenvectors,).go(ev_polarization::Closure)?;
+            let ev_layer_gamma_probs = ev_layer_gamma_probs::Analysis.analyze(hlist![
+                atom_layers, atom_coords, layer_sc_mats, ev_eigenvectors,
+            ])?;
 
-            let ev_layer_acousticness =
-                (atom_layers, ev_eigenvectors,)
-                .go(ev_layer_acousticness::Closure)?;
-
-            let ev_layer_gamma_probs =
-                (atom_layers, atom_coords, layer_sc_mats, ev_eigenvectors,)
-                .go(ev_layer_gamma_probs::Closure)?;
+            let ev_layer_acousticness = ev_layer_acousticness::Analysis.analyze(hlist![
+                atom_layers, ev_eigenvectors,
+            ])?;
 
             let ev_frequencies = ev_frequencies.clone();
 
@@ -700,11 +874,11 @@ macro_rules! wrap_maybe_compute {
                 $(   { $($Thing_body_if_brace)* }      )*
                 $($( ( $($Thing_body_if_paren)* ) )* ; )*
 
-                pub struct Closure;
-                impl<'a> FnOnce<(($(&'a $Arg,)*),)> for Closure {
+                pub struct Analysis;
+                impl<'a> FnOnce<Hlist![$(&'a $Arg,)*]> for Analysis {
                     type Output = Result<$Thing>;
 
-                    fn call_once(self, (($($arg,)*),) : (($(&'a $Arg,)*),) ) -> Self::Output
+                    fn call_once(self, hlist_pat![$($arg),*] : Hlist![$(&'a $Arg),*]) -> Self::Output
                     $fn_body
                 }
             }
@@ -717,12 +891,14 @@ pub use self::ev_acousticness::EvAcousticness;
 pub mod ev_acousticness {
     use super::*;
 
+    use self::inductive::hlist::HList1;
+
     pub struct EvAcousticness(pub Vec<f64>);
-    pub struct Closure;
-    impl<'a> FnOnce<((&'a EvEigenvectors,),)> for Closure {
+    pub struct Analysis;
+    impl<'a> FnOnce<HList1<&'a EvEigenvectors>> for Analysis {
         type Output = Result<EvAcousticness>;
 
-        fn call_once(self, ((ev_eigenvectors,),): ((&EvEigenvectors,),)) -> Self::Output {
+        fn call_once(self, hlist_pat![ev_eigenvectors]: HList1<&EvEigenvectors>) -> Self::Output {
             Ok(EvAcousticness((ev_eigenvectors.0).0.iter().map(|ket| ket.acousticness()).collect()))
         }
     }
@@ -953,7 +1129,7 @@ where
 
         // Work with Option<Vec<A>> as an applicative functor (for fixed length Vec)
         fn map1<A, R, F>(a: &Option<Vec<A>>, mut f: F) -> Option<Vec<R>>
-            where F: FnMut(&A) -> R
+        where F: for<'a> StdFnMut(&'a A) -> R
         {
             let a = a.as_ref()?;
             Some(a.iter().map(|a| f(a)).collect())
@@ -961,7 +1137,7 @@ where
 
         // (haskell's LiftA2)
         fn map2<B, A, R, F>(a: &Option<Vec<A>>, b: &Option<Vec<B>>, mut f: F) -> Option<Vec<R>>
-            where F: FnMut(&A, &B) -> R
+        where F: for<'a, 'b> StdFnMut(&'a A, &'b B) -> R
         {
             Some({
                 zip_eq(a.as_ref()?, b.as_ref()?)
@@ -1121,6 +1297,7 @@ use self::columns::{Columns, Color, Precision, fixed_prob_column, display_prob_c
 mod columns {
     use super::*;
     use std::iter::{Chain, Once, once};
+    use self::inductive::hlist::HList1;
 
     #[derive(Debug, Clone)]
     pub struct Columns<T = String> {
@@ -1161,11 +1338,15 @@ mod columns {
     fn quick_column<C, D, F>(painter: &PaintAs<D, C>, header: &str, values: &[C], width: usize, mut show: F) -> Columns
         where
             C: PartialOrd,
-            F: FnMut(&C) -> D,
+            F: StdFnMut(&C) -> D,
             D: fmt::Display,
     { Columns {
         header: format!(" {:^width$}", header, width = width),
-        entries: values.iter().map(|x| format!(" {}", painter.paint_as(x, show(x)))).collect(),
+        entries: {
+            values.iter()
+                .map(|x| format!(" {}", painter.paint_as(x, show(x))))
+                .collect()
+        },
     }}
 
     pub struct Precision(pub usize);
@@ -1180,7 +1361,7 @@ mod columns {
             Color::Colorful  => Box::new(default_prob_color_range()),
             Color::Colorless => Box::new(NullPainter),
         };
-        quick_column(&*painter, header, values, precision.0 + 2, |&x| FixedProb(x, precision.0))
+        quick_column(&*painter, header, values, precision.0 + 2, |&x: &_| FixedProb(x, precision.0))
     }
 
     pub fn display_prob_column(color: Color, header: &str, values: &[f64]) -> Columns
@@ -1189,6 +1370,6 @@ mod columns {
             Color::Colorful  => Box::new(default_prob_color_range()),
             Color::Colorless => Box::new(NullPainter),
         };
-        quick_column(&*painter, header, values, 7, |&x| DisplayProb(x))
+        quick_column(&*painter, header, values, 7, |&x: &_| DisplayProb(x))
     }
 }

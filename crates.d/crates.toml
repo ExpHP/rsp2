@@ -85,3 +85,4 @@ lammps-sys = { tag = "v0.3.0", git = "https://github.com/ExpHP/lammps-sys" }
 rayon = "0.8"
 vasp-poscar = "0.1.1"
 path_abs = { rev = "72c767cfabe27", git = "https://github.com/vitiral/path_abs" }
+frunk = "0.1.36"

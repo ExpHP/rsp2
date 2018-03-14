@@ -40,3 +40,4 @@ path = "lib.rs"
 !!serde-json
 !!serde-yaml
 !!path-abs
+!!frunk

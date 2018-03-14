@@ -31,70 +31,81 @@ macro_rules! derive_filetype_wrapper {
 ///
 /// This macro will automatically generate the impls for the traits
 /// lower on the Fn hierarchy.
+///
+/// This is unsuitable for HOFs, which generally need different bounds
+/// (and *technically* different implementations) on each of the impls.
 #[macro_export]
 macro_rules! derive_alternate_fn {
-    // FnOnce
+    // multiple invocations - base case
+    () => {};
+
+    // enable Fn(A, B, C) sugar
+    (impl[$($par:tt)*] $Fn:ident($($Arg:ty),*) $($rest:tt)*)
+    => {
+        derive_alternate_fn!{
+            impl[$($par)*] $Fn<($($Arg,)*)> $($rest)*
+        }
+    };
+
+    // multiple invocations - inductive case
     (
-        impl[$($par:tt)*] FnOnce<$Arg:ty> for $Type:ty
+        impl[$($par:tt)*] $Fn:ident<$Arg:ty> for $Type:ty
         $([where $($bnd:tt)*])*
-        { $($fn_once_body:tt)* }
+        {
+            type Output = $Output:ty;
+            $($fn_def:tt)*
+        }
+        $($rest:tt)*
     )
     => {
-        impl<$($par)*> $crate::alternate::FnOnce<$Arg> for $Type $(where $($bnd)*)*
-        { $($fn_once_body)* }
+        derive_alternate_fn!{
+            @one($Fn) [$($par)*] [$Arg] [$Type] [$Output] [$($($bnd)*)*] [$($fn_def)*]
+        }
+        derive_alternate_fn!{ $($rest)* }
+    };
+
+    // FnOnce
+    (@one(FnOnce) [$($par:tt)*] [$Arg:ty] [$Type:ty] [$Output:ty] [$($bnd:tt)*] [$($fn_def:tt)*])
+    => {
+        impl<$($par)*> $crate::traits::alternate::FnOnce<$Arg> for $Type where $($bnd)* {
+            type Output = $Output;
+
+            $($fn_def)*
+        }
     };
 
     // FnMut (+ FnOnce)
-    (
-        impl[$($par:tt)*] FnMut<$Arg:ty> for $Type:ty
-        $([where $($bnd:tt)*])*
-        {
-            // explicitly captured so it can be moved to the FnOnce body
-            type Output = $Output:ty;
-            $($fn_mut_body:tt)*
-        }
-    )
+    (@one(FnMut) [$($par:tt)*] [$Arg:ty] [$Type:ty] [$Output:ty] [$($bnd:tt)*] [$($fn_def:tt)*])
     => {
-        impl<$($par)*> $crate::alternate::FnMut<$Arg> for $Type $(where $($bnd)*)*
-        {
-            $($fn_mut_body)*
+        impl<$($par)*> $crate::traits::alternate::FnMut<$Arg> for $Type where $($bnd)* {
+            $($fn_def)*
         }
 
-        impl<$($par)*> $crate::alternate::FnOnce<$Arg> for $Type $(where $($bnd)*)*
-        {
+        impl<$($par)*> $crate::traits::alternate::FnOnce<$Arg> for $Type where $($bnd)* {
             type Output = $Output;
+
             fn call_once(mut self, args: $Args) -> Self::Output
-            { $crate::alternate::FnMut::call(&mut self, args) }
+            { $crate::traits::alternate::FnMut::call_mut(&mut self, args) }
         }
     };
 
     // Fn (+ FnMut + FnOnce)
-    (
-        impl[$($par:tt)*] Fn<$Arg:ty> for $Type:ty
-        $([where $($bnd:tt)*])*
-        {
-            // explicitly captured so it can be moved to the FnOnce body
-            type Output = $Output:ty;
-            $($fn_body:tt)*
-        }
-    )
+    (@one(Fn) [$($par:tt)*] [$Arg:ty] [$Type:ty] [$Output:ty] [$($bnd:tt)*] [$($fn_def:tt)*])
     => {
-        impl<$($par)*> $crate::alternate::Fn<$Arg> for $Type $(where $($bnd)*)*
-        {
-            $($fn_body)*
+        impl<$($par)*> $crate::traits::alternate::Fn<$Arg> for $Type where $($bnd)* {
+            $($fn_def)*
         }
 
-        impl<$($par)*> $crate::alternate::FnMut<$Arg> for $Type $(where $($bnd)*)*
-        {
+        impl<$($par)*> $crate::traits::alternate::FnMut<$Arg> for $Type where $($bnd)* {
             fn call_mut(&mut self, args: $Arg) -> Self::Output
-            { $crate::alternate::Fn::call(self, args) }
+            { $crate::traits::alternate::Fn::call(&*self, args) }
         }
 
-        impl<$($par)*> $crate::alternate::FnOnce<$Arg> for $Type $(where $($bnd)*)*
-        {
+        impl<$($par)*> $crate::traits::alternate::FnOnce<$Arg> for $Type where $($bnd)* {
             type Output = $Output;
+
             fn call_once(self, args: $Arg) -> Self::Output
-            { $crate::alternate::Fn::call(&self, args) }
+            { $crate::traits::alternate::Fn::call(&self, args) }
         }
     };
 }
