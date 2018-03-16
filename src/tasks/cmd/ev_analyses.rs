@@ -335,13 +335,13 @@ pub enum ColumnsMode {
 impl GammaSystemAnalysis {
     pub fn make_columns(&self, mode: ColumnsMode) -> Option<Columns> {
         use self::Color::{Colorful, Colorless};
+        use self::columns::{quick_column, fixed_prob_column, display_prob_column};
 
         let mut columns = vec![];
 
         let fix1 = |c, title: &str, data: &_| fixed_prob_column(c, Precision(1), title, data);
         let fix2 = |c, title: &str, data: &_| fixed_prob_column(c, Precision(2), title, data);
         let dp = display_prob_column;
-        let log10 = |c, title: &str, data: &_| short_exp_column(c, -80, title, data);
 
         if let Some(ref data) = self.ev_frequencies {
             let col = Columns {
@@ -363,10 +363,32 @@ impl GammaSystemAnalysis {
         };
 
         if let Some(ref data) = self.ev_raman_intensities {
-            columns.push(match mode {
-                ColumnsMode::ForHumans => log10(Colorful, "Raman", &data.0),
-                ColumnsMode::ForMachines => log10(Colorless, "Raman", &data.0),
-            })
+            // NOTE: raman_intensities are currently missing some scale factors
+            //       so they are just normalized for now.
+            let max = data.0.iter().fold(0.0, |acc, &x| f64::max(acc, x));
+            let data = data.0.iter().map(|x| x / max).collect_vec();
+
+            let painter: Box<PaintAs<_, f64>> = match mode {
+                ColumnsMode::ForHumans => Box::new({
+                    use ::ansi_term::Colour::*;
+                    ColorByRange::new(vec![
+                        ( 1e-0, Cyan.bold()),
+                        ( 1e-1, Cyan.normal()),
+                        ( 1e-5, Yellow.normal()),
+                        (1e-10, Red.bold()),
+                        (1e-25, Red.normal()),
+                    ],          Black.normal()) // make zeros "disappear"
+                }),
+                ColumnsMode::ForMachines => Box::new(NullPainter),
+            };
+
+            let cutoff_exp = -45;
+            columns.push({
+                quick_column(
+                    &*painter, "Raman", &data, 5,
+                    |&value| ShortExp { value, cutoff_exp },
+                )
+            });
         };
 
         if let Some(ref data) = self.ev_layer_acousticness {
@@ -549,7 +571,7 @@ impl GammaSystemAnalysis {
 
 // Color range used by most columns that contain probabilities in [0, 1]
 fn default_prob_color_range() -> ColorByRange<f64> {
-    use ::ansi_term::Colour::{Red, Cyan, Yellow, Black};
+    use ::ansi_term::Colour::*;
     ColorByRange::new(vec![
         (0.999, Cyan.bold()),
         (0.9,   Cyan.normal()),
@@ -631,7 +653,6 @@ impl fmt::Display for DisplayProb {
 }
 
 use self::columns::{Columns, Color, Precision};
-use self::columns::{short_exp_column, fixed_prob_column, display_prob_column};
 mod columns {
     use super::*;
     use std::iter::{Chain, Once, once};
@@ -672,7 +693,10 @@ mod columns {
     ///
     /// Values are string-formatted by some mapping function, and optionally colorized
     /// according to the magnitude of their value.
-    fn quick_column<C, D, F>(painter: &PaintAs<D, C>, header: &str, values: &[C], width: usize, mut show: F) -> Columns
+    pub fn quick_column<C, D, F>(
+        painter: &PaintAs<D, C>, header: &str, values: &[C],
+        width: usize, mut show: F,
+    ) -> Columns
     where
         C: PartialOrd,
         F: FnMut(&C) -> D,
@@ -704,14 +728,5 @@ mod columns {
             Color::Colorless => Box::new(NullPainter),
         };
         quick_column(&*painter, header, values, 7, |&x| DisplayProb(x))
-    }
-
-    pub fn short_exp_column(color: Color, cutoff_exp: i32, header: &str, values: &[f64]) -> Columns
-    {
-        let painter: Box<PaintAs<_, f64>> = match color {
-            Color::Colorful  => Box::new(NullPainter), // FIXME
-            Color::Colorless => Box::new(NullPainter),
-        };
-        quick_column(&*painter, header, values, 5, |&value| ShortExp { value, cutoff_exp })
     }
 }
