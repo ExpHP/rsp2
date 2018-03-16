@@ -8,10 +8,20 @@ use super::types::*;
 // ------------------------------ PUBLIC API ---------------------------------
 
 /// Construct a fixed-size vector from a function on indices.
+///
+/// The length of the vector will be inferred solely from how
+/// it is used. There is also a static method form of this for
+/// easily supplying a type hint. (e.g. `V3::from_fn`)
 #[inline(always)]
 pub fn from_fn<V: FromFn<F>, B, F>(f: F) -> V
 where F: FnMut(usize) -> B,
 { FromFn::from_fn(f) }
+
+/// Get a zero vector. (using type inference)
+#[inline(always)]
+pub fn zero<V: Zero>() -> V
+where V: Zero,
+{ Zero::zero() }
 
 gen_each!{
     @{Vn}
@@ -19,13 +29,29 @@ gen_each!{
         {$Vn:ident}
     ) => {
         impl<X> $Vn<X> {
+            /// Get a zero vector.
+            ///
+            /// This is also available as the free function `vee::zero`;
+            /// this static method just provides an easy way to supply a type hint.
+            #[inline(always)]
+            pub fn zero() -> Self
+            where Self: Zero,
+            { Zero::zero() }
+
             /// Construct a fixed-size vector from a function on indices.
+            ///
+            /// This is also available as the free function `vee::from_fn`;
+            /// this static method just provides an easy way to supply a type hint.
             #[inline(always)]
             pub fn from_fn<B, F>(f: F) -> Self
             where Self: FromFn<F>, F: FnMut(usize) -> B,
             { FromFn::from_fn(f) }
 
             /// Get the inner product of two vectors.
+            ///
+            /// This is also available as the free function `dot`, and to be honest
+            /// there's really no reason to prefer this form...
+            #[deprecated = "use `dot(&a, &b)` (also `vee::dot(&a, &b)`)"]
             #[inline(always)]
             pub fn dot(&self, other: &Self) -> ScalarT<Self>
             where Self: Dot,
@@ -35,7 +61,7 @@ gen_each!{
             #[inline(always)]
             pub fn sqnorm(&self) -> ScalarT<Self>
             where Self: Dot,
-            { self.dot(self) }
+            { Dot::dot(self, self) }
 
             /// Get the vector's magnitude.
             #[inline(always)]
@@ -54,7 +80,7 @@ gen_each!{
             pub fn angle_to(&self, other: &Self) -> ScalarT<Self>
             where X: Semiring + PrimitiveFloat,
             {
-                let arg = self.dot(other) / X::sqrt(self.sqnorm() * other.sqnorm());
+                let arg = dot(self, other) / X::sqrt(self.sqnorm() * other.sqnorm());
                 let out = X::acos(arg.min(X::one()).max(-X::one()));
                 out
             }
@@ -63,7 +89,7 @@ gen_each!{
             #[inline]
             pub fn par(&self, r: &Self) -> Self
             where X: Field + PrimitiveFloat,
-            { r * (self.dot(r) / r.dot(r)) }
+            { r * (dot(self, r) / dot(r, r)) }
 
             /// Get the part of the vector that is perpendicular to `r`.
             ///
@@ -117,8 +143,8 @@ where X: PrimitiveRing
 /// because everyone loves symmetry.
 #[inline(always)]
 pub fn dot<V>(a: &V, b: &V) -> ScalarT<V>
-  where V: Dot,
-{ a.dot(b) }
+where V: Dot,
+{ Dot::dot(a, b) }
 
 /// Element type of the vector.
 pub type ScalarT<V> = <V as IsV>::Scalar;
@@ -139,6 +165,33 @@ gen_each!{
 
 // -------------------------- END PUBLIC API ---------------------------------
 // The rest is implementation and boiler boiler boiiiiler boiilerplaaaaate
+// ---------------------------------------------------------------------------
+
+/// Implementation detail of the free function `vee::zero`.
+///
+/// > **_Fuggedaboudit._**
+///
+/// Without this, the free function `zero` could not be generic over different
+/// sizes of V.
+pub trait Zero: Sized {
+    fn zero() -> Self;
+}
+
+gen_each!{
+    @{Vn_n}
+    impl_from_fn!(
+        {$Vn:ident $n:tt}
+    ) => {
+        impl<X: Semiring> Zero for $Vn<X>
+        where X: PrimitiveSemiring,
+        {
+            #[inline]
+            fn zero() -> Self
+            { $Vn([X::zero(); $n]) }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 
 /// Implementation detail of the free function `vee::from_fn`.
@@ -259,7 +312,7 @@ mod tests {
         for _ in 0..10 {
             let a: V3 = V3(::rand::random());
             let b: V3 = V3(::rand::random());
-            assert_close!(abs=1e-10, 0.0, a.perp(&b).dot(&b));
+            assert_close!(abs=1e-10, 0.0, dot(&a.perp(&b), &b));
         }
     }
 }

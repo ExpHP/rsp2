@@ -28,3 +28,4 @@ pub mod vee;
 pub mod mat;
 
 pub use vee::dot;
+pub use mat::inv;

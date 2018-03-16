@@ -7,35 +7,72 @@
 
 use ::traits::{Semiring, Ring, Field};
 use ::traits::internal::{PrimitiveSemiring, PrimitiveRing, PrimitiveFloat};
-use super::types::*;
-use super::{Unvee, Envee};
+use ::vee;
+use ::types::*;
+use ::{Unvee, Envee};
 
 // ---------------------------------------------------------------------------
 // ------------------------------ PUBLIC API ---------------------------------
 
 /// Construct a matrix from a function on indices.
+///
+/// The shape of the matrix will be inferred solely from how it
+/// is used.  There is also a static method form of this for
+/// easily supplying a type hint. (e.g. `M33::from_fn`)
 #[inline(always)]
 pub fn from_fn<M: FromFn<F>, B, F>(f: F) -> M
 where F: FnMut(usize, usize) -> B,
 { FromFn::from_fn(f) }
 
 /// Construct a matrix from a 2D array (of rows).
+///
+/// This is intended to be used in places where an array of known
+/// shape already exists, and needs to be wrapped into a matrix.
+/// The signature is such that type inference will work in the
+/// forward direction (deciding the output Matrix shape from
+/// the input array).
 #[inline(always)]
 pub fn from_array<A: IntoMatrix>(arr: A) -> A::Matrix
 { arr.into_matrix() }
 
-/// Construct an identity matrix.
+/// Construct an identity matrix (using type inference).
+///
+/// This is also available as a static method on the matrix types.
 #[inline(always)]
 pub fn eye<M: Eye>() -> M
 { Eye::eye() }
 
+/// Construct a zero matrix (using type inference).
+///
+/// This is also available as a static method on the matrix types.
+#[inline(always)]
+pub fn zero<M: Zero>() -> M
+{ Zero::zero() }
+
+/// Matrix inverse.
+#[inline(always)]
+pub fn inv<M: Inv>(m: &M) -> M
+where M: Inv,
+{ Inv::inv(m) }
+
+// Square matrices
 gen_each!{
     @{Mnn_Mn_Vn_n}
     impl_square_inherent_wrappers!(
         {$Mnn:ident $Mn:ident $Vn:ident $n:tt}
     ) => {
         impl<X> $Mnn<X> {
+            /// Construct the identity matrix.
+            ///
+            /// This is also available as the free function `mat::eye`;
+            /// this static method just provides an easy way to supply a type hint.
+            #[inline(always)]
+            pub fn eye() -> Self
+            where Self: Eye,
+            { Eye::eye() }
+
             /// Matrix inverse.
+            #[deprecated = "use `inv(&matrix)` (also `mat::inv(&matrix)`)"]
             #[inline(always)]
             pub fn inv(&self) -> Self
             where Self: Inv,
@@ -50,6 +87,8 @@ gen_each!{
     }
 }
 
+// General rectangular, for things that must be generic over V.
+// (due to e.g. an associated type)
 gen_each!{
     @{Mn_n}
     impl_general_inherent_wrappers!(
@@ -83,6 +122,7 @@ gen_each!{
     }
 }
 
+// General rectangular.
 gen_each!{
     @{Mn_n}
     @{Vn_n}
@@ -91,7 +131,19 @@ gen_each!{
         {$Vc:ident $c:tt}
     ) => {
         impl<X> $Mr<$Vc<X>> {
+            /// Construct the zero matrix.
+            ///
+            /// This is also available as the free function `mat::zero`;
+            /// this static method just provides an easy way to supply a type hint.
+            #[inline(always)]
+            pub fn zero() -> Self
+            where Self: Zero,
+            { Zero::zero() }
+
             /// Construct a fixed-size vector from a function on indices.
+            ///
+            /// This is also available as the free function `mat::from_fn`;
+            /// this static method just provides an easy way to supply a type hint.
             #[inline(always)]
             pub fn from_fn<B, F>(f: F) -> Self
             where Self: FromFn<F>, F: FnMut(usize, usize) -> B,
@@ -120,6 +172,35 @@ gen_each!{
 
 // -------------------------- END PUBLIC API ---------------------------------
 // The rest is implementation and boiler boiler boiiiiler boiilerplaaaaate
+// ---------------------------------------------------------------------------
+
+/// Implementation detail of the free function `mat::zero`.
+///
+/// > **_Fuggedaboudit._**
+///
+/// Without this, the free function `zero` could not be generic over different
+/// sizes of matrices.
+pub trait Zero: Sized {
+    fn zero() -> Self;
+}
+
+gen_each!{
+    @{Mn_n}
+    @{Vn_n}
+    impl_from_fn!(
+        {$Mr:ident $r:tt}
+        {$Vc:ident $c:tt}
+    ) => {
+        impl<X: Semiring> Zero for $Mr<$Vc<X>>
+        where X: PrimitiveSemiring,
+        {
+            #[inline]
+            fn zero() -> Self
+            { from_array([[X::zero(); $c]; $r]) }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 
 /// Implementation detail of the free function `mat::from_fn`.
@@ -321,7 +402,7 @@ where T: PrimitiveFloat,
             + self[(r+1) % 3][(c+1) % 3] * self[(r+2) % 3][(c+2) % 3]
             - self[(r+1) % 3][(c+2) % 3] * self[(r+2) % 3][(c+1) % 3]
         );
-        let det = self[0].dot(&cofactors[0]);
+        let det = vee::dot(&self[0], &cofactors[0]);
         let rdet = T::one() / det;
         M33::from_fn(|r, c| rdet * cofactors[c][r])
     }
@@ -366,7 +447,7 @@ mod tests {
 
     #[test]
     fn test_inverse_2() {
-        let actual = from_array([[7., 2.], [-11., 4.]]).inv();
+        let actual = inv(&from_array([[7., 2.], [-11., 4.]]));
         let expected = from_array([
             [ 2./25., -1./25.],
             [11./50.,  7./50.],
@@ -381,11 +462,11 @@ mod tests {
 
     #[test]
     fn test_inverse_3() {
-        let actual = from_array([
+        let actual = inv(&from_array([
             [1., 2., 4.],
             [5., 2., 1.],
             [3., 6., 3.],
-        ]).inv();
+        ]));
 
         let expected = from_array([
             [ 0./1.,  1./4., -1./12.],

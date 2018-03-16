@@ -2,7 +2,7 @@
 // NOTE: This is really part of rsp2-array-types.
 
 use ::std::ops::{Add, Sub, AddAssign, SubAssign, Neg};
-use ::std::ops::{Mul, Div, Rem, MulAssign, DivAssign, RemAssign};
+use ::std::ops::{Mul, Div, MulAssign, DivAssign};
 use ::std::fmt;
 use ::traits::{Semiring, Ring, Field};
 use ::traits::internal::{PrimitiveSemiring, PrimitiveRing, PrimitiveFloat};
@@ -29,7 +29,7 @@ gen_each!{
     ) => {
         // vector + vector
         impl<$($lt_a)* $($lt_b)* X: Semiring> Add<$($ref_b)* $Vn<X>> for $($ref_a)*$Vn<X>
-          where X: PrimitiveSemiring,
+        where X: PrimitiveSemiring,
         {
             type Output = $Vn<X>;
 
@@ -40,7 +40,7 @@ gen_each!{
 
         // vector - vector
         impl<$($lt_a)* $($lt_b)* X: Ring> Sub<$($ref_b)* $Vn<X>> for $($ref_a)*$Vn<X>
-          where X: PrimitiveRing,
+        where X: PrimitiveRing,
         {
             type Output = $Vn<X>;
 
@@ -52,7 +52,41 @@ gen_each!{
 }
 
 // ---------------------------------------------------------------------------
-// vector unary ops
+// matrix addition
+
+gen_each!{
+    @{Mn_n}
+    @{Vn}
+    impl_v_add_sub!(
+        {$Mr:ident $r:tt}
+        {$Vc:ident}
+    ) => {
+        // matrix + matrix
+        impl<'a, 'b, X: Semiring> Add<&'b $Mr<$Vc<X>>> for &'a $Mr<$Vc<X>>
+        where X: PrimitiveSemiring,
+        {
+            type Output = $Mr<$Vc<X>>;
+
+            #[inline]
+            fn add(self, other: &'b $Mr<$Vc<X>>) -> Self::Output
+            { mat::from_fn(|r, c| self[r][c] + other[r][c]) }
+        }
+
+        // matrix - matrix
+        impl<'a, 'b, X: Ring> Sub<&'b $Mr<$Vc<X>>> for &'a $Mr<$Vc<X>>
+        where X: PrimitiveRing,
+        {
+            type Output = $Mr<$Vc<X>>;
+
+            #[inline]
+            fn sub(self, other: &'b $Mr<$Vc<X>>) -> Self::Output
+            { mat::from_fn(|r, c| self[r][c] - other[r][c]) }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// unary ops
 
 gen_each!{
     @{Vn}
@@ -63,13 +97,33 @@ gen_each!{
     ) => {
         // -vector
         impl<$($lt_a)* X: Ring> Neg for $($ref_a)* $Vn<X>
-          where X: PrimitiveRing,
+        where X: PrimitiveRing,
         {
             type Output = $Vn<X>;
 
             #[inline]
             fn neg(self) -> Self::Output
             { vee::from_fn(|k| -self.0[k]) }
+        }
+    }
+}
+
+gen_each!{
+    @{Mn_n}
+    @{Vn}
+    impl_m_unops!(
+        {$Mr:ident $r:tt}
+        {$Vc:ident}
+    ) => {
+        // -matrix
+        impl<'a, X: Ring> Neg for &'a $Mr<$Vc<X>>
+        where X: PrimitiveRing,
+        {
+            type Output = $Mr<$Vc<X>>;
+
+            #[inline]
+            fn neg(self) -> Self::Output
+            { mat::from_fn(|r, c| -self.0[r][c]) }
         }
     }
 }
@@ -137,22 +191,30 @@ gen_each!{
 }
 
 // ---------------------------------------------------------------------------
+// TODO: vector-scalar ops
+
+// ---------------------------------------------------------------------------
 // assign ops (general)
 
 gen_each!{
-    @{Vn}
+    [
+        {V2 X} {V3 X} {V4 X}
+        {M2 V} {M3 V} {M4 V}
+    ]
     impl_v_assign_ops!(
-        {$Vn:ident}
+        {$Cn:ident $T:ident}
     ) => {
         // vector += vector;
-        impl<X, B> AddAssign<B> for $Vn<X> where for<'a> &'a Self: Add<B, Output=Self> {
+        // matrix += matrix;
+        impl<$T, B> AddAssign<B> for $Cn<$T> where for<'a> &'a Self: Add<B, Output=Self> {
             #[inline(always)]
             fn add_assign(&mut self, rhs: B)
             { *self = &*self + rhs; }
         }
 
         // vector -= vector;
-        impl<X, B> SubAssign<B> for $Vn<X> where for<'a> &'a Self: Sub<B, Output=Self> {
+        // matrix -= matrix;
+        impl<$T, B> SubAssign<B> for $Cn<$T> where for<'a> &'a Self: Sub<B, Output=Self> {
             #[inline(always)]
             fn sub_assign(&mut self, rhs: B)
             { *self = &*self - rhs; }
@@ -160,24 +222,20 @@ gen_each!{
 
         // vector *= scalar;
         // vector *= matrix;   (how fortunate that we primarily use row vectors!)
-        impl<X, B> MulAssign<B> for $Vn<X> where for<'a> &'a Self: Mul<B, Output=Self> {
+        // matrix *= scalar;
+        // matrix *= matrix;
+        impl<$T, B> MulAssign<B> for $Cn<$T> where for<'a> &'a Self: Mul<B, Output=Self> {
             #[inline(always)]
             fn mul_assign(&mut self, rhs: B)
             { *self = &*self * rhs; }
         }
 
         // vector /= scalar;
-        impl<X, B> DivAssign<B> for $Vn<X> where for<'a> &'a Self: Div<B, Output=Self> {
+        // matrix /= scalar;
+        impl<$T, B> DivAssign<B> for $Cn<$T> where for<'a> &'a Self: Div<B, Output=Self> {
             #[inline(always)]
             fn div_assign(&mut self, rhs: B)
             { *self = &*self / rhs; }
-        }
-
-        // vector %= scalar;
-        impl<X, B> RemAssign<B> for $Vn<X> where for<'a> &'a Self: Rem<B, Output=Self> {
-            #[inline(always)]
-            fn rem_assign(&mut self, rhs: B)
-            { *self = &*self % rhs; }
         }
     }
 }
