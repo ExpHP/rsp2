@@ -243,7 +243,7 @@ fn raman_tensor(
     } // for Bond { ... } in bonds
 
     if ignored_count > 0 {
-        warn!(
+        warn_once!(
             "{} out of {} bonds were ignored because they were too long! \
             (max length {})",
             ignored_count, bonds.len(),

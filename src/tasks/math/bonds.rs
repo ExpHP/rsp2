@@ -11,6 +11,10 @@ use ::rsp2_array_types::{V3, M3, dot};
 pub struct Bonds {
     from: Vec<usize>,
     to: Vec<usize>,
+    // FIXME: Rather than the cartesian vectors (which change as the structure
+    //        relaxes), we should keep the `[i32; 3]` image indices.
+    //        Then a function could be provided that computes the V3s from a
+    //        structure, assuming the bonds haven't changed.
     cart_vectors: Vec<V3>,
 }
 
@@ -98,16 +102,6 @@ impl Bonds {
         }
         Ok(Bonds { from, to, cart_vectors })
     }
-
-    // FIXME HACK (the proper solution would be to not include vectors in the bond list)
-    pub fn update_vectors(&mut self, structure: &CoordStructure) {
-        use ::util::zip_eq;
-        let carts = structure.to_carts();
-        for ((&from, &to), v) in zip_eq(zip_eq(&self.from, &self.to), &mut self.cart_vectors) {
-            *v = carts[to] - carts[from];
-        }
-    }
-
 }
 
 //=================================================================

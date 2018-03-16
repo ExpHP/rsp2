@@ -122,15 +122,6 @@ impl TrialDir {
         let phonopy = phonopy_builder_from_settings(&settings.phonons, &original_structure);
         let phonopy = phonopy.use_sparse_sets(settings.tweaks.sparse_sets);
 
-        // (just dump bond info for now)
-        // FIXME HACK (shouldn't be mut)
-        let mut bonds = settings.bond_radius.map(|bond_radius| ok({
-            trace!("Computing bonds");
-            let bonds = Bonds::from_brute_force_very_dumb(&original_structure, bond_radius)?;
-            ::serde_yaml::to_writer(self.create_file("bonds-debug.yaml")?, &bonds)?;
-            bonds
-        })).fold_ok()?;
-
         let mut from_structure = original_structure;
         let mut iteration = 1;
         // HACK to stop one iteration AFTER all non-acoustics are positive
@@ -161,14 +152,18 @@ impl TrialDir {
                     &structure)?;
             }
 
+            // NOTE: in order to reuse the results of the bond search between iterations,
+            //       we would need to store image indices so that the correct cartesian
+            //       vectors can be computed.
+            //       For now, we just do it all from scratch each time.
+            let bonds = settings.bond_radius.map(|bond_radius| ok({
+                trace!("Computing bonds");
+                Bonds::from_brute_force_very_dumb(&structure, bond_radius)?
+            })).fold_ok()?;
+
             trace!("Computing eigensystem info");
             let ev_analysis = {
                 use self::ev_analyses::*;
-
-                // FIXME HACK (method shouldn't exist)
-                if let Some(bonds) = bonds.as_mut() {
-                    bonds.update_vectors(&structure.map_metadata_to(|_| ()));
-                }
 
                 // (NOTE: all these Options look pointless now, but the layer
                 //        stuff shall soon become optional.
@@ -187,7 +182,7 @@ impl TrialDir {
                     layer_sc_mats:   &layer_sc_mats.clone().map(LayerScMatrices),
                     ev_frequencies:  &Some(EvFrequencies(evals.clone())),
                     ev_eigenvectors: &Some(EvEigenvectors(evecs.clone())),
-                    bonds:           &bonds.clone().map(Bonds),
+                    bonds:           &bonds.map(Bonds),
                 }.compute()?
             };
 
