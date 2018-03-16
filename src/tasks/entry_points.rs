@@ -2,6 +2,7 @@ use ::errors::{Result};
 
 use ::clap;
 use ::cmd::trial::{TrialDir, NewTrialDirArgs};
+use ::cmd::StructureFileType;
 use ::path_abs::{PathDir, PathFile};
 use ::ui::logging::init_global_logger;
 use ::ui::cfg_merging::ConfigSources;
@@ -39,6 +40,46 @@ impl CliDeserialize for NewTrialDirArgs {
     })}
 }
 
+// (not sure why `impl CliDeserialize for Option<StructureFileType>` isn't good enough
+//  but rustc says Option<_> doesn't impl CliDeserialize, even when it ought to be
+//  inferrable that the _ is StructureFileType)
+pub struct OptionalFileType(Option<StructureFileType>);
+
+impl CliDeserialize for OptionalFileType {
+    fn _augment_clap_app<'a, 'b>(app: clap::App<'a, 'b>) -> clap::App<'a, 'b> {
+        app.args(&[
+            arg!( structure_type [--structure-type]=STYPE "Structure filetype. \
+                [choices: poscar, layers, guess] [default: guess]\
+            "),
+        ])
+    }
+
+    fn _resolve_args(m: &clap::ArgMatches) -> Result<Self> {
+        Ok(OptionalFileType({
+            if let Some(s) = m.value_of("structure_type") {
+                match s {
+                    "poscar" => Some(StructureFileType::Poscar),
+                    "layers" => Some(StructureFileType::LayersYaml),
+                    "guess" => None,
+                    _ => bail!("invalid setting for --structure-type"),
+                }
+            } else { None }
+        }))
+    }
+}
+
+impl StructureFileType {
+    pub fn guess(path: &PathFile) -> StructureFileType {
+        if let Some(ext) = path.extension() {
+            match ext.to_string_lossy().as_ref() {
+                "yaml" => return StructureFileType::LayersYaml,
+                _ => {},
+            }
+        }
+        StructureFileType::Poscar
+    }
+}
+
 // -------------------------------------------------------------------------------------
 
 pub fn rsp2() {
@@ -67,15 +108,18 @@ pub fn rsp2() {
                 ])
         });
         let matches = app.get_matches();
-        let (dir_args, extra_args) = de.resolve_args(&matches)?;
+        let (dir_args, (filetype, extra_args)) = de.resolve_args(&matches)?;
 
         let input = PathFile::new(matches.expect_value_of("input"))?;
+
+        let OptionalFileType(filetype) = filetype;
+        let filetype = filetype.unwrap_or_else(|| StructureFileType::guess(&input));
 
         let trial = TrialDir::create_new(dir_args)?;
         logfile.start(PathFile::new(trial.new_logfile_path()?)?)?;
 
         let settings = trial.read_settings()?;
-        trial.run_relax_with_eigenvectors(&settings, &input, extra_args)
+        trial.run_relax_with_eigenvectors(&settings, filetype, &input, extra_args)
     });
 }
 

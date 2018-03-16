@@ -44,6 +44,9 @@ impl<'a> IntoIterator for &'a Bonds {
 //=================================================================
 
 impl Bonds {
+    pub fn len(&self) -> usize
+    { self.from.len() }
+
     pub fn from_brute_force_very_dumb<M>(
         structure: &Structure<M>,
         range: f64,

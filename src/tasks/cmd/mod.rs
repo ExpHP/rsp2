@@ -50,10 +50,18 @@ pub struct CliArgs {
     pub save_bands: bool,
 }
 
+// FIXME needs a better home
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub enum StructureFileType {
+    Poscar,
+    LayersYaml,
+}
+
 impl TrialDir {
     pub(crate) fn run_relax_with_eigenvectors(
         self,
         settings: &Settings,
+        file_format: StructureFileType,
         input: &PathFile,
         cli: CliArgs,
     ) -> Result<()>
@@ -65,50 +73,65 @@ impl TrialDir {
         // let mut original = poscar::load(open(input)?)?;
         // original.scale_vecs(&settings.hack_scale);
 
-        // For the time being this now only supports layers.yaml format.
-        let (original, layer_sc_mats) = {
-            use ::rsp2_structure_gen::load_layers_yaml;
-            use ::rsp2_structure_gen::layer_sc_info_from_layers_yaml;
+        // FIXME: rather than doing this here, other rsp2 binaries ought to be able
+        //        to support the other file formats as well.
+        //
+        //        That said, the REASON for doing it here is that, currently, a
+        //        number of optional computational steps are toggled on/off based
+        //        on the input file format.
+        let (original_structure, atom_layers, layer_sc_mats);
+        match file_format {
+            StructureFileType::Poscar => {
+                original_structure = poscar::load(input.read()?)?;
+                atom_layers = None;
+                layer_sc_mats = None;
+            },
+            StructureFileType::LayersYaml => {
+                use ::rsp2_structure_gen::load_layers_yaml;
+                use ::rsp2_structure_gen::layer_sc_info_from_layers_yaml;
 
-            let builder = load_layers_yaml(input.read()?)?;
-            let builder = optimize_layer_parameters(&settings.scale_ranges, &lmp, builder)?;
-            let structure = carbon(&builder.assemble());
+                let builder = load_layers_yaml(input.read()?)?;
+                let builder = optimize_layer_parameters(&settings.scale_ranges, &lmp, builder)?;
+                original_structure = carbon(&builder.assemble());
 
-            let layer_sc_mats =
-                layer_sc_info_from_layers_yaml(input.read()?)?.into_iter()
-                .map(|(matrix, periods, _)| ::math::bands::ScMatrix::new(&matrix, &periods))
-                .collect_vec();
+                layer_sc_mats = Some({
+                    layer_sc_info_from_layers_yaml(input.read()?)?
+                        .into_iter()
+                        .map(|(matrix, periods, _)| {
+                            ::math::bands::ScMatrix::new(&matrix, &periods)
+                        }).collect_vec()
+                });
 
-            (structure, layer_sc_mats)
-        };
+                // FIXME: This is entirely unnecessary. We just read layers.yaml; we should
+                //        be able to get the layer assignments without a search like this!
+                atom_layers = Some({
+                    trace!("Finding layers");
+                    let layers =
+                        ::rsp2_structure::find_layers(&original_structure, &V3([0, 0, 1]), 0.25)?
+                            .per_unit_cell().expect("Structure is not layered?");
 
-        poscar::dump(self.create_file("initial.vasp")?, "", &original)?;
-        let phonopy = phonopy_builder_from_settings(&settings.phonons, &original);
+                    if let Some(expected) = settings.layers {
+                        assert_eq!(expected, layers.len() as u32);
+                    }
+                    layers.by_atom()
+                });
+            },
+        }
+
+        poscar::dump(self.create_file("initial.vasp")?, "", &original_structure)?;
+        let phonopy = phonopy_builder_from_settings(&settings.phonons, &original_structure);
         let phonopy = phonopy.use_sparse_sets(settings.tweaks.sparse_sets);
-
-        // (we can expect that the layers assignments will not change, so we do this early...)
-        trace!("Finding layers");
-        let atom_layers = {
-            let layers =
-                ::rsp2_structure::find_layers(&original, &V3([0, 0, 1]), 0.25)?
-                    .per_unit_cell().expect("Structure is not layered?");
-
-            if let Some(expected) = settings.layers {
-                assert_eq!(expected, layers.len() as u32);
-            }
-            layers.by_atom()
-        };
 
         // (just dump bond info for now)
         // FIXME HACK (shouldn't be mut)
         let mut bonds = settings.bond_radius.map(|bond_radius| ok({
             trace!("Computing bonds");
-            let bonds = Bonds::from_brute_force_very_dumb(&original, bond_radius)?;
-            ::serde_yaml::to_writer(self.create_file("bonds.yaml")?, &bonds)?;
+            let bonds = Bonds::from_brute_force_very_dumb(&original_structure, bond_radius)?;
+            ::serde_yaml::to_writer(self.create_file("bonds-debug.yaml")?, &bonds)?;
             bonds
         })).fold_ok()?;
 
-        let mut from_structure = original.clone();
+        let mut from_structure = original_structure;
         let mut iteration = 1;
         // HACK to stop one iteration AFTER all non-acoustics are positive
         let mut all_ok_count = 0;
@@ -160,8 +183,8 @@ impl TrialDir {
 
                     atom_elements:   &Some(AtomElements(structure.metadata().to_vec())),
                     atom_coords:     &Some(AtomCoordinates(structure.map_metadata_to(|_| ()))),
-                    atom_layers:     &Some(AtomLayers(atom_layers.clone())),
-                    layer_sc_mats:   &Some(LayerScMatrices(layer_sc_mats.clone())),
+                    atom_layers:     &atom_layers.clone().map(AtomLayers),
+                    layer_sc_mats:   &layer_sc_mats.clone().map(LayerScMatrices),
                     ev_frequencies:  &Some(EvFrequencies(evals.clone())),
                     ev_eigenvectors: &Some(EvEigenvectors(evecs.clone())),
                     bonds:           &bonds.clone().map(Bonds),

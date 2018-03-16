@@ -202,6 +202,8 @@ fn raman_tensor(
     let kdelta = <M33>::eye();
 
     let mut tensor = M33::zero();
+    let mut ignored_count = 0;
+    let mut ignored_distance = 0.0_f64;
     for Bond { from, to, cart_vector: bond_vector } in bonds {
         let bond_type = BondType::from_elements(types[from], types[to])?;
 
@@ -218,8 +220,8 @@ fn raman_tensor(
 
         // check if bond is actually valid (via length)
         if distance > pc.max_len {
-            warn_once!("Bond list contains a bond that is too long! (ignoring it)");
-            continue;
+            ignored_count += 1;
+            ignored_distance = ignored_distance.max(distance);
         }
 
         let const_one  = pc.c1; // `a_par  -   a_perp`
@@ -239,6 +241,15 @@ fn raman_tensor(
             )
         });
     } // for Bond { ... } in bonds
+
+    if ignored_count > 0 {
+        warn!(
+            "{} out of {} bonds were ignored because they were too long! \
+            (max length {})",
+            ignored_count, bonds.len(),
+            ignored_distance,
+        );
+    }
     Ok(tensor)
 }
 
