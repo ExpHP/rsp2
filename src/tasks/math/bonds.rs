@@ -4,7 +4,7 @@ use ::rsp2_structure::supercell;
 use ::rsp2_structure::{CoordStructure, Structure, Lattice};
 use ::rsp2_array_utils::{map_arr, arr_from_fn, try_map_arr};
 
-use ::rsp2_array_types::{V3, M3};
+use ::rsp2_array_types::{V3, M3, dot};
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
@@ -95,6 +95,16 @@ impl Bonds {
         }
         Ok(Bonds { from, to, cart_vectors })
     }
+
+    // FIXME HACK (the proper solution would be to not include vectors in the bond list)
+    pub fn update_vectors(&mut self, structure: &CoordStructure) {
+        use ::util::zip_eq;
+        let carts = structure.to_carts();
+        for ((&from, &to), v) in zip_eq(zip_eq(&self.from, &self.to), &mut self.cart_vectors) {
+            *v = carts[to] - carts[from];
+        }
+    }
+
 }
 
 //=================================================================
@@ -205,20 +215,20 @@ fn sufficiently_large_supercell(lattice: &Lattice, mut interaction_range: f64) -
     // ...I think.  Better safe than sorry, anyways.
     let distances = match check_plane_distances(&get_scaled_vectors(coeffs)) {
         Ok(distances) => {
-            trace!("bond graph: supercell: {:?}", coeffs);
+            trace!("bond graph: intermediate supercell: {:?}", coeffs);
             distances
         }
         Err(_) => {
             // Pick a larger cell with uniform scaling.
             coeffs = [*coeffs.iter().max().unwrap(); 3];
-            trace!("bond graph: taking uniform supercell: {:?}", coeffs);
+            trace!("bond graph: taking uniform intermediate supercell: {:?}", coeffs);
 
             check_plane_distances(&get_scaled_vectors(coeffs))
                 .expect("(bug) uniform supercell does not satisfy the property!?")
         }
     };
 
-    // The supercell for 'coeffs' should now accomodate a sphere around the center.
+    // The supercell for 'coeffs' should now accommodate a sphere around the center.
     assert!(distances.iter().all(|&dist| interaction_range <= dist * (1.0 + 1e-4)));
 
     // But hold on!
@@ -230,6 +240,7 @@ fn sufficiently_large_supercell(lattice: &Lattice, mut interaction_range: f64) -
 
     // (NOTE: pretty sure this is overly conservative)
     let coeffs = map_arr(coeffs, |c| 2 * c + 1); // NOTE: must be odd
+    trace!("bond graph: true supercell: {:?}", coeffs);
 
     Ok(SupercellData {
         supercell_dims: coeffs,
@@ -268,8 +279,8 @@ mod geometry {
     impl ParametricLine {
         /// Solve for the value of `t` where this line intersects a plane.
         pub fn t_at_plane_intersection(&self, plane: &PointNormalPlane) -> f64 {
-            let numer = plane.normal.dot(&(&plane.point - &self.start));
-            let denom = plane.normal.dot(&self.vector);
+            let numer = dot(&plane.normal, &(&plane.point - &self.start));
+            let denom = dot(&plane.normal, &self.vector);
             numer / denom
         }
     }

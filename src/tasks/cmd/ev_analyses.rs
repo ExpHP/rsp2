@@ -11,16 +11,22 @@ use ::itertools::Itertools;
 use ::rsp2_tasks_config::Settings;
 
 #[allow(unused)] // compiler bug
-use ::rsp2_structure::{CoordStructure, Part, Partition};
+use ::rsp2_structure::{CoordStructure, Part, Partition, Element};
 
 use ::std::fmt;
 use ::serde_yaml::Value as YamlValue;
+#[allow(unused)] // compiler bug
+use ::frunk::hlist::Sculptor;
 
+// NOTE: All inputs are wrapped in distinct types for the sake of type-based indexing.
 #[derive(Debug, Clone)] pub struct AtomCoordinates(pub CoordStructure);
 #[derive(Debug, Clone)] pub struct AtomLayers(pub Vec<usize>);
+#[derive(Debug, Clone)] pub struct AtomElements(pub Vec<Element>);
+#[derive(Debug, Clone)] pub struct AtomMasses(pub Vec<f64>);
 #[derive(Debug, Clone)] pub struct LayerScMatrices(pub Vec<ScMatrix>);
 #[derive(Debug, Clone)] pub struct EvFrequencies(pub Vec<f64>);
 #[derive(Debug, Clone)] pub struct EvEigenvectors(pub Basis3);
+#[derive(Debug, Clone)] pub struct Bonds(pub ::math::bonds::Bonds);
 
 pub use self::gamma_system_analysis::GammaSystemAnalysis;
 pub mod gamma_system_analysis {
@@ -29,9 +35,12 @@ pub mod gamma_system_analysis {
     pub struct Input<'a> {
         pub atom_coords:     &'a Option<AtomCoordinates>,
         pub atom_layers:     &'a Option<AtomLayers>,
+        pub atom_elements:   &'a Option<AtomElements>,
+        pub atom_masses:     &'a Option<AtomMasses>,
         pub layer_sc_mats:   &'a Option<LayerScMatrices>,
         pub ev_frequencies:  &'a Option<EvFrequencies>,
         pub ev_eigenvectors: &'a Option<EvEigenvectors>,
+        pub bonds:           &'a Option<Bonds>,
     }
 
     pub struct GammaSystemAnalysis {
@@ -40,34 +49,38 @@ pub mod gamma_system_analysis {
         pub ev_polarization:       Option<EvPolarization>,
         pub ev_layer_gamma_probs:  Option<EvLayerGammaProbs>,
         pub ev_layer_acousticness: Option<EvLayerAcousticness>,
+        pub ev_raman_intensities:  Option<EvRamanIntensities>,
     }
 
     impl<'a> Input<'a> {
         pub fn compute(&self) -> Result<GammaSystemAnalysis>
         {ok({
             let Input {
-                atom_coords, atom_layers, layer_sc_mats,
-                ev_frequencies, ev_eigenvectors,
+                atom_coords, atom_layers, atom_elements, atom_masses,
+                layer_sc_mats, ev_frequencies, ev_eigenvectors, bonds,
             } = *self;
 
-            // This is a bit repetitive, perhaps, but the upshot is that
-            // it is *impossible* to make a mistake here; it would not compile.
+            // since our inputs are all uniquely typed, we can let HList
+            // take care of finding all the right function arguments.
+            let grab_bag = hlist![
+                atom_coords, atom_layers, atom_elements, atom_masses,
+                layer_sc_mats, ev_frequencies, ev_eigenvectors, bonds,
+            ];
 
-            let ev_acousticness = ev_acousticness::Input {
-                ev_eigenvectors,
-            }.maybe_compute()?;
+            let (args, _) = grab_bag.sculpt();
+            let ev_acousticness = ev_acousticness::maybe_compute(args)?;
 
-            let ev_polarization = ev_polarization::Input {
-                ev_eigenvectors,
-            }.maybe_compute()?;
+            let (args, _) = grab_bag.sculpt();
+            let ev_polarization = ev_polarization::maybe_compute(args)?;
 
-            let ev_layer_acousticness = ev_layer_acousticness::Input {
-                ev_eigenvectors, atom_layers,
-            }.maybe_compute()?;
+            let (args, _) = grab_bag.sculpt();
+            let ev_layer_acousticness = ev_layer_acousticness::maybe_compute(args)?;
 
-            let ev_layer_gamma_probs = ev_layer_gamma_probs::Input {
-                ev_eigenvectors, atom_layers, atom_coords, layer_sc_mats,
-            }.maybe_compute()?;
+            let (args, _) = grab_bag.sculpt();
+            let ev_layer_gamma_probs = ev_layer_gamma_probs::maybe_compute(args)?;
+
+            let (args, _) = grab_bag.sculpt();
+            let ev_raman_intensities = ev_raman_intensities::maybe_compute(args)?;
 
             let ev_frequencies = ev_frequencies.clone();
 
@@ -77,53 +90,70 @@ pub mod gamma_system_analysis {
                 ev_polarization,
                 ev_layer_gamma_probs,
                 ev_layer_acousticness,
+                ev_raman_intensities,
             }
         })}
     }
 }
 
 macro_rules! wrap_maybe_compute {
-    (
-        $(
-            pub $struct_or_enum:tt $Thing:ident
-                $(   { $($Thing_body_if_brace:tt)* }      )*
-                $($( ( $($Thing_body_if_paren:tt)*  ) )* ; )*
+    ( // '= path' syntax for delegating to a function defined outside the macro
+        pub $struct_or_enum:tt $Thing:ident
+            $(   { $($Thing_body_if_brace:tt)* }      )*
+            $($( ( $($Thing_body_if_paren:tt)*  ) )* ; )*
 
-            fn $thing:ident(
-                $($arg:ident : & $Arg:ident),* $(,)*
-            ) -> Result<_>
-            $fn_body:block
-        )*
+        fn $thing:ident(
+            $($arg:ident : & $Arg:ident),* $(,)*
+        ) -> Result<_>
+        = $fn_path:path;
     ) => {
-        $(
-            pub use self::$thing::$Thing;
-            pub mod $thing {
-                use super::*;
-
-                pub $struct_or_enum $Thing
+        wrap_maybe_compute! {
+            pub $struct_or_enum $Thing
                 $(   { $($Thing_body_if_brace)* }      )*
                 $($( ( $($Thing_body_if_paren)* ) )* ; )*
 
-                pub struct Input<'a> {
-                    $(pub $arg : &'a Option<$Arg> ,)*
-                }
+            fn $thing(
+                $($arg : & $Arg),*
+            ) -> Result<_>
+            { $fn_path($($arg),*) }
+        }
+    };
 
-                impl<'a> Input<'a> {
-                    pub fn maybe_compute(self) -> Result<Option<$Thing>> {
-                        $(
-                            let $arg = match self.$arg {
-                                &Some(ref x) => x,
-                                &None => return Ok(None),
-                            };
-                        )*
-                        Ok(Some(compute($($arg),*)?))
-                    }
-                }
+    ( // function body defined inside the macro
+        pub $struct_or_enum:tt $Thing:ident
+            $(   { $($Thing_body_if_brace:tt)* }      )*
+            $($( ( $($Thing_body_if_paren:tt)*  ) )* ; )*
 
-                fn compute($($arg: &$Arg),*) -> Result<$Thing>
-                $fn_body
+        fn $thing:ident(
+            $($arg:ident : & $Arg:ident),* $(,)*
+        ) -> Result<_>
+        $fn_body:block
+    ) => {
+        pub use self::$thing::$Thing;
+        pub mod $thing {
+            use super::*;
+
+            pub $struct_or_enum $Thing
+            $(   { $($Thing_body_if_brace)* }      )*
+            $($( ( $($Thing_body_if_paren)* ) )* ; )*
+
+            pub fn maybe_compute(
+                list: Hlist![$(&Option<$Arg>),*],
+            ) -> Result<Option<$Thing>>
+            {
+                let hlist_pat![$($arg),*] = list;
+                $(
+                    let $arg = match $arg {
+                        &Some(ref x) => x,
+                        &None => return Ok(None),
+                    };
+                )*
+                Ok(Some(compute($($arg),*)?))
             }
-        )*
+
+            fn compute($($arg: &$Arg),*) -> Result<$Thing>
+            $fn_body
+        }
     }
 }
 
@@ -131,20 +161,21 @@ macro_rules! wrap_maybe_compute {
 pub use self::ev_acousticness::EvAcousticness;
 pub mod ev_acousticness {
     use super::*;
+    use ::frunk::hlist::{HCons, HNil};
 
     pub struct EvAcousticness(pub Vec<f64>);
-    pub struct Input<'a> {
-        pub ev_eigenvectors: &'a Option<EvEigenvectors>,
+
+    pub fn maybe_compute(list: HCons<&Option<EvEigenvectors>, HNil>)
+    -> Result<Option<EvAcousticness>>
+    {
+        let hlist_pat![ev_eigenvectors] = list;
+        let ev_eigenvectors = match ev_eigenvectors {
+            &Some(ref x) => x,
+            &None => return Ok(None),
+        };
+        Ok(Some(compute(ev_eigenvectors)?))
     }
-    impl<'a> Input<'a> {
-        pub fn maybe_compute(self) -> Result<Option<EvAcousticness>> {
-            let ev_eigenvectors = match self.ev_eigenvectors {
-                &Some(ref x) => x,
-                &None => return Ok(None),
-            };
-            Ok(Some(compute(ev_eigenvectors)?))
-        }
-    }
+
     fn compute(ev_eigenvectors: &EvEigenvectors) -> Result<EvAcousticness> {
         Ok(EvAcousticness((ev_eigenvectors.0).0.iter().map(|ket| ket.acousticness()).collect()))
     }
@@ -183,39 +214,86 @@ wrap_maybe_compute! {
         layer_sc_mats: &LayerScMatrices,
         ev_eigenvectors: &EvEigenvectors,
     ) -> Result<_> {
-        let part = Part::from_ord_keys(atom_layers.0.iter());
-        let coords_by_layer = atom_coords.0
-            .map_metadata_to(|_| ())
-            .into_unlabeled_partitions(&part)
-            .collect_vec();
+        _ev_layer_gamma_probs(
+            atom_layers,
+            atom_coords,
+            layer_sc_mats,
+            ev_eigenvectors,
+        )
+    }
+}
 
-        let evs_by_layer = (ev_eigenvectors.0).0.iter().map(|ket| {
-            ket.clone().into_unlabeled_partitions(&part)
-        });
-        let evs_by_layer = ::util::transpose_iter_to_vec(evs_by_layer);
+fn _ev_layer_gamma_probs(
+    atom_layers: &AtomLayers,
+    atom_coords: &AtomCoordinates,
+    layer_sc_mats: &LayerScMatrices,
+    ev_eigenvectors: &EvEigenvectors,
+) -> Result<EvLayerGammaProbs> {
+    let part = Part::from_ord_keys(atom_layers.0.iter());
+    let coords_by_layer = atom_coords.0
+        .map_metadata_to(|_| ())
+        .into_unlabeled_partitions(&part)
+        .collect_vec();
 
-        Ok(EvLayerGammaProbs({
-            zip_eq(coords_by_layer, zip_eq(evs_by_layer, &layer_sc_mats.0))
-                .map(|(layer_structure, (layer_evs, layer_sc_mat))| {
-                    // precompute data applicable to all kets
-                    let unfolder = GammaUnfolder::from_config(
-                        &from_json!({
+    let evs_by_layer = (ev_eigenvectors.0).0.iter().map(|ket| {
+        ket.clone().into_unlabeled_partitions(&part)
+    });
+    let evs_by_layer = ::util::transpose_iter_to_vec(evs_by_layer);
+
+    Ok(EvLayerGammaProbs({
+        zip_eq(coords_by_layer, zip_eq(evs_by_layer, &layer_sc_mats.0))
+            .map(|(layer_structure, (layer_evs, layer_sc_mat))| {
+                // precompute data applicable to all kets
+                let unfolder = GammaUnfolder::from_config(
+                    &from_json!({
                             "fbz": "reciprocal-cell",
                             "sampling": { "plain": [4, 4, 1] },
                         }),
-                        &layer_structure,
-                        layer_sc_mat,
-                    );
+                    &layer_structure,
+                    layer_sc_mat,
+                );
 
-                    layer_evs.into_iter().map(|ket| {
-                        let probs = unfolder.unfold_phonon(ket.to_ket().as_ref());
-                        zip_eq(unfolder.q_indices(), probs)
-                            .find( | & (idx, _) | idx == & [0, 0, 0])
-                            .unwrap().1
-                    }).collect()
+                layer_evs.into_iter().map(|ket| {
+                    let probs = unfolder.unfold_phonon(ket.to_ket().as_ref());
+                    zip_eq(unfolder.q_indices(), probs)
+                        .find( | & (idx, _) | idx == & [0, 0, 0])
+                        .unwrap().1
                 }).collect()
-        }))
-    }
+            }).collect()
+    }))
+}
+
+wrap_maybe_compute! {
+    pub struct EvRamanIntensities(pub Vec<f64>);
+    fn ev_raman_intensities(
+        bonds: &Bonds,
+        atom_masses: &AtomMasses,
+        atom_elements: &AtomElements,
+        ev_frequencies: &EvFrequencies,
+        ev_eigenvectors: &EvEigenvectors,
+    ) -> Result<_>
+    = _ev_raman_intensities;
+}
+
+fn _ev_raman_intensities(
+    bonds: &Bonds,
+    atom_masses: &AtomMasses,
+    atom_elements: &AtomElements,
+    ev_frequencies: &EvFrequencies,
+    ev_eigenvectors: &EvEigenvectors,
+) -> Result<EvRamanIntensities> {
+    use ::math::bond_polarizability::{Input, LightPolarization};
+
+    Input {
+        light_polarization: &LightPolarization::Average,
+        temperature: 0.0,
+        atom_masses: &atom_masses.0,
+        atom_elements: &atom_elements.0,
+        ev_eigenvectors: &ev_eigenvectors.0,
+        ev_frequencies: &ev_frequencies.0,
+        bonds: &bonds.0,
+    }.compute_ev_raman_intensities()
+        .map(EvRamanIntensities)
 }
 
 macro_rules! format_columns {
@@ -263,6 +341,7 @@ impl GammaSystemAnalysis {
         let fix1 = |c, title: &str, data: &_| fixed_prob_column(c, Precision(1), title, data);
         let fix2 = |c, title: &str, data: &_| fixed_prob_column(c, Precision(2), title, data);
         let dp = display_prob_column;
+        let log10 = |c, title: &str, data: &_| short_exp_column(c, -80, title, data);
 
         if let Some(ref data) = self.ev_frequencies {
             let col = Columns {
@@ -280,6 +359,13 @@ impl GammaSystemAnalysis {
             columns.push(match mode {
                 ColumnsMode::ForHumans => dp(Colorful, "Acoust.", &data.0),
                 ColumnsMode::ForMachines => fix2(Colorless, "Acou", &data.0),
+            })
+        };
+
+        if let Some(ref data) = self.ev_raman_intensities {
+            columns.push(match mode {
+                ColumnsMode::ForHumans => log10(Colorful, "Raman", &data.0),
+                ColumnsMode::ForMachines => log10(Colorless, "Raman", &data.0),
             })
         };
 
@@ -344,7 +430,7 @@ impl GammaSystemAnalysis {
         let GammaSystemAnalysis {
             ref ev_acousticness, ref ev_polarization,
             ref ev_frequencies, ref ev_layer_gamma_probs,
-            ref ev_layer_acousticness,
+            ref ev_layer_acousticness, ref ev_raman_intensities,
         } = *self;
 
         // This is where the newtypes start to get in the way;
@@ -354,10 +440,11 @@ impl GammaSystemAnalysis {
         let acousticness = ev_acousticness.as_ref().map(|d| d.0.to_vec());
         let polarization = ev_polarization.as_ref().map(|d| d.0.to_vec());
         let layer_acousticness = ev_layer_acousticness.as_ref().map(|d| d.0.to_vec());
+        let raman_intensities = ev_raman_intensities.as_ref().map(|d| d.0.to_vec());
 
         // Work with Option<Vec<A>> as an applicative functor (for fixed length Vec)
         fn map1<A, R, F>(a: &Option<Vec<A>>, mut f: F) -> Option<Vec<R>>
-            where F: FnMut(&A) -> R
+        where F: FnMut(&A) -> R,
         {
             let a = a.as_ref()?;
             Some(a.iter().map(|a| f(a)).collect())
@@ -365,7 +452,7 @@ impl GammaSystemAnalysis {
 
         // (haskell's LiftA2)
         fn map2<B, A, R, F>(a: &Option<Vec<A>>, b: &Option<Vec<B>>, mut f: F) -> Option<Vec<R>>
-            where F: FnMut(&A, &B) -> R
+        where F: FnMut(&A, &B) -> R,
         {
             Some({
                 zip_eq(a.as_ref()?, b.as_ref()?)
@@ -482,6 +569,29 @@ impl fmt::Display for FixedProb {
     { write!(f, "{:width$.prec$}", self.0, prec = self.1, width = self.1 + 2) }
 }
 
+/// Simple Display impl for positive numbers of wildly-varying magnitude.
+///
+/// Shows a float at dynamically-chosen fixed precision.
+///
+/// Printed width is always 5 characters, assuming cutoff_exp >= -99
+#[derive(Debug, Copy, Clone)]
+pub struct ShortExp {
+    value: f64,
+    cutoff_exp: i32,
+}
+impl fmt::Display for ShortExp {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result
+    {
+        let ShortExp { value, cutoff_exp } = *self;
+        assert!(value >= 0.0);
+        if value == 0.0 || (value.log10().ceil() as i32) < cutoff_exp {
+            write!(f, "{:<5}", "0")
+        } else {
+            write!(f, "{:<5.0e}", value)
+        }
+    }
+}
+
 /// Specialized display impl for probabilities (i.e. from 0 to 1)
 /// which may be extremely close to either 0 or 1.
 ///
@@ -520,7 +630,8 @@ impl fmt::Display for DisplayProb {
     }
 }
 
-use self::columns::{Columns, Color, Precision, fixed_prob_column, display_prob_column};
+use self::columns::{Columns, Color, Precision};
+use self::columns::{short_exp_column, fixed_prob_column, display_prob_column};
 mod columns {
     use super::*;
     use std::iter::{Chain, Once, once};
@@ -594,17 +705,13 @@ mod columns {
         };
         quick_column(&*painter, header, values, 7, |&x| DisplayProb(x))
     }
+
+    pub fn short_exp_column(color: Color, cutoff_exp: i32, header: &str, values: &[f64]) -> Columns
+    {
+        let painter: Box<PaintAs<_, f64>> = match color {
+            Color::Colorful  => Box::new(NullPainter), // FIXME
+            Color::Colorless => Box::new(NullPainter),
+        };
+        quick_column(&*painter, header, values, 5, |&value| ShortExp { value, cutoff_exp })
+    }
 }
-
-//         let energy_per_atom = {
-//             let f = |structure: ElementStructure| ok({
-//                 let na = structure.num_atoms() as f64;
-//                 lmp.build(structure)?.compute_value()? / na
-//             });
-//             let f_path = |s: &AsPath| ok(f(poscar::load(self.open(s)?)?)?);
-
-//             let initial = f_path(&"initial.vasp")?;
-//             let final_ = f_path(&"final.vasp")?;
-//             let before_ev_chasing = f_path(&"structure-01.1.vasp")?;
-//             EnergyPerAtom { initial, final_, before_ev_chasing }
-//         };

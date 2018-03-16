@@ -15,7 +15,7 @@ use self::ev_analyses::GammaSystemAnalysis;
 use self::trial::TrialDir;
 pub(crate) mod trial;
 
-use ::errors::{Error, ErrorKind, Result, ok};
+use ::errors::{Error, ErrorKind, Result, StdResult, ok};
 use ::rsp2_tasks_config::{self as cfg, Settings, NormalizationMode, SupercellSpec};
 use ::traits::{AsPath};
 use ::phonopy::{DirWithBands, DirWithDisps, DirWithForces};
@@ -100,11 +100,13 @@ impl TrialDir {
         };
 
         // (just dump bond info for now)
-        if let Some(bond_radius) = settings.bond_radius {
-            trace!("Computing bonds, just for kicks.");
+        // FIXME HACK (shouldn't be mut)
+        let mut bonds = settings.bond_radius.map(|bond_radius| ok({
+            trace!("Computing bonds");
             let bonds = Bonds::from_brute_force_very_dumb(&original, bond_radius)?;
             ::serde_yaml::to_writer(self.create_file("bonds.yaml")?, &bonds)?;
-        };
+            bonds
+        })).fold_ok()?;
 
         let mut from_structure = original.clone();
         let mut iteration = 1;
@@ -140,17 +142,29 @@ impl TrialDir {
             let ev_analysis = {
                 use self::ev_analyses::*;
 
+                // FIXME HACK (method shouldn't exist)
+                if let Some(bonds) = bonds.as_mut() {
+                    bonds.update_vectors(&structure.map_metadata_to(|_| ()));
+                }
+
                 // (NOTE: all these Options look pointless now, but the layer
                 //        stuff shall soon become optional.
                 //        ...
                 //        The other Options *are* kind of pointless, but they simplifies the
                 //        design of the analysis module)
+                assert!(structure.metadata().iter().all(|&sym| sym == CARBON), "VERYBAD MASS HACK");
                 gamma_system_analysis::Input {
+                    // vvv FIXME FIXME OMG HACK HACK HACK VERYBAD HACK vvv
+                    atom_masses:     &Some(AtomMasses(vec![12.01; structure.num_atoms()])),
+                    // ^^^ FIXME FIXME OMG HACK HACK HACK VERYBAD HACK ^^^
+
+                    atom_elements:   &Some(AtomElements(structure.metadata().to_vec())),
                     atom_coords:     &Some(AtomCoordinates(structure.map_metadata_to(|_| ()))),
                     atom_layers:     &Some(AtomLayers(atom_layers.clone())),
                     layer_sc_mats:   &Some(LayerScMatrices(layer_sc_mats.clone())),
                     ev_frequencies:  &Some(EvFrequencies(evals.clone())),
                     ev_eigenvectors: &Some(EvEigenvectors(evecs.clone())),
+                    bonds:           &bonds.clone().map(Bonds),
                 }.compute()?
             };
 
@@ -221,7 +235,6 @@ impl TrialDir {
             from_structure = structure;
         }; // (structure, ev_analysis, final_bands_dir)
 
-
         poscar::dump(self.create_file("final.vasp")?, "", &structure)?;
 
         write_eigen_info_for_machines(&ev_analysis, self.create_file("eigenvalues.final")?)?;
@@ -230,6 +243,12 @@ impl TrialDir {
         // let kinfos = get_k_eigensystem_info(
         //     &k_evals, &k_evecs, &layers[..], &structure, Some(&layer_sc_mats),
         // );
+
+        // HACK
+        if let (&Some(ref freqs), &Some(ref raman)) = (&ev_analysis.ev_frequencies, &ev_analysis.ev_raman_intensities) {
+            let pairs = ::util::zip_eq(freqs.0.to_vec(), raman.0.to_vec()).collect_vec();
+            ::serde_json::to_writer(self.create_file("raman.json")?, &pairs)?;
+        }
 
         // write_summary_file(settings, &lmp, &einfos, &kinfos)?;
         self.write_summary_file(settings, &lmp, &ev_analysis)?;
@@ -934,6 +953,14 @@ extension_trait! {
 }
 
 //=================================================================
+
+extension_trait! {
+    <T, E> OptionResultExt<T, E> for Option<StdResult<T, E>> {
+        fn fold_ok(self) -> StdResult<Option<T>, E> {
+            self.map_or(Ok(None), |r| r.map(Some))
+        }
+    }
+}
 
 extension_trait! {
     PathBufExt for PathBuf {
