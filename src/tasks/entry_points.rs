@@ -23,10 +23,15 @@ impl CliDeserialize for NewTrialDirArgs {
                 (via syntax described below). \
                 When provided multiple times, the configs are merged according to some fairly \
                 dumb strategy, with preference to the values supplied in later arguments. \
-                Any string containing ':' is interpreted as a literal (no mechanism is provided \
-                for escaping this character in a path).  The part after the colon must be a valid \
-                yaml value, and there may optionally be a '.'-separated sequence of string keys \
-                before the colon (as sugar for constructing a nested mapping). \
+                \n\n\
+                Literals are written as '--config [NESTED_KEY]:VALID_YAML', \
+                where NESTED_KEY is an optional '.'-separated sequence of string keys, \
+                and the ':' is a literal colon. When provided, NESTED_KEY constructs a nested \
+                mapping (so `--config a.b.c:[2]` is equivalent to `--config :{a: {b: {c: [2]}}}`.\
+                \n\n\
+                Note that detection of filepaths versus literals is based solely \
+                on the presence of a colon, and no means of escaping one in a path \
+                are currently provided.\
             "),
         ])
     }
@@ -104,7 +109,8 @@ pub fn rsp2() {
         let (app, de) = CliDeserialize::augment_clap_app({
             app_from_crate!(", ")
                 .args(&[
-                    arg!( input=POSCAR "POSCAR"),
+
+                    arg!( input=STRUCTURE "input file for structure"),
                 ])
         });
         let matches = app.get_matches();
