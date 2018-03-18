@@ -187,8 +187,6 @@ pub enum PotentialKind {
 pub struct PotentialAirebo {
     /// Cutoff radius (x3.4A)
     pub lj_sigma: Option<f64>,
-    /// Colin's scale hack
-    pub lj_strength: Option<f64>,
     // (I'm too lazy to make an ADT for this)
     pub lj_enabled: Option<bool>,
     pub torsion_enabled: Option<bool>,

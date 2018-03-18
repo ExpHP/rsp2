@@ -19,7 +19,6 @@ const REBO_MASS_CARBON:   f64 = 12.0107;
 const DEFAULT_KC_Z_CUTOFF: f64 = 20.0; // (Angstrom?)
 const DEFAULT_KC_Z_MAX_LAYER_SEP: f64 = 4.5; // Angstrom
 
-const DEFAULT_AIREBO_LJ_STRENGTH: f64 = 1.0;
 const DEFAULT_AIREBO_LJ_SIGMA:    f64 = 3.0; // (cutoff, x3.4 A)
 const DEFAULT_AIREBO_LJ_ENABLED:      bool = true;
 const DEFAULT_AIREBO_TORSION_ENABLED: bool = false;
@@ -93,7 +92,6 @@ mod airebo {
     #[derive(Debug, Clone)]
     pub struct Airebo {
         lj_sigma: f64,
-        lj_strength: f64,
         lj_enabled: bool,
         torsion_enabled: bool,
     }
@@ -101,12 +99,11 @@ mod airebo {
     impl<'a> From<&'a cfg::PotentialAirebo> for Airebo {
         fn from(cfg: &'a cfg::PotentialAirebo) -> Self {
             let cfg::PotentialAirebo {
-                lj_sigma, lj_strength, lj_enabled, torsion_enabled,
+                lj_sigma, lj_enabled, torsion_enabled,
             } = *cfg;
 
             Airebo {
                 lj_sigma: lj_sigma.unwrap_or(DEFAULT_AIREBO_LJ_SIGMA),
-                lj_strength: lj_strength.unwrap_or(DEFAULT_AIREBO_LJ_STRENGTH),
                 lj_enabled: lj_enabled.unwrap_or(DEFAULT_AIREBO_LJ_ENABLED),
                 torsion_enabled: torsion_enabled.unwrap_or(DEFAULT_AIREBO_TORSION_ENABLED),
             }
@@ -134,8 +131,6 @@ mod airebo {
                         .arg(boole(self.torsion_enabled))
                         ,
                     PairCommand::pair_coeff(.., ..).args(&["CH.airebo", "H", "C"]),
-                    // colin's lj scaling HACK
-                    PairCommand::pair_coeff(.., ..).arg("lj/scale").arg(self.lj_strength),
                 ],
             }
         }
