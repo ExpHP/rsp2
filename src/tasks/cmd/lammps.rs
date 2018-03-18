@@ -11,8 +11,10 @@ use ::rsp2_structure::{Layers, Element, Structure, ElementStructure};
 use ::rsp2_tasks_config as cfg;
 use ::rsp2_array_types::V3;
 
-const REBO_MASS_HYDROGEN: f64 =  1.00;
-const REBO_MASS_CARBON:   f64 = 12.01;
+// Note: Masses should match those that phonopy uses if they are not explicitly passed to phonopy
+//       in input configuration files.
+const REBO_MASS_HYDROGEN: f64 =  1.00794;
+const REBO_MASS_CARBON:   f64 = 12.0107;
 
 const DEFAULT_KC_Z_CUTOFF: f64 = 20.0; // (Angstrom?)
 const DEFAULT_KC_Z_MAX_LAYER_SEP: f64 = 4.5; // Angstrom
