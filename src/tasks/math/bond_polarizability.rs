@@ -58,24 +58,30 @@ impl BondType {
     }
 }
 
-pub type PolConstants = EnumMap<BondType, PolConstant>;
+pub type PolConstants = EnumMap<BondType, Option<PolConstant>>;
 #[allow(bad_style)]
 pub fn default_CH_pol_constants() -> PolConstants {
     enum_map!{
-        BondType::CC => PolConstant {
+        BondType::CC => Some(PolConstant {
             c1: 0.32, c2: 2.60, c3: 7.55,
             max_len: 1.6,
-        },
-        BondType::CH => PolConstant {
+        }),
+        BondType::CH => Some(PolConstant {
             c1: 0.32, c2: 2.60, c3: 7.55,
             max_len: 1.3,
-        },
-        // FIXME: ??? why is this like this?
-        // (this is just copied from sp2)
-        BondType::HH => PolConstant {
-            c1: 0.0, c2: 0.0, c3: 0.0,
-            max_len: 1.1,
-        },
+        }),
+        _ => None,
+    }
+}
+
+#[allow(bad_style)]
+pub fn nanotube_CC_pol_constants() -> PolConstants {
+    enum_map!{
+        BondType::CC => Some(PolConstant {
+            c1: 0.04, c2: 4.0, c3: 4.7,
+            max_len: 1.6,
+        }),
+        _ => None,
     }
 }
 
@@ -214,9 +220,11 @@ fn raman_tensor(
         let distance: f64 = bond_vector.norm();
         let rhat: V3 = bond_vector / distance;
 
-        // ignore bonds which have no corresponding polarization constants
-        // specified in the input map
-        let pc = &pol_constants[bond_type];
+        let pc = match &pol_constants[bond_type] {
+            &Some(ref pc) => pc,
+            // ignore bonds which have no corresponding polarization constants
+            &None => continue,
+        };
 
         // check if bond is actually valid (via length)
         if distance > pc.max_len {
