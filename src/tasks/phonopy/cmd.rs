@@ -106,7 +106,31 @@ impl Builder {
 }
 
 impl Builder {
+
+    fn finalize_config(&self, structure: &ElementStructure) -> Self
+    {
+        use ::itertools::Itertools;
+
+        // FIXME: Mass hack
+        self.clone()
+            .conf(
+                "MASS",
+                structure.metadata().iter()
+                    .map(|&s| ::common::element_mass(s))
+                    .join(" ")
+            )
+    }
+
     pub fn displacements(
+        &self,
+        structure: &ElementStructure,
+    ) -> Result<DirWithDisps<TempDir>>
+    {
+        self.finalize_config(structure)
+            ._displacements(structure)
+    }
+
+    fn _displacements(
         &self,
         structure: &ElementStructure,
     ) -> Result<DirWithDisps<TempDir>>
@@ -138,12 +162,21 @@ impl Builder {
         DirWithDisps::from_existing(dir)?
     })}
 
+    #[allow(unused)]
+    pub fn symmetry(
+        &self,
+        structure: &ElementStructure,
+    ) -> Result<(Vec<FracOp>)>
+    {
+        self.finalize_config(structure)
+            ._symmetry(structure)
+    }
+
     // FIXME: Should return a new DirWithSymmetry type.
     // FIXME: The 'symmetry-test' was the only binary shim that used this and
     //        I removed it,  was removed during a refactor but
     //        this is nontrivial.  I'd rather re-add the shim.
-    #[allow(unused)]
-    pub fn symmetry(
+    fn _symmetry(
         &self,
         structure: &ElementStructure,
     ) -> Result<(Vec<FracOp>)>

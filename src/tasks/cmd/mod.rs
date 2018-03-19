@@ -170,12 +170,15 @@ impl TrialDir {
                 //        ...
                 //        The other Options *are* kind of pointless, but they simplifies the
                 //        design of the analysis module)
-                assert!(structure.metadata().iter().all(|&sym| sym == CARBON), "VERYBAD MASS HACK");
-                gamma_system_analysis::Input {
-                    // vvv FIXME FIXME OMG HACK HACK HACK VERYBAD HACK vvv
-                    atom_masses:     &Some(AtomMasses(vec![12.0107; structure.num_atoms()])),
-                    // ^^^ FIXME FIXME OMG HACK HACK HACK VERYBAD HACK ^^^
 
+                // vvv FIXME FIXME OMG HACK HACK HACK VERYBAD HACK vvv
+                let masses = structure.metadata().iter()
+                    .map(|&s| ::common::element_mass(s))
+                    .collect();
+                // ^^^ FIXME FIXME OMG HACK HACK HACK VERYBAD HACK ^^^
+
+                gamma_system_analysis::Input {
+                    atom_masses:     &Some(AtomMasses(masses)),
                     atom_elements:   &Some(AtomElements(structure.metadata().to_vec())),
                     atom_coords:     &Some(AtomCoordinates(structure.map_metadata_to(|_| ()))),
                     atom_layers:     &atom_layers.clone().map(AtomLayers),

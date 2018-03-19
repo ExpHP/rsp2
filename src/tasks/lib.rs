@@ -184,3 +184,17 @@ impl<T> As3<T> for (T, T, T) {
     fn as_3(&self) -> (&T, &T, &T)
     { (&self.0, &self.1, &self.2) }
 }
+
+mod common {
+    use ::rsp2_structure::{Element, consts};
+
+    // FIXME: Should handle masses in a proper way (e.g. via metadata or otherwise) eventually...
+    pub fn element_mass(elem: Element) -> f64
+    {
+        match elem {
+            consts::HYDROGEN => 1.00794,
+            consts::CARBON => 12.0107,
+            _ => panic!("Missing mass for element {}.", elem.symbol()),
+        }
+    }
+}
