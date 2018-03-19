@@ -236,10 +236,7 @@ fn raman_tensor(
         let dconst_one = pc.c2; // `a'_par -   a'_perp`
         let dconst_two = pc.c3; // `a'_par + 2 a'_perp`
 
-        // FIXME
         tensor += &mat::from_fn(|r, c| {
-            // FIXME wtf is this
-            //       this is just some matrix sum, right?
             dot(&rhat, &eig) * (
                 (dconst_two / 3.0) * kdelta[r][c]
                     + dconst_one * (rhat[r] * rhat[c] - kdelta[r][c] / 3.0)
