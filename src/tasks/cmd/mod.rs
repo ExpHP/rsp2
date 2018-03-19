@@ -35,6 +35,7 @@ use ::rsp2_structure::{CoordStructure, ElementStructure, Structure};
 use ::rsp2_structure::{Lattice, Coords};
 use ::rsp2_structure_gen::Assemble;
 use ::phonopy::Builder as PhonopyBuilder;
+use ::math::bands::ScMatrix;
 
 use ::rsp2_fs_util::{rm_rf};
 
@@ -118,76 +119,38 @@ impl TrialDir {
             },
         }
 
-        poscar::dump(self.create_file("initial.vasp")?, "", &original_structure)?;
+        self.write_poscar("initial.vasp", "Initial structure", &original_structure)?;
         let phonopy = phonopy_builder_from_settings(&settings.phonons, &original_structure);
         let phonopy = phonopy.use_sparse_sets(settings.tweaks.sparse_sets);
 
         let mut from_structure = original_structure;
-        let mut iteration = 1;
-        // HACK to stop one iteration AFTER all non-acoustics are positive
-        let mut all_ok_count = 0;
-        let (structure, ev_analysis) = loop { // NOTE: we use break with value
+        let mut loop_state = EvLoopFsm::new(&settings.ev_loop);
 
-            let structure = do_relax(&lmp, &settings.cg, &settings.potential, from_structure)?;
-            let bands_dir = do_diagonalize(
-                &lmp, &settings.threading, &phonopy, &structure,
-                match cli.save_bands {
-                    true => Some(SAVE_BANDS_DIR.as_ref()),
-                    false => None,
-                },
-                &[Q_GAMMA, Q_K],
-            )?;
-
-            let (evals, evecs) = read_eigensystem(&bands_dir, &Q_GAMMA)?;
+        // NOTE: we use break with value
+        let (structure, ev_analysis) = loop {
+            // move out of from_structure so that Rust's control-flow analysis
+            // will make sure we put something back.
+            let structure = from_structure;
+            let iteration = loop_state.iteration;
 
             trace!("============================");
-            trace!("Finished relaxation # {}", iteration);
+            trace!("Begin relaxation # {}", iteration);
 
-            {
-                let file = self.create_file(format!("structure-{:02}.1.vasp", iteration))?;
-                trace!("Writing '{}'", file.path().nice()?);
-                poscar::dump(
-                    file,
-                    &format!("Structure after CG round {}", iteration),
-                    &structure)?;
-            }
+            let structure = do_relax(&lmp, &settings.cg, &settings.potential, structure)?;
+            
+            trace!("============================");
 
-            // NOTE: in order to reuse the results of the bond search between iterations,
-            //       we would need to store image indices so that the correct cartesian
-            //       vectors can be computed.
-            //       For now, we just do it all from scratch each time.
-            let bonds = settings.bond_radius.map(|bond_radius| ok({
-                trace!("Computing bonds");
-                Bonds::from_brute_force_very_dumb(&structure, bond_radius)?
-            })).fold_ok()?;
+            self.write_poscar(
+                &format!("structure-{:02}.1.vasp", iteration),
+                &format!("Structure after CG round {}", iteration),
+                &structure,
+            )?;
 
-            trace!("Computing eigensystem info");
-            let ev_analysis = {
-                use self::ev_analyses::*;
-
-                // (NOTE: all these Options look pointless now, but the layer
-                //        stuff shall soon become optional.
-                //        ...
-                //        The other Options *are* kind of pointless, but they simplifies the
-                //        design of the analysis module)
-
-                // vvv FIXME FIXME OMG HACK HACK HACK VERYBAD HACK vvv
-                let masses = structure.metadata().iter()
-                    .map(|&s| ::common::element_mass(s))
-                    .collect();
-                // ^^^ FIXME FIXME OMG HACK HACK HACK VERYBAD HACK ^^^
-
-                gamma_system_analysis::Input {
-                    atom_masses:     &Some(AtomMasses(masses)),
-                    atom_elements:   &Some(AtomElements(structure.metadata().to_vec())),
-                    atom_coords:     &Some(AtomCoordinates(structure.map_metadata_to(|_| ()))),
-                    atom_layers:     &atom_layers.clone().map(AtomLayers),
-                    layer_sc_mats:   &layer_sc_mats.clone().map(LayerScMatrices),
-                    ev_frequencies:  &Some(EvFrequencies(evals.clone())),
-                    ev_eigenvectors: &Some(EvEigenvectors(evecs.clone())),
-                    bonds:           &bonds.map(Bonds),
-                }.compute()?
-            };
+            let (bands_dir, evals, evecs, ev_analysis) = self.do_post_relaxation_computations(
+                settings, &cli, &lmp, &atom_layers, &layer_sc_mats,
+                &phonopy, &structure,
+            )?;
+            let _do_not_drop_the_bands_dir = bands_dir;
 
             {
                 let file = self.create_file(format!("eigenvalues.{:02}", iteration))?;
@@ -195,68 +158,34 @@ impl TrialDir {
                 write_eigen_info_for_humans(&ev_analysis, &mut |s| ok(info!("{}", s)))?;
             }
 
-            let mut structure = structure;
-            let bad_evs: Vec<_> = {
-                let acousticness = ev_analysis.ev_acousticness.as_ref().expect("(bug) always computed!");
-                izip!(1.., &evals, &evecs.0, &acousticness.0)
-                    .take_while(|&(_, &freq, _, _)| freq < 0.0)
-                    .filter(|&(_, _, _, &acousticness)| acousticness < 0.95)
-                    .map(|(i, freq, evec, _)| {
-                        let name = format!("band {} ({})", i, freq);
-                        (name, evec.as_real_checked())
-                    }).collect()
-            };
+            let (structure, did_chasing) = self.maybe_do_ev_chasing(
+                &settings, &lmp, structure, &ev_analysis, &evals, &evecs,
+            )?;
 
-            if !bad_evs.is_empty() {
-                trace!("Chasing eigenvectors...");
-                structure = do_eigenvector_chase(
-                    &lmp,
-                    &settings.ev_chase,
-                    &settings.potential,
-                    structure,
-                    &bad_evs[..],
-                )?;
-            }
-
-            {
-                let file = self.create_file(format!("./structure-{:02}.2.vasp", iteration))?;
-                trace!("Writing '{}'", file.path().nice()?);
-                poscar::dump(
-                    file,
-                    &format!("Structure after eigenmode-chasing round {}", iteration),
-                    &structure)?;
-            }
+            self.write_poscar(
+                &format!("structure-{:02}.2.vasp", iteration),
+                &format!("Structure after eigenmode-chasing round {}", iteration),
+                &structure,
+            )?;
 
             warn_on_improvable_lattice_params(&lmp, &structure)?;
 
-            if bad_evs.is_empty() {
-                all_ok_count += 1;
-                if all_ok_count >= settings.ev_loop.min_positive_iter {
-                    break (structure, ev_analysis /*, bands_dir */);
-                }
+            match loop_state.step(did_chasing) {
+                EvLoopStatus::KeepGoing => {
+                    from_structure = structure;
+                    continue;
+                },
+                EvLoopStatus::Done => {
+                    break (structure, ev_analysis);
+                },
+                EvLoopStatus::ItsBadGuys(msg) => {
+                    bail!("{}", msg);
+                },
             }
-
-            // -----------------------------
-            // mutate loop variables
-
-            iteration += 1; // REMINDER: not a for loop due to 'break value;'
-
-            // Possibly fail after too many iterations
-            // (we don't want to continue with negative non-acoustics)
-            if iteration > settings.ev_loop.max_iter {
-                if settings.ev_loop.fail {
-                    error!("Too many relaxation steps!");
-                    bail!("Too many relaxation steps!");
-                } else {
-                    warn!("Too many relaxation steps!");
-                    break (structure, ev_analysis /*, bands_dir */);
-                }
-            }
-
-            from_structure = structure;
+            // unreachable
         }; // (structure, ev_analysis, final_bands_dir)
 
-        poscar::dump(self.create_file("final.vasp")?, "", &structure)?;
+        self.write_poscar("final.vasp", "Final structure", &structure)?;
 
         write_eigen_info_for_machines(&ev_analysis, self.create_file("eigenvalues.final")?)?;
 
@@ -274,7 +203,164 @@ impl TrialDir {
         // write_summary_file(settings, &lmp, &einfos, &kinfos)?;
         self.write_summary_file(settings, &lmp, &ev_analysis)?;
     })}
+
+    fn write_poscar(&self, filename: &str, headline: &str, structure: &ElementStructure) -> Result<()>
+    {ok({
+        use ::rsp2_structure_io::poscar;
+        let file = self.create_file(filename)?;
+        trace!("Writing '{}'", file.path().nice()?);
+        poscar::dump(file, headline, &structure)?;
+    })}
+
+    fn do_post_relaxation_computations(
+        &self,
+        settings: &Settings,
+        cli: &CliArgs,
+        lmp: &LammpsBuilder,
+        atom_layers: &Option<Vec<usize>>,
+        layer_sc_mats: &Option<Vec<ScMatrix>>,
+        phonopy: &PhonopyBuilder,
+        structure: &ElementStructure,
+    ) -> Result<(DirWithBands<Box<AsPath>>, Vec<f64>, Basis3, GammaSystemAnalysis)>
+    {ok({
+
+        let bands_dir = do_diagonalize(
+            lmp, &settings.threading, phonopy, structure,
+            match cli.save_bands {
+                true => Some(SAVE_BANDS_DIR.as_ref()),
+                false => None,
+            },
+            &[Q_GAMMA],
+        )?;
+        let (evals, evecs) = read_eigensystem(&bands_dir, &Q_GAMMA)?;
+
+        trace!("============================");
+        trace!("Finished diagonalization");
+
+        // NOTE: in order to reuse the results of the bond search between iterations,
+        //       we would need to store image indices so that the correct cartesian
+        //       vectors can be computed.
+        //       For now, we just do it all from scratch each time.
+        let bonds = settings.bond_radius.map(|bond_radius| ok({
+            trace!("Computing bonds");
+            Bonds::from_brute_force_very_dumb(&structure, bond_radius)?
+        })).fold_ok()?;
+
+        trace!("Computing eigensystem info");
+
+        let ev_analysis = {
+            use self::ev_analyses::*;
+
+            let masses = {
+                structure.metadata().iter()
+                    .map(|&s| ::common::element_mass(s))
+                    .collect()
+            };
+
+            gamma_system_analysis::Input {
+                atom_masses:     &Some(AtomMasses(masses)),
+                atom_elements:   &Some(AtomElements(structure.metadata().to_vec())),
+                atom_coords:     &Some(AtomCoordinates(structure.map_metadata_to(|_| ()))),
+                atom_layers:     &atom_layers.clone().map(AtomLayers),
+                layer_sc_mats:   &layer_sc_mats.clone().map(LayerScMatrices),
+                ev_frequencies:  &Some(EvFrequencies(evals.clone())),
+                ev_eigenvectors: &Some(EvEigenvectors(evecs.clone())),
+                bonds: &bonds.map(Bonds),
+            }.compute()?
+        };
+        (bands_dir, evals, evecs, ev_analysis)
+    })}
+
+
+    fn maybe_do_ev_chasing(
+        &self,
+        settings: &Settings,
+        lmp: &LammpsBuilder,
+        structure: ElementStructure,
+        ev_analysis: &GammaSystemAnalysis,
+        evals: &[f64],
+        evecs: &Basis3,
+    ) -> Result<(ElementStructure, DidEvChasing)>
+    {ok({
+        let structure = structure;
+        let bad_evs: Vec<_> = {
+            let acousticness = ev_analysis.ev_acousticness.as_ref().expect("(bug) always computed!");
+            izip!(1.., evals, &evecs.0, &acousticness.0)
+                .take_while(|&(_, &freq, _, _)| freq < 0.0)
+                .filter(|&(_, _, _, &acousticness)| acousticness < 0.95)
+                .map(|(i, freq, evec, _)| {
+                    let name = format!("band {} ({})", i, freq);
+                    (name, evec.as_real_checked())
+                }).collect()
+        };
+
+        match bad_evs.len() {
+            0 => (structure, DidEvChasing(false)),
+            n => {
+                trace!("Chasing {} bad eigenvectors...", n);
+                let structure = do_eigenvector_chase(
+                    &lmp,
+                    &settings.ev_chase,
+                    &settings.potential,
+                    structure,
+                    &bad_evs[..],
+                )?;
+                (structure, DidEvChasing(true))
+            }
+        }
+    })}
 }
+
+struct EvLoopFsm {
+    config: cfg::EvLoop,
+    iteration: u32,
+    all_ok_count: u32,
+}
+
+pub enum EvLoopStatus {
+    KeepGoing,
+    Done,
+    ItsBadGuys(&'static str),
+}
+
+impl EvLoopFsm {
+    pub fn new(config: &cfg::EvLoop) -> Self
+    { EvLoopFsm {
+        config: config.clone(),
+        iteration: 1,
+        all_ok_count: 0,
+    }}
+
+    pub fn step(&mut self, did: DidEvChasing) -> EvLoopStatus {
+        self.iteration += 1;
+        match did {
+            DidEvChasing(true) => {
+                self.all_ok_count = 0;
+                if self.iteration > self.config.max_iter {
+                    if self.config.fail {
+                        error!("Too many relaxation steps!");
+                        EvLoopStatus::ItsBadGuys("Too many relaxation steps!")
+                    } else {
+                        warn!("Too many relaxation steps!");
+                        EvLoopStatus::Done
+                    }
+                } else {
+                    EvLoopStatus::KeepGoing
+                }
+            },
+            DidEvChasing(false) => {
+                self.all_ok_count += 1;
+                if self.all_ok_count >= self.config.min_positive_iter {
+                    EvLoopStatus::KeepGoing
+                } else {
+                    EvLoopStatus::Done
+                }
+            },
+        }
+    }
+}
+
+pub struct DidEvChasing(bool);
 
 fn do_relax(
     lmp: &LammpsBuilder,
