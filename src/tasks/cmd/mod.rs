@@ -173,7 +173,7 @@ impl TrialDir {
                 assert!(structure.metadata().iter().all(|&sym| sym == CARBON), "VERYBAD MASS HACK");
                 gamma_system_analysis::Input {
                     // vvv FIXME FIXME OMG HACK HACK HACK VERYBAD HACK vvv
-                    atom_masses:     &Some(AtomMasses(vec![12.01; structure.num_atoms()])),
+                    atom_masses:     &Some(AtomMasses(vec![12.0107; structure.num_atoms()])),
                     // ^^^ FIXME FIXME OMG HACK HACK HACK VERYBAD HACK ^^^
 
                     atom_elements:   &Some(AtomElements(structure.metadata().to_vec())),
