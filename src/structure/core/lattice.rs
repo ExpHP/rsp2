@@ -2,7 +2,7 @@ use ::rsp2_array_utils::{map_arr};
 use ::std::ops::Mul;
 use ::std::sync::Arc;
 
-use ::rsp2_array_types::{V3, M33, M3, mat};
+use ::rsp2_array_types::{V3, M33, M3, mat, inv};
 
 /// A 3x3 matrix with a precomputed inverse.
 #[derive(Debug, Clone)]
@@ -24,7 +24,7 @@ impl Lattice {
     /// Create a lattice from a matrix where the rows are lattice vectors.
     #[inline]
     pub fn new(matrix: &M33) -> Self {
-        let inverse = Arc::new(matrix.inv());
+        let inverse = Arc::new(inv(matrix));
         let matrix = Arc::new(*matrix);
         Self { matrix, inverse }
     }

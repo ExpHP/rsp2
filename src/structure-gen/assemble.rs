@@ -7,7 +7,7 @@ use ::{Result, ok};
 use ::rsp2_structure::{Coords, Lattice, CoordStructure};
 use ::std::io::Read;
 
-use ::rsp2_array_types::{M22, M33, V2, V3, mat};
+use ::rsp2_array_types::{M22, M33, V2, V3, mat, inv};
 
 pub fn load_layers_yaml<R: Read>(mut file: R) -> Result<Assemble>
 { _load_layers_yaml(&mut file) }
@@ -215,7 +215,7 @@ fn interpret_cereal(cereal: self::cereal::Root) -> Result<middle::Layers>
                 let x = Lattice::new(&m22_to_m33(&x));
                 match units {
                     Units::Frac => (&x * &full_lattice, x),
-                    Units::Cart => (x.clone(), &x * &full_lattice.inv()),
+                    Units::Cart => (x.clone(), &x * &inv(&full_lattice)),
                 }
             }
         };

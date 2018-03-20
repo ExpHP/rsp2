@@ -15,7 +15,7 @@
 use ::{Lattice};
 
 use ::rsp2_array_utils::{arr_from_fn};
-use ::rsp2_array_types::{V3, M33, Envee, Unvee, dot, mat};
+use ::rsp2_array_types::{V3, M33, Envee, Unvee, dot, mat, inv};
 
 use ::std::cmp::Ordering;
 
@@ -110,7 +110,7 @@ mod unimodular {
         {
             // FIXME it feels cleaner to compute the inverse alongside
             //       the matrix rather than to do a float inversion at the end
-            let floats_inv = self.0.map(|x| x as f64).inv();
+            let floats_inv = inv(&self.0.map(|x| x as f64));
             let inverse = ::util::Tol(1e-6).unfloat_m33(&floats_inv).expect("bug!");
 
             Unimodular { matrix: self.0, inverse }

@@ -259,6 +259,7 @@ impl LammpsOwner {
     // Gather an integer property across all atoms.
     //
     // unsafe because an incorrect 'count' or a non-integer field may cause an out-of-bounds read.
+    #[allow(unused)] // FIXME issue #4
     pub unsafe fn gather_atoms_i(&mut self, name: &str, count: usize) -> Result<Vec<i64>>
     {Ok({
         self.__gather_atoms_c_ty::<c_int>(name, ScatterGatherDatatype::Integer, count)?
