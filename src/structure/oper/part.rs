@@ -1,12 +1,34 @@
 use ::{Result, ErrorKind};
 use ::oper::Permute;
 
+/// Type of "a thing that has been partitioned."
+///
+/// It is a `V` that has been broken up into many smaller `V`s,
+/// each associated with a label `L`. (such as a layer number)
+///
+/// Typically, these labels are unique. However, technically there is
+/// nothing stopping you from constructing one with duplicate labels.
+/// (if you do, they will still be considered to represent separate pieces)
 pub type Parted<L, V> = Vec<(L, V)>;
+
+/// A partition operator.
+///
+/// It represents a specific way to break up a vector into smaller
+/// vectors. These partitions are not necessarily contiguous in the
+/// original vector. Basically, `Part` contains a partitioned form
+/// of the vector's indices.
+///
+/// Using the [`Partition`] trait, a `Part<L>` can be applied to any
+/// `V` that implements `Partition` in order to break it up into a
+/// [`Parted<L, V>`].
+///
+/// [`Partition`]: ../trait.Partition.html
+/// [`Parted`]: ../type.Parted.html
 #[derive(Debug, Clone)]
 pub struct Part<L> {
     // the total size, precomputed.
     // (in the future, incomplete partitions may be allowed, in which
-    //  case storing this will be just a convenience, but manditory)
+    //  case storing this will be not just a convenience, but manditory)
     index_limit: usize,
     part: Parted<L, Vec<usize>>,
 }
@@ -122,9 +144,17 @@ impl<L> IntoIterator for Part<L> {
 /// The lifetime is associated with the partition vector and not `self`,
 /// unfortunately, so prepare to see a lot of `Self: 'static` bounds...
 pub type Unlabeled<'part, T> = Box<VeclikeIterator<Item=T> + 'part>;
-pub trait VeclikeIterator: ExactSizeIterator + DoubleEndedIterator {}
-impl<T> VeclikeIterator for T where T: ExactSizeIterator + DoubleEndedIterator {}
 
+pub trait VeclikeIterator: ExactSizeIterator + DoubleEndedIterator {}
+
+impl<T> VeclikeIterator for T
+where T: ExactSizeIterator + DoubleEndedIterator {}
+
+/// Trait for applying a `Part` to a `Vec` (or similar type), breaking it into pieces.
+///
+/// By making this a trait, it can be implemented on types like rsp2's own
+/// `Structure<M>` (which at its core is fundamentally just an structure of
+/// arrays), or anything else that contains data per-atom (such as eigenvectors).
 pub trait Partition: Sized {
     /// Variant of `into_partitions` which composes more easily, and is
     /// therefore the one you need to implement.
@@ -134,7 +164,6 @@ pub trait Partition: Sized {
     /// See `into_partitions` for more info.
     fn into_unlabeled_partitions<L>(self, part: &Part<L>) -> Unlabeled<Self>;
 
-    // NOTE: Specifying order allows composite types
     /// Consume self to produce partitions.
     ///
     /// The ordering within each partition is specified, in order to allow
@@ -206,6 +235,8 @@ where
 mod tests {
     use super::*;
     use ::Error;
+    
+    // FIXME: I don't see any tests where two labels have the same value...
 
     #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
     pub enum LetterKind { Vowel, Consonant }
