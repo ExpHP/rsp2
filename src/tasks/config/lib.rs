@@ -71,18 +71,34 @@ fn value_from_dyn_reader(r: &mut Read) -> Result<::serde_yaml::Value, ::serde_ya
 pub struct Settings {
     #[serde(default)]
     pub threading: Threading,
+
     pub potential: Potential,
+
     pub scale_ranges: ScaleRanges,
+
     // Number of layers, when known in advance
     pub layers: Option<u32>,
+
+    #[serde(default)]
+    pub acoustic_search: AcousticSearch,
+
     pub cg: Acgsd,
+
     pub phonons: Phonons,
+
     pub ev_chase: EigenvectorChase,
+
     /// `None` disables bond graph.
-    #[serde(default)] pub bond_radius: Option<f64>,
+    #[serde(default)]
+    pub bond_radius: Option<f64>,
+
     pub layer_gamma_threshold: f64,
-    #[serde(default)] pub ev_loop: EvLoop,
-    #[serde(default)] pub tweaks: Tweaks,
+
+    #[serde(default)]
+    pub ev_loop: EvLoop,
+
+    #[serde(default)]
+    pub tweaks: Tweaks,
 }
 derive_yaml_read!{Settings}
 
@@ -250,6 +266,27 @@ pub enum Threading {
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
+pub struct AcousticSearch {
+    /// Displacement to use for checking changes in force along the mode.
+    #[serde(default = "self::defaults::acoustic_search::displacement_distance")]
+    pub displacement_distance: f64,
+
+    /// `-1 <= threshold < 1`.  How anti-parallel the changes in force
+    /// have to be at small displacements along the mode for it to be classified
+    /// as rotational.
+    #[serde(default = "self::defaults::acoustic_search::rotational_fdot_threshold")]
+    pub rotational_fdot_threshold: f64,
+
+    /// `-1 <= threshold < 1`.  How, uh, "pro-parallel" the changes in force
+    /// have to be at small displacements along the mode for it to be classified
+    /// as imaginary.
+    #[serde(default = "self::defaults::acoustic_search::imaginary_fdot_threshold")]
+    pub imaginary_fdot_threshold: f64,
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case")]
 pub enum NormalizationMode {
     /// Normalize the 2-norm of the 3N-component vector.
     CoordNorm,
@@ -296,17 +333,35 @@ impl Default for ScaleRangesLayerSepStyle {
 impl Default for EvLoop {
     fn default() -> Self { from_empty_mapping().unwrap() }
 }
-#[test] fn test_ev_loop_default() { let _ = EvLoop::default(); }
 
 impl Default for Tweaks {
     fn default() -> Self { from_empty_mapping().unwrap() }
 }
-#[test] fn test_tweaks_default() { let _ = Tweaks::default(); }
+
+impl Default for AcousticSearch {
+    fn default() -> Self { from_empty_mapping().unwrap() }
+}
+
+#[test]
+fn test_defaults()
+{
+    // NOTE: This simply checks that `from_empty_mapping` can succeed
+    //       for each type that uses it.
+    //       (it will fail if one of the fields does not have a default
+    //        value and is not an Option type)
+    let _ = Threading::default();
+    let _ = ScaleRangesLayerSepStyle::default();
+    let _ = EvLoop::default();
+    let _ = Tweaks::default();
+    let _ = AcousticSearch::default();
+}
 
 fn from_empty_mapping<T: for<'de> ::serde::Deserialize<'de>>() -> ::serde_yaml::Result<T> {
     use ::serde_yaml::{from_value, Value, Mapping};
     from_value(Value::Mapping(Mapping::new()))
 }
+
+// --------------------------------------------------------
 
 mod defaults {
     pub(crate) mod tweaks {
@@ -322,5 +377,11 @@ mod defaults {
         pub(crate) fn min_positive_iter() -> u32 { 3 }
         pub(crate) fn max_iter() -> u32 { 15 }
         pub(crate) fn fail() -> bool { true }
+    }
+
+    pub(crate) mod acoustic_search {
+        pub(crate) fn displacement_distance() -> f64 { 1e-5 }
+        pub(crate) fn imaginary_fdot_threshold() -> f64 { 0.80 }
+        pub(crate) fn rotational_fdot_threshold() -> f64 { 0.80 }
     }
 }

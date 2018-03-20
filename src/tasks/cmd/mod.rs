@@ -15,13 +15,16 @@ use self::ev_analyses::GammaSystemAnalysis;
 use self::trial::TrialDir;
 pub(crate) mod trial;
 
+mod acoustic_search;
+
 use ::errors::{Error, ErrorKind, Result, ok};
 use ::rsp2_tasks_config::{self as cfg, Settings, NormalizationMode, SupercellSpec};
 use ::traits::{AsPath};
 use ::phonopy::{DirWithBands, DirWithDisps, DirWithForces};
 
+use ::util::{tup2, tup3};
 use ::util::ext_traits::{OptionResultExt, PathNiceExt};
-use ::types::{Basis3};
+use ::math::basis::Basis3;
 use ::math::bonds::Bonds;
 
 use ::path_abs::{PathFile, PathDir};
@@ -705,6 +708,8 @@ fn read_eigensystem<P: AsPath>(
 
 //-----------------------------------
 
+//-----------------------------------
+
 pub(crate) fn optimize_layer_parameters(
     settings: &cfg::ScaleRanges,
     lmp: &LammpsBuilder,
@@ -730,6 +735,8 @@ pub(crate) fn optimize_layer_parameters(
     {
         let builder = &builder;
 
+        // Make a bunch of closures representing quantities that can be optimized.
+        // (NOTE: this is the only part that really contains stuff specific to layers)
         let optimizables = {
             let mut optimizables: Vec<(_, Box<Fn(f64)>)> = vec![];
             optimizables.push((
@@ -1126,5 +1133,3 @@ impl TrialDir {
 
 //=================================================================
 
-fn tup2<T:Copy>(arr: [T; 2]) -> (T, T) { (arr[0], arr[1]) }
-fn tup3<T:Copy>(arr: [T; 3]) -> (T, T, T) { (arr[0], arr[1], arr[2]) }
