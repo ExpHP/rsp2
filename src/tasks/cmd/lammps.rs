@@ -11,7 +11,7 @@ use ::rsp2_structure::{Layers, Element, Structure, ElementStructure, consts};
 use ::rsp2_tasks_config as cfg;
 use ::rsp2_array_types::V3;
 
-const DEFAULT_KC_Z_CUTOFF: f64 = 20.0; // (Angstrom?)
+const DEFAULT_KC_Z_CUTOFF: f64 = 14.0; // (Angstrom?)
 const DEFAULT_KC_Z_MAX_LAYER_SEP: f64 = 4.5; // Angstrom
 
 const DEFAULT_AIREBO_LJ_SIGMA:    f64 = 3.0; // (cutoff, x3.4 A)

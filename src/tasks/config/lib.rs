@@ -196,6 +196,8 @@ pub struct PotentialAirebo {
 #[derive(Debug, Clone, PartialEq, Default)]
 #[serde(rename_all = "kebab-case")]
 pub struct PotentialKolmogorovCrespiZ {
+    // NOTE: defaults are not here because they are defined in rsp2_tasks,
+    //       which depends on this crate
     /// Cutoff radius (Angstrom?)
     pub cutoff: Option<f64>,
     /// Separations larger than this are regarded as vacuum and do not interact. (Angstrom)
