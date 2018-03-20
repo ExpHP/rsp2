@@ -1,6 +1,7 @@
 use ::errors::{Result, ok};
 
 use ::std::fmt;
+use ::std::time;
 use ::log::{LogLevel, LogRecord};
 use ::fern::FernLog;
 use ::path_abs::{FileWrite, PathFile};
@@ -78,21 +79,17 @@ impl Verbosity {
 /// "unused variable" lint to help remind you to do this once possible.
 pub fn init_global_logger() -> Result<SetGlobalLogfile>
 {ok({
-    use ::std::time::Instant;
     use ::log::LogLevelFilter as LevelFilter;
 
     let verbosity = Verbosity::from_env()?;
 
-    let start = Instant::now();
+    let start = time::Instant::now();
     let mut fern = ::fern::Dispatch::new();
-    fern = fern.format(move |out, message, record| {
-            let t = start.elapsed();
-            out.finish(format_args!("[{:>4}.{:03}s][{}][{}] {}",
-                t.as_secs(),
-                t.subsec_nanos() / 1_000_000,
-                record.target(),
-                ColorizedLevel(record.level()),
-                message))
+    fern =
+        fern.format(move |out, message, record| {
+            let message = fmt_log_message_lines(message, record, start.elapsed());
+
+            out.finish(format_args!("{}", message))
         })
         .level(LevelFilter::Debug)
         .level_for("rsp2_tasks", LevelFilter::Trace)
@@ -134,4 +131,41 @@ pub struct SetGlobalLogfile(());
 impl SetGlobalLogfile {
     pub fn start(self, path: PathFile) -> Result<()>
     { GLOBAL_LOGFILE.start(path) }
+}
+
+fn fmt_log_message_lines(
+    message: &fmt::Arguments,
+    record: &LogRecord,
+    elapsed: time::Duration,
+) -> String {
+
+    // (yes, I know, we're ruining the entire point of fmt::Arguments by printing
+    //  it to a String, boo hoo.  We want to inspect its contents.)
+    let buf = message.to_string();
+    let mut lines = buf.lines();
+
+    // Break into lines, format the first, and pad the rest.
+    let first = lines.next().unwrap();
+    let mut out = vec![format!(
+        "[{:>4}.{:03}s][{}][{}] {}",
+        elapsed.as_secs(),
+        elapsed.subsec_nanos() / 1_000_000,
+        record.target(),
+        ColorizedLevel(record.level()),
+        first,
+    )];
+
+    let len_secs = format!("{:4}", elapsed.as_secs()).len();
+    let len_target = record.target().len();
+    let len_level = record.level().to_string().len();
+    out.extend(lines.map(|line| {
+        format!(
+            "\n {:len_secs$} {:3}   {:len_target$}  {:len_level$}| {}",
+            "", "", "", "", line,
+            len_secs=len_secs,
+            len_target=len_target,
+            len_level=len_level,
+        )
+    }));
+    out.concat()
 }

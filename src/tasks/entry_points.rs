@@ -10,8 +10,13 @@ use ::ui::cli_deserialize::CliDeserialize;
 use ::util::ext_traits::{ArgMatchesExt};
 
 fn wrap_result_main<F>(main: F)
-where F: FnOnce() -> Result<()>,
-{ main().unwrap_or_else(|e| panic!("{}", e.display_chain())); }
+    where F: FnOnce() -> Result<()>,
+{
+    main().unwrap_or_else(|e| {
+        error!("{}", e.display_chain());
+        ::std::process::exit(1);
+    });
+}
 
 impl CliDeserialize for NewTrialDirArgs {
     fn _augment_clap_app<'a, 'b>(app: clap::App<'a, 'b>) -> clap::App<'a, 'b> {

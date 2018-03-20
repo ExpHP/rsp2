@@ -339,7 +339,6 @@ impl EvLoopFsm {
                 self.all_ok_count = 0;
                 if self.iteration > self.config.max_iter {
                     if self.config.fail {
-                        error!("Too many relaxation steps!");
                         EvLoopStatus::ItsBadGuys("Too many relaxation steps!")
                     } else {
                         warn!("Too many relaxation steps!");
