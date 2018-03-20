@@ -13,9 +13,10 @@ pub type Parted<L, V> = Vec<(L, V)>;
 
 /// A partition operator.
 ///
-/// It represents a specific way to break up a vector into smaller
-/// vectors. These partitions are not necessarily contiguous in the
-/// original vector. Basically, `Part` contains a partitioned form
+/// It represents a specific way to break up a vector into smaller vectors,
+/// each with a label of type `L`. These labels are *usually* (but not
+/// necessarily) unique, and the partitions are not necessarily contiguous
+/// in the original vector. Basically, `Part` contains a partitioned form
 /// of the vector's indices.
 ///
 /// Using the [`Partition`] trait, a `Part<L>` can be applied to any
