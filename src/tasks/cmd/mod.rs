@@ -351,9 +351,9 @@ impl EvLoopFsm {
             DidEvChasing(false) => {
                 self.all_ok_count += 1;
                 if self.all_ok_count >= self.config.min_positive_iter {
-                    EvLoopStatus::KeepGoing
-                } else {
                     EvLoopStatus::Done
+                } else {
+                    EvLoopStatus::KeepGoing
                 }
             },
         }

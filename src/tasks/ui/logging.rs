@@ -156,7 +156,6 @@ fn fmt_log_message_lines(
 
     let len_secs = format!("{:4}", elapsed.as_secs()).len();
     let len_target = record.target().len();
-    let len_level = record.level().to_string().len();
     out.extend(lines.map(|line| {
         format!(
             "\n {:len_secs$} {:3}   {:len_target$}  {:6}| {}",
