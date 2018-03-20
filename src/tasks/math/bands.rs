@@ -2,7 +2,7 @@
 use ::rsp2_structure::{Coords, Lattice, CoordStructure};
 use ::rsp2_kets::{Ket, KetRef, Rect};
 use ::rsp2_array_utils::{arr_from_fn};
-use ::rsp2_array_types::{V3, M33, dot};
+use ::rsp2_array_types::{V3, M33, dot, mat};
 
 use ::std::f64::consts::PI;
 use ::itertools::Itertools;
@@ -177,7 +177,7 @@ impl GammaUnfolder {
     pub fn from_config(
         config: &Config,
         superstructure: &CoordStructure,
-        supercell_matrix: &ScMatrix,
+        sc_matrix: &ScMatrix,
         // eigenvector_q: &V3, // reduced by sc lattice
     ) -> GammaUnfolder
     {
@@ -199,13 +199,13 @@ impl GammaUnfolder {
                 //  - supercell reciprocal lattice vectors (which we are trying to project onto)
                 let sc_lattice = superstructure.lattice().matrix();
                 let sc_inverse = superstructure.lattice().inverse_matrix();
-                let pc_lattice = &supercell_matrix.matrix.map(|x| x as f64).inv() * sc_lattice;
-                let pc_inverse = pc_lattice.inv();
-                let sc_recip = sc_inverse.t();
-                let pc_recip = pc_inverse.t();
+                let ref pc_lattice = &mat::inv(&sc_matrix.matrix.map(|x| x as f64)) * sc_lattice;
+                let ref pc_inverse = mat::inv(pc_lattice);
+                let ref sc_recip = sc_inverse.t();
+                let ref pc_recip = pc_inverse.t();
 
                 // lattice points of interest
-                let sc_periods = supercell_matrix.periods;
+                let sc_periods = sc_matrix.periods;
 
                 let quotient_sample_spec = self::config::SampleType::Plain(sc_periods);
                 let quotient_indices: Vec<_> =
@@ -216,11 +216,11 @@ impl GammaUnfolder {
                         }).collect();
                 assert!(quotient_indices.len() > 0, "no points to sample against");
 
-                let quotient_vecs = quotient_sample_spec.points(&sc_recip);
-                let pc_recip_vecs = config.sampling.points(&pc_recip);
+                let quotient_vecs = quotient_sample_spec.points(sc_recip);
+                let pc_recip_vecs = config.sampling.points(pc_recip);
 
                 // into recip cartesian space
-                let eigenvector_q_cart = eigenvector_q * &sc_recip;
+                let eigenvector_q_cart = eigenvector_q * sc_recip;
                 if eigenvector_q != &V3([0.0; 3]) {
                     // (I currently always run this code on gamma eigenvectors...)
                     warn!("Untested code path: 9fc15058-7199-45d2-80ec-630ceb575d3d");
@@ -237,7 +237,7 @@ impl GammaUnfolder {
                         }).collect()
                     }).collect(),
                     sc_qs_frac: {
-                        let pc_recip = Lattice::new(&pc_recip);
+                        let pc_recip = Lattice::new(pc_recip);
                         Coords::Carts(quotient_vecs.clone()).to_fracs(&pc_recip)
                     },
                 }
