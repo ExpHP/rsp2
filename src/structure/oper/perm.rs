@@ -1,6 +1,10 @@
 use ::{Result, ErrorKind};
 
 /// Represents a reordering operation on atoms.
+///
+/// See the [`Permute`] trait for more information.
+///
+/// [`Permute`]: trait.Permute.html
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Perm(Vec<u32>);
 
@@ -126,6 +130,24 @@ pub(crate) fn shuffle<T: Clone>(xs: &[T]) -> (Vec<T>, Perm)
     (xs.permuted_by(&perm), perm)
 }
 
+/// Trait for applying a permutation operation.
+///
+/// Note that in rsp2, this actually has two roles that are a bit
+/// conflated together: (this hasn't caused any trouble *yet*)
+///
+/// * Permutations of vectors, in general;
+///   To this end, there are helper functions like `append` and `with_inner`
+///   for constructing and composing permutations, and the implementation
+///   of `Permute` uses unsafe code to efficiently and correctly handle
+///   types with `Drop` implementations.
+///
+/// * Permutations of atoms, as a sort of "change of basis operation."
+///   Basically, if you have a function `compute_b(Structure) -> B`
+///   for some `B` that impls `Permute` (and the type `B` isn't used to
+///   represent anything else), then the implementation of `Permute` for
+///   `B` likely tries to satisfy the following property:
+///
+///        compute_b(structure.permute(perm)) == compute_b(structure).permute(perm)
 pub trait Permute: Sized {
     // awkward name, but it makes it makes two things clear
     // beyond a shadow of a doubt:
