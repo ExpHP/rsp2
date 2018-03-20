@@ -7,10 +7,10 @@ use ::path_abs::{PathDir, PathFile};
 use ::ui::logging::init_global_logger;
 use ::ui::cfg_merging::ConfigSources;
 use ::ui::cli_deserialize::CliDeserialize;
-use ::util::ArgMatchesExt;
+use ::util::ext_traits::{ArgMatchesExt};
 
 fn wrap_result_main<F>(main: F)
-where F: FnOnce() -> Result<()>
+where F: FnOnce() -> Result<()>,
 { main().unwrap_or_else(|e| panic!("{}", e.display_chain())); }
 
 impl CliDeserialize for NewTrialDirArgs {
@@ -109,7 +109,6 @@ pub fn rsp2() {
         let (app, de) = CliDeserialize::augment_clap_app({
             app_from_crate!(", ")
                 .args(&[
-
                     arg!( input=STRUCTURE "input file for structure"),
                 ])
         });

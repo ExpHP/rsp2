@@ -4,6 +4,7 @@ use ::Result;
 use ::traits::{Save, AsPath};
 use ::traits::save::{Json, Yaml};
 use ::util::{LockfilePath, LockfileGuard};
+use ::util::ext_traits::PathNiceExt;
 use ::ui::cfg_merging::ConfigSources;
 
 use ::std::path::{Path};
@@ -34,6 +35,15 @@ impl TrialDir {
 
         if !err_if_existing {
             rm_rf(&trial_dir)?;
+        }
+
+        if trial_dir.exists() {
+            // PathDir::create does not error on pre-existing dirs...
+            bail!(
+                "'{}': Output directory already exists! \
+                Use --force if you really want to replace it.",
+                trial_dir.nice(),
+            )
         }
         let trial_dir = PathDir::create(&trial_dir)?;
 

@@ -15,11 +15,12 @@ use self::ev_analyses::GammaSystemAnalysis;
 use self::trial::TrialDir;
 pub(crate) mod trial;
 
-use ::errors::{Error, ErrorKind, Result, StdResult, ok};
+use ::errors::{Error, ErrorKind, Result, ok};
 use ::rsp2_tasks_config::{self as cfg, Settings, NormalizationMode, SupercellSpec};
 use ::traits::{AsPath};
 use ::phonopy::{DirWithBands, DirWithDisps, DirWithForces};
 
+use ::util::ext_traits::{OptionResultExt, PathNiceExt};
 use ::types::{Basis3};
 use ::math::bonds::Bonds;
 
@@ -40,7 +41,7 @@ use ::math::bands::ScMatrix;
 use ::rsp2_fs_util::{rm_rf};
 
 use ::std::io::{Write};
-use ::std::path::{Path, PathBuf};
+use ::std::path::{Path};
 
 use ::itertools::Itertools;
 
@@ -208,7 +209,7 @@ impl TrialDir {
     {ok({
         use ::rsp2_structure_io::poscar;
         let file = self.create_file(filename)?;
-        trace!("Writing '{}'", file.path().nice()?);
+        trace!("Writing '{}'", file.path().nice());
         poscar::dump(file, headline, &structure)?;
     })}
 
@@ -1055,30 +1056,6 @@ extension_trait! {
                 *v /= norm;
             }
             ev
-        }
-    }
-}
-
-//=================================================================
-
-extension_trait! {
-    <T, E> OptionResultExt<T, E> for Option<StdResult<T, E>> {
-        fn fold_ok(self) -> StdResult<Option<T>, E> {
-            self.map_or(Ok(None), |r| r.map(Some))
-        }
-    }
-}
-
-extension_trait! {
-    PathBufExt for PathBuf {
-        // make a path "nice" for display
-        fn nice(&self) -> Result<String> {
-            let cwd = PathDir::current_dir()?;
-            let absolute = cwd.join(self);
-            match absolute.as_path().strip_prefix(&cwd) {
-                Ok(path) => Ok(format!("{}", path.display())),
-                Err(_) => Ok(format!("{}", self.display())),
-            }
         }
     }
 }

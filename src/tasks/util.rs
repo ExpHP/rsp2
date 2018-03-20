@@ -137,14 +137,47 @@ mod lockfile {
 
 //--------------------------------------------------------
 
-extension_trait!{
-    <'a> pub ArgMatchesExt<'a> for ::clap::ArgMatches<'a> {
-        // For when the value ought to exist because it was 'required(true)'
-        // (and therefore clap would have panicked if it were missing)
-        fn expect_value_of(&self, s: &str) -> String
-        { self.value_of(s).unwrap_or_else(|| panic!("BUG! ({} was required)", s)).into() }
+pub mod ext_traits {
+    use ::path_abs::PathDir;
+    use ::std::result::Result as StdResult;
+    use ::std::path::Path;
 
-        fn expect_values_of(&self, s: &str) -> Vec<String>
-        { self.values_of(s).unwrap_or_else(|| panic!("BUG! ({} was required)", s)).map(Into::into).collect() }
+    extension_trait!{
+        <'a> pub ArgMatchesExt<'a> for ::clap::ArgMatches<'a> {
+            // For when the value ought to exist because it was 'required(true)'
+            // (and therefore clap would have panicked if it were missing)
+            fn expect_value_of(&self, s: &str) -> String
+            { self.value_of(s).unwrap_or_else(|| panic!("BUG! ({} was required)", s)).into() }
+
+            fn expect_values_of(&self, s: &str) -> Vec<String>
+            { self.values_of(s).unwrap_or_else(|| panic!("BUG! ({} was required)", s)).map(Into::into).collect() }
+        }
+    }
+
+    extension_trait! {
+        pub <T, E> OptionResultExt<T, E> for Option<StdResult<T, E>> {
+            fn fold_ok(self) -> StdResult<Option<T>, E> {
+                self.map_or(Ok(None), |r| r.map(Some))
+            }
+        }
+    }
+
+    extension_trait! {
+        pub <A: AsRef<Path>> PathNiceExt for A {
+            // make a path "nice" for display, *if possible*
+            fn nice(&self) -> String {
+                self.nice_or_bust()
+                    .unwrap_or_else(|| format!("{}", self.as_ref().display()))
+            }
+
+            fn nice_or_bust(&self) -> Option<String> {
+                let cwd = PathDir::current_dir().ok()?;
+                let absolute = cwd.join(self.as_ref());
+
+                // (just bail if it's not a child. "../../../other/place" would hardly be nice.)
+                let relative = absolute.as_path().strip_prefix(&cwd).ok()?;
+                Some(format!("{}", relative.display()))
+            }
+        }
     }
 }
