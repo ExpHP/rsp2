@@ -4,7 +4,7 @@ use ::errors::{Result, ok};
 use ::ui::color::{ColorByRange, PaintAs, NullPainter};
 use ::ui::cfg_merging::{no_summary, merge_summaries, make_nested_mapping};
 use ::util::zip_eq;
-use ::types::basis::Basis3;
+use ::math::basis::Basis3;
 use ::math::bands::{GammaUnfolder, ScMatrix};
 #[allow(unused)] // compiler bug
 use ::itertools::Itertools;
@@ -213,14 +213,8 @@ wrap_maybe_compute! {
         atom_coords: &AtomCoordinates,
         layer_sc_mats: &LayerScMatrices,
         ev_eigenvectors: &EvEigenvectors,
-    ) -> Result<_> {
-        _ev_layer_gamma_probs(
-            atom_layers,
-            atom_coords,
-            layer_sc_mats,
-            ev_eigenvectors,
-        )
-    }
+    ) -> Result<_>
+    = _ev_layer_gamma_probs;
 }
 
 fn _ev_layer_gamma_probs(

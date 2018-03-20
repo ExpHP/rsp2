@@ -69,7 +69,6 @@ mod cmd;
 mod phonopy;
 mod math;
 mod ui;
-mod types;
 
 pub mod entry_points;
 

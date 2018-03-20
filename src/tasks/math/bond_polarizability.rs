@@ -5,7 +5,7 @@
 
 use ::Result;
 use ::util::zip_eq;
-use ::types::basis::Basis3;
+use ::math::basis::Basis3;
 use ::math::bonds::{Bond, Bonds};
 use ::enum_map::EnumMap;
 use ::rsp2_array_types::{dot, mat, V3, M33};
