@@ -120,7 +120,7 @@ impl fmt::Display for ColorizedLevel {
             LogLevel::Debug => ::ansi_term::Colour::Yellow.dimmed(),
             LogLevel::Trace => ::ansi_term::Colour::Cyan.normal(),
         };
-        write!(f, "{}", ::ui::color::gpaint(style, self.0))
+        write!(f, "[{:^5}]", ::ui::color::gpaint(style, self.0))
     }
 }
 
@@ -138,16 +138,15 @@ fn fmt_log_message_lines(
     record: &LogRecord,
     elapsed: time::Duration,
 ) -> String {
-
     // (yes, I know, we're ruining the entire point of fmt::Arguments by printing
     //  it to a String, boo hoo.  We want to inspect its contents.)
     let buf = message.to_string();
     let mut lines = buf.lines();
 
     // Break into lines, format the first, and pad the rest.
-    let first = lines.next().unwrap();
+    let first = lines.next().unwrap_or("");
     let mut out = vec![format!(
-        "[{:>4}.{:03}s][{}][{}] {}",
+        "[{:>4}.{:03}s][{}]{} {}",
         elapsed.as_secs(),
         elapsed.subsec_nanos() / 1_000_000,
         record.target(),
@@ -160,11 +159,10 @@ fn fmt_log_message_lines(
     let len_level = record.level().to_string().len();
     out.extend(lines.map(|line| {
         format!(
-            "\n {:len_secs$} {:3}   {:len_target$}  {:len_level$}| {}",
+            "\n {:len_secs$} {:3}   {:len_target$}  {:6}| {}",
             "", "", "", "", line,
             len_secs=len_secs,
             len_target=len_target,
-            len_level=len_level,
         )
     }));
     out.concat()
