@@ -24,7 +24,7 @@ use ::util::ext_traits::{OptionResultExt, PathNiceExt};
 use ::math::basis::Basis3;
 use ::math::bonds::Bonds;
 
-use ::path_abs::{PathFile, PathDir};
+use ::path_abs::{PathArc, PathFile, PathDir};
 use ::rsp2_structure::consts::CARBON;
 use ::rsp2_slice_math::{vnorm};
 
@@ -39,7 +39,6 @@ use ::math::bands::ScMatrix;
 use ::rsp2_fs_util::{rm_rf};
 
 use ::std::io::{Write};
-use ::std::path::{Path};
 
 use ::itertools::Itertools;
 
@@ -162,10 +161,10 @@ impl TrialDir {
 
         let bands_dir = do_diagonalize(
             lmp, &settings.threading, phonopy, structure,
-            match cli.save_bands {
-                true => Some(SAVE_BANDS_DIR.as_ref()),
+            &(match cli.save_bands {
+                true => Some(self.save_bands_dir()),
                 false => None,
-            },
+            }),
             &[Q_GAMMA],
         )?;
         let (evals, evecs) = read_eigensystem(&bands_dir, &Q_GAMMA)?;
@@ -219,7 +218,7 @@ fn do_diagonalize_at_gamma(
     threading: &cfg::Threading,
     phonopy: &PhonopyBuilder,
     structure: &ElementStructure,
-    save_bands: Option<&Path>,
+    save_bands: &Option<PathArc>,
 ) -> Result<(Vec<f64>, Basis3)>
 {Ok({
     let dir = do_diagonalize(lmp, threading, phonopy, structure, save_bands, &[Q_GAMMA])?;
@@ -231,7 +230,7 @@ fn do_diagonalize(
     threading: &cfg::Threading,
     phonopy: &PhonopyBuilder,
     structure: &ElementStructure,
-    save_bands: Option<&Path>,
+    save_bands: &Option<PathArc>,
     points: &[V3],
 ) -> Result<DirWithBands<Box<AsPath>>>
 {ok({
@@ -244,7 +243,7 @@ fn do_diagonalize(
         .eigenvectors(true)
         .compute(&points)?;
 
-    if let Some(save_dir) = save_bands {
+    if let Some(ref save_dir) = *save_bands {
         rm_rf(save_dir)?;
         bands_dir.relocate(save_dir)?.boxed()
     } else {
@@ -564,10 +563,15 @@ impl TrialDir {
         let phonopy = phonopy.use_sparse_sets(settings.tweaks.sparse_sets);
         do_diagonalize(
             &lmp, &settings.threading, &phonopy, &original,
-            Some(SAVE_BANDS_DIR.as_ref()),
+            &Some(self.save_bands_dir()),
             &[Q_GAMMA, Q_K],
         )?;
     })}
+}
+
+impl TrialDir {
+    pub fn save_bands_dir(&self) -> PathArc
+    { self.join(SAVE_BANDS_DIR).into() }
 }
 
 //=================================================================
