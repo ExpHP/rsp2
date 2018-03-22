@@ -255,6 +255,10 @@ impl TrialDir {
         let ev_analysis = {
             use self::ev_analyses::*;
 
+            let classifications = acoustic_search::perform_acoustic_search(
+                &lmp, &evals, &evecs, &structure, settings,
+            )?;
+
             let masses = {
                 structure.metadata().iter()
                     .map(|&s| ::common::element_mass(s))
@@ -262,13 +266,14 @@ impl TrialDir {
             };
 
             gamma_system_analysis::Input {
-                atom_masses:     &Some(AtomMasses(masses)),
-                atom_elements:   &Some(AtomElements(structure.metadata().to_vec())),
-                atom_coords:     &Some(AtomCoordinates(structure.map_metadata_to(|_| ()))),
-                atom_layers:     &atom_layers.clone().map(AtomLayers),
-                layer_sc_mats:   &layer_sc_mats.clone().map(LayerScMatrices),
-                ev_frequencies:  &Some(EvFrequencies(evals.clone())),
-                ev_eigenvectors: &Some(EvEigenvectors(evecs.clone())),
+                ev_classifications: &Some(EvClassifications(classifications)),
+                atom_masses:        &Some(AtomMasses(masses)),
+                atom_elements:      &Some(AtomElements(structure.metadata().to_vec())),
+                atom_coords:        &Some(AtomCoordinates(structure.map_metadata_to(|_| ()))),
+                atom_layers:        &atom_layers.clone().map(AtomLayers),
+                layer_sc_mats:      &layer_sc_mats.clone().map(LayerScMatrices),
+                ev_frequencies:     &Some(EvFrequencies(evals.clone())),
+                ev_eigenvectors:    &Some(EvEigenvectors(evecs.clone())),
                 bonds: &bonds.map(Bonds),
             }.compute()?
         };
@@ -288,10 +293,9 @@ impl TrialDir {
     {ok({
         let structure = structure;
         let bad_evs: Vec<_> = {
-            let acousticness = ev_analysis.ev_acousticness.as_ref().expect("(bug) always computed!");
-            izip!(1.., evals, &evecs.0, &acousticness.0)
-                .take_while(|&(_, &freq, _, _)| freq < 0.0)
-                .filter(|&(_, _, _, &acousticness)| acousticness < 0.95)
+            let classifications = ev_analysis.ev_classifications.as_ref().expect("(bug) always computed!");
+            izip!(1.., evals, &evecs.0, &classifications.0)
+                .filter(|&(_, _, _, kind)| kind == &acoustic_search::ModeKind::Imaginary)
                 .map(|(i, freq, evec, _)| {
                     let name = format!("band {} ({})", i, freq);
                     (name, evec.as_real_checked())
