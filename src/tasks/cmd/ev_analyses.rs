@@ -18,12 +18,15 @@ use ::serde_yaml::Value as YamlValue;
 #[allow(unused)] // compiler bug
 use ::frunk::hlist::Sculptor;
 
+use super::acoustic_search;
+
 // NOTE: All inputs are wrapped in distinct types for the sake of type-based indexing.
 #[derive(Debug, Clone)] pub struct AtomCoordinates(pub CoordStructure);
 #[derive(Debug, Clone)] pub struct AtomLayers(pub Vec<usize>);
 #[derive(Debug, Clone)] pub struct AtomElements(pub Vec<Element>);
 #[derive(Debug, Clone)] pub struct AtomMasses(pub Vec<f64>);
 #[derive(Debug, Clone)] pub struct LayerScMatrices(pub Vec<ScMatrix>);
+#[derive(Debug, Clone)] pub struct EvClassifications(pub Vec<acoustic_search::ModeKind>);
 #[derive(Debug, Clone)] pub struct EvFrequencies(pub Vec<f64>);
 #[derive(Debug, Clone)] pub struct EvEigenvectors(pub Basis3);
 #[derive(Debug, Clone)] pub struct Bonds(pub ::math::bonds::Bonds);
@@ -33,17 +36,19 @@ pub mod gamma_system_analysis {
     use super::*;
 
     pub struct Input<'a> {
-        pub atom_coords:     &'a Option<AtomCoordinates>,
-        pub atom_layers:     &'a Option<AtomLayers>,
-        pub atom_elements:   &'a Option<AtomElements>,
-        pub atom_masses:     &'a Option<AtomMasses>,
-        pub layer_sc_mats:   &'a Option<LayerScMatrices>,
-        pub ev_frequencies:  &'a Option<EvFrequencies>,
-        pub ev_eigenvectors: &'a Option<EvEigenvectors>,
-        pub bonds:           &'a Option<Bonds>,
+        pub atom_coords:        &'a Option<AtomCoordinates>,
+        pub atom_layers:        &'a Option<AtomLayers>,
+        pub atom_elements:      &'a Option<AtomElements>,
+        pub atom_masses:        &'a Option<AtomMasses>,
+        pub layer_sc_mats:      &'a Option<LayerScMatrices>,
+        pub ev_classifications: &'a Option<EvClassifications>,
+        pub ev_frequencies:     &'a Option<EvFrequencies>,
+        pub ev_eigenvectors:    &'a Option<EvEigenvectors>,
+        pub bonds:              &'a Option<Bonds>,
     }
 
     pub struct GammaSystemAnalysis {
+        pub ev_classifications:    Option<EvClassifications>,
         pub ev_frequencies:        Option<EvFrequencies>,
         pub ev_acousticness:       Option<EvAcousticness>,
         pub ev_polarization:       Option<EvPolarization>,
@@ -52,12 +57,14 @@ pub mod gamma_system_analysis {
         pub ev_raman_intensities:  Option<EvRamanIntensities>,
     }
 
+
     impl<'a> Input<'a> {
         pub fn compute(&self) -> Result<GammaSystemAnalysis>
         {ok({
             let Input {
                 atom_coords, atom_layers, atom_elements, atom_masses,
                 layer_sc_mats, ev_frequencies, ev_eigenvectors, bonds,
+                ev_classifications,
             } = *self;
 
             // since our inputs are all uniquely typed, we can let HList
@@ -83,8 +90,10 @@ pub mod gamma_system_analysis {
             let ev_raman_intensities = ev_raman_intensities::maybe_compute(args)?;
 
             let ev_frequencies = ev_frequencies.clone();
+            let ev_classifications = ev_classifications.clone();
 
             GammaSystemAnalysis {
+                ev_classifications,
                 ev_frequencies,
                 ev_acousticness,
                 ev_polarization,
@@ -330,6 +339,7 @@ impl GammaSystemAnalysis {
     pub fn make_columns(&self, mode: ColumnsMode) -> Option<Columns> {
         use self::Color::{Colorful, Colorless};
         use self::columns::{quick_column, fixed_prob_column, display_prob_column};
+        use self::columns::aligned_dot_column;
 
         let mut columns = vec![];
 
@@ -337,16 +347,20 @@ impl GammaSystemAnalysis {
         let fix2 = |c, title: &str, data: &_| fixed_prob_column(c, Precision(2), title, data);
         let dp = display_prob_column;
 
+        if let Some(ref data) = self.ev_classifications {
+            columns.push(Columns {
+                header: "(C)".to_string(),
+                entries: data.0.iter().map(|&kind| {
+                    match mode {
+                        ColumnsMode::ForHumans => format!("({})", ::cmd::acoustic_search::Colorful(kind)),
+                        ColumnsMode::ForMachines => format!("({})", kind),
+                    }
+                }).collect(),
+            })
+        }
+
         if let Some(ref data) = self.ev_frequencies {
-            let col = Columns {
-                header: "Frequency(cm-1)".into(),
-                entries: data.0.to_vec(),
-            };
-            columns.push(format_columns!(
-                "{:27}",
-                "{:27}",
-                col,
-            ))
+            columns.push(aligned_dot_column("Frequency(cm-1)", &data.0));
         };
 
         if let Some(ref data) = self.ev_acousticness {
@@ -446,7 +460,9 @@ impl GammaSystemAnalysis {
         let GammaSystemAnalysis {
             ref ev_acousticness, ref ev_polarization,
             ref ev_frequencies, ref ev_layer_gamma_probs,
-            ref ev_layer_acousticness, ref ev_raman_intensities,
+            ref ev_layer_acousticness,
+            ev_raman_intensities: _,
+            ev_classifications: _,
         } = *self;
 
         // This is where the newtypes start to get in the way;
@@ -456,7 +472,7 @@ impl GammaSystemAnalysis {
         let acousticness = ev_acousticness.as_ref().map(|d| d.0.to_vec());
         let polarization = ev_polarization.as_ref().map(|d| d.0.to_vec());
         let layer_acousticness = ev_layer_acousticness.as_ref().map(|d| d.0.to_vec());
-        let raman_intensities = ev_raman_intensities.as_ref().map(|d| d.0.to_vec());
+        //let raman_intensities = ev_raman_intensities.as_ref().map(|d| d.0.to_vec());
 
         // Work with Option<Vec<A>> as an applicative functor (for fixed length Vec)
         fn map1<A, R, F>(a: &Option<Vec<A>>, mut f: F) -> Option<Vec<R>>
@@ -696,14 +712,56 @@ mod columns {
         F: FnMut(&C) -> D,
         D: fmt::Display,
     { Columns {
-        header: format!(" {:^width$}", header, width = width),
-        entries: values.iter().map(|x| format!(" {}", painter.paint_as(x, show(x)))).collect(),
+        header: format!("{:^width$}", header, width = width),
+        entries: values.iter().map(|x| format!("{}", painter.paint_as(x, show(x)))).collect(),
     }}
 
     pub struct Precision(pub usize);
     pub enum Color {
         Colorful,
         Colorless,
+    }
+
+    pub fn aligned_dot_column(header: &str, values: &[f64]) -> Columns
+    {
+        // do it the dumb way
+        // print each one to a string
+        let mut strings: Vec<_> = values.iter().map(|x| x.to_string()).collect();
+        for s in &mut strings {
+            if !s.contains(".") {
+                *s += ".0";
+            }
+        }
+
+        let period_indices: Vec<_> = {
+            strings.iter()
+                .map(|s| s.find(".").expect("we just guaranteed a '.'"))
+                .collect()
+        };
+
+        let &max_period = period_indices.iter().max().expect("no lines!?");
+        let padding_source = " ".repeat(max_period);
+        for (period, s) in ::util::zip_eq(period_indices, &mut strings) {
+            match max_period - period {
+                0 => {},
+                n => {
+                    let new = padding_source[..n].to_string();
+                    let old = ::std::mem::replace(s, new);
+                    *s += &old;
+                },
+            }
+        }
+
+        let max_len = strings.iter().map(|s| s.len()).max().expect("no lines!?");
+        let pad_right = |s| format!("{:<len$}", s, len=max_len);
+
+        // start the column header at the digit in the ones place
+        let header = padding_source[..max_period.saturating_sub(1)].to_string() + header;
+        let header = pad_right(header);
+
+        let entries = strings.into_iter().map(pad_right).collect();
+
+        Columns { header, entries }
     }
 
     pub fn fixed_prob_column(color: Color, precision: Precision, header: &str, values: &[f64]) -> Columns
