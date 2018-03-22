@@ -1,7 +1,6 @@
 
-use ::cmd::lammps::{LammpsBuilder};
-use ::cmd::lammps_flat_diff_fn;
-use ::cmd::SupercellSpecExt;
+use super::lammps::{LammpsBuilder, LammpsExt};
+use super::SupercellSpecExt;
 
 use ::errors::{Result, ok};
 use ::rsp2_tasks_config as cfg;
@@ -122,7 +121,7 @@ pub(crate) fn perform_acoustic_search(
         let sc_dims = tup3(supercell_spec.dim_for_unitcell(structure.lattice()));
         let (superstructure, sc_token) = supercell::diagonal(sc_dims, structure.clone());
         let mut lmp = lmp.with_modified_inner(|b| b.threaded(true)).build(superstructure.clone())?;
-        let mut diff_at_pos = lammps_flat_diff_fn(&mut lmp);
+        let mut diff_at_pos = lmp.flat_diff_fn();
 
         let pos_0 = superstructure.to_carts();
         let grad_0 = diff_at_pos(pos_0.flat())?.1;

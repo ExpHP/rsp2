@@ -9,7 +9,8 @@ use ::rsp2_lammps_wrap::{InitInfo, Potential, AtomType, PairCommand};
 use ::rsp2_lammps_wrap::Builder as InnerBuilder;
 use ::rsp2_structure::{Layers, Element, Structure, ElementStructure, consts};
 use ::rsp2_tasks_config as cfg;
-use ::rsp2_array_types::V3;
+use ::rsp2_array_types::{V3, Unvee};
+use ::slice_of_array::prelude::*;
 
 const DEFAULT_KC_Z_CUTOFF: f64 = 14.0; // (Angstrom?)
 const DEFAULT_KC_Z_MAX_LAYER_SEP: f64 = 4.5; // Angstrom
@@ -21,6 +22,20 @@ const DEFAULT_AIREBO_TORSION_ENABLED: bool = false;
 pub type DynPotential = Box<Potential<Meta=Element>>;
 pub type Lammps = ::rsp2_lammps_wrap::Lammps<DynPotential>;
 
+extension_trait! {
+    pub LammpsExt for Lammps {
+        fn flat_diff_fn<'a>(
+            &'a mut self,
+        ) -> Box<FnMut(&[f64]) -> Result<(f64, Vec<f64>)> + 'a>
+        {
+            Box::new(move |pos| Ok({
+                self.set_carts(pos.nest())?;
+                self.compute().map(|(v, g)| (v, g.unvee().flat().to_vec()))?
+            }))
+        }
+    }
+}
+
 // A bundle of everything we need to initialize a Lammps API object.
 //
 // It is nothing more than a bundle of configuration, and can be freely
@@ -29,18 +44,6 @@ pub type Lammps = ::rsp2_lammps_wrap::Lammps<DynPotential>;
 pub(crate) struct LammpsBuilder {
     pub(crate) builder: InnerBuilder,
     pub(crate) potential: cfg::PotentialKind,
-}
-
-impl LammpsBuilder {
-    // laziest route to easily adapt code that used to receive
-    // an InnerBuilder directly (that's what LammpsBuilder USED to be)
-    pub(crate) fn with_modified_inner<F>(&self, mut f: F) -> Self
-    where F: FnMut(&mut InnerBuilder) -> &mut InnerBuilder,
-    {
-        let mut out = self.clone();
-        let _ = f(&mut out.builder);
-        out
-    }
 }
 
 fn assert_send_sync<S: Send + Sync>() {}
@@ -63,6 +66,16 @@ impl LammpsBuilder {
         let potential = potential.clone();
 
         LammpsBuilder { builder, potential }
+    }
+
+    // laziest route to easily adapt code that used to receive
+    // an InnerBuilder directly (that's what LammpsBuilder USED to be)
+    pub(crate) fn with_modified_inner<F>(&self, mut f: F) -> Self
+        where F: FnMut(&mut InnerBuilder) -> &mut InnerBuilder,
+    {
+        let mut out = self.clone();
+        let _ = f(&mut out.builder);
+        out
     }
 
     pub(crate) fn build(&self, structure: ElementStructure) -> Result<Lammps>
