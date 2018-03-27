@@ -131,9 +131,20 @@ impl TrialDir {
         write_eigen_info_for_machines(&ev_analysis, self.create_file("eigenvalues.final")?)?;
 
         // HACK
-        if let (&Some(ref freqs), &Some(ref raman)) = (&ev_analysis.ev_frequencies, &ev_analysis.ev_raman_intensities) {
-            let pairs = ::util::zip_eq(freqs.0.to_vec(), raman.0.to_vec()).collect_vec();
-            ::serde_json::to_writer(self.create_file("raman.json")?, &pairs)?;
+        if let (&Some(ref frequency), &Some(ref raman)) = (&ev_analysis.ev_frequencies, &ev_analysis.ev_raman_tensors) {
+            #[derive(Serialize)]
+            #[serde(rename_all = "kebab-case")]
+            struct Output {
+                frequency: Vec<f64>,
+                average_3d: Vec<f64>,
+                backscatter: Vec<f64>,
+            }
+            use ::math::bond_polarizability::LightPolarization::*;
+            ::serde_json::to_writer(self.create_file("raman.json")?, &Output {
+                frequency: frequency.0.to_vec(),
+                average_3d: raman.0.iter().map(|t| t.integrate_intensity(&Average)).collect(),
+                backscatter: raman.0.iter().map(|t| t.integrate_intensity(&BackscatterZ)).collect(),
+            })?;
         }
 
         self.write_summary_file(settings, &lmp, &ev_analysis)?;

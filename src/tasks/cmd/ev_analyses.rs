@@ -54,7 +54,7 @@ pub mod gamma_system_analysis {
         pub ev_polarization:       Option<EvPolarization>,
         pub ev_layer_gamma_probs:  Option<EvLayerGammaProbs>,
         pub ev_layer_acousticness: Option<EvLayerAcousticness>,
-        pub ev_raman_intensities:  Option<EvRamanIntensities>,
+        pub ev_raman_tensors:      Option<EvRamanTensors>,
     }
 
 
@@ -87,7 +87,7 @@ pub mod gamma_system_analysis {
             let ev_layer_gamma_probs = ev_layer_gamma_probs::maybe_compute(args)?;
 
             let (args, _) = grab_bag.sculpt();
-            let ev_raman_intensities = ev_raman_intensities::maybe_compute(args)?;
+            let ev_raman_tensors = ev_raman_tensors::maybe_compute(args)?;
 
             let ev_frequencies = ev_frequencies.clone();
             let ev_classifications = ev_classifications.clone();
@@ -99,7 +99,7 @@ pub mod gamma_system_analysis {
                 ev_polarization,
                 ev_layer_gamma_probs,
                 ev_layer_acousticness,
-                ev_raman_intensities,
+                ev_raman_tensors,
             }
         })}
     }
@@ -267,36 +267,35 @@ fn _ev_layer_gamma_probs(
 }
 
 wrap_maybe_compute! {
-    pub struct EvRamanIntensities(pub Vec<f64>);
-    fn ev_raman_intensities(
+    pub struct EvRamanTensors(pub Vec<::math::bond_polarizability::RamanTensor>);
+    fn ev_raman_tensors(
         bonds: &Bonds,
         atom_masses: &AtomMasses,
         atom_elements: &AtomElements,
         ev_frequencies: &EvFrequencies,
         ev_eigenvectors: &EvEigenvectors,
     ) -> Result<_>
-    = _ev_raman_intensities;
+    = _ev_raman_tensors;
 }
 
-fn _ev_raman_intensities(
+fn _ev_raman_tensors(
     bonds: &Bonds,
     atom_masses: &AtomMasses,
     atom_elements: &AtomElements,
     ev_frequencies: &EvFrequencies,
     ev_eigenvectors: &EvEigenvectors,
-) -> Result<EvRamanIntensities> {
-    use ::math::bond_polarizability::{Input, LightPolarization};
+) -> Result<EvRamanTensors> {
+    use ::math::bond_polarizability::{Input};
 
     Input {
-        light_polarization: &LightPolarization::Average,
         temperature: 0.0,
         atom_masses: &atom_masses.0,
         atom_elements: &atom_elements.0,
         ev_eigenvectors: &ev_eigenvectors.0,
         ev_frequencies: &ev_frequencies.0,
         bonds: &bonds.0,
-    }.compute_ev_raman_intensities()
-        .map(EvRamanIntensities)
+    }.compute_ev_raman_tensors()
+        .map(EvRamanTensors)
 }
 
 macro_rules! format_columns {
@@ -370,33 +369,40 @@ impl GammaSystemAnalysis {
             })
         };
 
-        if let Some(ref data) = self.ev_raman_intensities {
-            // NOTE: raman_intensities are currently missing some scale factors
-            //       so they are just normalized for now.
-            let max = data.0.iter().fold(0.0, |acc, &x| f64::max(acc, x));
-            let data = data.0.iter().map(|x| x / max).collect_vec();
-
-            let painter: Box<PaintAs<_, f64>> = match mode {
-                ColumnsMode::ForHumans => Box::new({
-                    use ::ansi_term::Colour::*;
-                    ColorByRange::new(vec![
-                        ( 1e-0, Cyan.bold()),
-                        ( 1e-1, Cyan.normal()),
-                        ( 1e-5, Yellow.normal()),
-                        (1e-10, Red.bold()),
-                        (1e-25, Red.normal()),
-                    ],          Black.normal()) // make zeros "disappear"
-                }),
-                ColumnsMode::ForMachines => Box::new(NullPainter),
+        if let Some(EvRamanTensors(ref tensors)) = self.ev_raman_tensors {
+            let raman_column = |name: &str, data: &[f64]| {
+                // NOTE: raman_intensities are currently missing some scale factors
+                //       so they are just normalized for now.
+                let max = data.iter().fold(0.0, |acc, &x| f64::max(acc, x));
+                let data = data.iter().map(|x| x / max).collect_vec();
+                let painter: Box<PaintAs<_, f64>> = match mode {
+                    ColumnsMode::ForHumans => Box::new({
+                        use ::ansi_term::Colour::*;
+                        ColorByRange::new(vec![
+                            ( 1e-0, Cyan.bold()),
+                            ( 1e-1, Cyan.normal()),
+                            ( 1e-5, Yellow.normal()),
+                            (1e-10, Red.bold()),
+                            (1e-25, Red.normal()),
+                        ],          Black.normal()) // make zeros "disappear"
+                    }),
+                    ColumnsMode::ForMachines => Box::new(NullPainter),
+                };
+                quick_column(
+                    &*painter, name, &data, 5,
+                    |&value| ShortExp { value, cutoff_exp: -45 },
+                )
             };
 
-            let cutoff_exp = -45;
-            columns.push({
-                quick_column(
-                    &*painter, "Raman", &data, 5,
-                    |&value| ShortExp { value, cutoff_exp },
-                )
-            });
+            use ::math::bond_polarizability::LightPolarization::*;
+            columns.push(raman_column(
+                "RamnA",
+                &tensors.iter().map(|t| t.integrate_intensity(&Average)).collect_vec(),
+            ));
+            columns.push(raman_column(
+                "RamnB",
+                &tensors.iter().map(|t| t.integrate_intensity(&BackscatterZ)).collect_vec(),
+            ));
         };
 
         if let Some(ref data) = self.ev_layer_acousticness {
@@ -461,7 +467,7 @@ impl GammaSystemAnalysis {
             ref ev_acousticness, ref ev_polarization,
             ref ev_frequencies, ref ev_layer_gamma_probs,
             ref ev_layer_acousticness,
-            ev_raman_intensities: _,
+            ev_raman_tensors: _,
             ev_classifications: _,
         } = *self;
 
