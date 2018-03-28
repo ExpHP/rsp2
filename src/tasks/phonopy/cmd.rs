@@ -58,6 +58,12 @@ impl Default for Builder {
 }
 
 const FNAME_OTHER_SETTINGS: &'static str = "rsp2-phonopy.json";
+const FNAME_SETTINGS_ARGS: &'static str = "disp.args";
+const FNAME_HELPER_SCRIPT: &'static str = "phonopy";
+const FNAME_CONF_DISPS: &'static str = "disp.conf";
+const FNAME_CONF_BANDS: &'static str = "band.conf";
+const FNAME_CONF_SYMMETRY: &'static str = "phonopy.conf";
+const FNAME_OUT_SYMMETRY: &'static str = "symmetry.yaml";
 
 impl Builder {
     pub fn new() -> Self
@@ -141,17 +147,41 @@ impl Builder {
             trace!("Displacement dir: '{}'...", dir.display());
 
             let extra_args = self.args_from_settings();
-            self.conf.save(dir.join("disp.conf"))?;
+            self.conf.save(dir.join(FNAME_CONF_DISPS))?;
             poscar::dump(create(dir.join("POSCAR"))?, "blah", &structure)?;
-            extra_args.save(dir.join("disp.args"))?;
+            extra_args.save(dir.join(FNAME_SETTINGS_ARGS))?;
             self.more.save(dir.join(FNAME_OTHER_SETTINGS))?;
+
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                use ::errors::ResultExt;
+                use ::util::ext_traits::PathNiceExt;
+                ::std::fs::OpenOptions::new()
+                    .create(true)
+                    .write(true)
+                    .mode(0o777)
+                    .open(dir.join(FNAME_HELPER_SCRIPT))
+                    .chain_err(|| ErrorKind::from(format!("error while opening {}", dir.nice())))?
+                    .write_all(format!(r#"#!/bin/sh
+
+# This script simulates rsp2's calls to phonopy by adding
+# additional args that are not in any conf file.
+#
+# rsp2 itself does not use this file; it's for you!
+phonopy \
+    $(cat {}) \
+    --fc-format=hdf5 \
+    --readfc \
+    "$@"
+"#, FNAME_SETTINGS_ARGS).as_bytes())?;
+            }
 
             trace!("Calling phonopy for displacements...");
             {
                 let mut command = Command::new("phonopy");
                 command
                     .args(&extra_args.0)
-                    .arg("disp.conf")
+                    .arg(FNAME_CONF_DISPS)
                     .arg("--displacement")
                     .current_dir(&dir);
 
@@ -185,17 +215,17 @@ impl Builder {
         let tmp = tmp.path();
         trace!("Entered '{}'...", tmp.display());
 
-        self.conf.save(tmp.join("phonopy.conf"))?;
+        self.conf.save(tmp.join(FNAME_CONF_SYMMETRY))?;
 
         poscar::dump(create(tmp.join("POSCAR"))?, "blah", &structure)?;
 
         trace!("Calling phonopy for symmetry...");
         check_status(Command::new("phonopy")
             .args(self.args_from_settings().0)
-            .arg("phonopy.conf")
+            .arg(FNAME_CONF_SYMMETRY)
             .arg("--sym")
             .current_dir(&tmp)
-            .stdout(create(tmp.join("symmetry.yaml"))?)
+            .stdout(create(tmp.join(FNAME_OUT_SYMMETRY))?)
             .status()?)?;
 
         trace!("Done calling phonopy");
@@ -215,7 +245,7 @@ impl Builder {
             ensure!(ratio == 1, ErrorKind::NonPrimitiveStructure);
         }
 
-        let yaml = SymmetryYaml::load(tmp.join("symmetry.yaml"))?;
+        let yaml = SymmetryYaml::load(tmp.join(FNAME_OUT_SYMMETRY))?;
         yaml.space_group_operations.into_iter()
             .map(|op| Ok({
                 let rotation = FracRot::new(&op.rotation);
@@ -301,8 +331,8 @@ impl<P: AsPath> DirWithDisps<P> {
         for name in &[
             "POSCAR",
             "disp.yaml",
-            "disp.conf",
-            "disp.args",
+            FNAME_CONF_DISPS,
+            FNAME_SETTINGS_ARGS,
             FNAME_OTHER_SETTINGS,
         ] {
             let path = dir.as_path().join(name);
@@ -383,9 +413,16 @@ impl<P: AsPath> DirWithDisps<P> {
     {Ok({
         let disp_dir = self.path();
 
-        for name in &["POSCAR", "disp.yaml", "disp.conf", "disp.args", FNAME_OTHER_SETTINGS] {
+        for name in &[
+            "POSCAR",
+            "disp.yaml",
+            FNAME_CONF_DISPS,
+            FNAME_SETTINGS_ARGS,
+            FNAME_OTHER_SETTINGS,
+        ] {
             copy(disp_dir.join(name), path.join(name))?;
         }
+        let _ = copy(disp_dir.join(FNAME_HELPER_SCRIPT), path.join(FNAME_HELPER_SCRIPT));
 
         match self.settings.use_sparse_sets {
             false => {
@@ -442,8 +479,8 @@ impl<P: AsPath> DirWithForces<P> {
         for name in &[
             "POSCAR",
             settings.force_sets_filename(),
-            "disp.args",
-            "disp.conf",
+            FNAME_SETTINGS_ARGS,
+            FNAME_CONF_DISPS,
         ] {
             let path = dir.as_path().join(name);
             ensure!(path.exists(),
@@ -503,12 +540,19 @@ impl<'p, P: AsPath> BandsBuilder<'p, P> {
         let me = self.into_inner();
         let dir = TempDir::new("rsp2")?;
 
-        let fc_filename = "force_constants.hdf5";
+        // scope to temporarily shadow `dir` with a &Path, which is easier to work with
         {
             let src = me.dir_with_forces.as_path();
             let dir = dir.as_path();
 
-            for name in &["POSCAR", "disp.conf", "disp.args", FNAME_OTHER_SETTINGS] {
+            let fc_filename = "force_constants.hdf5";
+
+            for name in &[
+                "POSCAR",
+                FNAME_CONF_DISPS,
+                FNAME_SETTINGS_ARGS,
+                FNAME_OTHER_SETTINGS,
+            ] {
                 copy(src.join(name), dir.join(name))?;
             }
             {
@@ -519,13 +563,14 @@ impl<'p, P: AsPath> BandsBuilder<'p, P> {
             if src.join(fc_filename).exists() {
                 copy_or_link(src.join(fc_filename), dir.join(fc_filename))?;
             }
+            let _ = copy(src.join(FNAME_HELPER_SCRIPT), dir.join(FNAME_HELPER_SCRIPT));
 
             QPositions(q_points.into()).save(dir.join("q-positions.json"))?;
 
             // band.conf
             {
                 // Carry over settings from displacements.
-                let Conf(mut conf) = Load::load(dir.join("disp.conf"))?;
+                let Conf(mut conf) = Load::load(dir.join(FNAME_CONF_DISPS))?;
 
                 // Append a dummy qpoint so that each of our points begin a line segment.
                 conf.insert("BAND".to_string(), band_string(q_points) + " 0 0 0");
@@ -538,15 +583,15 @@ impl<'p, P: AsPath> BandsBuilder<'p, P> {
                     true => ".TRUE.".to_string(),
                     false => ".FALSE.".to_string(),
                 });
-                Conf(conf).save(dir.join("band.conf"))?;
+                Conf(conf).save(dir.join(FNAME_CONF_BANDS))?;
             }
 
             trace!("Calling phonopy for bands...");
             {
                 let mut command = Command::new("phonopy");
                 command
-                    .args(Args::load(dir.join("disp.args"))?.0)
-                    .arg("band.conf")
+                    .args(Args::load(dir.join(FNAME_SETTINGS_ARGS))?.0)
+                    .arg(FNAME_CONF_BANDS)
                     .arg("--fc-format=hdf5")
                     .arg("--band-format=hdf5")
                     .arg(match dir.join(fc_filename).exists() {

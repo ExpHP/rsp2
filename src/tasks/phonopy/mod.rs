@@ -4,6 +4,7 @@ use ::traits::save::Json;
 
 use ::rsp2_phonopy_io::{symmetry_yaml, disp_yaml, conf};
 use ::std::io::BufReader;
+use ::std::io::prelude::*;
 use ::path_abs::{FileRead, FileWrite};
 use ::rsp2_array_types::V3;
 
@@ -62,12 +63,30 @@ where
 
 impl Load for Args {
     fn load<P: AsPath>(path: P) -> Result<Self>
-    { Load::load(path).map(|Json(x)| x) }
+    {
+        use ::path_abs::FileRead;
+        use ::util::ext_traits::PathNiceExt;
+        let path = path.as_path();
+
+        let text = FileRead::read(path)?.read_string()?;
+        if let Some(args) = ::shlex::split(&text) {
+            Ok(Args(args))
+        } else {
+            bail!("Bad args at {}", path.nice())
+        }
+    }
 }
 
 impl Save for Args {
     fn save<P: AsPath>(&self, path: P) -> Result<()>
-    { Json(self).save(path) }
+    {
+        use ::path_abs::FileWrite;
+        let mut file = FileWrite::create(path.as_path())?;
+        for arg in &self.0 {
+            writeln!(file, "{}", ::shlex::quote(arg))?;
+        }
+        Ok(())
+    }
 }
 
 //--------------------------------------------------------

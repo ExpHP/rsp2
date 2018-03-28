@@ -267,6 +267,10 @@ pub enum Threading {
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub struct AcousticSearch {
+    /// Known number of non-translational acoustic modes.
+    #[serde(default)]
+    pub expected_non_translations: Option<usize>,
+
     /// Displacement to use for checking changes in force along the mode.
     #[serde(default = "self::defaults::acoustic_search::displacement_distance")]
     pub displacement_distance: f64,
