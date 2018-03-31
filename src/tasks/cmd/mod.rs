@@ -35,6 +35,7 @@ use ::rsp2_structure::{CoordStructure, ElementStructure, Structure};
 use ::rsp2_structure::{Lattice};
 use ::phonopy::Builder as PhonopyBuilder;
 use ::math::bands::ScMatrix;
+use ::rsp2_structure_io::poscar;
 
 use ::rsp2_fs_util::{rm_rf};
 
@@ -65,8 +66,6 @@ impl TrialDir {
         cli: CliArgs,
     ) -> Result<()>
     {ok({
-        use ::rsp2_structure_io::poscar;
-
         let lmp = LammpsBuilder::new(&settings.threading, &settings.potential.kind);
 
         // FIXME: rather than doing this here, other rsp2 binaries ought to be able
@@ -75,46 +74,10 @@ impl TrialDir {
         //        That said, the REASON for doing it here is that, currently, a
         //        number of optional computational steps are toggled on/off based
         //        on the input file format.
-        let (original_structure, atom_layers, layer_sc_mats);
-        match file_format {
-            StructureFileType::Poscar => {
-                original_structure = poscar::load(input.read()?)?;
-                atom_layers = None;
-                layer_sc_mats = None;
-            },
-            StructureFileType::LayersYaml => {
-                use ::rsp2_structure_gen::load_layers_yaml;
-                use ::rsp2_structure_gen::layer_sc_info_from_layers_yaml;
-
-                let layer_builder = load_layers_yaml(input.read()?)?;
-                let layer_builder = self::relaxation::optimize_layer_parameters(
-                    &settings.scale_ranges, &lmp, layer_builder,
-                )?;
-                original_structure = carbon(&layer_builder.assemble());
-
-                layer_sc_mats = Some({
-                    layer_sc_info_from_layers_yaml(input.read()?)?
-                        .into_iter()
-                        .map(|(matrix, periods, _)| {
-                            ::math::bands::ScMatrix::new(&matrix, &periods)
-                        }).collect_vec()
-                });
-
-                // FIXME: This is entirely unnecessary. We just read layers.yaml; we should
-                //        be able to get the layer assignments without a search like this!
-                atom_layers = Some({
-                    trace!("Finding layers");
-                    let layers =
-                        ::rsp2_structure::find_layers(&original_structure, &V3([0, 0, 1]), 0.25)?
-                            .per_unit_cell().expect("Structure is not layered?");
-
-                    if let Some(expected) = settings.layers {
-                        assert_eq!(expected, layers.len() as u32);
-                    }
-                    layers.by_atom()
-                });
-            },
-        }
+        ;
+        let (original_structure, atom_layers, layer_sc_mats) = read_structure_file(
+            Some(settings), file_format, input, Some(&lmp),
+        )?;
 
         self.write_poscar("initial.vasp", "Initial structure", &original_structure)?;
         let phonopy = phonopy_builder_from_settings(&settings.phonons, &original_structure);
@@ -628,3 +591,62 @@ impl TrialDir {
 // })}
 
 //=================================================================
+
+pub(crate) fn read_structure_file(
+    // FIXME this option is dumb; basically, it's so that code can use this function
+    //       even without needing an entire settings struct.
+    settings: Option<&Settings>,
+    file_format: StructureFileType,
+    input: &PathFile,
+    // will be used to optimize parameters for layers.yaml if provided.
+    // will be ignored for poscars.
+    // FIXME: that's really inconsistent and dumb.
+    //        (a function like this really shouldn't do ANY optimization,
+    //         but I don't see any other place to do it without mega refactoring...)
+    lmp: Option<&LammpsBuilder>,
+) -> Result<(ElementStructure, Option<Vec<usize>>, Option<Vec<ScMatrix>>)> {
+    let (original_structure, atom_layers, layer_sc_mats);
+    match file_format {
+        StructureFileType::Poscar => {
+            original_structure = poscar::load(input.read()?)?;
+            atom_layers = None;
+            layer_sc_mats = None;
+        },
+        StructureFileType::LayersYaml => {
+            use ::rsp2_structure_gen::load_layers_yaml;
+            use ::rsp2_structure_gen::layer_sc_info_from_layers_yaml;
+
+            let mut layer_builder = load_layers_yaml(input.read()?)?;
+            if let (Some(settings), Some(lmp)) = (settings, lmp) {
+                layer_builder = self::relaxation::optimize_layer_parameters(
+                    &settings.scale_ranges, lmp, layer_builder,
+                )?;
+            }
+            original_structure = carbon(&layer_builder.assemble());
+
+            layer_sc_mats = Some({
+                layer_sc_info_from_layers_yaml(input.read()?)?
+                    .into_iter()
+                    .map(|(matrix, periods, _)| ScMatrix::new(&matrix, &periods))
+                    .collect_vec()
+            });
+
+            // FIXME: This is entirely unnecessary. We just read layers.yaml; we should
+            //        be able to get the layer assignments without a search like this!
+            atom_layers = Some({
+                trace!("Finding layers");
+                let layers =
+                    ::rsp2_structure::find_layers(&original_structure, &V3([0, 0, 1]), 0.25)?
+                        .per_unit_cell().expect("Structure is not layered?");
+
+                if let Some(settings) = settings {
+                    if let Some(expected) = settings.layers {
+                        assert_eq!(expected, layers.len() as u32);
+                    }
+                }
+                layers.by_atom()
+            });
+        },
+    }
+    Ok((original_structure, atom_layers, layer_sc_mats))
+}

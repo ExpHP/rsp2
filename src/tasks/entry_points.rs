@@ -78,15 +78,15 @@ impl CliDeserialize for OptionalFileType {
     }
 }
 
-impl StructureFileType {
-    pub fn guess(path: &PathFile) -> StructureFileType {
-        if let Some(ext) = path.extension() {
-            match ext.to_string_lossy().as_ref() {
-                "yaml" => return StructureFileType::LayersYaml,
-                _ => {},
+impl OptionalFileType {
+    pub fn or_guess(self, path: &PathFile) -> StructureFileType {
+        self.0.unwrap_or_else(|| {
+            match path.extension().and_then(|s| s.to_str()) {
+                Some("yaml") => StructureFileType::LayersYaml,
+                Some("vasp") => StructureFileType::Poscar,
+                _ => StructureFileType::Poscar,
             }
-        }
-        StructureFileType::Poscar
+        })
     }
 }
 
@@ -121,9 +121,7 @@ pub fn rsp2() {
         let (dir_args, (filetype, extra_args)) = de.resolve_args(&matches)?;
 
         let input = PathFile::new(matches.expect_value_of("input"))?;
-
-        let OptionalFileType(filetype) = filetype;
-        let filetype = filetype.unwrap_or_else(|| StructureFileType::guess(&input));
+        let filetype = OptionalFileType::or_guess(filetype, &input);
 
         let trial = TrialDir::create_new(dir_args)?;
         logfile.start(PathFile::new(trial.new_logfile_path()?)?)?;
@@ -200,23 +198,16 @@ pub fn bond_test() {
                 ])
         });
         let matches = app.get_matches();
-        let () = de.resolve_args(&matches)?;
-
-        use ::rsp2_structure_gen::load_layers_yaml;
+        let filetype = de.resolve_args(&matches)?;
 
         let input = PathFile::new(matches.expect_value_of("input"))?;
-        let structure = {
-            let mut builder = load_layers_yaml(input.read()?)?;
-            builder.scale = 2.46;
-            for sep in builder.layer_seps() {
-                *sep = 3.38;
-            }
-            builder.assemble()
-        };
+        let filetype = OptionalFileType::or_guess(filetype, &input);
 
-        let bonds = ::math::bonds::Bonds::from_brute_force_very_dumb(&structure, 1.8);
+        let (structure, _, _) = ::cmd::read_structure_file(None, filetype, &input, None)?;
 
-        println!("{:?}", bonds);
+        let bonds = ::math::bonds::Bonds::from_brute_force_very_dumb(&structure, 1.8)?;
+        ::serde_json::to_writer(::std::io::stdout(), &bonds)?;
+        println!(""); // flush, dammit
         Ok(())
     });
 }
