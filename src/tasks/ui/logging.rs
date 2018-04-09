@@ -102,7 +102,7 @@ pub fn init_global_logger() -> Result<SetGlobalLogfile>
         // Yes, this really is deliberately boxing a reference (a 'static one).
         // The reason is simply because chain asks for a Box.
         .chain(Box::new(&*GLOBAL_LOGFILE) as Box<FernLog>)
-        .chain(::std::io::stdout());
+        .chain(::std::io::stderr());
 
     fern.apply()?;
 
