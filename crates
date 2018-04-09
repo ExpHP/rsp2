@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# pylint: disable=cell-var-from-loop
 
 # This file is licensed under WTFPL 2.0.
 # I honestly do not care what you do with it.
@@ -54,7 +55,7 @@ def register(klass):
 
 #------------
 
-thru = lambda f: lambda g: lambda *a, **kw: f(g(*a, **kw))
+thru = lambda f: lambda g: lambda *a, **kw: f(g(*a, **kw)) # pylint: disable=E0602
 
 #------------
 
@@ -85,7 +86,7 @@ class Gen:
                     parser.error('[crates."{}"]: "{}": no such directory'.format(name, path))
 
                 src = root_rel_src_toml_path(name)
-                if not src.is_file():
+                if not src.is_file():  # pylint: disable=E1101
                     parser.error('{}: no such file'.format(src))
 
             # callbacks that generate substitutions for the line !!some-crate-name,
@@ -110,10 +111,18 @@ class Gen:
                         lines.append(f'{name} = {{ path = "{path}" }}')
                 return '\n'.join(lines)
 
+            # FIXME vvv this is waaaaaay too application-specific.
+            binary_shim_pairs = get_binary_shim_pairs()
+            make_binary_shims(binary_shim_pairs)
+            # FIXME ^^^ this is waaaaaay too application-specific.
+
             # build a dash-insensitive lookup table of callbacks
             lookup_d = {
                 # builtin macros
                 'WORKSPACE-MEMBERS-AS-PATH-DEPS': gen_members_as_pathdeps,
+
+                # FIXME this is waaaaaay too application-specific.
+                'BINARY-SHIM-BIN-ENTRIES': macro_subst_for_binary_shims(binary_shim_pairs),
             }
             # for defining new macros
             lookup_put = lambda k, v: lookup_d.__setitem__(canonicalize_crate(k), v)
@@ -137,10 +146,10 @@ class Gen:
                 Path('target').mkdir(parents=True, exist_ok=True)
 
             if user_conf.shared_dot_idea:
-                (Path('.subcrate-cfg') / '.idea').mkdir(parents=True, exist_ok=True)
+                (Path('.subcrate-cfg') / '.idea').mkdir(parents=True, exist_ok=True) # pylint: disable=E1101
 
             if user_conf.shared_dot_vscode:
-                (Path('.subcrate-cfg') / '.vscode').mkdir(parents=True, exist_ok=True)
+                (Path('.subcrate-cfg') / '.vscode').mkdir(parents=True, exist_ok=True) # pylint: disable=E1101
 
             # link the rest
             for (name, path) in crates.items():
@@ -663,8 +672,67 @@ But at least make sure there are exactly two quotes of the same style.
                 lines[i] = f'{lines[i][:quotes[0]+1]}{path}{lines[i][quotes[1]:]}'
 
             return lines
-    else:
+    else: # pylint: disable=useless-else-on-loop
         fail(f"{MASTER_CFG_PATH}: Failed to find line for {name}.")
+
+#------------
+
+# FIXME this is waaaaaay too application-specific.
+# Maybe .crates.d could have some simplistic plugin files or something for crap like this.
+def get_binary_shim_pairs():
+    with open('src/tasks/entry_points.rs') as f:
+        lines = list(f)
+
+    pairs = []
+    for cur, nxt in zip(lines, lines[1:]):
+        heuristic = "CRATES" # for better debugging
+        cur = cur.strip()
+        nxt = nxt.strip()
+        if heuristic in cur:
+            prefix = "// %% CRATES: binary: "
+            suffix = " %%"
+            assert cur.startswith(prefix)
+            assert cur.endswith(suffix)
+            bin = cur[len(prefix):-len(suffix)]
+
+            prefix = "pub fn "
+            suffix = "() {"
+            assert nxt.startswith(prefix)
+            assert nxt.endswith(suffix)
+            func = nxt[len(prefix):-len(suffix)]
+
+            pairs.append((bin, func))
+
+    return sorted(pairs)
+
+def make_binary_shims(pairs):
+    shims_dir = Path("src/binary-shims")
+    shims_dir.mkdir(exist_ok = True)
+
+    for (bin, func) in pairs:
+        with open(shims_dir / f"{bin}.rs", mode='w') as f:
+            print(f"""\
+extern crate rsp2_tasks;
+
+fn main() {{
+    ::rsp2_tasks::entry_points::{func}();
+}}
+""", end='', file=f)
+
+
+def macro_subst_for_binary_shims(pairs):
+    def gen(_):
+        entries = []
+        for (bin, func) in pairs:
+            lines = [
+                f"[[bin]]\n",
+                f'name = "{bin}"\n',
+                f'path = "src/binary-shims/{bin}.rs"\n',
+            ]
+            entries.append(''.join(lines))
+        return '\n'.join(entries)
+    return gen
+
 
 #------------
 

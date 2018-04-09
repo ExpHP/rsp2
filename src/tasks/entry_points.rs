@@ -92,6 +92,7 @@ impl OptionalFileType {
 
 // -------------------------------------------------------------------------------------
 
+// %% CRATES: binary: rsp2 %%
 pub fn rsp2() {
     use ::cmd::CliArgs;
 
@@ -131,6 +132,7 @@ pub fn rsp2() {
     });
 }
 
+// %% CRATES: binary: rsp2-shear-plot %%
 pub fn shear_plot() {
     wrap_result_main(|| {
         let logfile = init_global_logger()?;
@@ -157,6 +159,7 @@ pub fn shear_plot() {
     });
 }
 
+// %% CRATES: binary: rsp2-save-bands-after-the-fact %%
 pub fn save_bands_after_the_fact() {
     wrap_result_main(|| {
         let logfile = init_global_logger()?;
@@ -182,6 +185,7 @@ pub fn save_bands_after_the_fact() {
     });
 }
 
+// %% CRATES: binary: rsp2-rerun-analysis %%
 pub fn rerun_analysis() {
     wrap_result_main(|| {
         let logfile = init_global_logger()?;
@@ -205,6 +209,7 @@ pub fn rerun_analysis() {
     });
 }
 
+// %% CRATES: binary: rsp2-bond-test %%
 pub fn bond_test() {
     wrap_result_main(|| {
         let _logfile = init_global_logger()?;

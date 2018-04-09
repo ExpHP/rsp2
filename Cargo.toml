@@ -10,23 +10,24 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 
 [[bin]]
 name = "rsp2"
-path = "src/binary-shims/main.rs"
-
-[[bin]]
-name = "rsp2-shear-plot"
-path = "src/binary-shims/shear-plot.rs"
-
-[[bin]]
-name = "rsp2-save-bands"
-path = "src/binary-shims/save-bands.rs"
+path = "src/binary-shims/rsp2.rs"
 
 [[bin]]
 name = "rsp2-bond-test"
-path = "src/binary-shims/bond-test.rs"
+path = "src/binary-shims/rsp2-bond-test.rs"
 
 [[bin]]
 name = "rsp2-rerun-analysis"
-path = "src/binary-shims/rerun-analysis.rs"
+path = "src/binary-shims/rsp2-rerun-analysis.rs"
+
+[[bin]]
+name = "rsp2-save-bands-after-the-fact"
+path = "src/binary-shims/rsp2-save-bands-after-the-fact.rs"
+
+[[bin]]
+name = "rsp2-shear-plot"
+path = "src/binary-shims/rsp2-shear-plot.rs"
+
 
 [dependencies]
 

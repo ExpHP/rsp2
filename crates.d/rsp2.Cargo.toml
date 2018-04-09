@@ -3,25 +3,7 @@ name = "rsp2"
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 
-[[bin]]
-name = "rsp2"
-path = "src/binary-shims/main.rs"
-
-[[bin]]
-name = "rsp2-shear-plot"
-path = "src/binary-shims/shear-plot.rs"
-
-[[bin]]
-name = "rsp2-save-bands"
-path = "src/binary-shims/save-bands.rs"
-
-[[bin]]
-name = "rsp2-bond-test"
-path = "src/binary-shims/bond-test.rs"
-
-[[bin]]
-name = "rsp2-rerun-analysis"
-path = "src/binary-shims/rerun-analysis.rs"
+!!BINARY-SHIM-BIN-ENTRIES
 
 [dependencies]
 
