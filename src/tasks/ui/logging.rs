@@ -53,7 +53,7 @@ mod fern {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-enum Verbosity { Default, Loud }
+enum Verbosity { Default, Loud, MyEarsHurt }
 
 impl Default for Verbosity {
     fn default() -> Self { Verbosity::Default }
@@ -63,9 +63,10 @@ impl Verbosity {
     /// Any integer will be accepted; the level will be truncated
     /// to the most extreme value supported.
     fn from_int(level: i32) -> Self
-    { match level > 0 {
-        true => Verbosity::Loud,
-        false => Verbosity::Default,
+    { match level {
+        level if level < 1 => Verbosity::Default,
+        1 => Verbosity::Loud,
+        _ => Verbosity::MyEarsHurt,
     }}
 
     pub fn from_env() -> Result<Self>
@@ -79,9 +80,10 @@ impl Verbosity {
 /// "unused variable" lint to help remind you to do this once possible.
 pub fn init_global_logger() -> Result<SetGlobalLogfile>
 {ok({
-    use ::log::LogLevelFilter as LevelFilter;
+    use ::log::LogLevelFilter as L;
+    use self::Verbosity as V;
 
-    let verbosity = Verbosity::from_env()?;
+    let verbosity = V::from_env()?;
 
     let start = time::Instant::now();
     let mut fern = ::fern::Dispatch::new();
@@ -91,13 +93,19 @@ pub fn init_global_logger() -> Result<SetGlobalLogfile>
 
             out.finish(format_args!("{}", message))
         })
-        .level(LevelFilter::Debug)
-        .level_for("rsp2_tasks", LevelFilter::Trace)
-        .level_for("rsp2_minimize", LevelFilter::Trace)
-        .level_for("rsp2_phonopy_io", LevelFilter::Trace)
+        .level(L::Debug)
+        .level_for("rsp2_tasks", L::Trace)
+        .level_for("rsp2_minimize", L::Trace)
+        .level_for("rsp2_phonopy_io", L::Trace)
+        .level_for("rsp2_minimize::hagar_ls", match verbosity {
+            V::Default => L::Debug,
+            V::Loud |
+            V::MyEarsHurt => L::Trace,
+        })
         .level_for("rsp2_minimize::exact_ls", match verbosity {
-            Verbosity::Default => LevelFilter::Debug,
-            Verbosity::Loud => LevelFilter::Trace,
+            V::Default |
+            V::Loud => L::Debug,
+            V::MyEarsHurt => L::Trace,
         })
         // Yes, this really is deliberately boxing a reference (a 'static one).
         // The reason is simply because chain asks for a Box.
