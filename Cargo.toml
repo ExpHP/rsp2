@@ -24,6 +24,10 @@ path = "src/binary-shims/save-bands.rs"
 name = "rsp2-bond-test"
 path = "src/binary-shims/bond-test.rs"
 
+[[bin]]
+name = "rsp2-rerun-analysis"
+path = "src/binary-shims/rerun-analysis.rs"
+
 [dependencies]
 
 # Workspace members

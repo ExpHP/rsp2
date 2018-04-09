@@ -24,20 +24,21 @@ use super::acoustic_search;
 //
 // NOTE: Since a lot of the wrapped types are just vectors, the naming convention
 //       is to prefix the name with each thing they are indexed over (in order)
-#[derive(Debug, Clone)] pub struct AtomCoordinates(pub CoordStructure);
-#[derive(Debug, Clone)] pub struct AtomLayers(pub Vec<usize>);
-#[derive(Debug, Clone)] pub struct AtomElements(pub Vec<Element>);
-#[derive(Debug, Clone)] pub struct AtomMasses(pub Vec<f64>);
-#[derive(Debug, Clone)] pub struct LayerScMatrices(pub Vec<ScMatrix>);
-#[derive(Debug, Clone)] pub struct EvClassifications(pub Vec<acoustic_search::ModeKind>);
-#[derive(Debug, Clone)] pub struct EvFrequencies(pub Vec<f64>);
-#[derive(Debug, Clone)] pub struct EvEigenvectors(pub Basis3);
-#[derive(Debug, Clone)] pub struct Bonds(pub ::math::bonds::Bonds);
+#[derive(Debug, Clone)]                         pub struct AtomCoordinates(pub CoordStructure);
+#[derive(Debug, Clone, Serialize, Deserialize)] pub struct AtomLayers(pub Vec<usize>);
+#[derive(Debug, Clone)]                         pub struct AtomElements(pub Vec<Element>);
+#[derive(Debug, Clone, Serialize, Deserialize)] pub struct AtomMasses(pub Vec<f64>);
+#[derive(Debug, Clone, Serialize, Deserialize)] pub struct LayerScMatrices(pub Vec<ScMatrix>);
+#[derive(Debug, Clone)]                         pub struct EvClassifications(pub Vec<acoustic_search::ModeKind>);
+#[derive(Debug, Clone)]                         pub struct EvFrequencies(pub Vec<f64>);
+#[derive(Debug, Clone)]                         pub struct EvEigenvectors(pub Basis3);
+#[derive(Debug, Clone)]                         pub struct Bonds(pub ::math::bonds::Bonds);
 
 pub use self::gamma_system_analysis::GammaSystemAnalysis;
 pub mod gamma_system_analysis {
     use super::*;
 
+    #[derive(Debug, Clone)]
     pub struct Input {
         pub atom_coords:        Option<AtomCoordinates>,
         pub atom_layers:        Option<AtomLayers>,

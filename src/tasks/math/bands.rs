@@ -107,22 +107,22 @@ impl self::config::SampleType {
 /// This only exists for now because I am still too lazy to
 /// properly incorporate an HNF search into this codebase...
 #[derive(Debug, Clone)]
+#[derive(Serialize, Deserialize)]
 pub struct ScMatrix {
-    matrix: M33<i32>,
-    periods: [u32; 3],
+    pub matrix: M33<i32>,
+    pub periods: [u32; 3],
 }
 
 impl ScMatrix {
     pub fn new(matrix: &M33<i32>, periods: &[u32; 3]) -> Self
     {
         // sanity check
-        // (NOTE: this condition is neccessary, but not sufficient)
+        // (NOTE: this condition is necessary, but not sufficient)
+        // (NOTE: this is obviously not considered to be an invariant of this type,
+        //        due to public members and Deserialize)
         assert_eq!(matrix.det().abs() as u32, periods[0] * periods[1] * periods[2]);
         ScMatrix { matrix: *matrix, periods: *periods }
     }
-
-    pub fn periods(&self) -> [u32; 3]
-    { self.periods }
 }
 
 /// # Output

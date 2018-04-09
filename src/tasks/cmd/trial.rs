@@ -128,7 +128,7 @@ impl TrialDir {
     pub fn create_file<P: AsPath>(&self, path: P) -> Result<FileWrite>
     { Ok(FileWrite::create(self.join(path))?) }
 
-    pub fn open<P: AsPath>(&self, path: P) -> Result<FileRead>
+    pub fn read_file<P: AsPath>(&self, path: P) -> Result<FileRead>
     { Ok(PathFile::new(self.join(path))?.read()?) }
 
     pub fn read_settings<T>(&self) -> Result<T>

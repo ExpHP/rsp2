@@ -74,7 +74,6 @@ impl TrialDir {
         //        That said, the REASON for doing it here is that, currently, a
         //        number of optional computational steps are toggled on/off based
         //        on the input file format.
-        ;
         let (original_structure, atom_layers, layer_sc_mats) = read_structure_file(
             Some(settings), file_format, input, Some(&lmp),
         )?;
@@ -129,7 +128,7 @@ impl TrialDir {
             }
 
             ::serde_json::to_writer(self.create_file("unfold.json")?, &Output {
-                layer_sc_dims: sc_mats.0.iter().map(|m| m.periods()).collect(),
+                layer_sc_dims: sc_mats.0.iter().map(|m| m.periods).collect(),
                 layer_q_indices: {
                     unfold_probs.layer_unfolders.iter()
                         .map(|u| u.q_indices().to_vec())
@@ -153,22 +152,16 @@ impl TrialDir {
     fn do_post_relaxation_computations(
         &self,
         settings: &Settings,
-        cli: &CliArgs,
+        save_bands: Option<&PathArc>,
         lmp: &LammpsBuilder,
-        atom_layers: &Option<Vec<usize>>,
-        layer_sc_mats: &Option<Vec<ScMatrix>>,
+        aux_info: aux_info::Info,
         phonopy: &PhonopyBuilder,
         structure: &ElementStructure,
     ) -> Result<(DirWithBands<Box<AsPath>>, Vec<f64>, Basis3, GammaSystemAnalysis)>
     {ok({
 
         let bands_dir = do_diagonalize(
-            lmp, &settings.threading, phonopy, structure,
-            match cli.save_bands {
-                true => Some(self.save_bands_dir()),
-                false => None,
-            }.as_ref(),
-            &[Q_GAMMA],
+            lmp, &settings.threading, phonopy, structure, save_bands, &[Q_GAMMA],
         )?;
         let (evals, evecs) = read_eigensystem(&bands_dir, &Q_GAMMA)?;
 
@@ -193,19 +186,15 @@ impl TrialDir {
                 &lmp, &evals, &evecs, &structure, settings,
             )?;
 
-            let masses = {
-                structure.metadata().iter()
-                    .map(|&s| ::common::element_mass(s))
-                    .collect()
-            };
+            let aux_info::Info { atom_layers, atom_masses, layer_sc_mats } = aux_info;
 
             gamma_system_analysis::Input {
+                atom_masses,
+                atom_layers,
+                layer_sc_mats,
                 ev_classifications: Some(EvClassifications(classifications)),
-                atom_masses:        Some(AtomMasses(masses)),
                 atom_elements:      Some(AtomElements(structure.metadata().to_vec())),
                 atom_coords:        Some(AtomCoordinates(structure.map_metadata_to(|_| ()))),
-                atom_layers:        atom_layers.clone().map(AtomLayers),
-                layer_sc_mats:      layer_sc_mats.clone().map(LayerScMatrices),
                 ev_frequencies:     Some(EvFrequencies(evals.clone())),
                 ev_eigenvectors:    Some(EvEigenvectors(evecs.clone())),
                 bonds:              bonds.map(Bonds),
@@ -301,7 +290,7 @@ impl TrialDir {
                 let na = structure.num_atoms() as f64;
                 lmp.build(structure)?.compute_value()? / na
             });
-            let f_path = |s: &AsPath| ok(f(poscar::load(self.open(s)?)?)?);
+            let f_path = |s: &AsPath| ok(f(poscar::load(self.read_file(s)?)?)?);
 
             let initial = f_path(&"initial.vasp")?;
             let final_ = f_path(&"final.vasp")?;
@@ -410,6 +399,37 @@ fn uncarbon(structure: &ElementStructure) -> CoordStructure
         do something about all the carbon-specific code.  Look for calls \
         to `carbon()`");
     structure.map_metadata_to(|_| ())
+}
+
+//=================================================================
+
+// auxilliary info for rerunning updated analysis code on old trial directories
+mod aux_info {
+    use super::*;
+    use self::ev_analyses::*;
+
+    const FILENAME: &'static str = "aux-analysis-info.json";
+
+    impl TrialDir {
+        pub(crate) fn save_analysis_aux_info(&self, aux: &Info) -> Result<()>
+        { ok(::serde_json::to_writer(self.create_file(FILENAME)?, &aux)?) }
+
+        pub(crate) fn load_analysis_aux_info(&self) -> Result<Info>
+        {ok({
+            let file = self.read_file(FILENAME)?;
+            let de = &mut ::serde_json::Deserializer::from_reader(file);
+            ::serde_ignored::deserialize(de, |path| {
+                panic!("Incompatible {}: unrecognized entry: {}", FILENAME, path)
+            })?
+        })}
+    }
+
+    #[derive(Clone, Deserialize, Serialize)]
+    pub struct Info {
+        pub atom_layers:   Option<AtomLayers>,
+        pub atom_masses:   Option<AtomMasses>,
+        pub layer_sc_mats: Option<LayerScMatrices>,
+    }
 }
 
 //=================================================================
@@ -561,11 +581,11 @@ impl TrialDir {
 
         let lmp = LammpsBuilder::new(&settings.threading, &settings.potential.kind);
 
-        let original = poscar::load(self.open("./final.vasp")?)?;
-        let phonopy = phonopy_builder_from_settings(&settings.phonons, &original);
+        let structure = poscar::load(self.read_file("./final.vasp")?)?;
+        let phonopy = phonopy_builder_from_settings(&settings.phonons, &structure);
         let phonopy = phonopy.use_sparse_sets(settings.tweaks.sparse_sets);
         do_diagonalize(
-            &lmp, &settings.threading, &phonopy, &original,
+            &lmp, &settings.threading, &phonopy, &structure,
             Some(&self.save_bands_dir()),
             &[Q_GAMMA, Q_K],
         )?;
@@ -575,6 +595,33 @@ impl TrialDir {
 impl TrialDir {
     pub fn save_bands_dir(&self) -> PathArc
     { self.join(SAVE_BANDS_DIR).into() }
+}
+
+//=================================================================
+
+impl TrialDir {
+    pub(crate) fn rerun_ev_analysis(
+        self,
+        settings: &Settings,
+    ) -> Result<()>
+    {Ok({
+        use ::rsp2_structure_io::poscar;
+
+        let lmp = LammpsBuilder::new(&settings.threading, &settings.potential.kind);
+
+        let structure = poscar::load(self.read_file("./final.vasp")?)?;
+        let phonopy = phonopy_builder_from_settings(&settings.phonons, &structure);
+        let phonopy = phonopy.use_sparse_sets(settings.tweaks.sparse_sets);
+
+        let aux_info = self.load_analysis_aux_info()?;
+
+        let save_bands = None;
+        let (_, _, _, ev_analysis) = self.do_post_relaxation_computations(
+            settings, save_bands, &lmp, aux_info, &phonopy, &structure,
+        )?;
+
+        self.write_ev_analysis_output_files(settings, &lmp, &ev_analysis)?;
+    })}
 }
 
 //=================================================================

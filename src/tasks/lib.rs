@@ -37,6 +37,7 @@ extern crate shlex;
 #[macro_use] extern crate lazy_static;
 extern crate rsp2_kets;
 extern crate path_abs;
+extern crate serde_ignored;
 extern crate serde_yaml;
 #[macro_use] extern crate serde_json;
 #[macro_use] extern crate serde_derive;

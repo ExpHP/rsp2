@@ -182,6 +182,29 @@ pub fn save_bands_after_the_fact() {
     });
 }
 
+pub fn rerun_analysis() {
+    wrap_result_main(|| {
+        let logfile = init_global_logger()?;
+
+        let (app, de) = CliDeserialize::augment_clap_app({
+            ::clap::App::new("rsp2-rerun-analysis")
+                .author(crate_authors!{", "})
+                .args(&[
+                    arg!( trial_dir=TRIAL_DIR "existing trial directory"),
+                ])
+        });
+        let matches = app.get_matches();
+        let () = de.resolve_args(&matches)?;
+
+        let trial = PathDir::new(matches.expect_value_of("trial_dir"))?;
+        let trial = TrialDir::from_existing(&trial)?;
+        logfile.start(PathFile::new(trial.new_logfile_path()?)?)?;
+
+        let settings = trial.read_settings()?;
+        trial.rerun_ev_analysis(&settings)
+    });
+}
+
 pub fn bond_test() {
     wrap_result_main(|| {
         let _logfile = init_global_logger()?;

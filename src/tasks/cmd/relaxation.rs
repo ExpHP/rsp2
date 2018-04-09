@@ -60,10 +60,35 @@ impl TrialDir {
                 &structure,
             )?;
 
-            let (bands_dir, evals, evecs, ev_analysis) = self.do_post_relaxation_computations(
-                settings, cli, lmp, atom_layers, layer_sc_mats,
-                phonopy, &structure,
-            )?;
+            let aux_info = {
+                use super::ev_analyses::*;
+
+                // HACK
+                let masses = {
+                    structure.metadata().iter()
+                        .map(|&s| ::common::element_mass(s))
+                        .collect()
+                };
+
+                super::aux_info::Info {
+                    atom_layers:   atom_layers.clone().map(AtomLayers),
+                    layer_sc_mats: layer_sc_mats.clone().map(LayerScMatrices),
+                    atom_masses:   Some(AtomMasses(masses)),
+                }
+            };
+
+            let (bands_dir, evals, evecs, ev_analysis) = {
+                self.save_analysis_aux_info(&aux_info)?;
+
+                let save_bands = match cli.save_bands {
+                    true => Some(self.save_bands_dir()),
+                    false => None,
+                };
+
+                self.do_post_relaxation_computations(
+                    settings, save_bands.as_ref(), lmp, aux_info, phonopy, &structure,
+                )?
+            };
 
             {
                 let file = self.create_file(format!("eigenvalues.{:02}", iteration))?;

@@ -39,6 +39,7 @@ path = "lib.rs"
 !!serde-derive
 !!serde-json
 !!serde-yaml
+!!serde-ignored
 !!path-abs
 !!enum-map
 !!frunk
