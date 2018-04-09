@@ -200,15 +200,15 @@ impl TrialDir {
             };
 
             gamma_system_analysis::Input {
-                ev_classifications: &Some(EvClassifications(classifications)),
-                atom_masses:        &Some(AtomMasses(masses)),
-                atom_elements:      &Some(AtomElements(structure.metadata().to_vec())),
-                atom_coords:        &Some(AtomCoordinates(structure.map_metadata_to(|_| ()))),
-                atom_layers:        &atom_layers.clone().map(AtomLayers),
-                layer_sc_mats:      &layer_sc_mats.clone().map(LayerScMatrices),
-                ev_frequencies:     &Some(EvFrequencies(evals.clone())),
-                ev_eigenvectors:    &Some(EvEigenvectors(evecs.clone())),
-                bonds: &bonds.map(Bonds),
+                ev_classifications: Some(EvClassifications(classifications)),
+                atom_masses:        Some(AtomMasses(masses)),
+                atom_elements:      Some(AtomElements(structure.metadata().to_vec())),
+                atom_coords:        Some(AtomCoordinates(structure.map_metadata_to(|_| ()))),
+                atom_layers:        atom_layers.clone().map(AtomLayers),
+                layer_sc_mats:      layer_sc_mats.clone().map(LayerScMatrices),
+                ev_frequencies:     Some(EvFrequencies(evals.clone())),
+                ev_eigenvectors:    Some(EvEigenvectors(evecs.clone())),
+                bonds:              bonds.map(Bonds),
             }.compute()?
         };
         (bands_dir, evals, evecs, ev_analysis)

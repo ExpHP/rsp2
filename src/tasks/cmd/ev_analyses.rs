@@ -38,16 +38,16 @@ pub use self::gamma_system_analysis::GammaSystemAnalysis;
 pub mod gamma_system_analysis {
     use super::*;
 
-    pub struct Input<'a> {
-        pub atom_coords:        &'a Option<AtomCoordinates>,
-        pub atom_layers:        &'a Option<AtomLayers>,
-        pub atom_elements:      &'a Option<AtomElements>,
-        pub atom_masses:        &'a Option<AtomMasses>,
-        pub layer_sc_mats:      &'a Option<LayerScMatrices>,
-        pub ev_classifications: &'a Option<EvClassifications>,
-        pub ev_frequencies:     &'a Option<EvFrequencies>,
-        pub ev_eigenvectors:    &'a Option<EvEigenvectors>,
-        pub bonds:              &'a Option<Bonds>,
+    pub struct Input {
+        pub atom_coords:        Option<AtomCoordinates>,
+        pub atom_layers:        Option<AtomLayers>,
+        pub atom_elements:      Option<AtomElements>,
+        pub atom_masses:        Option<AtomMasses>,
+        pub layer_sc_mats:      Option<LayerScMatrices>,
+        pub ev_classifications: Option<EvClassifications>,
+        pub ev_frequencies:     Option<EvFrequencies>,
+        pub ev_eigenvectors:    Option<EvEigenvectors>,
+        pub bonds:              Option<Bonds>,
     }
 
     pub struct GammaSystemAnalysis {
@@ -61,14 +61,13 @@ pub mod gamma_system_analysis {
         pub unfold_probs:          Option<UnfoldProbs>,
     }
 
-
-    impl<'a> Input<'a> {
+    impl Input {
         pub fn compute(&self) -> Result<GammaSystemAnalysis>
         {ok({
             let Input {
-                atom_coords, atom_layers, atom_elements, atom_masses,
-                layer_sc_mats, ev_frequencies, ev_eigenvectors, bonds,
-                ev_classifications,
+                ref atom_coords, ref atom_layers, ref atom_elements, ref atom_masses,
+                ref layer_sc_mats, ref ev_frequencies, ref ev_eigenvectors, ref bonds,
+                ref ev_classifications,
             } = *self;
 
             // since our inputs are all uniquely typed, we can let HList
