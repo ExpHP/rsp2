@@ -97,7 +97,7 @@ pub fn init_global_logger() -> Result<SetGlobalLogfile>
         .level_for("rsp2_tasks", L::Trace)
         .level_for("rsp2_minimize", L::Trace)
         .level_for("rsp2_phonopy_io", L::Trace)
-        .level_for("rsp2_minimize::hagar_ls", match verbosity {
+        .level_for("rsp2_minimize::hager_ls", match verbosity {
             V::Default => L::Debug,
             V::Loud |
             V::MyEarsHurt => L::Trace,
