@@ -25,6 +25,10 @@ def main():
     import argparse
     parser = argparse.ArgumentParser()
 
+    # NOTE:
+    # - we don't bother with support for STDIN because phonopy always makes a file
+    # - we don't bother with support for STDOUT because v_sim cares about
+    #   filename extensions (I think).
     parser.add_argument(
         "FILE",
         help='v_sim ascii output from phonopy')
@@ -279,9 +283,9 @@ class QptMeta:
         qpoint, numbers = [numbers[:3], numbers[3:]]
         frequency = numbers.pop(0)
 
-        numbers = np.array(numbers).reshape(-1, 3, 2)
-        real = numbers[:, :, 0]
-        imag = numbers[:, :, 1]
+        numbers = np.array(numbers).reshape(-1, 2, 3)
+        real = numbers[:, 0, :]
+        imag = numbers[:, 1, :]
 
         return QptMeta(qpoint, frequency, real + 1j * imag)
 
