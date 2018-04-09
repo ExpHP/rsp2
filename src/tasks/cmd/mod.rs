@@ -93,8 +93,17 @@ impl TrialDir {
 
         write_eigen_info_for_machines(&ev_analysis, self.create_file("eigenvalues.final")?)?;
 
-        // HACK
-        if let (&Some(ref frequency), &Some(ref raman)) = (&ev_analysis.ev_frequencies, &ev_analysis.ev_raman_tensors) {
+        self.write_ev_analysis_output_files(settings, &lmp, &ev_analysis)?;
+    })}
+
+    fn write_ev_analysis_output_files(
+        &self,
+        settings: &Settings,
+        lmp: &LammpsBuilder,
+        eva: &GammaSystemAnalysis,
+    ) -> Result<()>
+    {ok({
+        if let (&Some(ref frequency), &Some(ref raman)) = (&eva.ev_frequencies, &eva.ev_raman_tensors) {
             #[derive(Serialize)]
             #[serde(rename_all = "kebab-case")]
             struct Output {
@@ -110,7 +119,27 @@ impl TrialDir {
             })?;
         }
 
-        self.write_summary_file(settings, &lmp, &ev_analysis)?;
+        if let (&Some(ref sc_mats), &Some(ref unfold_probs)) = (&eva.layer_sc_mats, &eva.unfold_probs) {
+            #[derive(Serialize)]
+            #[serde(rename_all = "kebab-case")]
+            struct Output {
+                layer_sc_dims: Vec<[u32; 3]>,
+                layer_q_indices: Vec<Vec<[u32; 3]>>,
+                layer_ev_q_probs: Vec<Vec<Vec<f64>>>,
+            }
+
+            ::serde_json::to_writer(self.create_file("unfold.json")?, &Output {
+                layer_sc_dims: sc_mats.0.iter().map(|m| m.periods()).collect(),
+                layer_q_indices: {
+                    unfold_probs.layer_unfolders.iter()
+                        .map(|u| u.q_indices().to_vec())
+                        .collect()
+                },
+                layer_ev_q_probs: unfold_probs.layer_ev_q_probs.clone(),
+            })?;
+        }
+
+        self.write_summary_file(settings, lmp, eva)?;
     })}
 
     fn write_poscar(&self, filename: &str, headline: &str, structure: &ElementStructure) -> Result<()>
@@ -135,10 +164,10 @@ impl TrialDir {
 
         let bands_dir = do_diagonalize(
             lmp, &settings.threading, phonopy, structure,
-            &(match cli.save_bands {
+            match cli.save_bands {
                 true => Some(self.save_bands_dir()),
                 false => None,
-            }),
+            }.as_ref(),
             &[Q_GAMMA],
         )?;
         let (evals, evecs) = read_eigensystem(&bands_dir, &Q_GAMMA)?;
@@ -192,7 +221,7 @@ fn do_diagonalize_at_gamma(
     threading: &cfg::Threading,
     phonopy: &PhonopyBuilder,
     structure: &ElementStructure,
-    save_bands: &Option<PathArc>,
+    save_bands: Option<&PathArc>,
 ) -> Result<(Vec<f64>, Basis3)>
 {Ok({
     let dir = do_diagonalize(lmp, threading, phonopy, structure, save_bands, &[Q_GAMMA])?;
@@ -204,7 +233,7 @@ fn do_diagonalize(
     threading: &cfg::Threading,
     phonopy: &PhonopyBuilder,
     structure: &ElementStructure,
-    save_bands: &Option<PathArc>,
+    save_bands: Option<&PathArc>,
     points: &[V3],
 ) -> Result<DirWithBands<Box<AsPath>>>
 {ok({
@@ -217,7 +246,7 @@ fn do_diagonalize(
         .eigenvectors(true)
         .compute(&points)?;
 
-    if let Some(ref save_dir) = *save_bands {
+    if let Some(save_dir) = save_bands {
         rm_rf(save_dir)?;
         bands_dir.relocate(save_dir)?.boxed()
     } else {
@@ -537,7 +566,7 @@ impl TrialDir {
         let phonopy = phonopy.use_sparse_sets(settings.tweaks.sparse_sets);
         do_diagonalize(
             &lmp, &settings.threading, &phonopy, &original,
-            &Some(self.save_bands_dir()),
+            Some(&self.save_bands_dir()),
             &[Q_GAMMA, Q_K],
         )?;
     })}

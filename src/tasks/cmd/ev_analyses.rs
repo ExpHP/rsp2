@@ -21,6 +21,9 @@ use ::frunk::hlist::Sculptor;
 use super::acoustic_search;
 
 // NOTE: All inputs are wrapped in distinct types for the sake of type-based indexing.
+//
+// NOTE: Since a lot of the wrapped types are just vectors, the naming convention
+//       is to prefix the name with each thing they are indexed over (in order)
 #[derive(Debug, Clone)] pub struct AtomCoordinates(pub CoordStructure);
 #[derive(Debug, Clone)] pub struct AtomLayers(pub Vec<usize>);
 #[derive(Debug, Clone)] pub struct AtomElements(pub Vec<Element>);
@@ -52,9 +55,10 @@ pub mod gamma_system_analysis {
         pub ev_frequencies:        Option<EvFrequencies>,
         pub ev_acousticness:       Option<EvAcousticness>,
         pub ev_polarization:       Option<EvPolarization>,
-        pub ev_layer_gamma_probs:  Option<EvLayerGammaProbs>,
         pub ev_layer_acousticness: Option<EvLayerAcousticness>,
         pub ev_raman_tensors:      Option<EvRamanTensors>,
+        pub layer_sc_mats:         Option<LayerScMatrices>,
+        pub unfold_probs:          Option<UnfoldProbs>,
     }
 
 
@@ -84,20 +88,22 @@ pub mod gamma_system_analysis {
             let ev_layer_acousticness = ev_layer_acousticness::maybe_compute(args)?;
 
             let (args, _) = grab_bag.sculpt();
-            let ev_layer_gamma_probs = ev_layer_gamma_probs::maybe_compute(args)?;
+            let unfold_probs = unfold_probs::maybe_compute(args)?;
 
             let (args, _) = grab_bag.sculpt();
             let ev_raman_tensors = ev_raman_tensors::maybe_compute(args)?;
 
             let ev_frequencies = ev_frequencies.clone();
             let ev_classifications = ev_classifications.clone();
+            let layer_sc_mats = layer_sc_mats.clone();
 
             GammaSystemAnalysis {
                 ev_classifications,
                 ev_frequencies,
                 ev_acousticness,
                 ev_polarization,
-                ev_layer_gamma_probs,
+                layer_sc_mats,
+                unfold_probs,
                 ev_layer_acousticness,
                 ev_raman_tensors,
             }
@@ -216,54 +222,72 @@ wrap_maybe_compute! {
 }
 
 wrap_maybe_compute! {
-    pub struct EvLayerGammaProbs(pub Vec<Vec<f64>>);
-    fn ev_layer_gamma_probs(
+    pub struct UnfoldProbs {
+        pub layer_unfolders: Vec<GammaUnfolder>,
+        pub layer_ev_q_probs: Vec<Vec<Vec<f64>>>,
+    }
+    fn unfold_probs(
         atom_layers: &AtomLayers,
         atom_coords: &AtomCoordinates,
         layer_sc_mats: &LayerScMatrices,
         ev_eigenvectors: &EvEigenvectors,
     ) -> Result<_>
-    = _ev_layer_gamma_probs;
+    = _unfold_probs;
 }
 
-fn _ev_layer_gamma_probs(
+impl UnfoldProbs {
+    fn layer_ev_gamma_probs(&self) -> Vec<Vec<f64>> {
+        let UnfoldProbs { ref layer_unfolders, ref layer_ev_q_probs } = *self;
+
+        zip_eq(layer_unfolders, layer_ev_q_probs)
+            .map(|(unfolder, ev_q_probs)| {
+                ev_q_probs.iter().map(|probs| {
+                    zip_eq(unfolder.q_indices(), probs.iter().cloned())
+                        .find(|&(idx, _)| idx == &[0, 0, 0])
+                        .unwrap().1
+                }).collect()
+            }).collect()
+    }
+}
+
+fn _unfold_probs(
     atom_layers: &AtomLayers,
     atom_coords: &AtomCoordinates,
     layer_sc_mats: &LayerScMatrices,
     ev_eigenvectors: &EvEigenvectors,
-) -> Result<EvLayerGammaProbs> {
+) -> Result<UnfoldProbs> {
     let part = Part::from_ord_keys(atom_layers.0.iter());
-    let coords_by_layer = atom_coords.0
+    let layer_partial_coords = atom_coords.0
         .map_metadata_to(|_| ())
         .into_unlabeled_partitions(&part)
         .collect_vec();
 
-    let evs_by_layer = (ev_eigenvectors.0).0.iter().map(|ket| {
+    let ev_layer_partial_evs = (ev_eigenvectors.0).0.iter().map(|ket| {
         ket.clone().into_unlabeled_partitions(&part)
     });
-    let evs_by_layer = ::util::transpose_iter_to_vec(evs_by_layer);
+    let layer_partial_evs = ::util::transpose_iter_to_vec(ev_layer_partial_evs);
 
-    Ok(EvLayerGammaProbs({
-        zip_eq(coords_by_layer, zip_eq(evs_by_layer, &layer_sc_mats.0))
-            .map(|(layer_structure, (layer_evs, layer_sc_mat))| {
+    let (layer_unfolders, layer_ev_q_probs) = {
+        zip_eq(layer_partial_coords, zip_eq(layer_partial_evs, &layer_sc_mats.0))
+            .map(|(partial_structure, (partial_evs, sc_mat))| {
                 // precompute data applicable to all kets
                 let unfolder = GammaUnfolder::from_config(
                     &from_json!({
                             "fbz": "reciprocal-cell",
                             "sampling": { "plain": [4, 4, 1] },
                         }),
-                    &layer_structure,
-                    layer_sc_mat,
+                    &partial_structure,
+                    sc_mat,
                 );
 
-                layer_evs.into_iter().map(|ket| {
-                    let probs = unfolder.unfold_phonon(ket.to_ket().as_ref());
-                    zip_eq(unfolder.q_indices(), probs)
-                        .find( | & (idx, _) | idx == & [0, 0, 0])
-                        .unwrap().1
-                }).collect()
-            }).collect()
-    }))
+                let ev_q_probs = partial_evs.into_iter().map(|ket| {
+                    unfolder.unfold_phonon(ket.to_ket().as_ref())
+                }).collect();
+                (unfolder, ev_q_probs)
+            }).unzip()
+    };
+
+    Ok(UnfoldProbs { layer_unfolders, layer_ev_q_probs })
 }
 
 wrap_maybe_compute! {
@@ -438,8 +462,9 @@ impl GammaSystemAnalysis {
             });
         }
 
-        if let Some(ref data) = self.ev_layer_gamma_probs {
-            for (n, probs) in data.0.iter().enumerate() {
+        if let Some(ref obj) = self.unfold_probs {
+            let data = obj.layer_ev_gamma_probs();
+            for (n, probs) in data.iter().enumerate() {
                 columns.push(match mode {
                     ColumnsMode::ForHumans   => fix1(Colorful,  &format!("G{:02}", n+1), &probs),
                     ColumnsMode::ForMachines => fix1(Colorless, &format!("G{:02}", n+1), &probs),
@@ -465,10 +490,11 @@ impl GammaSystemAnalysis {
     pub fn make_summary(&self, settings: &Settings) -> YamlValue {
         let GammaSystemAnalysis {
             ref ev_acousticness, ref ev_polarization,
-            ref ev_frequencies, ref ev_layer_gamma_probs,
+            ref ev_frequencies, ref unfold_probs,
             ref ev_layer_acousticness,
             ev_raman_tensors: _,
             ev_classifications: _,
+            layer_sc_mats: _,
         } = *self;
 
         // This is where the newtypes start to get in the way;
@@ -554,8 +580,10 @@ impl GammaSystemAnalysis {
         }
 
         // For gamma probs, don't bother with all layers; just a couple.
+        let layer_ev_gamma_probs = unfold_probs.as_ref().map(|u| u.layer_ev_gamma_probs());
         [0, 1].iter().for_each(|&layer_n| {
-            let probs = ev_layer_gamma_probs.as_ref().map(|d| d.0[layer_n].to_vec());
+
+            let probs = layer_ev_gamma_probs.as_ref().map(|d| d[layer_n].to_vec());
             let layer_key = format!("layer-{}", layer_n + 1);
 
             let pred = at_least(settings.layer_gamma_threshold, &probs);

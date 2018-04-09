@@ -153,8 +153,6 @@ pub fn shear_plot() {
         logfile.start(PathFile::new(trial.new_logfile_path()?)?)?;
 
         let settings = trial.read_settings()?;
-        // HACK: Incomplete refactoring; canonicalize() and CanonicalPath should
-        //       no longer exist, and this function should take TrialDir
         trial.run_energy_surface(&settings, &input)
     });
 }
@@ -164,7 +162,7 @@ pub fn save_bands_after_the_fact() {
         let logfile = init_global_logger()?;
 
         let (app, de) = CliDeserialize::augment_clap_app({
-            ::clap::App::new("rsp2-shear-plot")
+            ::clap::App::new("rsp2-save-bands")
                 .version("negative 0.00.3-734.bubbles")
                 .author(crate_authors!{", "})
                 .about("blah")

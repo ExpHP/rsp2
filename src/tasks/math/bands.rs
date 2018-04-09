@@ -120,6 +120,9 @@ impl ScMatrix {
         assert_eq!(matrix.det().abs() as u32, periods[0] * periods[1] * periods[2]);
         ScMatrix { matrix: *matrix, periods: *periods }
     }
+
+    pub fn periods(&self) -> [u32; 3]
+    { self.periods }
 }
 
 /// # Output
