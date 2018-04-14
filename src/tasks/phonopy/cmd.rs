@@ -256,50 +256,6 @@ phonopy \
     })}
 }
 
-// Declares a type whose body is hidden behind an Option,
-// which can be taken to "poison" (consume) the value.
-//
-// This is a design pattern for &mut Self-based builders.
-macro_rules! declare_poison_pair {
-    (
-        generics: { $($generics:tt)* }
-        where: { $($bounds:tt)* }
-        type: {
-            #[derive($($derive:ident),*)]
-            pub struct $Type:ident<...>(Option<_>);
-            struct $Impl:ident<...> { $($body:tt)* }
-        }
-        poisoned: $poisoned:block
-    ) => {
-        #[derive($($derive),*)]
-        pub struct $Type<$($generics)*>(Option<$Impl<$($generics)*>>)
-        where $($bounds)*;
-
-        #[derive($($derive),*)]
-        struct $Impl<$($generics)*>
-        where $($bounds)*
-        { $($body)* }
-
-        impl<$($generics)*> $Type<$($generics)*> where $($bounds)*
-        {
-            /// modify self if not poisoned
-            fn inner_mut(&mut self) -> &mut $Impl<$($generics)*>
-            { match self.0 {
-                Some(ref mut inner) => inner,
-                None => $poisoned,
-            }}
-
-            /// poisons self
-            fn into_inner(&mut self) -> $Impl<$($generics)*>
-            { match self.0.take() {
-                Some(inner) => inner,
-                None => $poisoned,
-            }}
-        }
-
-    }
-}
-
 /// Represents a directory with the following data:
 /// - `POSCAR`: The input structure
 /// - `disp.yaml`: Phonopy file with displacements
@@ -509,40 +465,42 @@ impl<P: AsPath> DirWithForces<P> {
     { BandsBuilder::init(self) }
 }
 
-declare_poison_pair! {
-    generics: {'p, P}
-    where: {
-        P: AsPath + 'p,
-    }
-    type: {
-        #[derive(Debug, Clone)]
-        pub struct BandsBuilder<...>(Option<_>);
-        struct BandsBuilderImpl<...> {
-            dir_with_forces: &'p DirWithForces<P>,
-            eigenvectors: bool,
-        }
-    }
-    poisoned: { panic!("This BandsBuilder has already been used!"); }
+// NOTE: I'm not sure if you should be allowed to clone this.
+//       (correctness depends on how the build function uses the filesystem)
+//
+//       Dang filesystem; it's like global variables all over again.
+#[derive(Debug)]
+pub struct BandsBuilder<'moveck, 'p, P: AsPath + 'p> {
+    dir_with_forces: &'p DirWithForces<P>,
+    eigenvectors: bool,
+    // Part of a trick to simulate "moving" a value with a `&mut self` function
+    _move: ::std::marker::PhantomData<&'moveck ()>,
 }
 
-impl<'p, P: AsPath> BandsBuilder<'p, P> {
+impl<'moveck, 'p, P: AsPath> BandsBuilder<'moveck, 'p, P> {
     fn init(dir_with_forces: &'p DirWithForces<P>) -> Self
-    { BandsBuilder(Some(BandsBuilderImpl {
+    { BandsBuilder {
         dir_with_forces,
         eigenvectors: false,
-    })) }
+        _move: Default::default(),
+    }}
 
     pub fn eigenvectors(&mut self, b: bool) -> &mut Self
-    { self.inner_mut().eigenvectors = b; self }
+    { self.eigenvectors = b; self }
 
-    pub fn compute(&mut self, q_points: &[V3]) -> Result<DirWithBands<TempDir>>
+    /// Consume the builder, run phonopy, and produce a DirWithBands.
+    ///
+    /// This uses a special trick to simulate a move of the builder (statically preventing
+    /// you from using it again) with a receiver of type `&mut self`. Basically, by associating
+    /// the `&mut self` borrow with a lifetime parameter of the struct itself, the duration of
+    /// the borrow is extended to cover the entire rest of the DirWithBands' existence.
+    pub fn compute(&'moveck mut self, q_points: &[V3]) -> Result<DirWithBands<TempDir>>
     {Ok({
-        let me = self.into_inner();
         let dir = TempDir::new("rsp2")?;
 
-        // scope to temporarily shadow `dir` with a &Path, which is easier to work with
+        // scope to temporarily shadow `dir` with a &Path, which is easier to work with.
         {
-            let src = me.dir_with_forces.as_path();
+            let src = self.dir_with_forces.as_path();
             let dir = dir.as_path();
 
             let fc_filename = "force_constants.hdf5";
@@ -556,7 +514,7 @@ impl<'p, P: AsPath> BandsBuilder<'p, P> {
                 copy(src.join(name), dir.join(name))?;
             }
             {
-                let name = me.dir_with_forces.settings.force_sets_filename();
+                let name = self.dir_with_forces.settings.force_sets_filename();
                 copy_or_link(src.join(name), dir.join(name))?;
             }
 
@@ -579,7 +537,7 @@ impl<'p, P: AsPath> BandsBuilder<'p, P> {
                 //       points. Considering how large the band output is, I'll take my chances!
                 //          - ML
                 conf.insert("BAND_POINTS".to_string(), "1".to_string());
-                conf.insert("EIGENVECTORS".to_string(), match me.eigenvectors {
+                conf.insert("EIGENVECTORS".to_string(), match self.eigenvectors {
                     true => ".TRUE.".to_string(),
                     false => ".FALSE.".to_string(),
                 });
@@ -624,10 +582,10 @@ import os; os.unlink('band.hdf5')
 ".to_string()))?;
             }
 
-            if me.dir_with_forces.cache_force_constants {
+            if self.dir_with_forces.cache_force_constants {
                 cache_link(dir.join(fc_filename), src.join(fc_filename))?;
             }
-        }
+        } // end of scope that borrows dir
 
         DirWithBands::from_existing(dir)?
     })}
