@@ -43,7 +43,6 @@ rsp2-structure-gen = { path = "src/structure-gen" }
 rsp2-structure-io = { path = "src/util/structure-io" }
 rsp2-slice-math = { path = "src/util/slice-math" }
 rsp2-util-macros = { path = "src/util/macros" }
-rsp2-linalg = { path = "src/math/linalg" }
 rsp2-fs-util = { path = "src/util/fs" }
 rsp2-clap = { path = "src/util/clap" }
 rsp2-tasks-config = { path = "src/tasks/config" }
