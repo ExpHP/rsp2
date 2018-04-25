@@ -45,6 +45,9 @@ extern crate serde_yaml;
 #[macro_use] extern crate itertools;
 #[macro_use] extern crate error_chain;
 
+extern crate lapacke;
+extern crate lapacke_sys;
+
 macro_rules! ichain {
     ($e:expr,) => { $e.into_iter() };
     ($e:expr, $($es:expr,)+)
@@ -112,6 +115,10 @@ mod errors {
             PhonopyFailed(status: ::std::process::ExitStatus) {
                 description("phonopy exited unsuccessfully"),
                 display("phonopy exited unsuccessfully ({})", status),
+            }
+            SingularMatrix {
+                description("matrix was exactly singular"),
+                display("matrix was exactly singular"),
             }
         }
     }

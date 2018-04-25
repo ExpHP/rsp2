@@ -1,4 +1,5 @@
 use ::{Result, ErrorKind};
+use ::std::ops::Index;
 
 /// Represents a reordering operation on atoms.
 ///
@@ -120,6 +121,22 @@ impl Perm {
     /// Conventional group operator.
     pub fn of(&self, other: &Perm) -> Perm
     { other.then(self) }
+}
+
+impl Index<usize> for Perm {
+    type Output = u32;
+
+    #[inline]
+    fn index(&self, i: usize) -> &u32
+    { &self.0[i] }
+}
+
+impl Index<u32> for Perm {
+    type Output = u32;
+
+    #[inline]
+    fn index(&self, i: u32) -> &u32
+    { &self.0[i as usize] }
 }
 
 #[cfg(test)]
