@@ -17,7 +17,7 @@ rsp2-array-utils = { path = "../array" }
 
 serde = "1"
 serde_derive = "1"
-slice-of-array = "0.1"
+slice-of-array = "0.2"
 
 # FIXME make this dev-dependencies once rust-lang-nursery/rls#169 is fixed
 rsp2-assert-close = { path = "../assert-close" }
