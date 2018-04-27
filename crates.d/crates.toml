@@ -46,6 +46,8 @@ rsp2-fs-util        = "src/util/fs"
 rsp2-clap = "src/util/clap"
 rsp2-tasks-config = "src/tasks/config"
 rsp2-array-types = "src/util/array-types"
+rsp2-shims = "src/util/shims"
+rsp2-matrix = "src/util/matrix"
 #!!INSERTION POINT FOR NEW CRATES!!#
 
 #--------------------------------------------
@@ -88,4 +90,4 @@ frunk = "0.1.36"
 shlex = "0.1.1"
 indoc = "0.2.3"
 lapacke = "0.1.4"
-lapacke-sys = "0.1.4"
+lapack-src = { version = "0.1.4", features = ["netlib"] }

@@ -1,6 +1,8 @@
 use ::{Result, ErrorKind};
-use ::rsp2_array_types::{V3, M33, dot};
+use ::rsp2_array_types::{V3, M33, M3, dot};
 use ::rsp2_structure::{FracOp, Perm};
+use ::std::collections::HashMap;
+use ::slice_of_array::prelude::*;
 
 #[derive(Debug, Clone, Default)]
 pub struct ForceSets {
@@ -34,11 +36,53 @@ impl ForceSets {
         })
     }
 
-    fn solve_force_constants() -> ForceConstants
+    /// NOTE: The error case is for singular matrices.
+    /// (I wish I was using 'failure' right now...)
+    fn solve_force_constants(&self) -> Result<ForceConstants>
     {
+        use ::util::zip_eq as z;
+        let ForceSets {
+            ref atom_displaced,
+            ref atom_affected,
+            ref cart_force,
+            ref cart_displacement,
+        } = *self;
+
+        let mut map = HashMap::new();
+
         // build a (likely overconstrained) system of equations for each interacting (i,j) pair
-        unimplemented!()
-        // solve using pseudoinverse
+        z(z(z(atom_displaced, atom_affected), cart_force), cart_displacement)
+            .for_each(|(((&displaced, &affected), force), displacement)| {
+                let key = (displaced, affected);
+                let entry = map.entry(key).or_insert((vec![], vec![]));
+                let &mut (ref mut fs, ref mut us) = entry;
+                fs.push(*force);
+                us.push(*displacement);
+            });
+
+        let mut row_atom = vec![];
+        let mut col_atom = vec![];
+        let mut cart_matrix = vec![];
+        for ((displaced, affected), (forces, displacements)) in map {
+            //
+            //    F = -U Phi
+            //
+            // * Phi is the 3x3 matrix of force constants for this pair of atoms
+            // * F is the Nx3 matrix of forces experienced by 'affected'
+            // * U is the Nx3 matrix of corresponding displacements for 'displaced'
+            //
+            // for large enough N (and assuming sufficient rank),
+            // we can solve for Phi using the pseudoinverse
+            assert!(forces.len() > 6, "not enough FCs? (got {})", forces.len());
+            let displacements: Matrix = (&displacements[..]).into();
+            let forces: Matrix = (&forces[..]).into();
+            let phi = &linalg::left_pseudoinverse(&displacements)? * &forces;
+            row_atom.push(displaced as usize);
+            col_atom.push(affected as usize);
+            cart_matrix.push(M3(*phi.row_major_data().nest().as_array()));
+        }
+
+        Ok(ForceConstants { row_atom, col_atom, cart_matrix })
     }
 }
 
@@ -48,96 +92,5 @@ pub struct ForceConstants {
     // this might be awkward to work with...
     cart_matrix: Vec<M33>,
 }
-
-// rsp2 doesn't frequently work with matrices that are variable in more
-// than one dimension, so this is kind of defined on the spot
-//
-// if it's later worth reusing somewhere else, move it to somewhere better
-mod matrix {
-    use super::*;
-
-    pub struct Matrix<T> {
-        data: Vec<T>, // c-contiguous, row-contiguous
-        // invariant:  width * height == data.len()
-        // Both are stored for the sake of the degenerate case where one dimension is zero.
-        height: usize,
-        width: usize,
-    }
-
-    impl<T> Matrix<T> {
-        fn new_filled((height, width): (usize, usize), fill: &T) -> Self
-        where T: Clone
-        {
-            let data = (0..height * width).map(|_| fill.clone()).collect();
-            Matrix { data, height, width }
-        }
-        fn num_rows(&self) -> usize { self.height }
-        fn num_cols(&self) -> usize { self.width }
-        fn row_major_data(&self) -> &[T] { &self.data }
-        fn row_major_data_mut(&mut self) -> &mut [T] { &mut self.data }
-        fn is_square(&self) -> bool { self.width == self.height }
-        fn size(&self) -> usize { self.data.len() }
-    }
-
-    pub fn pseudoinverse(mat: Vec<V3>) -> Matrix<f64> {
-        // mat * mat.T
-        // each element (row, col) is the row'th 3-vector dotted by the col'th 3-vector
-        let dim = mat.len();
-        let big_square = {
-            let mut data = vec![0.0; dim * dim];
-            {
-                let chunks: Vec<_> = data.chunks_mut(dim).collect();
-                for (data, row_v3) in ::util::zip_eq(chunks, &mat) {
-                    for (data, col_v3) in ::util::zip_eq(data, &mat) {
-                        *data = dot(row_v3, col_v3);
-                    }
-                }
-            }
-            Matrix { data, width: dim, height: dim }
-        };
-
-        panic!()
-    }
-
-    /// Solves `output = square * rhs` using LAPACKe's dgesv.
-    fn lapacke_linear_solve(mut square: Matrix<f64>, mut rhs: Matrix<f64>) -> Result<Matrix<f64>> {
-        use ::lapacke::{Layout, dgesv};
-        assert!(square.is_square());
-        assert_eq!(square.num_cols(), rhs.num_rows());
-
-        let layout = Layout::RowMajor;
-
-        let n = rhs.num_rows() as i32;
-        let nrhs = rhs.num_cols() as i32;
-        let lda = square.num_cols() as i32;
-        let ldb = rhs.num_cols() as i32;
-
-        {
-            // lapacke hates size-zero arrays.
-            let a = match square.size() {
-                0 => return Ok(rhs), // rhs must also have zero size; trivial solution
-                _ => square.row_major_data_mut(),
-            };
-            let b = match rhs.size() {
-                0 => return Ok(rhs), // trivial solution
-                _ => rhs.row_major_data_mut(),
-            };
-
-            let mut ipiv = vec![0; n as usize];
-            let ipiv = &mut ipiv;
-            assert!(ipiv.len() > 0);
-
-            match unsafe { dgesv(layout, n, nrhs, a, lda, ipiv, b, ldb) } {
-                0 => { /* okey dokey */ },
-                info if info < 0 => panic!("bad arg number {} to dgesv", -info),
-                info => bail!(ErrorKind::SingularMatrix),
-            }
-        } // end borrows
-
-        Ok(rhs)
-    }
-}
-
-
 
 

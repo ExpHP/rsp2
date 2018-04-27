@@ -19,8 +19,10 @@ extern crate rsp2_array_utils;
 extern crate rsp2_array_types;
 extern crate rsp2_slice_math;
 extern crate rsp2_fs_util;
+extern crate rsp2_shims;
 #[macro_use] extern crate rsp2_util_macros;
 #[macro_use] extern crate rsp2_clap;
+#[macro_use] extern crate rsp2_assert_close;
 
 #[macro_use] extern crate extension_trait;
 #[macro_use] extern crate enum_map;
@@ -46,7 +48,7 @@ extern crate serde_yaml;
 #[macro_use] extern crate error_chain;
 
 extern crate lapacke;
-extern crate lapacke_sys;
+extern crate lapack_src;
 
 macro_rules! ichain {
     ($e:expr,) => { $e.into_iter() };
