@@ -49,7 +49,7 @@ serde_yaml = "0.7"
 serde_ignored = "0.0.4"
 path_abs = { rev = "72c767cfabe27", git = "https://github.com/vitiral/path_abs" } 
 enum-map = "0.2.24"
-frunk = "0.1.36"
+frunk = "0.2.0"
 shlex = "0.1.1"
 indoc = "0.2.3"
 lapacke = "0.1.4"

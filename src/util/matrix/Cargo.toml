@@ -12,8 +12,13 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 path = "lib.rs"
 
 [dependencies]
-rsp2-shims = { path = "../shims" }
-rsp2-array-types = { path = "../array-types" }
-error-chain = "0.11"
+rsp2-assert-close = { path = "../assert-close" }
+#!!rsp2-shims
+#!!rsp2-array-types
+failure = "0.1"
+slice-of-array = "0.2"
+#!!frunk
 lapacke = "0.1.4"
 lapack-src = { version = "0.1.4", features = ["netlib"] } 
+ndarray = "0.11.2"
+rand = "0.3"

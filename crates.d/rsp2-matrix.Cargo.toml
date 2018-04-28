@@ -7,8 +7,13 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 path = "lib.rs"
 
 [dependencies]
-!!rsp2-shims
-!!rsp2-array-types
-!!error-chain
+!!rsp2-assert-close
+#!!rsp2-shims
+#!!rsp2-array-types
+!!failure
+!!slice-of-array
+#!!frunk
 !!lapacke
 !!lapack-src
+!!ndarray
+!!rand

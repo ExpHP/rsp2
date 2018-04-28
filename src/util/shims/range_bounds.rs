@@ -196,26 +196,3 @@ mod stuff_from_core {
     }
 }
 
-use ::std::collections::Bound;
-use ::std::ops::Range;
-
-pub trait RangeBoundsHelper: RangeBounds<usize> {
-    fn to_range(&self, len: usize) -> Range<usize>
-    {
-        let inclusive_start = match self.start() {
-            Bound::Included(&i) => i,
-            Bound::Excluded(&i) => i + 1,
-            Bound::Unbounded => 0,
-        };
-
-        let exclusive_end = match self.end() {
-            Bound::Included(&i) => i + 1,
-            Bound::Excluded(&i) => i,
-            Bound::Unbounded => len,
-        };
-
-        inclusive_start..exclusive_end
-    }
-}
-
-impl<T: RangeBounds<usize>> RangeBoundsHelper for T {}
