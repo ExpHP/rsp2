@@ -20,13 +20,23 @@ pub fn dot<A, B>(a: &A, b: &B) -> <A as ndarray::linalg::Dot<B>>::Output
 where A: ndarray::linalg::Dot<B>
 { a.dot(b) }
 
-use self::c_matrix::CMatrix;
+pub use self::c_matrix::CMatrix;
 mod c_matrix {
     use super::*;
+    use ::slice_of_array::IsSliceomorphic;
+    use ::slice_of_array::prelude::*;
 
     /// Owned, contiguous, C-order matrix data.
+    ///
+    /// Convenient for interfacing with LAPACKe, which tends to assume that
+    /// one of the strides is equal to 1.
     #[derive(Debug, Clone)]
-    pub struct CMatrix<A = f64>(Array2<A>);
+    pub struct CMatrix<A = f64>(
+        // invariant: .strides[1] == 1
+        // invariant: .strides[0] == .cols()
+        // invariant: .len() == product of dims
+        Array2<A>
+    );
 
     impl<A> CMatrix<A> {
         pub fn into_inner(self) -> Array2<A> { self.0 }
@@ -39,6 +49,19 @@ mod c_matrix {
         type Target = Array2<A>;
 
         fn deref(&self) -> &Self::Target { &self.0 }
+    }
+
+    impl<'a, A, V> From<&'a [V]> for CMatrix<A>
+    where
+        A: Clone,
+        V: IsSliceomorphic<Element = A>,
+    {
+        fn from(slice: &'a [V]) -> Self {
+            CMatrix(Array::from_shape_vec(
+                (slice.len(), V::LEN),
+                slice.flat().to_vec(),
+            ).expect("BUG"))
+        }
     }
 
     impl<A: Clone> From<Array2<A>> for CMatrix<A> {
@@ -71,9 +94,30 @@ mod c_matrix {
         }
     }
 
+    impl<A> Into<Array2<A>> for CMatrix<A> {
+        fn into(self) -> Array2<A> { self.0 }
+    }
+
+    // placebo
+    impl<A, V> Into<Vec<V>> for CMatrix<A>
+    where
+        V: Clone + IsSliceomorphic<Element = A>,
+    {
+        fn into(self) -> Vec<V> { (&self).into() }
+    }
+
+    impl<'a, A, V> Into<Vec<V>> for &'a CMatrix<A>
+    where
+        V: Clone + IsSliceomorphic<Element = A>,
+    {
+        fn into(self) -> Vec<V> {
+            assert_eq!(self.cols(), V::LEN);
+            self.c_order_data().nest().to_vec()
+        }
+    }
+
     #[test]
     fn test_into_c_matrix() {
-
         let check = |arr: Array2<_>, expected| {
             let c_mat_ref = CMatrix::from(&arr);
             let c_mat_view = CMatrix::from(arr.view());
@@ -104,9 +148,7 @@ mod c_matrix {
     }
 }
 
-pub type ArrayBase2<S> = ArrayBase<S, ndarray::Ix2>;
-
-pub fn left_pseudoinverse(mat: &ArrayView2<f64>) -> Result<Array2<f64>, Error>
+pub fn left_pseudoinverse(mat: CMatrix) -> Result<CMatrix, Error>
 {
     // http://icl.cs.utk.edu/lapack-forum/viewtopic.php?f=2&t=160
     //
@@ -123,11 +165,11 @@ pub fn left_pseudoinverse(mat: &ArrayView2<f64>) -> Result<Array2<f64>, Error>
     // (I don't think we have to worry about this for computing force constants, because
     //  our matrices tend to be around size... I'm not sure.  6x3?  In any case, they don't
     //  scale with the size of the system (we simply end up with more of them to solve))
-    let max = usize::max(mat.rows(), mat.cols());
-    let b = Array2::<f64>::eye(max);
+    let cols = mat.cols();
+    let rows = mat.rows();
+    let b = Array2::<f64>::eye(usize::max(rows, cols));
     let b = lapacke_least_squares_svd(mat.into(), b.into())?;
-
-    Ok(b.slice(s![..mat.cols(), ..mat.rows()]).to_owned())
+    Ok(b.slice(s![..cols, ..rows]).into())
 }
 
 /// Solves `output = square * rhs` using LAPACKe's dgesv.
@@ -218,7 +260,7 @@ fn test_pseudoinverse() {
         let mat = Array2::from_shape_fn((r, c), |_| 1.0 - 2.0 * rng.gen::<f64>());
         let p_inv = match left_pseudoinverse(&mat.view()) {
             Ok(inv) => inv,
-            Err(_) => panic!("singular random uniform? now that's what I call bad luck {:?}", (r, c)),
+            Err(_) => panic!("SVD convergence failure for size {:?}", (r, c)),
         };
         let prod = dot(&p_inv, &mat);
         for i in 0..c {
