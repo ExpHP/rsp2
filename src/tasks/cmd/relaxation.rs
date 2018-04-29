@@ -11,7 +11,6 @@ use ::rsp2_tasks_config::{self as cfg, Settings};
 use ::traits::{AsPath};
 use ::phonopy::{DirWithBands};
 
-use ::util::{tup3};
 use ::math::basis::Basis3;
 
 use ::rsp2_slice_math::{v, V, vdot};
@@ -222,8 +221,8 @@ fn do_relax(
     structure: ElementStructure,
 ) -> Result<ElementStructure>
 {ok({
-    let sc_dims = tup3(potential_settings.supercell.dim_for_unitcell(structure.lattice()));
-    let (supercell, sc_token) = supercell::diagonal(sc_dims, structure);
+    let sc_dims = potential_settings.supercell.dim_for_unitcell(structure.lattice());
+    let (supercell, sc_token) = supercell::diagonal(sc_dims).build(structure);
 
     let mut lmp = lmp.with_modified_inner(|b| b.threaded(true)).build(supercell.clone())?;
     let relaxed_flat = ::rsp2_minimize::acgsd(
@@ -291,8 +290,8 @@ fn _do_cg_along_evecs(
     evecs: &[&[V3]],
 ) -> Result<ElementStructure>
 {ok({
-    let sc_dims = tup3(potential_settings.supercell.dim_for_unitcell(structure.lattice()));
-    let (mut supercell, sc_token) = supercell::diagonal(sc_dims, structure);
+    let sc_dims = potential_settings.supercell.dim_for_unitcell(structure.lattice());
+    let (mut supercell, sc_token) = supercell::diagonal(sc_dims).build(structure);
     let evecs: Vec<_> = evecs.iter().map(|ev| sc_token.replicate(ev)).collect();
 
     let flat_evecs: Vec<_> = evecs.iter().map(|ev| ev.flat()).collect();
@@ -317,8 +316,8 @@ fn do_minimize_along_evec(
     evec: &[V3],
 ) -> Result<(f64, ElementStructure)>
 {ok({
-    let sc_dims = tup3(settings.supercell.dim_for_unitcell(structure.lattice()));
-    let (structure, sc_token) = supercell::diagonal(sc_dims, structure);
+    let sc_dims = settings.supercell.dim_for_unitcell(structure.lattice());
+    let (structure, sc_token) = supercell::diagonal(sc_dims).build(structure);
     let evec = sc_token.replicate(evec);
     let mut lmp = lmp.with_modified_inner(|b| b.threaded(true)).build(structure.clone())?;
 

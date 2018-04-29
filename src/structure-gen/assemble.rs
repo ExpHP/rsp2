@@ -255,14 +255,25 @@ fn assemble_from_cereal(cereal: self::cereal::Root) -> Result<Assemble>
         structure.transform(&layer.transform);
 
         // generate all unique sites in this layer
-        let sc_vec = (layer.repeat[0], layer.repeat[1], layer.repeat[2]);
-        let (structure, _) = ::rsp2_structure::supercell::diagonal(sc_vec, structure);
+        // FIXME this causes a different-but-equivalent diagonal supercell
+        //       to be used for the layer in some places even though the cell we *use* is
+        //       not diagonal.  This is a huge footgun, and may even have been what caused
+        //       the band unfolding code to give such miserable results at K.
+        //
+        //       it would be better to invert/transpose the fractional lattice in the file
+        //       to get the integer sc matrices, and somehow verify that the 'repeat' field
+        //       is correct.  Or just ignore the 'repeat' field and do HNF reduction to find
+        //       a set of periods (but that feels wasteful).
+        let (structure, _) = ::rsp2_structure::supercell::diagonal(layer.repeat).build(structure);
 
         // put them in frac coords for the full lattice
         let mut structure = CoordStructure::new_coords(
             Lattice::new(&full_lattice),
             Coords::Carts(structure.to_carts()),
         );
+        // FIXME this reduction is just a bandaid for the above-mentioned issue.
+        //       (taking unique positions in the diagonal layer supercells and mapping
+        //        them into the cell that we generally use for the structure)
         structure.reduce_positions();
         frac_sites.push(v3_to_v2(&structure.to_fracs()));
     }

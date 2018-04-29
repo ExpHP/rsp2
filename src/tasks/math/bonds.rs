@@ -73,7 +73,7 @@ impl Bonds {
             supercell_dims, center_cell_index,
         } = sufficiently_large_supercell(structure.lattice(), range)?;
 
-        let (superstructure, sc_info) = supercell::diagonal(tup3(supercell_dims), structure);
+        let (superstructure, sc_info) = supercell::diagonal(supercell_dims).build(structure);
 
         let mut from = vec![];
         let mut to = vec![];

@@ -12,7 +12,6 @@ use ::rsp2_slice_math::{v, V, vdot, vnormalize, BadNorm};
 use ::slice_of_array::prelude::*;
 use ::rsp2_structure::supercell;
 use ::rsp2_structure::{ElementStructure};
-use ::util::tup3;
 
 use std::fmt;
 
@@ -126,8 +125,8 @@ pub(crate) fn perform_acoustic_search(
     }
 
     // look at the negative eigenvectors for rotations and true imaginary modes
-    let sc_dims = tup3(supercell_spec.dim_for_unitcell(structure.lattice()));
-    let (superstructure, sc_token) = supercell::diagonal(sc_dims, structure.clone());
+    let sc_dims = supercell_spec.dim_for_unitcell(structure.lattice());
+    let (superstructure, sc_token) = supercell::diagonal(sc_dims).build(structure.clone());
     let mut lmp = lmp.with_modified_inner(|b| b.threaded(true)).build(superstructure.clone())?;
     let mut diff_at_pos = lmp.flat_diff_fn();
 

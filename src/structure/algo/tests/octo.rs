@@ -25,7 +25,7 @@
 
 use ::{Perm, FracRot};
 
-use ::rsp2_array_types::{V3, Envee};
+use ::rsp2_array_types::{V3, vee, Envee};
 
 /// Type of positions being acted upon.
 type X = Vec<V3>;
@@ -44,7 +44,7 @@ fn index_from_point(point: V3) -> u32
     assert!(point.iter().all(|x| x.abs() == 1.0));
 
     let bits = point.map(|x| (x as i32 + 1) / 2);
-    V3::dot(&V3([4, 2, 1]), &bits) as u32 // binary encoding
+    vee::dot(&V3([4, 2, 1]), &bits) as u32 // binary encoding
 }
 
 // inverse of `index_from_point`

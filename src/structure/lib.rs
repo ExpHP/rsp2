@@ -64,7 +64,7 @@ pub mod helper {
 pub mod supercell {
     pub use ::algo::supercell::{
         diagonal,
-        diagonal_with,
+        centered_diagonal,
         OwnedMetas,
         SupercellToken,
     };

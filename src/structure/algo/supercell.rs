@@ -5,29 +5,79 @@ use ::rsp2_array_utils::{try_arr_from_fn};
 
 use ::rsp2_array_types::{V3};
 
-pub fn diagonal<M>(dims: (u32,u32,u32), structure: Structure<M>)
--> (Structure<M>, SupercellToken)
-where M: Clone,
-{
-    diagonal_with(dims, structure, |meta,_| meta.clone())
+
+// ---------------------------------------------------------------
+#[derive(Debug, Clone)]
+pub struct Builder {
+    // supercell "matrix". (currently only diagonal are supported)
+    diagonal: [u32; 3],
+    // add a lattice point to the entire output.  This will be reflected
+    // in `supercell_indices()` as well.
+    offset: V3<i32>,
 }
 
-pub fn diagonal_with<M, F>(dims: (u32,u32,u32), structure: Structure<M>, mut make_meta: F)
+pub fn diagonal(dims: [u32; 3]) -> Builder {
+    // there's really no use case for empty supercells AFAICT, and they break
+    // the laws of periodicity
+    assert!(dims.iter().all(|&x| x > 0), "supercell of size zero?!");
+    Builder {
+        diagonal: dims,
+        offset: V3([0; 3]),
+    }
+}
+
+/// Given dims `[a, b, c]`, makes a supercell of size `[2a + 1, 2b + 1, 2c + 1]`.
+pub fn centered_diagonal(extra_images: [u32; 3]) -> Builder {
+    let extra_images = V3(extra_images);
+
+    Builder {
+        diagonal: (extra_images * 2 + V3([1; 3])).0,
+        offset: extra_images.map(|x| -(x as i32)),
+    }
+}
+
+impl Builder {
+    pub fn build<M>(&self, structure: Structure<M>) -> (Structure<M>, SupercellToken)
+    where M: Clone,
+    {
+        self.build_with(structure, |meta, _| meta.clone())
+    }
+
+    pub fn build_with<M, F>(&self, structure: Structure<M>, make_meta: F) -> (Structure<M>, SupercellToken)
+    where F: FnMut(&M, [u32; 3]) -> M,
+    {
+        diagonal_with(self.clone(), structure, make_meta)
+    }
+}
+
+// ---------------------------------------------------------------
+
+impl Builder {
+    // convert into a data structure with precomputed info for general supercell matrices
+    fn into_sc_token(self, num_primitive_atoms: usize) -> SupercellToken {
+        let Builder { offset, diagonal: periods } = self;
+        let integer_lattice = Lattice::diagonal(&V3(periods).map(|x| x as f64));
+        SupercellToken { offset, periods, integer_lattice, num_primitive_atoms }
+    }
+}
+
+// ---------------------------------------------------------------
+
+fn diagonal_with<M, F>(builder: Builder, structure: Structure<M>, mut make_meta: F)
 -> (Structure<M>, SupercellToken)
-where F: FnMut(&M, (u32,u32,u32)) -> M,
+where F: FnMut(&M, [u32; 3]) -> M,
 {
-    let num_primitive_atoms = structure.num_atoms();
     let Structure { lattice, coords, meta } = structure;
 
-    let integer_lattice = Lattice::orthorhombic(dims.0 as f64, dims.1 as f64, dims.2 as f64);
+    // construct a SupercellToken ASAP so that we know the rest of the code
+    // works for general supercell matrices
+    let sc = builder.into_sc_token(coords.len());
 
     // number of offsets along each lattice vector.
-    // trivial for a diagonal supercell; less so for a general supercell
-    let periods = [dims.0, dims.1, dims.2];
-    let num_sc = (periods[0] * periods[1] * periods[2]) as usize;
+    let num_sc = (sc.periods[0] * sc.periods[1] * sc.periods[2]) as usize;
     let num_supercell_atoms = num_sc * coords.len();
 
-    let sc_carts = sc_lattice_vecs(periods, &lattice);
+    let sc_carts = sc_lattice_vecs(sc.periods, sc.offset, &lattice);
     let mut new_carts = Vec::with_capacity(num_supercell_atoms);
     for atom_cart in coords.into_carts(&lattice) {
         let old_len = new_carts.len();
@@ -35,22 +85,21 @@ where F: FnMut(&M, (u32,u32,u32)) -> M,
         ::util::translate_mut_n3_3(&mut new_carts[old_len..], &atom_cart);
     }
 
-    let sc_idx = sc_indices(periods);
+    let sc_idx = sc_indices(sc.periods);
     let mut new_meta = Vec::with_capacity(num_supercell_atoms);
     for m in meta {
         for idx in &sc_idx {
-            new_meta.push(make_meta(&m, (idx[0], idx[1], idx[2])));
+            new_meta.push(make_meta(&m, idx.0));
         }
     }
 
     let structure = Structure {
-        lattice: &integer_lattice * &lattice,
+        lattice: &sc.integer_lattice * &lattice,
         coords: Coords::Carts(new_carts),
         meta: new_meta,
     };
 
-    let token = SupercellToken { periods, integer_lattice, num_primitive_atoms };
-    (structure, token)
+    (structure, sc)
 }
 
 /// Contains enough information to deconstruct a supercell produced by this library.
@@ -60,6 +109,7 @@ where F: FnMut(&M, (u32,u32,u32)) -> M,
 /// Instead, please refer to the methods `cell_indices` and `primitive_site_indices`.
 pub struct SupercellToken {
     periods: [u32; 3],
+    offset: V3<i32>,
     num_primitive_atoms: usize,
     // supercell in units of primitive cell vectors.  Elements are integral
     integer_lattice: Lattice,
@@ -135,14 +185,14 @@ impl SupercellToken {
             "wrong # of atoms in supercell");
 
         let num_cells = self.num_cells();
-        let SupercellToken { periods, ref integer_lattice, num_primitive_atoms } = *self;
+        let SupercellToken { periods, offset, ref integer_lattice, num_primitive_atoms } = *self;
         let Structure { lattice, coords, meta } = structure;
 
         let primitive_lattice = integer_lattice.inverse_matrix() * &lattice;
 
         let out_carts = {
             let neg_offsets = {
-                let mut vs = sc_lattice_vecs(periods, &primitive_lattice);
+                let mut vs = sc_lattice_vecs(periods, offset, &primitive_lattice);
                 for v in &mut vs {
                     *v *= -1.0;
                 }
@@ -241,8 +291,9 @@ fn sc_indices(periods: [u32; 3]) -> Vec<V3<u32>> {
 }
 
 // supercell image offsets in the library's preferred order
-fn sc_lattice_vecs(periods: [u32; 3], lattice: &Lattice) -> Vec<V3> {
+fn sc_lattice_vecs(periods: [u32; 3], offset: V3<i32>, lattice: &Lattice) -> Vec<V3> {
     sc_indices(periods).into_iter()
+        .map(|idx| idx.map(|x| x as i32) + offset)
         .map(|idx| idx.map(|x| x as f64) * lattice.matrix())
         .collect()
 }
@@ -260,7 +311,7 @@ mod tests {
         let coords = Coords::Fracs(vec![[0.0, 0.0, 0.0]].envee());
 
         let original = Structure::new_coords(Lattice::eye(), coords);
-        let (supercell, sc_token) = ::supercell::diagonal((2, 2, 2), original.clone());
+        let (supercell, sc_token) = ::supercell::diagonal([2, 2, 2]).build(original.clone());
 
         assert_eq!(supercell.num_atoms(), 8);
         assert_eq!(supercell.lattice(), &Lattice::cubic(2.0));
@@ -280,7 +331,8 @@ mod tests {
     fn test_diagonal_supercell() {
         use ::{Coords, Structure, Lattice};
 
-        // nondiagonal lattice so that matrix multiplication order matters
+        // nondiagonal lattice so that matrix multiplication order matters.
+        // carefully chosen so that the inverse has an exact representation.
         let lattice = Lattice::from(&[
             [2.0, 2.0, 0.0],
             [0.0, 4.0, 0.0],
@@ -293,7 +345,7 @@ mod tests {
         ].envee());
 
         let original = Structure::new_coords(lattice, coords);
-        let (supercell, sc_token) = ::supercell::diagonal((4, 2, 2), original.clone());
+        let (supercell, sc_token) = ::supercell::diagonal([4, 2, 2]).build(original.clone());
         let deconstructed = sc_token.deconstruct(1e-10, supercell.clone()).unwrap();
 
         assert_eq!(original.to_carts(), deconstructed.to_carts());
@@ -305,5 +357,42 @@ mod tests {
         carts[4][1] += 1e-6;
         supercell.coords = Coords::Carts(carts);
         assert!(sc_token.deconstruct(1e-10, supercell.clone()).is_err());
+    }
+
+    #[test]
+    fn test_centered_diagonal_supercell() {
+        use ::{Coords, Structure, Lattice};
+
+        // nondiagonal lattice so that matrix multiplication order matters
+        // carefully chosen so that the inverse has an exact representation.
+        let lattice = Lattice::from(&[
+            [2.0, 0.0, 0.0],
+            [0.0, 4.0, 0.0],
+            [0.0, 0.0, 8.0],
+        ]);
+
+        let coords = Coords::Carts(vec![
+            [0.25, 0.75, 1.5],
+        ].envee());
+
+        let original = Structure::new_coords(lattice, coords);
+        let (supercell, sc_token) = {
+            ::supercell::centered_diagonal([0, 2, 1])
+                .build(original.clone())
+        };
+        let deconstructed = sc_token.deconstruct(1e-10, supercell.clone()).unwrap();
+
+        assert_eq!(original.to_carts(), deconstructed.to_carts());
+        assert_eq!(original.lattice(), deconstructed.lattice());
+        let expected_carts = {
+            let xs = [0.25];
+            let ys = [-7.25, -3.25, 0.75, 4.75, 8.75];
+            let zs = [-6.5, 1.5, 9.5];
+            iproduct!(&xs, &ys, &zs)
+                .map(|(&x, &y, &z)| [x, y, z])
+                .collect::<Vec<_>>().envee()
+        };
+        let actual_carts = supercell.to_carts();
+        assert!(::util::eq_unordered_n3(&expected_carts, &actual_carts), "{:?} {:?}", expected_carts, actual_carts);
     }
 }
