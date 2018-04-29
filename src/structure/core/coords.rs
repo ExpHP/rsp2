@@ -9,25 +9,35 @@ use ::rsp2_array_types::{V3, M33};
 ///
 /// This allows a function to support either cartesian coordinates,
 /// or fractional coordinates with respect to some lattice.
+// NOTE: The type parameter here is a necessary step towards the HList
+//       structure types, so that views of them can be constructed.
 #[derive(Debug, Clone, PartialEq)]
-pub enum CoordsKind {
-    Carts(Vec<V3>),
-    Fracs(Vec<V3>),
+pub enum CoordsKind<V = Vec<V3>> {
+    Carts(V),
+    Fracs(V),
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum Tag { Cart, Frac }
 
-impl CoordsKind {
+#[allow(unused)]
+impl<V> CoordsKind<V>
+where V: AsRef<[V3]>,
+{
+    #[inline(always)]
     pub fn len(&self) -> usize
     { self.as_slice().1.len() }
 
     pub(crate) fn as_slice(&self) -> (Tag, &[V3])
     { match *self {
-        CoordsKind::Carts(ref c) => (Tag::Cart, c),
-        CoordsKind::Fracs(ref c) => (Tag::Frac, c),
+        CoordsKind::Carts(ref c) => (Tag::Cart, c.as_ref()),
+        CoordsKind::Fracs(ref c) => (Tag::Frac, c.as_ref()),
     }}
+}
 
+#[allow(unused)]
+impl CoordsKind<Vec<V3>>
+{
     pub(crate) fn as_mut_vec(&mut self) -> (Tag, &mut Vec<V3>)
     { match *self {
         CoordsKind::Carts(ref mut c) => (Tag::Cart, c),
@@ -48,22 +58,26 @@ impl CoordsKind {
 }
 
 // projections
-impl CoordsKind {
+#[allow(unused)]
+impl<V> CoordsKind<V>
+where V: AsRef<[V3]>,
+{
     pub(crate) fn as_carts_opt(&self) -> Option<&[V3]>
     { match *self {
-        CoordsKind::Carts(ref x) => Some(x),
+        CoordsKind::Carts(ref x) => Some(x.as_ref()),
         CoordsKind::Fracs(_) => None,
     }}
 
     pub(crate) fn as_fracs_opt(&self) -> Option<&[V3]>
     { match *self {
         CoordsKind::Carts(_) => None,
-        CoordsKind::Fracs(ref x) => Some(x),
+        CoordsKind::Fracs(ref x) => Some(x.as_ref()),
     }}
 }
 
 // conversions
-impl CoordsKind {
+impl CoordsKind<Vec<V3>>
+{
     pub fn into_carts(self, lattice: &Lattice) -> Vec<V3>
     { match self {
         CoordsKind::Carts(c) => c,
@@ -76,22 +90,27 @@ impl CoordsKind {
         CoordsKind::Fracs(c) => c,
     }}
 
-    pub fn to_carts(&self, lattice: &Lattice) -> Vec<V3>
-    { match *self {
-        CoordsKind::Carts(ref c) => c.clone(),
-        CoordsKind::Fracs(ref c) => dot_n3_33(c, lattice.matrix()),
-    }}
-
-    pub fn to_fracs(&self, lattice: &Lattice) -> Vec<V3>
-    { match *self {
-        CoordsKind::Carts(ref c) => dot_n3_33(c, lattice.inverse_matrix()),
-        CoordsKind::Fracs(ref c) => c.clone(),
-    }}
-
+    #[allow(unused)]
     pub(crate) fn into_tag(self, tag: Tag, lattice: &Lattice) -> Vec<V3>
     { match tag {
         Tag::Cart => self.into_carts(lattice),
         Tag::Frac => self.into_fracs(lattice),
+    }}
+}
+
+impl<V> CoordsKind<V>
+where V: AsRef<[V3]>,
+{
+    pub fn to_carts(&self, lattice: &Lattice) -> Vec<V3>
+    { match *self {
+        CoordsKind::Carts(ref c) => c.as_ref().to_vec(),
+        CoordsKind::Fracs(ref c) => dot_n3_33(c.as_ref(), lattice.matrix()),
+    }}
+
+    pub fn to_fracs(&self, lattice: &Lattice) -> Vec<V3>
+    { match *self {
+        CoordsKind::Carts(ref c) => dot_n3_33(c.as_ref(), lattice.inverse_matrix()),
+        CoordsKind::Fracs(ref c) => c.as_ref().to_vec(),
     }}
 
     #[allow(unused)]
@@ -105,15 +124,18 @@ impl CoordsKind {
 fn dot_n3_33(c: &[V3], m: &M33) -> Vec<V3>
 { c.iter().map(|v| v * m).collect() }
 
-impl Permute for CoordsKind {
-    fn permuted_by(self, perm: &Perm) -> CoordsKind
+impl<V> Permute for CoordsKind<V>
+where V: Permute,
+{
+    fn permuted_by(self, perm: &Perm) -> CoordsKind<V>
     { match self {
         CoordsKind::Carts(c) => CoordsKind::Carts(c.permuted_by(perm)),
         CoordsKind::Fracs(c) => CoordsKind::Fracs(c.permuted_by(perm)),
     }}
 }
 
-impl Partition for CoordsKind {
+impl Partition for CoordsKind<Vec<V3>>
+{
     fn into_unlabeled_partitions<L>(self, part: &Part<L>) -> Unlabeled<Self>
     {
         let (tag, coords) = self.into_vec();
