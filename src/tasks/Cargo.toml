@@ -28,13 +28,14 @@ rsp2-util-macros = { path = "../util/macros" }
 rsp2-fs-util = { path = "../util/fs" }
 rsp2-clap = { path = "../util/clap" }
 rsp2-assert-close = { path = "../util/assert-close" }
-rsp2-shims = { path = "../util/shims" }
+rsp2-linalg = { path = "../linalg" }
 
 clap = "2"
 slice-of-array = "0.2"
 rsp2-kets = { version = "0.3.6", git = "https://github.com/ExpHP/rsp2-kets", features = ["serde"] } 
 rand = "0.3"
 log = "0.3"
+failure = "0.1"
 fern = "0.4"
 extension-trait = "0.1.2"
 itertools = "0.7"

@@ -64,6 +64,15 @@ mod c_matrix {
         }
     }
 
+    // ergonomics / placebo
+    impl<A, V> From<Vec<V>> for CMatrix<A>
+    where
+        A: Clone,
+        V: IsSliceomorphic<Element = A>,
+    {
+        fn from(vec: Vec<V>) -> Self { (&vec[..]).into() }
+    }
+
     impl<A: Clone> From<Array2<A>> for CMatrix<A> {
         fn from(arr: Array2<A>) -> Self {
             if arr.is_standard_layout() {
@@ -98,7 +107,7 @@ mod c_matrix {
         fn into(self) -> Array2<A> { self.0 }
     }
 
-    // placebo
+    // ergonomics / placebo
     impl<A, V> Into<Vec<V>> for CMatrix<A>
     where
         V: Clone + IsSliceomorphic<Element = A>,

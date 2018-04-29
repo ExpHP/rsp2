@@ -1,5 +1,5 @@
 [package]
-name = "rsp2-matrix"
+name = "rsp2-linalg"
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 

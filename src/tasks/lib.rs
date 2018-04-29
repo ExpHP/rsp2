@@ -19,7 +19,7 @@ extern crate rsp2_array_utils;
 extern crate rsp2_array_types;
 extern crate rsp2_slice_math;
 extern crate rsp2_fs_util;
-extern crate rsp2_shims;
+extern crate rsp2_linalg;
 #[macro_use] extern crate rsp2_util_macros;
 #[macro_use] extern crate rsp2_clap;
 #[macro_use] extern crate rsp2_assert_close;
@@ -35,6 +35,7 @@ extern crate serde;
 extern crate ansi_term;
 extern crate fern;
 extern crate shlex;
+extern crate failure;
 #[macro_use] extern crate clap;
 #[macro_use] extern crate lazy_static;
 extern crate rsp2_kets;
@@ -91,6 +92,7 @@ mod errors {
             SetLogger(::log::SetLoggerError);
             ParseInt(::std::num::ParseIntError);
             PathAbs(::path_abs::Error);
+            Failure(::failure::Compat<::failure::Error>);
         }
 
         links {
@@ -142,6 +144,11 @@ mod errors {
             Error(ErrorKind::MissingFile(_, _, _), _) => true,
             _ => false,
         }}
+    }
+    impl From<::failure::Error> for Error {
+        fn from(e: ::failure::Error) -> Self {
+            e.compat().into()
+        }
     }
 }
 

@@ -48,7 +48,7 @@ rsp2-clap = { path = "src/util/clap" }
 rsp2-tasks-config = { path = "src/tasks/config" }
 rsp2-array-types = { path = "src/util/array-types" }
 rsp2-shims = { path = "src/util/shims" }
-rsp2-matrix = { path = "src/util/matrix" }
+rsp2-linalg = { path = "src/linalg" }
 
 # Deps of examples/ and tests/.
 # Some of these could be dev-dependencies, however currently

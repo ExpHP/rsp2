@@ -23,13 +23,14 @@ path = "lib.rs"
 !!rsp2-fs-util
 !!rsp2-clap
 !!rsp2-assert-close
-!!rsp2-shims
+!!rsp2-linalg
 
 !!clap
 !!slice-of-array
 !!rsp2-kets
 !!rand
 !!log
+!!failure
 !!fern
 !!extension-trait
 !!itertools

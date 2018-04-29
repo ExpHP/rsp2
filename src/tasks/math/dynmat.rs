@@ -64,6 +64,7 @@ impl ForceSets {
         let mut col_atom = vec![];
         let mut cart_matrix = vec![];
         for ((displaced, affected), (forces, displacements)) in map {
+            use rsp2_linalg::{CMatrix, left_pseudoinverse, dot};
             //
             //    F = -U Phi
             //
@@ -73,13 +74,13 @@ impl ForceSets {
             //
             // for large enough N (and assuming sufficient rank),
             // we can solve for Phi using the pseudoinverse
-            assert!(forces.len() > 6, "not enough FCs? (got {})", forces.len());
-            let displacements: Matrix = (&displacements[..]).into();
-            let forces: Matrix = (&forces[..]).into();
-            let phi = &linalg::left_pseudoinverse(&displacements)? * &forces;
+            assert!(forces.len() > 3, "not enough FCs? (got {})", forces.len());
+            let displacements: CMatrix = displacements.into();
+            let forces: CMatrix = forces.into();
+            let phi: CMatrix = dot(&*left_pseudoinverse(displacements)?, &*forces).into();
             row_atom.push(displaced as usize);
             col_atom.push(affected as usize);
-            cart_matrix.push(M3(*phi.row_major_data().nest().as_array()));
+            cart_matrix.push(M3(phi.c_order_data().nest().to_array()));
         }
 
         Ok(ForceConstants { row_atom, col_atom, cart_matrix })

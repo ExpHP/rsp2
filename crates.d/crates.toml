@@ -47,7 +47,7 @@ rsp2-clap = "src/util/clap"
 rsp2-tasks-config = "src/tasks/config"
 rsp2-array-types = "src/util/array-types"
 rsp2-shims = "src/util/shims"
-rsp2-matrix = "src/util/matrix"
+rsp2-linalg = "src/linalg"
 #!!INSERTION POINT FOR NEW CRATES!!#
 
 #--------------------------------------------
