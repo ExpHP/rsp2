@@ -69,22 +69,20 @@ impl Bonds {
 
         // Construct a supercell large enough to contain all atoms that interact with an atom
         // in the centermost unit cell.
-        let SupercellData {
-            supercell_dims, center_cell_index,
-        } = sufficiently_large_supercell(structure.lattice(), range)?;
-
-        let (superstructure, sc_info) = supercell::diagonal(supercell_dims).build(structure);
+        let sc_builder = sufficiently_large_centered_supercell(structure.lattice(), range)?;
+        let (superstructure, sc_info) = sc_builder.build(structure);
+        let centermost_cell = V3([0, 0, 0]);
 
         let mut from = vec![];
         let mut to = vec![];
         let mut cart_vectors = vec![];
 
         let carts = superstructure.to_carts();
-        let cells = sc_info.cell_indices();
+        let cells = sc_info.signed_cell_indices();
         let sites = sc_info.primitive_site_indices();
 
         for (cell_from, &site_from, &cart_from) in izip!(cells, &sites, &carts) {
-            if cell_from != center_cell_index {
+            if cell_from != centermost_cell {
                 continue;
             }
 
@@ -100,19 +98,15 @@ impl Bonds {
                 }
             }
         }
+        assert_ne!(from.len(), 0, "(BUG) nothing in center cell?");
         Ok(Bonds { from, to, cart_vectors })
     }
 }
 
 //=================================================================
 
-struct SupercellData {
-    supercell_dims: [u32; 3],
-    center_cell_index: V3<u32>,
-}
-
 // Construct a supercell large enough to contain all atoms that interact with an atom
-// in the centermost unit cell.
+// in the unit cell with coeffs [0, 0, 0]
 //
 // FIXME: even for how retardedly conservative this idea is for large unit cells,
 //        it's still VERY HARD to actually implement this function correctly!
@@ -120,7 +114,10 @@ struct SupercellData {
 //         when it comes to finding "sufficiently large search volumes")
 //
 //        We took the easy way out for nothing!
-fn sufficiently_large_supercell(lattice: &Lattice, mut interaction_range: f64) -> Result<SupercellData> {
+fn sufficiently_large_centered_supercell(
+    lattice: &Lattice,
+    mut interaction_range: f64,
+) -> Result<supercell::Builder> {
     // Search for a slightly larger range to account for numerical fuzz.
     interaction_range *= 1.0 + 1e-4;
 
@@ -234,18 +231,12 @@ fn sufficiently_large_supercell(lattice: &Lattice, mut interaction_range: f64) -
     // central cell; not just the center.  Calling the supercell we just chose `S1`,
     // we can pick an even larger supercell `S2` which is guaranteed to include a
     // region shaped like `S1` around any point in the original unit cell.
+    //
+    // `(2 * c + 1)` cells (where `c` was the old number) should be enough.
+    // Lucky for us, we automatically get this by building a centered supercell.
+    trace!("bond graph: true supercell: centered_diagonal({:?})", coeffs);
 
-    // (NOTE: pretty sure this is overly conservative)
-    let coeffs = map_arr(coeffs, |c| 2 * c + 1); // NOTE: must be odd
-    trace!("bond graph: true supercell: {:?}", coeffs);
-
-    Ok(SupercellData {
-        supercell_dims: coeffs,
-        center_cell_index: {
-            assert!(coeffs.iter().all(|&n| n % 2 == 1), "bug (sc coeff not odd)");
-            V3(map_arr(coeffs, |n| (n - 1) / 2))
-        },
-    })
+    Ok(supercell::centered_diagonal(coeffs))
 }
 
 mod geometry {
@@ -284,5 +275,3 @@ mod geometry {
 }
 
 //=================================================================
-
-fn tup3<T:Copy>(arr: [T; 3]) -> (T, T, T) { (arr[0], arr[1], arr[2]) }

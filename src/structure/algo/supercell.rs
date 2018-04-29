@@ -268,6 +268,20 @@ impl SupercellToken {
             .collect()
     }
 
+    /// Gives coefficients of the lattice vectors that were added to each atom in the supercell.
+    ///
+    /// This is like `cell_indices`, but gives the indices as signed integer offsets.
+    /// The `offset` from building the supercell affects this, so that e.g. centered supercells
+    /// have a signed index of `[0, 0, 0]` assigned to atoms in the centermost unit cell.
+    ///
+    /// This function is constant for any given supercell; it merely exists to define the
+    /// conventions for ordering used by the library.
+    pub fn signed_cell_indices(&self) -> Vec<V3<i32>> {
+        signed_sc_indices(self.periods, self.offset).iter().cloned()
+            .cycle().take(self.num_supercell_atoms())
+            .collect()
+    }
+
     /// Defines which atom in the primitive cell that each supercell atom is an image of.
     ///
     /// This function is constant for any given supercell; it merely exists to define the
@@ -290,10 +304,16 @@ fn sc_indices(periods: [u32; 3]) -> Vec<V3<u32>> {
     out
 }
 
-// supercell image offsets in the library's preferred order
-fn sc_lattice_vecs(periods: [u32; 3], offset: V3<i32>, lattice: &Lattice) -> Vec<V3> {
+// signed lattice point indices in the library's preferred order
+fn signed_sc_indices(periods: [u32; 3], offset: V3<i32>) -> Vec<V3<i32>> {
     sc_indices(periods).into_iter()
         .map(|idx| idx.map(|x| x as i32) + offset)
+        .collect()
+}
+
+// cartesian supercell image offsets in the library's preferred order
+fn sc_lattice_vecs(periods: [u32; 3], offset: V3<i32>, lattice: &Lattice) -> Vec<V3> {
+    signed_sc_indices(periods, offset).into_iter()
         .map(|idx| idx.map(|x| x as f64) * lattice.matrix())
         .collect()
 }
