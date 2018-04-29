@@ -1,4 +1,4 @@
-use ::{Lattice, Coords};
+use ::{Lattice, CoordsKind};
 use ::rsp2_array_utils::{map_arr};
 use super::reduction::LatticeReduction;
 
@@ -67,7 +67,7 @@ impl Context {
         let lengths = self.lattice.reduced().norms();
         let choices_frac = map_arr(lengths, |x| self.lattice_points_of_length(x));
         let choices_cart = map_arr(choices_frac.clone(), |ref choices| {
-                Coords::Fracs(floatify(choices))
+                CoordsKind::Fracs(floatify(choices))
                     .to_carts(self.lattice.reduced())
         });
 
@@ -124,7 +124,7 @@ impl Context {
 
     fn lattice_points_of_length(&self, target_length: f64) -> Vec<V3<i32>>
     {
-        Coords::Fracs(LATTICE_POINTS_FLOAT.clone()).to_carts(&self.lattice.reduced())
+        CoordsKind::Fracs(LATTICE_POINTS_FLOAT.clone()).to_carts(&self.lattice.reduced())
             .into_iter()
             .map(|v| v.norm())
             .enumerate()

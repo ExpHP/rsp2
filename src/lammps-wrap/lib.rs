@@ -893,10 +893,10 @@ mod tests {
     // get a fresh Lammps instance on which arbitrary functions can be called.
     fn arbitrary_initialized_lammps() -> Lammps<potential::None>
     {
-        use ::rsp2_structure::Coords;
+        use ::rsp2_structure::CoordsKind;
         let structure = Structure::new(
             Lattice::eye(),
-            Coords::Fracs(vec![V3([0.0; 3])]),
+            CoordsKind::Fracs(vec![V3([0.0; 3])]),
             vec![()],
         );
         Builder::new().build(Default::default(), structure).unwrap()

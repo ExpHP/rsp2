@@ -4,7 +4,7 @@
 
 use ::{Result, ok};
 
-use ::rsp2_structure::{Coords, Lattice, CoordStructure};
+use ::rsp2_structure::{CoordsKind, Lattice, CoordStructure};
 use ::std::io::Read;
 
 use ::rsp2_array_types::{M22, M33, V2, V3, mat, inv};
@@ -59,13 +59,13 @@ impl Assemble {
         let mut full_carts = vec![];
         for (xy_fracs, z_cart) in self.frac_sites.iter().zip(layer_zs) {
             let mut structure =
-                CoordStructure::new_coords(lattice.clone(), Coords::Fracs(v2_to_v3(xy_fracs)));
+                CoordStructure::new_coords(lattice.clone(), CoordsKind::Fracs(v2_to_v3(xy_fracs)));
 
             structure.translate_cart(&V3([0.0, 0.0, z_cart]));
             full_carts.extend(structure.to_carts());
         }
 
-        CoordStructure::new_coords(lattice, Coords::Carts(full_carts))
+        CoordStructure::new_coords(lattice, CoordsKind::Carts(full_carts))
     }
 
     fn get_z_length(&self) -> f64
@@ -223,7 +223,7 @@ fn interpret_cereal(cereal: self::cereal::Root) -> Result<middle::Layers>
             (units, x) => {
                 let x = v2_to_v3(&x);
                 match units {
-                    Units::Frac => Coords::Fracs(x).into_carts(&cart_lattice),
+                    Units::Frac => CoordsKind::Fracs(x).into_carts(&cart_lattice),
                     Units::Cart => x,
                 }
             }
@@ -250,7 +250,7 @@ fn assemble_from_cereal(cereal: self::cereal::Root) -> Result<Assemble>
         let lattice = layer.cart_lattice.clone();
         let sites = layer.cart_sites.clone();
 
-        let mut structure = CoordStructure::new_coords(lattice, Coords::Carts(sites));
+        let mut structure = CoordStructure::new_coords(lattice, CoordsKind::Carts(sites));
         structure.translate_frac(&layer.shift);
         structure.transform(&layer.transform);
 
@@ -269,7 +269,7 @@ fn assemble_from_cereal(cereal: self::cereal::Root) -> Result<Assemble>
         // put them in frac coords for the full lattice
         let mut structure = CoordStructure::new_coords(
             Lattice::new(&full_lattice),
-            Coords::Carts(structure.to_carts()),
+            CoordsKind::Carts(structure.to_carts()),
         );
         // FIXME this reduction is just a bandaid for the above-mentioned issue.
         //       (taking unique positions in the diagonal layer supercells and mapping

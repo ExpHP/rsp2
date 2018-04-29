@@ -1,4 +1,4 @@
-use ::{Structure, Lattice, Coords};
+use ::{Structure, Lattice, CoordsKind};
 use ::{Result, Error, ErrorKind};
 
 use ::rsp2_array_utils::{try_arr_from_fn};
@@ -95,7 +95,7 @@ where F: FnMut(&M, [u32; 3]) -> M,
 
     let structure = Structure {
         lattice: &sc.integer_lattice * &lattice,
-        coords: Coords::Carts(new_carts),
+        coords: CoordsKind::Carts(new_carts),
         meta: new_meta,
     };
 
@@ -248,7 +248,7 @@ impl SupercellToken {
 
         Ok(Structure {
             lattice: primitive_lattice,
-            coords: Coords::Carts(out_carts),
+            coords: CoordsKind::Carts(out_carts),
             meta: out_meta,
         })
     }
@@ -326,9 +326,9 @@ mod tests {
 
     #[test]
     fn diagonal_supercell_smoke_test() {
-        use ::{Coords, Structure, Lattice};
+        use ::{CoordsKind, Structure, Lattice};
 
-        let coords = Coords::Fracs(vec![[0.0, 0.0, 0.0]].envee());
+        let coords = CoordsKind::Fracs(vec![[0.0, 0.0, 0.0]].envee());
 
         let original = Structure::new_coords(Lattice::eye(), coords);
         let (supercell, sc_token) = ::supercell::diagonal([2, 2, 2]).build(original.clone());
@@ -349,7 +349,7 @@ mod tests {
 
     #[test]
     fn test_diagonal_supercell() {
-        use ::{Coords, Structure, Lattice};
+        use ::{CoordsKind, Structure, Lattice};
 
         // nondiagonal lattice so that matrix multiplication order matters.
         // carefully chosen so that the inverse has an exact representation.
@@ -359,7 +359,7 @@ mod tests {
             [0.0, 0.0, 2.0],
         ]);
 
-        let coords = Coords::Fracs(vec![
+        let coords = CoordsKind::Fracs(vec![
             [ 0.5, -0.5, 0.0], // cart: [+1.0, -1.0,  0.0]
             [ 0.0,  0.5, 0.5], // cart: [ 0.0, +1.0, +1.0]
         ].envee());
@@ -375,13 +375,13 @@ mod tests {
         let mut supercell = supercell;
         let mut carts = supercell.to_carts();
         carts[4][1] += 1e-6;
-        supercell.coords = Coords::Carts(carts);
+        supercell.coords = CoordsKind::Carts(carts);
         assert!(sc_token.deconstruct(1e-10, supercell.clone()).is_err());
     }
 
     #[test]
     fn test_centered_diagonal_supercell() {
-        use ::{Coords, Structure, Lattice};
+        use ::{CoordsKind, Structure, Lattice};
 
         // nondiagonal lattice so that matrix multiplication order matters
         // carefully chosen so that the inverse has an exact representation.
@@ -391,7 +391,7 @@ mod tests {
             [0.0, 0.0, 8.0],
         ]);
 
-        let coords = Coords::Carts(vec![
+        let coords = CoordsKind::Carts(vec![
             [0.25, 0.75, 1.5],
         ].envee());
 

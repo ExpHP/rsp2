@@ -1,4 +1,4 @@
-use ::{Lattice, Coords, Element};
+use ::{Lattice, CoordsKind, Element};
 use ::errors::*;
 use ::oper::{Perm, Permute};
 use ::oper::{Part, Partition};
@@ -8,19 +8,19 @@ use ::rsp2_array_types::{M33, V3, Unvee};
 use ::std::result::Result as StdResult;
 
 
-/// Pairs [`Coords`] together with their [`Lattice`], and metadata.
+/// Pairs [`CoordsKind`] together with their [`Lattice`], and metadata.
 ///
 /// Currently the metadata story is pretty weak and hardly resembles
 /// any sort of final design.  You should let the `M` type contain all
 /// of the information you need, and then when certain functions request
 /// a certain `M` type, use `map_metadata_to` to extract that information.
 ///
-/// [`Coords`]: ../struct.Coords.html
+/// [`CoordsKind`]: ../struct.CoordsKind.html
 /// [`Lattice`]: ../struct.Lattice.html
 #[derive(Debug,Clone,PartialEq)]
 pub struct Structure<M = ()> {
     pub(crate) lattice: Lattice,
-    pub(crate) coords: Coords,
+    pub(crate) coords: CoordsKind,
     pub(crate) meta: Vec<M>,
 }
 
@@ -32,14 +32,14 @@ pub type ElementStructure = Structure<Element>;
 
 impl CoordStructure {
     /// Create a structure with no metadata; just coordinates.
-    pub fn new_coords(lattice: Lattice, coords: Coords) -> Self {
+    pub fn new_coords(lattice: Lattice, coords: CoordsKind) -> Self {
         let meta = vec![(); coords.len()];
         Self::new(lattice, coords, meta)
     }
 }
 
 impl<M> Structure<M> {
-    pub fn new<Ms>(lattice: Lattice, coords: Coords, meta: Ms) -> Self
+    pub fn new<Ms>(lattice: Lattice, coords: CoordsKind, meta: Ms) -> Self
     where Ms: IntoIterator<Item=M>,
     {
         let meta: Vec<_> = meta.into_iter().collect();
@@ -114,7 +114,7 @@ impl<M> Structure<M> {
         metadata: self.meta,
     }}
 
-    pub fn extend<Ms>(&mut self, coords: Coords, meta: Ms)
+    pub fn extend<Ms>(&mut self, coords: CoordsKind, meta: Ms)
     where Ms: IntoIterator<Item=M>,
     {
         warn!("Untested code path: 0f3b98e1-203b-4632-af21-db8a6dcb479d");
@@ -131,7 +131,7 @@ impl<M> Structure<M> {
 #[derive(Debug, Clone)]
 pub struct Parts<M> {
     pub lattice: Lattice,
-    pub coords: Coords,
+    pub coords: CoordsKind,
     pub metadata: Vec<M>,
 }
 
@@ -169,16 +169,16 @@ impl<M> Structure<M> {
     pub fn carts_mut(&mut self) -> &mut [V3] {
         self.ensure_only_carts(); // 'only' because user modifications will invalidate fracs
         match self.coords {
-            Coords::Fracs(_) => unreachable!(),
-            Coords::Carts(ref mut c) => c,
+            CoordsKind::Fracs(_) => unreachable!(),
+            CoordsKind::Carts(ref mut c) => c,
         }
     }
 
     pub fn fracs_mut(&mut self) -> &mut [V3] {
         self.ensure_only_fracs(); // 'only' because user modifications will invalidate carts
         match self.coords {
-            Coords::Fracs(ref mut c) => c,
-            Coords::Carts(_) => unreachable!(),
+            CoordsKind::Fracs(ref mut c) => c,
+            CoordsKind::Carts(_) => unreachable!(),
         }
     }
 
@@ -186,17 +186,17 @@ impl<M> Structure<M> {
     ///
     /// # Panics
     /// Panics if the length does not match.
-    pub fn set_coords(&mut self, coords: Coords) {
+    pub fn set_coords(&mut self, coords: CoordsKind) {
         assert_eq!(self.coords.len(), coords.len());
         self.coords = coords;
     }
-    pub fn set_carts(&mut self, carts: Vec<V3>) { self.set_coords(Coords::Carts(carts)); }
-    pub fn set_fracs(&mut self, fracs: Vec<V3>) { self.set_coords(Coords::Fracs(fracs)); }
+    pub fn set_carts(&mut self, carts: Vec<V3>) { self.set_coords(CoordsKind::Carts(carts)); }
+    pub fn set_fracs(&mut self, fracs: Vec<V3>) { self.set_coords(CoordsKind::Fracs(fracs)); }
 
 
     /// # Panics
     /// Panics if the length does not match.
-    pub fn with_coords(mut self, coords: Coords) -> Self { self.set_coords(coords); self }
+    pub fn with_coords(mut self, coords: CoordsKind) -> Self { self.set_coords(coords); self }
     pub fn with_carts(mut self, carts: Vec<V3>) -> Self { self.set_carts(carts); self }
     pub fn with_fracs(mut self, fracs: Vec<V3>) -> Self { self.set_fracs(fracs); self }
 
@@ -210,9 +210,9 @@ impl<M> Structure<M> {
     /// Currently equivalent to 'ensure_carts,' but that method may eventually
     /// retain the fracs.
     fn ensure_only_carts(&mut self) {
-        let dummy = Coords::Carts(vec![]);
+        let dummy = CoordsKind::Carts(vec![]);
         let coords = ::std::mem::replace(&mut self.coords, dummy);
-        self.coords = Coords::Carts(coords.into_carts(&self.lattice));
+        self.coords = CoordsKind::Carts(coords.into_carts(&self.lattice));
     }
 
     /// Ensure that fracs are available, and that carts are NOT available.
@@ -220,9 +220,9 @@ impl<M> Structure<M> {
     /// Currently equivalent to 'ensure_fracs,' but that method may eventually
     /// retain the carts.
     fn ensure_only_fracs(&mut self) {
-        let dummy = Coords::Carts(vec![]);
+        let dummy = CoordsKind::Carts(vec![]);
         let coords = ::std::mem::replace(&mut self.coords, dummy);
-        self.coords = Coords::Fracs(coords.into_fracs(&self.lattice));
+        self.coords = CoordsKind::Fracs(coords.into_fracs(&self.lattice));
     }
 }
 

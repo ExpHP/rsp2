@@ -19,7 +19,7 @@ use ::slice_of_array::prelude::*;
 use ::rsp2_array_types::{V3};
 use ::rsp2_structure::supercell::{self, SupercellToken};
 use ::rsp2_structure::{ElementStructure};
-use ::rsp2_structure::{Coords};
+use ::rsp2_structure::{CoordsKind};
 use ::rsp2_structure_gen::Assemble;
 use ::phonopy::Builder as PhonopyBuilder;
 use ::math::bands::ScMatrix;
@@ -231,7 +231,7 @@ fn do_relax(
         &mut *lmp.flat_diff_fn(),
     ).unwrap().position;
 
-    let supercell = supercell.with_coords(Coords::Carts(relaxed_flat.nest().to_vec()));
+    let supercell = supercell.with_coords(CoordsKind::Carts(relaxed_flat.nest().to_vec()));
     multi_threshold_deconstruct(sc_token, 1e-10, 1e-3, supercell)?
 })}
 
@@ -334,7 +334,7 @@ fn do_minimize_along_evec(
         ok(::rsp2_minimize::exact_ls::Slope(slope))
     })??.alpha;
     let pos = pos_at_alpha(alpha);
-    let structure = from_structure.with_coords(Coords::Carts(pos.nest().to_vec()));
+    let structure = from_structure.with_coords(CoordsKind::Carts(pos.nest().to_vec()));
 
     (alpha, multi_threshold_deconstruct(sc_token, 1e-10, 1e-3, structure)?)
 })}

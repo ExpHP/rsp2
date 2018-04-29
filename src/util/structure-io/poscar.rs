@@ -5,7 +5,7 @@ use ::std::io::prelude::*;
 use ::itertools::Itertools;
 
 use ::rsp2_structure::{Element, ElementStructure};
-use ::rsp2_structure::{Lattice, Coords};
+use ::rsp2_structure::{Lattice, CoordsKind};
 use ::rsp2_array_types::{Envee, Unvee};
 
 use ::vasp_poscar::{Poscar, RawPoscar, ScaleLine};
@@ -74,8 +74,8 @@ where R: BufRead,
     assert_eq!(scale, ScaleLine::Factor(1.0));
     let lattice = Lattice::from(&lattice_vectors);
     let coords = match positions {
-        ::vasp_poscar::Coords::Cart(p) => Coords::Carts(p.envee()),
-        ::vasp_poscar::Coords::Frac(p) => Coords::Fracs(p.envee()),
+        ::vasp_poscar::Coords::Cart(p) => CoordsKind::Carts(p.envee()),
+        ::vasp_poscar::Coords::Frac(p) => CoordsKind::Fracs(p.envee()),
     };
 
     let group_symbols = group_symbols.expect("symbols are required").into_iter()

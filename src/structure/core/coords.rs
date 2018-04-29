@@ -10,7 +10,7 @@ use ::rsp2_array_types::{V3, M33};
 /// This allows a function to support either cartesian coordinates,
 /// or fractional coordinates with respect to some lattice.
 #[derive(Debug, Clone, PartialEq)]
-pub enum Coords {
+pub enum CoordsKind {
     Carts(Vec<V3>),
     Fracs(Vec<V3>),
 }
@@ -18,74 +18,74 @@ pub enum Coords {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum Tag { Cart, Frac }
 
-impl Coords {
+impl CoordsKind {
     pub fn len(&self) -> usize
     { self.as_slice().1.len() }
 
     pub(crate) fn as_slice(&self) -> (Tag, &[V3])
     { match *self {
-        Coords::Carts(ref c) => (Tag::Cart, c),
-        Coords::Fracs(ref c) => (Tag::Frac, c),
+        CoordsKind::Carts(ref c) => (Tag::Cart, c),
+        CoordsKind::Fracs(ref c) => (Tag::Frac, c),
     }}
 
     pub(crate) fn as_mut_vec(&mut self) -> (Tag, &mut Vec<V3>)
     { match *self {
-        Coords::Carts(ref mut c) => (Tag::Cart, c),
-        Coords::Fracs(ref mut c) => (Tag::Frac, c),
+        CoordsKind::Carts(ref mut c) => (Tag::Cart, c),
+        CoordsKind::Fracs(ref mut c) => (Tag::Frac, c),
     }}
 
     pub(crate) fn into_vec(self) -> (Tag, Vec<V3>)
     { match self {
-        Coords::Carts(c) => (Tag::Cart, c),
-        Coords::Fracs(c) => (Tag::Frac, c),
+        CoordsKind::Carts(c) => (Tag::Cart, c),
+        CoordsKind::Fracs(c) => (Tag::Frac, c),
     }}
 
     pub(crate) fn from_vec(tag: Tag, c: Vec<V3>) -> Self
     { match tag {
-        Tag::Cart => Coords::Carts(c),
-        Tag::Frac => Coords::Fracs(c),
+        Tag::Cart => CoordsKind::Carts(c),
+        Tag::Frac => CoordsKind::Fracs(c),
     }}
 }
 
 // projections
-impl Coords {
+impl CoordsKind {
     pub(crate) fn as_carts_opt(&self) -> Option<&[V3]>
     { match *self {
-        Coords::Carts(ref x) => Some(x),
-        Coords::Fracs(_) => None,
+        CoordsKind::Carts(ref x) => Some(x),
+        CoordsKind::Fracs(_) => None,
     }}
 
     pub(crate) fn as_fracs_opt(&self) -> Option<&[V3]>
     { match *self {
-        Coords::Carts(_) => None,
-        Coords::Fracs(ref x) => Some(x),
+        CoordsKind::Carts(_) => None,
+        CoordsKind::Fracs(ref x) => Some(x),
     }}
 }
 
 // conversions
-impl Coords {
+impl CoordsKind {
     pub fn into_carts(self, lattice: &Lattice) -> Vec<V3>
     { match self {
-        Coords::Carts(c) => c,
-        Coords::Fracs(c) => dot_n3_33(&c, lattice.matrix()),
+        CoordsKind::Carts(c) => c,
+        CoordsKind::Fracs(c) => dot_n3_33(&c, lattice.matrix()),
     }}
 
     pub fn into_fracs(self, lattice: &Lattice) -> Vec<V3>
     { match self {
-        Coords::Carts(c) => dot_n3_33(&c, lattice.inverse_matrix()),
-        Coords::Fracs(c) => c,
+        CoordsKind::Carts(c) => dot_n3_33(&c, lattice.inverse_matrix()),
+        CoordsKind::Fracs(c) => c,
     }}
 
     pub fn to_carts(&self, lattice: &Lattice) -> Vec<V3>
     { match *self {
-        Coords::Carts(ref c) => c.clone(),
-        Coords::Fracs(ref c) => dot_n3_33(c, lattice.matrix()),
+        CoordsKind::Carts(ref c) => c.clone(),
+        CoordsKind::Fracs(ref c) => dot_n3_33(c, lattice.matrix()),
     }}
 
     pub fn to_fracs(&self, lattice: &Lattice) -> Vec<V3>
     { match *self {
-        Coords::Carts(ref c) => dot_n3_33(c, lattice.inverse_matrix()),
-        Coords::Fracs(ref c) => c.clone(),
+        CoordsKind::Carts(ref c) => dot_n3_33(c, lattice.inverse_matrix()),
+        CoordsKind::Fracs(ref c) => c.clone(),
     }}
 
     pub(crate) fn into_tag(self, tag: Tag, lattice: &Lattice) -> Vec<V3>
@@ -105,15 +105,15 @@ impl Coords {
 fn dot_n3_33(c: &[V3], m: &M33) -> Vec<V3>
 { c.iter().map(|v| v * m).collect() }
 
-impl Permute for Coords {
-    fn permuted_by(self, perm: &Perm) -> Coords
+impl Permute for CoordsKind {
+    fn permuted_by(self, perm: &Perm) -> CoordsKind
     { match self {
-        Coords::Carts(c) => Coords::Carts(c.permuted_by(perm)),
-        Coords::Fracs(c) => Coords::Fracs(c.permuted_by(perm)),
+        CoordsKind::Carts(c) => CoordsKind::Carts(c.permuted_by(perm)),
+        CoordsKind::Fracs(c) => CoordsKind::Fracs(c.permuted_by(perm)),
     }}
 }
 
-impl Partition for Coords {
+impl Partition for CoordsKind {
     fn into_unlabeled_partitions<L>(self, part: &Part<L>) -> Unlabeled<Self>
     {
         let (tag, coords) = self.into_vec();
@@ -125,7 +125,7 @@ impl Partition for Coords {
 #[deny(unused)]
 mod tests {
     use ::Lattice;
-    use ::Coords::{Fracs, Carts};
+    use ::CoordsKind::{Fracs, Carts};
 
     use ::rsp2_array_types::Envee;
 

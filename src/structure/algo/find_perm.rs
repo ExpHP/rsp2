@@ -38,7 +38,7 @@ fn dumb_nearest_distance(
     frac_b: &V3,
 ) -> f64
 {
-    use ::Coords;
+    use ::CoordsKind;
     let diff = (frac_a - frac_b).map(|x| x - x.round());
 
     let mut diffs = vec![];
@@ -50,7 +50,7 @@ fn dumb_nearest_distance(
         }
     }
 
-    let carts = Coords::Fracs(diffs).to_carts(lattice);
+    let carts = CoordsKind::Fracs(diffs).to_carts(lattice);
     carts.into_iter().map(|v| v.norm())
         .min_by(|a, b| a.partial_cmp(b).unwrap()).unwrap()
 }
@@ -159,7 +159,7 @@ fn of_rotation_impl<M: Ord>(
 ) -> Result<Perm>
 {Ok({
     use ::ordered_float::NotNaN;
-    use ::Coords::Fracs;
+    use ::CoordsKind::Fracs;
 
     // Sort both sides by some measure which is likely to produce a small
     // maximum value of (sorted_rotated_index - sorted_original_index).

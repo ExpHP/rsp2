@@ -1,5 +1,5 @@
 
-use ::rsp2_structure::{Coords, Lattice, CoordStructure};
+use ::rsp2_structure::{CoordsKind, Lattice, CoordStructure};
 use ::rsp2_kets::{Ket, KetRef, Rect};
 use ::rsp2_array_utils::{arr_from_fn};
 use ::rsp2_array_types::{V3, M33, dot, mat};
@@ -241,7 +241,7 @@ impl GammaUnfolder {
                     }).collect(),
                     sc_qs_frac: {
                         let pc_recip = Lattice::new(pc_recip);
-                        Coords::Carts(quotient_vecs.clone()).to_fracs(&pc_recip)
+                        CoordsKind::Carts(quotient_vecs.clone()).to_fracs(&pc_recip)
                     },
                 }
             },
@@ -304,7 +304,7 @@ type PrimFracQ = V3;
 mod tests {
     use super::*;
     use ::slice_of_array::prelude::*;
-    use ::rsp2_structure::{Coords, Lattice};
+    use ::rsp2_structure::{CoordsKind, Lattice};
     use ::rsp2_array_types::{Envee, mat};
 
     #[test]
@@ -354,7 +354,7 @@ mod tests {
         // 1 atom per primitive cell
         let structure = CoordStructure::new_coords(
             Lattice::diagonal(&[1.0, 1.0, 4.0]),
-            Coords::Carts(vec![
+            CoordsKind::Carts(vec![
                 [0.0, 0.0, 0.0],
                 [0.0, 0.0, 1.0],
                 [0.0, 0.0, 2.0],
@@ -396,7 +396,7 @@ mod tests {
         // 1 atom per primitive cell
         let structure = CoordStructure::new_coords(
             Lattice::diagonal(&[2.0, 2.0, 1.0]),
-            Coords::Carts(vec![
+            CoordsKind::Carts(vec![
                 [0.0, 0.0, 0.0],
                 [0.0, 1.0, 0.0],
                 [1.0, 0.0, 0.0],
@@ -446,7 +446,7 @@ mod tests {
                 [-0.5, 0.5 * 3_f64.sqrt(), 0.0],
                 [0.0, 0.0, 1.0],
             ]),
-            Coords::Fracs(vec![
+            CoordsKind::Fracs(vec![
                 [0.0, 0.0, 0.0],
                 [0.0, 0.5, 0.0],
                 [0.5, 0.0, 0.0],
@@ -475,7 +475,7 @@ mod tests {
                 [-1.0, 1.0 * 3_f64.sqrt(), 0.0],
                 [0.0, 0.0, 1.0],
             ]),
-            Coords::Fracs(vec![
+            CoordsKind::Fracs(vec![
                 // honeycomb pattern
                 [    0.0, 0.0, 0.0],
                 [1.0/3.0, 0.0, 0.0],

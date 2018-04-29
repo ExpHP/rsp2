@@ -83,7 +83,7 @@ mod element;
 pub use ::oper::perm::{Perm, Permute};
 pub use ::oper::part::{Part, Parted, Partition, Unlabeled};
 pub use ::core::lattice::Lattice;
-pub use ::core::coords::Coords;
+pub use ::core::coords::CoordsKind;
 pub use ::core::structure::{Structure, CoordStructure, ElementStructure};
 
 pub use ::element::Element;
