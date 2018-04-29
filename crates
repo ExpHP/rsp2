@@ -90,20 +90,21 @@ class Gen:
                     parser.error('{}: no such file'.format(src))
 
             # callbacks that generate substitutions for the line !!some-crate-name,
-            # which accept the current Cargo.toml's directory as an argument
+            # which accept keyword arguments that are documented down by where the
+            # callback is called
             def gen_constant(s):
-                return lambda _: s
+                return lambda **_ignored: s
 
-            def gen_relpath_to(crate_name, dep_dir):
-                def inner(d):
+            def gen_relpath_to(dep_name, dep_dir):
+                def inner(*, cur_dir, **_ignored):
                     # Don't use Path for this because:
                     # - It has no normpath equivalent that doesn't follow links (wtf?)
                     # - Its relpath equivalent is too strict
-                    rel = os.path.normpath(os.path.relpath(dep_dir, d))
-                    return f'{crate_name} = {{ path = "{rel}" }}'
+                    rel = os.path.normpath(os.path.relpath(dep_dir, cur_dir))
+                    return f'{dep_name} = {{ path = "{rel}" }}'
                 return inner
 
-            def gen_members_as_pathdeps(_):
+            def gen_members_as_pathdeps(**_ignored):
                 root = get_root_package(parser.error)
                 lines = []
                 for (name, path) in crates.items():
@@ -118,6 +119,9 @@ class Gen:
 
             # build a dash-insensitive lookup table of callbacks
             lookup_d = {
+                # name = "crate-name"
+                'CRATE-NAME-LINE': lambda *, cur_name, **_ignored: f'name = "{cur_name}"',
+
                 # builtin macros
                 'WORKSPACE-MEMBERS-AS-PATH-DEPS': gen_members_as_pathdeps,
 
@@ -192,7 +196,13 @@ class Gen:
                             s = f"{src_path}:{i}: unknown macro: {format_macro(macro)}"
                             parser.error(s)
 
-                        write(func(path))
+                        write(func(
+                            # These are the keyword args available to callbacks:
+                            # The directory for the Cargo.toml that we are generating.
+                            cur_dir=path,
+                            # The name of the crate whose Cargo.toml we are generating.
+                            cur_name=name,
+                        ))
 
 # a makeshift toml.dumps that uses inline tables
 def inline_toml(x):
@@ -721,7 +731,7 @@ fn main() {{
 
 
 def macro_subst_for_binary_shims(pairs):
-    def gen(_):
+    def gen(**_ignored):
         entries = []
         for (bin, func) in pairs:
             lines = [

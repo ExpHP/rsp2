@@ -1,5 +1,5 @@
 [package]
-name = "rsp2-clap"
+!!CRATE-NAME-LINE
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 description = "Macros that suck less than clap_app"

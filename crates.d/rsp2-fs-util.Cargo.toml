@@ -1,5 +1,5 @@
 [package]
-name = "rsp2-fs-util"
+!!CRATE-NAME-LINE
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 description = "Adds error context to fs operations.  Sort of superceded by path_abs, but not everywhere."

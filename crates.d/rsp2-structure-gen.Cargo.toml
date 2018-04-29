@@ -1,5 +1,5 @@
 [package]
-name = "rsp2-structure-gen"
+!!CRATE-NAME-LINE
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 description = "Reads layer.yaml files, and is poorly named."

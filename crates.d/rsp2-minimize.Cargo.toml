@@ -1,5 +1,5 @@
 [package]
-name = "rsp2-minimize"
+!!CRATE-NAME-LINE
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 description = "Function minimization algorithms, even in multiple dimensions."

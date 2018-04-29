@@ -1,5 +1,5 @@
 [package]
-name = "rsp2-slice-math"
+!!CRATE-NAME-LINE
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 description = "For math on variable length slices. Contrast with rsp2-array-types, which is for arrays."
