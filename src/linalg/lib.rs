@@ -267,11 +267,11 @@ fn test_pseudoinverse() {
         let c = rng.gen_range(1, r + 1);
 
         let mat = Array2::from_shape_fn((r, c), |_| 1.0 - 2.0 * rng.gen::<f64>());
-        let p_inv = match left_pseudoinverse(&mat.view()) {
+        let p_inv = match left_pseudoinverse(mat.clone().into()) {
             Ok(inv) => inv,
             Err(_) => panic!("SVD convergence failure for size {:?}", (r, c)),
         };
-        let prod = dot(&p_inv, &mat);
+        let prod = dot(&*p_inv, &mat);
         for i in 0..c {
             for j in 0..c {
                 // NOTE: I've seen up to 1.2e-10 absolute error on a long run
