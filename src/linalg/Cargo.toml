@@ -24,4 +24,5 @@ ndarray = "0.11.2"
 rand = "0.3"
 
 [features]
-nightly = ["rsp2-assert-close/nightly"]
+nightly = ["beta", "rsp2-assert-close/nightly"]
+beta = ["rsp2-assert-close/beta"]

@@ -27,4 +27,5 @@ rsp2-array-types = { path = "../util/array-types" }
 rsp2-kets = { version = "0.3.6", git = "https://github.com/ExpHP/rsp2-kets", features = ["serde"] } 
 
 [features]
-nightly = ["rsp2-array-types/nightly", "rsp2-structure/nightly"]
+nightly = ["beta", "rsp2-array-types/nightly", "rsp2-structure/nightly"]
+beta = ["rsp2-array-types/beta", "rsp2-structure/beta"]

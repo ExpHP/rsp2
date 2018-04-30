@@ -24,4 +24,5 @@ failure = "0.1"
 slice-of-array = "0.2"
 
 [features]
-nightly = ["rsp2-array-types/nightly", "rsp2-structure/nightly"]
+nightly = ["beta", "rsp2-array-types/nightly", "rsp2-structure/nightly"]
+beta = ["rsp2-array-types/beta", "rsp2-structure/beta"]

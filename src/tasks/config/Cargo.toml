@@ -22,4 +22,5 @@ serde_yaml = "0.7"
 serde_ignored = "0.0.4"
 
 [features]
-nightly = ["rsp2-minimize/nightly"]
+nightly = ["beta", "rsp2-minimize/nightly"]
+beta = ["rsp2-minimize/beta"]

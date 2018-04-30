@@ -16,4 +16,5 @@ path = "lib.rs"
 clap = "2"
 
 [features]
-nightly = []
+nightly = ["beta"]
+beta = []

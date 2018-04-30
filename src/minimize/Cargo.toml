@@ -31,4 +31,5 @@ failure = "0.1"
 env_logger = "0.4"
 
 [features]
-nightly = ["rsp2-array-utils/nightly", "rsp2-assert-close/nightly", "rsp2-slice-math/nightly", "rsp2-util-macros/nightly"]
+nightly = ["beta", "rsp2-array-utils/nightly", "rsp2-assert-close/nightly", "rsp2-slice-math/nightly", "rsp2-util-macros/nightly"]
+beta = ["rsp2-array-utils/beta", "rsp2-assert-close/beta", "rsp2-slice-math/beta", "rsp2-util-macros/beta"]

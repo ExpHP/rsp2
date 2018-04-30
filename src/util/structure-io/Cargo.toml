@@ -21,4 +21,5 @@ rsp2-structure = { path = "../../structure" }
 rsp2-array-types = { path = "../array-types" }
 
 [features]
-nightly = ["rsp2-array-types/nightly", "rsp2-structure/nightly"]
+nightly = ["beta", "rsp2-array-types/nightly", "rsp2-structure/nightly"]
+beta = ["rsp2-array-types/beta", "rsp2-structure/beta"]

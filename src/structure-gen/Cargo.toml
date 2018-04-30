@@ -24,4 +24,5 @@ serde_yaml = "0.7"
 failure = "0.1"
 
 [features]
-nightly = ["rsp2-array-types/nightly", "rsp2-array-utils/nightly", "rsp2-structure/nightly"]
+nightly = ["beta", "rsp2-array-types/nightly", "rsp2-array-utils/nightly", "rsp2-structure/nightly"]
+beta = ["rsp2-array-types/beta", "rsp2-array-utils/beta", "rsp2-structure/beta"]

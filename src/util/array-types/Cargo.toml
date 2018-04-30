@@ -25,4 +25,5 @@ rsp2-assert-close = { path = "../assert-close" }
 rand = "0.3"
 
 [features]
-nightly = ["rsp2-array-utils/nightly", "rsp2-assert-close/nightly"]
+nightly = ["beta", "rsp2-array-utils/nightly", "rsp2-assert-close/nightly"]
+beta = ["rsp2-array-utils/beta", "rsp2-assert-close/beta"]

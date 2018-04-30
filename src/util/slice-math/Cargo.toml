@@ -15,4 +15,5 @@ path = "lib.rs"
 [dependencies]
 
 [features]
-nightly = []
+nightly = ["beta"]
+beta = []

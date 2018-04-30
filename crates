@@ -759,9 +759,14 @@ def macro_subst_for_nightly_feature(crates, fail):
     g = get_internal_dep_graph(crates, fail)
     def gen(*, cur_name, **_ignored):
         deps = list(g.edge[cur_name])
-        toml_strs = sorted([f'"{d}/nightly"' for d in deps])
-        toml_list = '[' + ', '.join(toml_strs) + ']'
-        return f"nightly = {toml_list}"
+        def recursive_feature_line(feature, base_list=()):
+            toml_strs = [f'"{f}"' for f in base_list]
+            toml_strs += sorted([f'"{d}/{feature}"' for d in deps])
+            toml_list = '[' + ', '.join(toml_strs) + ']'
+            return f"{feature} = {toml_list}"
+        nightly = recursive_feature_line("nightly", ['beta'])
+        beta = recursive_feature_line("beta")
+        return f'{nightly}\n{beta}'
     return gen
 
 #------------
