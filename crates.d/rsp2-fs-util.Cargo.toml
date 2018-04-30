@@ -12,3 +12,5 @@ path = "lib.rs"
 !!tempdir
 !!log
 
+[features]
+!!NIGHTLY-FEATURE-LINE

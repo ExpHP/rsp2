@@ -19,3 +19,6 @@ vasp-poscar = "0.1.1"
 
 rsp2-structure = { path = "../../structure" }
 rsp2-array-types = { path = "../array-types" }
+
+[features]
+nightly = ["rsp2-array-types/nightly", "rsp2-structure/nightly"]

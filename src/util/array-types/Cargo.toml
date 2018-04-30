@@ -23,3 +23,6 @@ slice-of-array = "0.2"
 rsp2-assert-close = { path = "../assert-close" }
 # FIXME make this dev-dependencies once rust-lang-nursery/rls#169 is fixed
 rand = "0.3"
+
+[features]
+nightly = ["rsp2-array-utils/nightly", "rsp2-assert-close/nightly"]

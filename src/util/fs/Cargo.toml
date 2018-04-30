@@ -17,3 +17,5 @@ failure = "0.1"
 tempdir = "0.3"
 log = "0.3"
 
+[features]
+nightly = []

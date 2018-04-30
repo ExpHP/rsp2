@@ -8,3 +8,6 @@ description = "uhhh"
 path = "lib.rs"
 
 [dependencies]
+
+[features]
+!!NIGHTLY-FEATURE-LINE

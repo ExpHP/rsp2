@@ -25,5 +25,8 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 !!ansi-term
 !!itertools
 
+[features]
+!!NIGHTLY-FEATURE-LINE
+
 # This is NOT a workspace anymore.
 # I don't have time to debug the RLS.

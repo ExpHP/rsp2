@@ -13,3 +13,6 @@ description = "Provides safe abstractions for moving data out of arrays."
 path = "lib.rs"
 
 [dependencies]
+
+[features]
+nightly = []

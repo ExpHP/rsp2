@@ -127,6 +127,9 @@ class Gen:
 
                 # FIXME this is waaaaaay too application-specific.
                 'BINARY-SHIM-BIN-ENTRIES': macro_subst_for_binary_shims(binary_shim_pairs),
+
+                # FIXME this is waaaaaay too application-specific.
+                'NIGHTLY-FEATURE-LINE': macro_subst_for_nightly_feature(crates, parser.error),
             }
             # for defining new macros
             lookup_put = lambda k, v: lookup_d.__setitem__(canonicalize_crate(k), v)
@@ -274,7 +277,7 @@ def ensure_not_symlink(path):
 
 CARGO_TOML_TEMPLATE = '''
 [package]
-name = "{}"
+!!CRATE-NAME-LINE
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 
@@ -282,6 +285,9 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 path = "lib.rs"
 
 [dependencies]
+
+[features]
+!!NIGHTLY-FEATURE-LINE
 '''[1:]
 
 @register
@@ -478,32 +484,38 @@ class Dot:
     @staticmethod
     def run(parser, args):
         import matplotlib.pyplot as plt
-        import networkx as nx
         from networkx.drawing.nx_pydot import write_dot
 
         # regenerate
         Gen.run(parser, None)
 
-        with pushd(search_for_root(parser.error)):
-            g = nx.DiGraph()
-            crates = get_internal_crates_and_root_rel_paths(parser.error)
-            for (crate, path) in crates.items():
-                with open(path / 'Cargo.toml') as f:
-                    d = toml.load(f)
-                for dep in d['dependencies']:
-                    if dep in crates:
-                        g.add_edge(crate, dep)
+        crates = get_internal_crates_and_root_rel_paths(parser.error)
 
-            if not args.root:
-                g.remove_node(get_root_package(parser.error))
+        g = get_internal_dep_graph(crates, parser.error)
 
-            if not args.leaves:
-                leaves = [node for node in g if g.out_degree(node) == 0]
-                for node in leaves:
-                    g.remove_node(node)
+        if not args.root:
+            g.remove_node(get_root_package(parser.error))
 
-            write_dot(g, sys.stdout)
-            plt.show()
+        if not args.leaves:
+            leaves = [node for node in g if g.out_degree(node) == 0]
+            for node in leaves:
+                g.remove_node(node)
+
+        write_dot(g, sys.stdout)
+        plt.show()
+
+def get_internal_dep_graph(crates, fail):
+    import networkx as nx
+
+    with pushd(search_for_root(fail)):
+        g = nx.DiGraph()
+        for (crate, path) in crates.items():
+            with open(path / 'Cargo.toml') as f:
+                d = toml.load(f)
+            for dep in d['dependencies']:
+                if dep in crates:
+                    g.add_edge(crate, dep)
+    return g
 
 #------------
 
@@ -743,6 +755,14 @@ def macro_subst_for_binary_shims(pairs):
         return '\n'.join(entries)
     return gen
 
+def macro_subst_for_nightly_feature(crates, fail):
+    g = get_internal_dep_graph(crates, fail)
+    def gen(*, cur_name, **_ignored):
+        deps = list(g.edge[cur_name])
+        toml_strs = sorted([f'"{d}/nightly"' for d in deps])
+        toml_list = '[' + ', '.join(toml_strs) + ']'
+        return f"nightly = {toml_list}"
+    return gen
 
 #------------
 

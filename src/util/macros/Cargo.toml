@@ -13,3 +13,6 @@ description = "uhhh"
 path = "lib.rs"
 
 [dependencies]
+
+[features]
+nightly = []

@@ -8,3 +8,6 @@ description = "For math on variable length slices. Contrast with rsp2-array-type
 path = "lib.rs"
 
 [dependencies]
+
+[features]
+!!NIGHTLY-FEATURE-LINE

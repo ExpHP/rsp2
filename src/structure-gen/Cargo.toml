@@ -22,3 +22,6 @@ serde = "1"
 serde_derive = "1"
 serde_yaml = "0.7"
 failure = "0.1"
+
+[features]
+nightly = ["rsp2-array-types/nightly", "rsp2-array-utils/nightly", "rsp2-structure/nightly"]

@@ -20,3 +20,6 @@ path = "lib.rs"
 !!rsp2-array-types
 
 !!rsp2-kets
+
+[features]
+!!NIGHTLY-FEATURE-LINE

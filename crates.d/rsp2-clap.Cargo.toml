@@ -9,3 +9,6 @@ path = "lib.rs"
 
 [dependencies]
 !!clap
+
+[features]
+!!NIGHTLY-FEATURE-LINE

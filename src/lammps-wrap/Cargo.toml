@@ -22,3 +22,6 @@ lazy_static = "0.2"
 chrono = "0.4"
 failure = "0.1"
 slice-of-array = "0.2"
+
+[features]
+nightly = ["rsp2-array-types/nightly", "rsp2-structure/nightly"]

@@ -50,3 +50,5 @@ path = "lib.rs"
 !!lapacke
 !!lapack-src
 
+[features]
+!!NIGHTLY-FEATURE-LINE

@@ -55,3 +55,5 @@ indoc = "0.2.3"
 lapacke = "0.1.4"
 lapack-src = { version = "0.1.4", features = ["netlib"] } 
 
+[features]
+nightly = ["rsp2-array-types/nightly", "rsp2-array-utils/nightly", "rsp2-assert-close/nightly", "rsp2-clap/nightly", "rsp2-fs-util/nightly", "rsp2-lammps-wrap/nightly", "rsp2-linalg/nightly", "rsp2-minimize/nightly", "rsp2-phonopy-io/nightly", "rsp2-slice-math/nightly", "rsp2-structure-gen/nightly", "rsp2-structure-io/nightly", "rsp2-structure/nightly", "rsp2-tasks-config/nightly", "rsp2-util-macros/nightly"]

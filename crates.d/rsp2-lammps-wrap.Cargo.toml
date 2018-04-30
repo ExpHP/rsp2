@@ -17,3 +17,6 @@ path = "lib.rs"
 !!chrono
 !!failure
 !!slice-of-array
+
+[features]
+!!NIGHTLY-FEATURE-LINE

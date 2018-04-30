@@ -17,3 +17,6 @@ path = "lib.rs"
 !!lapack-src
 !!ndarray
 !!rand
+
+[features]
+!!NIGHTLY-FEATURE-LINE

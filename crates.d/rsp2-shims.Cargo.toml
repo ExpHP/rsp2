@@ -7,3 +7,6 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 path = "lib.rs"
 
 [dependencies]
+
+[features]
+!!NIGHTLY-FEATURE-LINE
