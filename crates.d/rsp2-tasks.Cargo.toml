@@ -37,7 +37,6 @@ path = "lib.rs"
 !!lazy-static
 !!ansi-term
 !!rayon
-!!error-chain
 !!serde
 !!serde-derive
 !!serde-json

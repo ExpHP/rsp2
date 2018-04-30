@@ -12,7 +12,7 @@ path = "lib.rs"
 !!rsp2-array-types
 !!rsp2-assert-close
 
-!!error-chain
+!!failure
 !!slice-of-array
 !!ordered-float
 !!itertools

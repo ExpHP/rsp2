@@ -3,7 +3,7 @@
 //!
 //! Adapted from the sp2 code.
 
-use ::Result;
+use ::FailResult;
 use ::util::zip_eq;
 use ::math::basis::Basis3;
 use ::math::bonds::{Bond, Bonds};
@@ -43,7 +43,7 @@ fn raman_prefactor(
 pub enum BondType { CC, CH, HH }
 
 impl BondType {
-    fn from_elements(a: Element, b: Element) -> Result<BondType> {
+    fn from_elements(a: Element, b: Element) -> FailResult<BondType> {
         use rsp2_structure::consts::{CARBON, HYDROGEN};
         Ok(match (a, b) {
             (CARBON, CARBON) => BondType::CC,
@@ -178,7 +178,7 @@ fn raman_tensor(
     bonds: &Bonds,
     types: &[Element],
     pol_constants: &PolConstants,
-) -> Result<M33> {
+) -> FailResult<M33> {
     // kronecker delta value
     let kdelta = <M33>::eye();
 
@@ -256,7 +256,7 @@ pub struct Input<'a> {
 }
 
 impl<'a> Input<'a> {
-    pub fn compute_ev_raman_tensors(self) -> Result<Vec<RamanTensor>> {
+    pub fn compute_ev_raman_tensors(self) -> FailResult<Vec<RamanTensor>> {
         let Input {
             ev_frequencies, ev_eigenvectors,
             temperature, atom_elements, atom_masses, bonds,

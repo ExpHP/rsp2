@@ -1,6 +1,5 @@
 
-
-use ::errors::{Result, ok};
+use ::FailResult;
 use ::ui::color::{ColorByRange, PaintAs, NullPainter};
 use ::ui::cfg_merging::{no_summary, merge_summaries, make_nested_mapping};
 use ::util::zip_eq;
@@ -63,8 +62,8 @@ pub mod gamma_system_analysis {
     }
 
     impl Input {
-        pub fn compute(&self) -> Result<GammaSystemAnalysis>
-        {ok({
+        pub fn compute(&self) -> FailResult<GammaSystemAnalysis>
+        {Ok({
             let Input {
                 ref atom_coords, ref atom_layers, ref atom_elements, ref atom_masses,
                 ref layer_sc_mats, ref ev_frequencies, ref ev_eigenvectors, ref bonds,
@@ -119,7 +118,7 @@ macro_rules! wrap_maybe_compute {
 
         fn $thing:ident(
             $($arg:ident : & $Arg:ident),* $(,)*
-        ) -> Result<_>
+        ) -> FailResult<_>
         = $fn_path:path;
     ) => {
         wrap_maybe_compute! {
@@ -129,7 +128,7 @@ macro_rules! wrap_maybe_compute {
 
             fn $thing(
                 $($arg : & $Arg),*
-            ) -> Result<_>
+            ) -> FailResult<_>
             { $fn_path($($arg),*) }
         }
     };
@@ -141,7 +140,7 @@ macro_rules! wrap_maybe_compute {
 
         fn $thing:ident(
             $($arg:ident : & $Arg:ident),* $(,)*
-        ) -> Result<_>
+        ) -> FailResult<_>
         $fn_body:block
     ) => {
         pub use self::$thing::$Thing;
@@ -154,7 +153,7 @@ macro_rules! wrap_maybe_compute {
 
             pub fn maybe_compute(
                 list: Hlist![$(&Option<$Arg>),*],
-            ) -> Result<Option<$Thing>>
+            ) -> FailResult<Option<$Thing>>
             {
                 let hlist_pat![$($arg),*] = list;
                 $(
@@ -166,7 +165,7 @@ macro_rules! wrap_maybe_compute {
                 Ok(Some(compute($($arg),*)?))
             }
 
-            fn compute($($arg: &$Arg),*) -> Result<$Thing>
+            fn compute($($arg: &$Arg),*) -> FailResult<$Thing>
             $fn_body
         }
     }
@@ -181,7 +180,7 @@ pub mod ev_acousticness {
     pub struct EvAcousticness(pub Vec<f64>);
 
     pub fn maybe_compute(list: HCons<&Option<EvEigenvectors>, HNil>)
-    -> Result<Option<EvAcousticness>>
+    -> FailResult<Option<EvAcousticness>>
     {
         let hlist_pat![ev_eigenvectors] = list;
         let ev_eigenvectors = match ev_eigenvectors {
@@ -191,14 +190,14 @@ pub mod ev_acousticness {
         Ok(Some(compute(ev_eigenvectors)?))
     }
 
-    fn compute(ev_eigenvectors: &EvEigenvectors) -> Result<EvAcousticness> {
+    fn compute(ev_eigenvectors: &EvEigenvectors) -> FailResult<EvAcousticness> {
         Ok(EvAcousticness((ev_eigenvectors.0).0.iter().map(|ket| ket.acousticness()).collect()))
     }
 }
 
 wrap_maybe_compute! {
     pub struct EvPolarization(pub Vec<[f64; 3]>);
-    fn ev_polarization(ev_eigenvectors: &EvEigenvectors) -> Result<_> {
+    fn ev_polarization(ev_eigenvectors: &EvEigenvectors) -> FailResult<_> {
         Ok(EvPolarization((ev_eigenvectors.0).0.iter().map(|ket| ket.polarization()).collect()))
     }
 }
@@ -208,7 +207,7 @@ wrap_maybe_compute! {
     fn ev_layer_acousticness(
         atom_layers: &AtomLayers,
         ev_eigenvectors: &EvEigenvectors,
-    ) -> Result<_> {
+    ) -> FailResult<_> {
         let part = Part::from_ord_keys(atom_layers.0.iter());
         Ok(EvLayerAcousticness({
             (ev_eigenvectors.0).0.iter().map(|ket| {
@@ -231,7 +230,7 @@ wrap_maybe_compute! {
         atom_coords: &AtomCoordinates,
         layer_sc_mats: &LayerScMatrices,
         ev_eigenvectors: &EvEigenvectors,
-    ) -> Result<_>
+    ) -> FailResult<_>
     = _unfold_probs;
 }
 
@@ -255,7 +254,7 @@ fn _unfold_probs(
     atom_coords: &AtomCoordinates,
     layer_sc_mats: &LayerScMatrices,
     ev_eigenvectors: &EvEigenvectors,
-) -> Result<UnfoldProbs> {
+) -> FailResult<UnfoldProbs> {
     let part = Part::from_ord_keys(atom_layers.0.iter());
     let layer_partial_coords = atom_coords.0
         .map_metadata_to(|_| ())
@@ -298,7 +297,7 @@ wrap_maybe_compute! {
         atom_elements: &AtomElements,
         ev_frequencies: &EvFrequencies,
         ev_eigenvectors: &EvEigenvectors,
-    ) -> Result<_>
+    ) -> FailResult<_>
     = _ev_raman_tensors;
 }
 
@@ -308,7 +307,7 @@ fn _ev_raman_tensors(
     atom_elements: &AtomElements,
     ev_frequencies: &EvFrequencies,
     ev_eigenvectors: &EvEigenvectors,
-) -> Result<EvRamanTensors> {
+) -> FailResult<EvRamanTensors> {
     use ::math::bond_polarizability::{Input};
 
     Input {

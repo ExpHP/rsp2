@@ -1,4 +1,3 @@
-use ::errors::*;
 use ::std::rc::Rc;
 
 use ::rsp2_array_types::{V3, M33, M44, M4, V4, mat};
@@ -111,7 +110,7 @@ impl FracTrans {
     pub fn eye() -> Self
     { FracTrans(V3([0, 0, 0])) }
 
-    pub fn from_floats(xs: &V3) -> Result<FracTrans>
+    pub fn from_floats(xs: &V3) -> Result<FracTrans, ::IntPrecisionError>
     { xs.try_map(|x| ::util::Tol(1e-4).unfloat(x * 12.0)).map(FracTrans) }
 
     fn float(&self) -> V3

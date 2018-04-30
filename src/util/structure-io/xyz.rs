@@ -1,4 +1,4 @@
-use ::Result;
+use ::FailResult;
 use ::std::io::prelude::*;
 
 use ::rsp2_structure::{Element, ElementStructure};
@@ -10,13 +10,13 @@ use ::rsp2_array_types::V3;
 /// You can freely call this multiple times on the same file
 /// to write an animation, since XYZ animations are simply
 /// concatenated XYZ files.
-pub fn dump<W>(w: W, title: &str, structure: &ElementStructure) -> Result<()>
+pub fn dump<W>(w: W, title: &str, structure: &ElementStructure) -> FailResult<()>
 where W: Write,
 {
     _dump(w, title, &structure.to_carts(), structure.metadata())
 }
 
-fn _dump<W>(mut w: W, title: &str, carts: &[V3], types: &[Element]) -> Result<()>
+fn _dump<W>(mut w: W, title: &str, carts: &[V3], types: &[Element]) -> FailResult<()>
 where W: Write,
 {
     assert!(!title.contains("\n"));

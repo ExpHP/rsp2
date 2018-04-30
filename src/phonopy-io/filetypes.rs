@@ -1,4 +1,4 @@
-use ::{Result};
+use ::FailResult;
 use ::std::io::prelude::*;
 use ::std::collections::HashMap;
 
@@ -58,11 +58,11 @@ pub mod disp_yaml {
         structure
     }
 
-    pub fn read<R: Read>(mut r: R) -> Result<DispYaml>
+    pub fn read<R: Read>(mut r: R) -> FailResult<DispYaml>
     { _read(&mut r) }
 
     // Monomorphic to ensure that all the yaml parsing code is generated inside this crate
-    pub fn _read(r: &mut Read) -> Result<DispYaml>
+    pub fn _read(r: &mut Read) -> FailResult<DispYaml>
     {
         use ::rsp2_structure::{CoordsKind, Lattice};
         use self::cereal::{Point, Displacement, DispYaml as RawDispYaml};
@@ -96,7 +96,7 @@ pub type Conf = HashMap<String, String>;
 pub mod conf {
     use super::*;
 
-    pub fn read<R: BufRead>(file: R) -> Result<Conf>
+    pub fn read<R: BufRead>(file: R) -> FailResult<Conf>
     {Ok({
         // NOTE: This was just thrown together based on what I assume
         //       the format of phonopy's `conf` files is.
@@ -127,7 +127,7 @@ pub mod conf {
         out
     })}
 
-    pub fn write<W: Write>(mut w: W, conf: &Conf) -> Result<()>
+    pub fn write<W: Write>(mut w: W, conf: &Conf) -> FailResult<()>
     {Ok({
         for (key, val) in conf {
             ensure!(key.bytes().all(|c| c != b'='), "'=' in conf key");
@@ -158,11 +158,11 @@ pub mod symmetry_yaml {
     }
 
     // NOTE: this is currently entirely unvalidated.
-    pub fn read<R: Read>(mut r: R) -> Result<SymmetryYaml>
+    pub fn read<R: Read>(mut r: R) -> FailResult<SymmetryYaml>
     { _read(&mut r) }
 
     // Monomorphic to ensure that all the yaml parsing code is generated inside this crate
-    pub fn _read(r: &mut Read) -> Result<SymmetryYaml>
+    pub fn _read(r: &mut Read) -> FailResult<SymmetryYaml>
     {Ok({ ::serde_yaml::from_reader(r)? })}
 }
 
@@ -175,7 +175,7 @@ pub mod force_sets {
         mut w: W,
         displacements: &[(usize, V3)],
         force_sets: Vs,
-    ) -> Result<()>
+    ) -> FailResult<()>
     where
         W: Write,
         Vs: IntoIterator,
@@ -233,7 +233,7 @@ pub mod sparse_sets {
         mut w: W,
         displacements: &[(usize, V3)],
         force_sets: Vs,
-    ) -> Result<()>
+    ) -> FailResult<()>
         where
             W: Write,
             Vs: IntoIterator,
@@ -271,6 +271,6 @@ pub mod sparse_sets {
         })
     }
 
-    fn _write(w: &mut Write, sparse_sets: &SparseSets) -> Result<()>
+    fn _write(w: &mut Write, sparse_sets: &SparseSets) -> FailResult<()>
     { Ok(::serde_json::to_writer(w, sparse_sets)?) }
 }

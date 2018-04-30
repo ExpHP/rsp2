@@ -1,5 +1,5 @@
 
-use ::Result;
+use ::FailResult;
 
 use ::traits::{Save, AsPath};
 use ::traits::save::{Json, Yaml};
@@ -28,7 +28,7 @@ pub struct NewTrialDirArgs {
 }
 
 impl TrialDir {
-    pub fn create_new(args: NewTrialDirArgs) -> Result<TrialDir> {
+    pub fn create_new(args: NewTrialDirArgs) -> FailResult<TrialDir> {
         let NewTrialDirArgs {
             trial_dir, config_sources, err_if_existing,
         } = args;
@@ -79,10 +79,10 @@ impl TrialDir {
     fn _settings_path(path: &PathDir) -> PathArc
     { PathArc::new(path.join("settings.yaml")) }
 
-    fn settings_path(&self) -> Result<PathFile>
+    fn settings_path(&self) -> FailResult<PathFile>
     { Ok(Self::_settings_path(self).canonicalize()?.into_file()?) }
 
-    pub fn from_existing(path: &PathArc) -> Result<Self> {
+    pub fn from_existing(path: &PathArc) -> FailResult<Self> {
         let path = PathArc::new(path).canonicalize()?.into_dir()?;
         TrialDir {
             _lock: match Self::lockfile_path(&path).try_lock()? {
@@ -93,7 +93,7 @@ impl TrialDir {
         }.validate()
     }
 
-    pub fn validate(self) -> Result<Self> {
+    pub fn validate(self) -> FailResult<Self> {
         // Double-check that these files exist.
         let _ = self.settings_path()?;
         let _ = Self::lockfile_path(&self).canonicalize()?.into_file()?;
@@ -104,7 +104,7 @@ impl TrialDir {
     ///
     /// This uses a lockfile (not the same as 'lockfile_path()'), and will
     /// fail if it cannot be created for some reason other than being locked.
-    pub fn new_logfile_path(&self) -> Result<PathArc>
+    pub fn new_logfile_path(&self) -> FailResult<PathArc>
     {
         let paths = {
             ::std::iter::once("rsp2.log".into())
@@ -125,13 +125,13 @@ impl TrialDir {
         panic!("gee, that's an awful lot of log files you have there");
     }
 
-    pub fn create_file<P: AsPath>(&self, path: P) -> Result<FileWrite>
+    pub fn create_file<P: AsPath>(&self, path: P) -> FailResult<FileWrite>
     { Ok(FileWrite::create(self.join(path))?) }
 
-    pub fn read_file<P: AsPath>(&self, path: P) -> Result<FileRead>
+    pub fn read_file<P: AsPath>(&self, path: P) -> FailResult<FileRead>
     { Ok(PathFile::new(self.join(path))?.read()?) }
 
-    pub fn read_settings<T>(&self) -> Result<T>
+    pub fn read_settings<T>(&self) -> FailResult<T>
     where T: YamlRead,
     {
         let file = FileRead::read(self.settings_path()?)?;

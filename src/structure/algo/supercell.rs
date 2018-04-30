@@ -1,5 +1,4 @@
 use ::{Structure, Lattice, CoordsKind};
-use ::{Result, Error, ErrorKind};
 
 use ::rsp2_array_utils::{try_arr_from_fn};
 
@@ -115,6 +114,13 @@ pub struct SupercellToken {
     integer_lattice: Lattice,
 }
 
+#[derive(Debug, Fail)]
+#[fail(display = "Suspiciously large movement between supercell images: {:e}", magnitude)]
+pub struct BigDisplacement {
+    backtrace: ::failure::Backtrace,
+    magnitude: f64,
+}
+
 pub type OwnedMetas<'a,T> = ::std::vec::Drain<'a,T>;
 impl SupercellToken {
 
@@ -159,7 +165,7 @@ impl SupercellToken {
     /// * Images of an atom did not move by equal amounts (within `validation_radius`)
     #[inline]
     pub fn deconstruct<M>(&self, validation_radius: f64, structure: Structure<M>)
-    -> Result<Structure<M>>
+    -> Result<Structure<M>, BigDisplacement>
     {
         self.deconstruct_with(
             validation_radius,
@@ -177,12 +183,18 @@ impl SupercellToken {
     /// * Reordering of atoms
     /// * Wrapping of positions (FIXME unnecessary limitation)
     /// * Images of an atom did not move by equal amounts (within `validation_radius`)
-    pub fn deconstruct_with<M, F>(&self, validation_radius: f64, structure: Structure<M>, mut fold_meta: F)
-    -> Result<Structure<M>>
+    pub fn deconstruct_with<M, F>(
+        &self,
+        validation_radius: f64,
+        structure: Structure<M>,
+        mut fold_meta: F,
+    ) -> Result<Structure<M>, BigDisplacement>
     where F: FnMut(OwnedMetas<M>) -> M,
     {
-        ensure!(structure.num_atoms() == self.num_supercell_atoms(),
-            "wrong # of atoms in supercell");
+        assert_eq!(
+            structure.num_atoms(), self.num_supercell_atoms(),
+            "wrong # of atoms in supercell",
+        );
 
         let num_cells = self.num_cells();
         let SupercellToken { periods, offset, ref integer_lattice, num_primitive_atoms } = *self;
@@ -222,12 +234,14 @@ impl SupercellToken {
                     let inf = ::std::f64::INFINITY;
                     let min = this_axis().fold(inf, |a, b| a.min(b));
                     let max = this_axis().fold(-inf, |a, b| a.max(b));
-                    ensure!(
-                        max - min <= 2.0 * validation_radius,
-                        ErrorKind::BigDisplacement(max - min));
+                    if max - min > 2.0 * validation_radius {
+                        let backtrace = ::failure::Backtrace::new();
+                        let magnitude = max - min;
+                        return Err(BigDisplacement { backtrace, magnitude });
+                    }
 
                     let sum = this_axis().sum::<f64>();
-                    Ok::<_, Error>(sum / num_cells as f64)
+                    Ok(sum / num_cells as f64)
                 })?));
             }
             // Atoms were done in reverse order

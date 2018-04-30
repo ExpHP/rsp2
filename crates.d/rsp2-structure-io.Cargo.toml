@@ -9,7 +9,7 @@ path = "lib.rs"
 
 [dependencies]
 !!itertools
-!!error-chain
+!!failure
 !!vasp-poscar
 
 !!rsp2-structure

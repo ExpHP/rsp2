@@ -16,4 +16,4 @@ path = "lib.rs"
 !!serde
 !!serde-derive
 !!serde-yaml
-!!error-chain
+!!failure

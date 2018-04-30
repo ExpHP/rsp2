@@ -345,7 +345,6 @@ pub mod stop_condition {
 }
 
 pub mod hager_beta {
-
     pub struct Input<'a, 'b, 'c> {
         pub eta: f64,
         pub last_direction: &'a [f64],
@@ -395,20 +394,29 @@ pub trait DiffFn<E>: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E> { }
 impl<E, F> DiffFn<E> for F
 where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E> { }
 
-/// `linesearch` error type
-error_chain! {
-    types {
-        Error, ErrorKind, ResultExt, CgResult;
-    }
-    links {
-        LsError(::linesearch::Error, ::linesearch::ErrorKind);
-    }
-    errors { }
+use ::linesearch::LinesearchError;
+#[derive(Debug, Fail)]
+pub enum AcgsdError {
+    #[fail(display = "Linesearch failed: {}", _0)]
+    Linesearch(#[fail(cause)] LinesearchError),
+
+    #[doc(hidden)]
+    #[fail(display = "impossible!")]
+    _Hidden,
 }
 
+impl From<LinesearchError> for AcgsdError {
+    fn from(error: LinesearchError) -> Self {
+        AcgsdError::Linesearch(error)
+    }
+}
+
+/// A wrapper type used to allow `?` to work on errors from the user function.
+// (FIXME: honestly though we're probably better off without it so that
+//         we can fill in the `best_position` field)
 struct ComputeError<E>(E);
-impl<E> From<Error> for Failure<E> {
-    fn from(e: Error) -> Self {
+impl<E> From<AcgsdError> for Failure<E> {
+    fn from(e: AcgsdError) -> Self {
         Failure {
             best_position: None,
             error: Left(e),
@@ -432,7 +440,7 @@ pub struct Failure<E> {
     /// Might not always be available due to corners cut in error branches
     /// inside the acgsd implementation.
     pub best_position: Option<Vec<f64>>,
-    pub error: Either<Error, E>,
+    pub error: Either<AcgsdError, E>,
 }
 
 impl<E: fmt::Display> fmt::Display for Failure<E> {
@@ -757,7 +765,7 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
                         &mut *memoized,
                     ) {
                         Ok(x) => x,
-                        Err(Left(e)) => Err(Error::from(e))?,
+                        Err(Left(e)) => Err(AcgsdError::from(e))?,
                         Err(Right(e)) => Err(e)?,
                     }
                 },

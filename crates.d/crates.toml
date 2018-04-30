@@ -65,8 +65,6 @@ either = "1"
 fern = "0.4"
 env_logger = "0.4"
 extension-trait = "0.1.2"
-# FIXME phase out error-chain in favor of 'failure'
-error-chain = "0.11"
 failure = "0.1"
 itertools = "0.7"
 lazy_static = "0.2"

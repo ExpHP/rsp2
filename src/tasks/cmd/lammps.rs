@@ -4,7 +4,7 @@
 // This is where we decide e.g. atom type assignments and `pair_coeff` commands.
 // (which are decisions that `rsp2_lammps_wrap` has largely chosen to defer)
 
-use ::Result;
+use ::FailResult;
 use ::rsp2_lammps_wrap::{InitInfo, Potential, AtomType, PairCommand};
 use ::rsp2_lammps_wrap::Builder as InnerBuilder;
 use ::rsp2_structure::{Layers, Element, Structure, ElementStructure, consts};
@@ -26,7 +26,7 @@ extension_trait! {
     pub LammpsExt for Lammps {
         fn flat_diff_fn<'a>(
             &'a mut self,
-        ) -> Box<FnMut(&[f64]) -> Result<(f64, Vec<f64>)> + 'a>
+        ) -> Box<FnMut(&[f64]) -> FailResult<(f64, Vec<f64>)> + 'a>
         {
             Box::new(move |pos| Ok({
                 self.set_carts(pos.nest())?;
@@ -78,7 +78,7 @@ impl LammpsBuilder {
         out
     }
 
-    pub(crate) fn build(&self, structure: ElementStructure) -> Result<Lammps>
+    pub(crate) fn build(&self, structure: ElementStructure) -> FailResult<Lammps>
     {Ok({
         let potential: DynPotential = match self.potential {
             cfg::PotentialKind::Airebo(ref cfg) => {
@@ -283,7 +283,7 @@ mod kc_z {
 
     // the 'pair_coeff' in the name is meant to emphasize that this
     // takes care of issues like ensuring I < J.
-    fn determine_pair_coeff_pairs(gaps: &[GapKind]) -> Result<Vec<(AtomType, AtomType)>>
+    fn determine_pair_coeff_pairs(gaps: &[GapKind]) -> FailResult<Vec<(AtomType, AtomType)>>
     {Ok({
         let pairs: Vec<(AtomType, AtomType)> = match gaps.len() {
             0 => {

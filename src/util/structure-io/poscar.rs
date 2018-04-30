@@ -1,5 +1,5 @@
 
-use ::Result;
+use ::FailResult;
 
 use ::std::io::prelude::*;
 use ::itertools::Itertools;
@@ -15,7 +15,7 @@ pub fn dump<W>(
     mut w: W,
     title: &str,
     structure: &ElementStructure,
-) -> Result<()>
+) -> FailResult<()>
 where W: Write
 {
     // FIXME replace with e.g. Poscar::set_site_symbols when available
@@ -49,7 +49,7 @@ where W: Write
 /// Reads a POSCAR from an open file.
 ///
 /// This forcibly reads to EOF because it must construct a BufReader.
-pub fn load<R>(mut f: R) -> Result<ElementStructure>
+pub fn load<R>(mut f: R) -> FailResult<ElementStructure>
 where R: Read,
 {
     let out = load_txt(::std::io::BufReader::new(&mut f))?;
@@ -58,7 +58,7 @@ where R: Read,
 }
 
 /// Reads a POSCAR from an open file.
-pub fn load_txt<R>(f: R) -> Result<ElementStructure>
+pub fn load_txt<R>(f: R) -> FailResult<ElementStructure>
 where R: BufRead,
 {
     use vasp_poscar::failure::ResultExt;
@@ -83,7 +83,7 @@ where R: BufRead,
             None => bail!("Unknown element: '{}'", sym),
             Some(e) => Ok(e),
         })
-        .collect::<Result<Vec<Element>>>()?;
+        .collect::<FailResult<Vec<Element>>>()?;
 
     // FIXME use Poscar method once available
     let elements = izip!(group_counts, group_symbols)

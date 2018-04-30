@@ -1,4 +1,3 @@
-use ::{Result, ErrorKind};
 use ::std::ops::Index;
 
 /// Represents a reordering operation on atoms.
@@ -8,6 +7,10 @@ use ::std::ops::Index;
 /// [`Permute`]: trait.Permute.html
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Perm(Vec<u32>);
+
+#[derive(Debug, Fail)]
+#[fail(display = "Tried to construct an invalid permutation.")]
+pub struct InvalidPermutationError(::failure::Backtrace);
 
 impl Perm {
     pub fn eye(n: u32) -> Perm
@@ -26,9 +29,11 @@ impl Perm {
 
     /// This performs O(n log n) validation on the data
     /// to verify that it satisfies the invariants of Perm.
-    pub fn from_vec(vec: Vec<u32>) -> Result<Perm>
+    pub fn from_vec(vec: Vec<u32>) -> Result<Perm, InvalidPermutationError>
     {Ok({
-        ensure!(Self::validate_perm(&vec), ErrorKind::BadPerm);
+        if !Self::validate_perm(&vec) {
+            return Err(InvalidPermutationError(::failure::Backtrace::new()));
+        }
         Perm(vec)
     })}
 
@@ -164,7 +169,9 @@ pub(crate) fn shuffle<T: Clone>(xs: &[T]) -> (Vec<T>, Perm)
 ///   represent anything else), then the implementation of `Permute` for
 ///   `B` likely tries to satisfy the following property:
 ///
-///        compute_b(structure.permute(perm)) == compute_b(structure).permute(perm)
+///   ```ignore
+///   compute_b(structure.permute(perm)) == compute_b(structure).permute(perm)
+///   ```
 pub trait Permute: Sized {
     // awkward name, but it makes it makes two things clear
     // beyond a shadow of a doubt:
@@ -223,7 +230,6 @@ impl Permute for Perm {
 #[deny(unused)]
 mod tests {
     use super::*;
-    use ::Error;
 
     #[test]
     fn inverse()
@@ -238,11 +244,11 @@ mod tests {
     #[test]
     fn invalid() {
         assert_matches!(
-            Err(Error(ErrorKind::BadPerm, _)),
+            Err(InvalidPermutationError(_)),
             Perm::from_vec(vec![0,1,3,3]));
 
         assert_matches!(
-            Err(Error(ErrorKind::BadPerm, _)),
+            Err(InvalidPermutationError(_)),
             Perm::from_vec(vec![1,2,3]));
     }
 

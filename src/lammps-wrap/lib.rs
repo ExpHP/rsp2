@@ -8,41 +8,36 @@ extern crate rsp2_structure;
 extern crate rsp2_array_types;
 extern crate lammps_sys;
 #[macro_use] extern crate log;
-#[macro_use] extern crate error_chain;
+#[macro_use] extern crate failure;
 #[macro_use] extern crate lazy_static;
 extern crate chrono;
 
+use ::failure::Backtrace;
 use ::rsp2_array_types::{V3, Unvee, Envee};
+
+pub type FailResult<T> = Result<T, ::failure::Error>;
 
 use std::fmt;
 
-error_chain! {
-    errors {
-        Lammps(severity: Severity, message: String) {
-            description("LAMMPS threw an exception"),
-            display("LAMMPS threw {}: {}",
-                match *severity {
-                    Severity::Recoverable => "an exception",
-                    Severity::Fatal => "a fatal exception",
-                },
-                message
-            ),
-        }
-        BadMeta(potential: &'static str, value_debug: String) {
-            description("Bad atom metadata for potential"),
-            display("Bad atom metadata for potential {}: {}", potential, value_debug),
-        }
+/// An error thrown by the LAMMPS C API.
+#[derive(Debug, Fail)]
+pub struct LammpsError {
+    backtrace: Backtrace,
+    severity: Severity,
+    message: String,
+}
+impl fmt::Display for LammpsError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f, "LAMMPS threw {}: {}",
+            match self.severity {
+                Severity::Recoverable => "an exception",
+                Severity::Fatal => "a fatal exception",
+            },
+            self.message,
+        )
     }
 }
-
-// constructs an Error, as opposed to bail!() which diverges with a Result.
-// Useful in `ok_or_else`.
-macro_rules! err {
-    ($($t:tt)+)
-    => { Error::from(format!($($t)+)) }
-}
-
-pub type StdResult<T, E> = ::std::result::Result<T, E>;
 
 use ::low_level::ComputeStyle;
 pub use ::low_level::Severity;
@@ -218,7 +213,7 @@ impl Builder {
     /// The `compute_*` methods on `Lammps` will check these properties on every
     /// computed structure, and will fail if they disagree with the structure
     /// that was initially provided to `build`.
-    pub fn build<P>(&self, potential: P, initial_structure: Structure<P::Meta>) -> Result<Lammps<P>>
+    pub fn build<P>(&self, potential: P, initial_structure: Structure<P::Meta>) -> FailResult<Lammps<P>>
     where P: Potential,
     { Lammps::from_builder(self, potential, initial_structure) }
 }
@@ -226,7 +221,7 @@ impl Builder {
 /// Initialize LAMMPS, do nothing of particular value, and exit.
 ///
 /// For debugging linker errors.
-pub fn link_test() -> Result<()>
+pub fn link_test() -> FailResult<()>
 {Ok({
     let _ = ::LammpsOwner::new(&["lammps",
         "-screen", "none",
@@ -472,7 +467,7 @@ impl<'a, D: fmt::Display> fmt::Display for JoinDisplay<'a, D> {
 impl<P: Potential> Lammps<P>
 {
     // implementation of Builder::Build
-    fn from_builder(builder: &Builder, potential: P, structure: Structure<P::Meta>) -> Result<Self>
+    fn from_builder(builder: &Builder, potential: P, structure: Structure<P::Meta>) -> FailResult<Self>
     {Ok({
         let original_num_atoms = structure.num_atoms();
         let original_init_info = potential.init_info(&structure);
@@ -492,7 +487,7 @@ impl<P: Potential> Lammps<P>
         builder: &Builder,
         num_atoms: usize,
         init_info: &InitInfo,
-    ) -> Result<LammpsOwner>
+    ) -> FailResult<LammpsOwner>
     {Ok({
         // Lammps script based on code from Colin Daniels.
 
@@ -592,17 +587,17 @@ impl<P: Potential> Lammps<P>
 // propagated to LAMMPS, so long as `update_computation` is able to correctly
 // detect when the new values differ from the old.
 impl<P: Potential> Lammps<P> {
-    pub fn set_structure(&mut self, new: Structure<P::Meta>) -> Result<()>
+    pub fn set_structure(&mut self, new: Structure<P::Meta>) -> FailResult<()>
     {Ok({
         *self.structure.get_mut() = new;
     })}
 
-    pub fn set_carts(&mut self, new: &[V3]) -> Result<()>
+    pub fn set_carts(&mut self, new: &[V3]) -> FailResult<()>
     {Ok({
         self.structure.get_mut().set_carts(new.to_vec());
     })}
 
-    pub fn set_lattice(&mut self, new: Lattice) -> Result<()>
+    pub fn set_lattice(&mut self, new: Lattice) -> FailResult<()>
     {Ok({
         self.structure.get_mut().set_lattice(&new);
     })}
@@ -617,7 +612,7 @@ impl<P: Potential> Lammps<P> {
     //  will be populated with initial data that isn't just garbage.)
     //
     // At the end, (cached, updated) == (Some(_), None)
-    fn update_computation(&mut self) -> Result<()>
+    fn update_computation(&mut self) -> FailResult<()>
     {Ok({
         if self.structure.is_dirty() {
             self.structure.get_mut().ensure_carts();
@@ -653,7 +648,7 @@ impl<P: Potential> Lammps<P> {
         }
     })}
 
-    fn send_lmp_types(&mut self) -> Result<()>
+    fn send_lmp_types(&mut self) -> FailResult<()>
     {Ok({
         let meta = self.potential.atom_types(self.structure.get());
         assert_eq!(meta.len(), self.ptr.borrow_mut().get_natoms());
@@ -663,7 +658,7 @@ impl<P: Potential> Lammps<P> {
         unsafe { self.ptr.borrow_mut().scatter_atoms_i("type", &meta) }?;
     })}
 
-    fn send_lmp_carts(&mut self) -> Result<()>
+    fn send_lmp_carts(&mut self) -> FailResult<()>
     {Ok({
         let carts = self.structure.get().to_carts();
         assert_eq!(carts.len(), self.ptr.borrow_mut().get_natoms());
@@ -671,7 +666,7 @@ impl<P: Potential> Lammps<P> {
         unsafe { self.ptr.borrow_mut().scatter_atoms_f("x", carts.unvee_ref().flat()) }?;
     })}
 
-    fn send_lmp_lattice(&mut self) -> Result<()>
+    fn send_lmp_lattice(&mut self) -> FailResult<()>
     {Ok({
 
         // From the documentation on 'change_box command':
@@ -780,9 +775,9 @@ impl<P: Potential> Lammps<P> {
     // Some of these properties probably could be allowed to change,
     // but it's not important enough for me to look into them right now,
     // so we simply check that they don't change.
-    fn check_data_set_in_stone(&self, structure: &Structure<P::Meta>) -> Result<()>
+    fn check_data_set_in_stone(&self, structure: &Structure<P::Meta>) -> FailResult<()>
     {Ok({
-        fn check<D>(msg: &'static str, was: D, now: D) -> Result<()>
+        fn check<D>(msg: &'static str, was: D, now: D) -> FailResult<()>
         where D: fmt::Debug + PartialEq,
         {
             ensure!(
@@ -815,21 +810,21 @@ impl<P: Potential> Lammps<P> {
 //       the method was designed for such usage.
 impl<P: Potential> Lammps<P> {
 
-    pub fn compute(&mut self) -> Result<(f64, Vec<V3>)>
+    pub fn compute(&mut self) -> FailResult<(f64, Vec<V3>)>
     {Ok({
         self.update_computation()?;
 
         (self.compute_value()?, self.compute_grad()?)
     })}
 
-    pub fn compute_value(&mut self) -> Result<f64>
+    pub fn compute_value(&mut self) -> FailResult<f64>
     {Ok({
         self.update_computation()?;
 
         unsafe { self.ptr.borrow_mut().extract_compute_0d("RSP2_PE") }?
     })}
 
-    pub fn compute_force(&mut self) -> Result<Vec<V3>>
+    pub fn compute_force(&mut self) -> FailResult<Vec<V3>>
     {Ok({
         self.update_computation()?;
 
@@ -837,7 +832,7 @@ impl<P: Potential> Lammps<P> {
         grad.nest::<[_; 3]>().to_vec().envee()
     })}
 
-    pub fn compute_grad(&mut self) -> Result<Vec<V3>>
+    pub fn compute_grad(&mut self) -> FailResult<Vec<V3>>
     {Ok({
         self.update_computation()?;
 
@@ -848,7 +843,7 @@ impl<P: Potential> Lammps<P> {
         grad
     })}
 
-    pub fn compute_pressure(&mut self) -> Result<[f64; 6]>
+    pub fn compute_pressure(&mut self) -> FailResult<[f64; 6]>
     {Ok({
         self.update_computation()?;
 
@@ -920,13 +915,18 @@ mod tests {
     fn exceptions()
     {
         let lmp = arbitrary_initialized_lammps();
+        let e = unsafe { lmp.ptr.borrow_mut().commands(&[
+            // try to change to block with a nonzero skew
+            "change_box all xy final 0.25",
+            "change_box all ortho",
+        ]).unwrap_err() };
+
         assert_matches!(
-            Err(Error(ErrorKind::Lammps(Severity::Recoverable, _), _)),
-            unsafe { lmp.ptr.borrow_mut().commands(&[
-                // try to change to block with a nonzero skew
-                "change_box all xy final 0.25",
-                "change_box all ortho",
-            ])}
+            LammpsError {
+                severity: Severity::Recoverable,
+                ..
+            },
+            e.downcast().expect("wrong error type"),
         );
     }
 }

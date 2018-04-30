@@ -6,7 +6,7 @@ use super::{write_eigen_info_for_humans, write_eigen_info_for_machines};
 use super::SupercellSpecExt;
 use super::carbon;
 
-use ::errors::{Result, ok};
+use ::{FailResult, FailOk};
 use ::rsp2_tasks_config::{self as cfg, Settings};
 use ::traits::{AsPath};
 use ::phonopy::{DirWithBands};
@@ -36,7 +36,7 @@ impl TrialDir {
         layer_sc_mats: &Option<Vec<ScMatrix>>,
         phonopy: &PhonopyBuilder,
         original_structure: ElementStructure,
-    ) -> Result<(ElementStructure, GammaSystemAnalysis, DirWithBands<Box<AsPath>>)>
+    ) -> FailResult<(ElementStructure, GammaSystemAnalysis, DirWithBands<Box<AsPath>>)>
     {
         let mut from_structure = original_structure;
         let mut loop_state = EvLoopFsm::new(&settings.ev_loop);
@@ -92,7 +92,7 @@ impl TrialDir {
             {
                 let file = self.create_file(format!("eigenvalues.{:02}", iteration))?;
                 write_eigen_info_for_machines(&ev_analysis, file)?;
-                write_eigen_info_for_humans(&ev_analysis, &mut |s| ok(info!("{}", s)))?;
+                write_eigen_info_for_humans(&ev_analysis, &mut |s| FailOk(info!("{}", s)))?;
             }
 
             let (structure, did_chasing) = self.maybe_do_ev_chasing(
@@ -131,8 +131,8 @@ impl TrialDir {
         ev_analysis: &GammaSystemAnalysis,
         evals: &[f64],
         evecs: &Basis3,
-    ) -> Result<(ElementStructure, DidEvChasing)>
-    {ok({
+    ) -> FailResult<(ElementStructure, DidEvChasing)>
+    {Ok({
         use super::acoustic_search::ModeKind;
         let structure = structure;
         let bad_evs: Vec<_> = {
@@ -219,8 +219,8 @@ fn do_relax(
     cg_settings: &cfg::Acgsd,
     potential_settings: &cfg::Potential,
     structure: ElementStructure,
-) -> Result<ElementStructure>
-{ok({
+) -> FailResult<ElementStructure>
+{Ok({
     let sc_dims = potential_settings.supercell.dim_for_unitcell(structure.lattice());
     let (supercell, sc_token) = supercell::diagonal(sc_dims).build(structure);
 
@@ -241,8 +241,8 @@ fn do_eigenvector_chase(
     potential_settings: &cfg::Potential,
     mut structure: ElementStructure,
     bad_evecs: &[(String, &[V3])],
-) -> Result<ElementStructure>
-{ok({
+) -> FailResult<ElementStructure>
+{Ok({
     match *chase_settings {
         cfg::EigenvectorChase::OneByOne => {
             for &(ref name, evec) in bad_evecs {
@@ -272,11 +272,11 @@ fn do_cg_along_evecs<V, I>(
     potential_settings: &cfg::Potential,
     structure: ElementStructure,
     evecs: I,
-) -> Result<ElementStructure>
+) -> FailResult<ElementStructure>
 where
     V: AsRef<[V3]>,
     I: IntoIterator<Item=V>,
-{ok({
+{Ok({
     let evecs: Vec<_> = evecs.into_iter().collect();
     let refs: Vec<_> = evecs.iter().map(|x| x.as_ref()).collect();
     _do_cg_along_evecs(lmp, cg_settings, potential_settings, structure, &refs)?
@@ -288,8 +288,8 @@ fn _do_cg_along_evecs(
     potential_settings: &cfg::Potential,
     structure: ElementStructure,
     evecs: &[&[V3]],
-) -> Result<ElementStructure>
-{ok({
+) -> FailResult<ElementStructure>
+{Ok({
     let sc_dims = potential_settings.supercell.dim_for_unitcell(structure.lattice());
     let (mut supercell, sc_token) = supercell::diagonal(sc_dims).build(structure);
     let evecs: Vec<_> = evecs.iter().map(|ev| sc_token.replicate(ev)).collect();
@@ -314,8 +314,8 @@ fn do_minimize_along_evec(
     settings: &cfg::Potential,
     structure: ElementStructure,
     evec: &[V3],
-) -> Result<(f64, ElementStructure)>
-{ok({
+) -> FailResult<(f64, ElementStructure)>
+{Ok({
     let sc_dims = settings.supercell.dim_for_unitcell(structure.lattice());
     let (structure, sc_token) = supercell::diagonal(sc_dims).build(structure);
     let evec = sc_token.replicate(evec);
@@ -331,7 +331,7 @@ fn do_minimize_along_evec(
     let alpha = ::rsp2_minimize::exact_ls(0.0, 1e-4, |alpha| {
         let gradient = lmp.flat_diff_fn()(&pos_at_alpha(alpha))?.1;
         let slope = vdot(&gradient[..], direction.flat());
-        ok(::rsp2_minimize::exact_ls::Slope(slope))
+        FailOk(::rsp2_minimize::exact_ls::Slope(slope))
     })??.alpha;
     let pos = pos_at_alpha(alpha);
     let structure = from_structure.with_coords(CoordsKind::Carts(pos.nest().to_vec()));
@@ -342,7 +342,7 @@ fn do_minimize_along_evec(
 fn warn_on_improvable_lattice_params(
     lmp: &LammpsBuilder,
     structure: &ElementStructure,
-) -> Result<()>
+) -> FailResult<()>
 {Ok({
     const SCALE_AMT: f64 = 1e-6;
     let mut lmp = lmp.build(structure.clone())?;
@@ -388,11 +388,11 @@ fn lammps_constrained_diff_fn<'a>(
     lmp: &'a mut Lammps,
     flat_init_pos: &'a [f64],
     flat_evs: &'a [&[f64]],
-) -> Box<FnMut(&[f64]) -> Result<(f64, Vec<f64>)> + 'a>
+) -> Box<FnMut(&[f64]) -> FailResult<(f64, Vec<f64>)> + 'a>
 {
     let mut compute_from_3n_flat = lmp.flat_diff_fn();
 
-    Box::new(move |coeffs| ok({
+    Box::new(move |coeffs| Ok({
         assert_eq!(coeffs.len(), flat_evs.len());
 
         // This is dead simple.
@@ -415,8 +415,8 @@ fn multi_threshold_deconstruct(
     warn: f64,
     fail: f64,
     supercell: ElementStructure,
-) -> Result<ElementStructure>
-{ok({
+) -> FailResult<ElementStructure>
+{Ok({
     match sc_token.deconstruct(warn, supercell.clone()) {
         Ok(x) => x,
         Err(e) => {
@@ -449,8 +449,8 @@ pub(crate) fn optimize_layer_parameters(
     settings: &cfg::ScaleRanges,
     lmp: &LammpsBuilder,
     mut builder: Assemble,
-) -> Result<Assemble>
-{ok({
+) -> FailResult<Assemble>
+{Ok({
     pub use ::rsp2_minimize::exact_ls::{Value, Golden};
     use ::rsp2_tasks_config::{ScaleRanges, ScaleRange, ScaleRangesLayerSepStyle};
     use ::std::cell::RefCell;
@@ -520,7 +520,7 @@ pub(crate) fn optimize_layer_parameters(
             }
         }
 
-        let get_value = || ok({
+        let get_value = || FailOk({
             lmp.build(carbon(&builder.borrow().assemble()))?.compute_value()?
         });
 

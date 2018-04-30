@@ -19,7 +19,7 @@ description = "Function minimization algorithms, even in multiple dimensions."
 !!rsp2-slice-math
 !!rsp2-util-macros
 
-!!error-chain
+!!failure
 
 # FIXME make this dev-dependencies once rust-lang-nursery/rls#169 is fixed
 # FIXME use fern for less hax?

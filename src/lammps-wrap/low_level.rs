@@ -1,6 +1,5 @@
 
-use ::{Result, Error, ErrorKind};
-
+use ::FailResult;
 use ::std::sync::Mutex;
 use ::std::os::raw::{c_int, c_void, c_double, c_char};
 
@@ -24,7 +23,7 @@ macro_rules! c_enums {
 
             impl $Type {
                 #[allow(unused)]
-                pub fn from_int(x: u32) -> Result<$Type>
+                pub fn from_int(x: u32) -> FailResult<$Type>
                 { match x {
                     $($value => Ok($Type::$Variant),)+
                     _ => bail!("Invalid value {} for {}", x, stringify!($Type)),
@@ -115,7 +114,7 @@ impl Drop for LammpsOwner {
 }
 
 impl LammpsOwner {
-    pub fn new(argv: &[&str]) -> Result<LammpsOwner>
+    pub fn new(argv: &[&str]) -> FailResult<LammpsOwner>
     {Ok({
         let mut argv = CArgv::from_strs(argv);
         let mut ptr: *mut c_void = ::std::ptr::null_mut();
@@ -135,7 +134,7 @@ impl LammpsOwner {
 
         let ptr = unsafe {
             ptr.as_mut()
-        }.ok_or_else(|| err!("Lammps initialization failed"))?;
+        }.ok_or_else(|| format_err!("Lammps initialization failed"))?;
 
         LammpsOwner { argv, ptr }
     })}
@@ -151,7 +150,7 @@ mod cli { // name shows up in log output
 // the basics
 impl LammpsOwner {
     /// Invokes `lammps_command`.
-    pub fn command(&mut self, cmd: &str) -> Result<()>
+    pub fn command(&mut self, cmd: &str) -> FailResult<()>
     {Ok({
         cli::trace(cmd);
 
@@ -177,7 +176,7 @@ impl LammpsOwner {
     ///
     /// That is to say, it does NOT invoke `lammps_command_list`.
     /// (Though one should sincerely *hope* this difference does not matter...)
-    pub fn commands<S: ToString>(&mut self, cmds: &[S]) -> Result<()>
+    pub fn commands<S: ToString>(&mut self, cmds: &[S]) -> FailResult<()>
     {Ok({
         for s in cmds { self.command(&s.to_string())?; }
     })}
@@ -198,20 +197,22 @@ impl LammpsOwner {
 impl LammpsOwner {
 
     // (this is our '?')
-    fn pop_error_as_result(&mut self) -> Result<()>
-    {Ok({
+    fn pop_error_as_result(&mut self) -> Result<(), ::LammpsError>
+    {
         match self.pop_error() {
-            None => {},
-            Some((severity, s)) => bail!(ErrorKind::Lammps(severity, s)),
+            None => Ok(()),
+            Some((severity, message)) => {
+                let backtrace = ::failure::Backtrace::new();
+                Err(::LammpsError { severity, message, backtrace })
+            },
         }
-    })}
+    }
 
     // (this is our 'unwrap')
     fn assert_no_error(&mut self)
     {
         self.pop_error_as_result().unwrap_or_else(|e| {
-            use ::error_chain::ChainedError;
-            panic!("Unexpected error from LAMMPS: {}", e.display_chain());
+            panic!("Unexpected error from LAMMPS: {}", e);
         });
     }
 
@@ -260,7 +261,7 @@ impl LammpsOwner {
     //
     // unsafe because an incorrect 'count' or a non-integer field may cause an out-of-bounds read.
     #[allow(unused)] // FIXME issue #4
-    pub unsafe fn gather_atoms_i(&mut self, name: &str, count: usize) -> Result<Vec<i64>>
+    pub unsafe fn gather_atoms_i(&mut self, name: &str, count: usize) -> FailResult<Vec<i64>>
     {Ok({
         self.__gather_atoms_c_ty::<c_int>(name, ScatterGatherDatatype::Integer, count)?
             .into_iter().map(|x| x as i64).collect()
@@ -269,7 +270,7 @@ impl LammpsOwner {
     // Gather a floating property across all atoms.
     //
     // unsafe because an incorrect 'count' or a non-floating field may cause an out-of-bounds read.
-    pub unsafe fn gather_atoms_f(&mut self, name: &str, count: usize) -> Result<Vec<f64>>
+    pub unsafe fn gather_atoms_f(&mut self, name: &str, count: usize) -> FailResult<Vec<f64>>
     {Ok({
         self.__gather_atoms_c_ty::<c_double>(name, ScatterGatherDatatype::Float, count)?
             .into_iter().map(|x| x as f64).collect()
@@ -285,7 +286,7 @@ impl LammpsOwner {
         name: &str,
         ty: ScatterGatherDatatype,
         count: usize,
-    ) -> Result<Vec<T>>
+    ) -> FailResult<Vec<T>>
     {Ok({
         let natoms = self.get_natoms();
         let mut out = vec![T::default(); count * natoms];
@@ -309,7 +310,7 @@ impl LammpsOwner {
         name: &str,
         ty: ScatterGatherDatatype,
         buf: &mut [T],
-    ) -> Result <()>
+    ) -> FailResult<()>
     {Ok({
         let natoms = self.get_natoms();
 
@@ -332,7 +333,7 @@ impl LammpsOwner {
     //
     // unsafe because a non-integer field may copy data of the wrong size,
     // and data of inappropriate length could cause an out of bounds write.
-    pub unsafe fn scatter_atoms_i(&mut self, name: &str, data: &[i64]) -> Result<()>
+    pub unsafe fn scatter_atoms_i(&mut self, name: &str, data: &[i64]) -> FailResult<()>
     {Ok({
         let mut cdata: Vec<_> = data.iter().map(|&x| x as c_int).collect();
         self.__scatter_atoms_checked_c_ty(name, ScatterGatherDatatype::Integer, &mut cdata)?;
@@ -342,7 +343,7 @@ impl LammpsOwner {
     //
     // unsafe because a non-floating field may copy data of the wrong size,
     // and data of inappropriate length could cause an out of bounds write.
-    pub unsafe fn scatter_atoms_f(&mut self, name: &str, data: &[f64]) -> Result<()>
+    pub unsafe fn scatter_atoms_f(&mut self, name: &str, data: &[f64]) -> FailResult<()>
     {Ok({
         let mut cdata: Vec<_> = data.iter().map(|&x| x as c_double).collect();
         self.__scatter_atoms_checked_c_ty(name, ScatterGatherDatatype::Float, &mut cdata)?;
@@ -355,7 +356,7 @@ impl LammpsOwner {
         name: &str,
         ty: ScatterGatherDatatype,
         data: &mut [T],
-    ) -> Result<()>
+    ) -> FailResult<()>
     {Ok({
         assert!(data.len() > 0, "No data to scatter!?"); // always at least one atom
         self.__scatter_atoms_c_ty(name, ty, data)?;
@@ -381,7 +382,7 @@ impl LammpsOwner {
         name: &str,
         ty: ScatterGatherDatatype,
         data: &mut [T]
-    ) -> Result<()>
+    ) -> FailResult<()>
     {Ok({
         let natoms = self.get_natoms();
         assert_eq!(data.len() % natoms, 0);
@@ -407,7 +408,7 @@ impl LammpsOwner {
     // NOTE: There are warnings in extract_compute about making sure it is valid
     //       to run the compute.  I'm not sure what it means, and it sounds to me
     //       like this could possibly actually cause UB; I just have no idea how.
-    pub unsafe fn extract_compute_0d(&mut self, name: &str) -> Result<f64>
+    pub unsafe fn extract_compute_0d(&mut self, name: &str) -> FailResult<f64>
     {Ok({
         let out_ptr = with_temporary_c_str(name, |name| {
             unsafe { ::lammps_sys::lammps_extract_compute(
@@ -425,7 +426,7 @@ impl LammpsOwner {
         // * (bug in lammps-wrap) Name provided does not belong to a compute.
         unsafe { out_ptr.as_ref() }
             .cloned()
-            .ok_or_else(|| Error::from(format!("could not extract {:?}", name)))?
+            .unwrap_or_else(|| panic!("could not extract {:?}", name))
     })}
 
     // Read a vector compute, possibly computing it in the process.
@@ -438,7 +439,7 @@ impl LammpsOwner {
         name: &str,
         style: ComputeStyle,
         len: usize,
-    ) -> Result<Vec<f64>>
+    ) -> FailResult<Vec<f64>>
     {Ok({
         let out_ptr = with_temporary_c_str(name, |name| {
             unsafe { ::lammps_sys::lammps_extract_compute(
@@ -452,7 +453,7 @@ impl LammpsOwner {
         self.pop_error_as_result()?;
         let p =
             out_ptr.as_ref()
-            .ok_or_else(|| err!("Could not extract {:?}", name))?;
+            .ok_or_else(|| format_err!("Could not extract {:?}", name))?;
 
         ::std::slice::from_raw_parts(p, len)
             .iter().map(|&c| c as f64).collect()

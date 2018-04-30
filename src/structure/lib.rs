@@ -7,36 +7,15 @@ extern crate ordered_float;
 extern crate slice_of_array;
 #[macro_use] extern crate log;
 #[macro_use] extern crate itertools;
-#[macro_use] extern crate error_chain;
+#[macro_use] extern crate failure;
 #[macro_use] extern crate lazy_static;
 #[cfg(test)] extern crate rand;
 
-error_chain!{
-    errors {
-        BadPerm {
-            description("Tried to construct an invalid permutation.")
-            display("Tried to construct an invalid permutation.")
-        }
-        BadPart {
-            description("Tried to construct an invalid partition.")
-            display("Tried to construct an invalid partition.")
-        }
-        BigDisplacement(d: f64) {
-            description("Suspiciously large movement between supercell images."),
-            display("Suspiciously large movement between supercell images: {:e}", d),
-        }
-        IntPrecisionError(d: f64) {
-            description("Poor precision for float approximation of integer."),
-            display("Not nearly an integer: {}", d),
-        }
-        NonEquivalentLattice(a_binv: [[f64; 3]; 3]) {
-            description("The new lattice is not equivalent to the original."),
-            display("The new lattice is not equivalent to the original. (A B^-1 = {:?})", a_binv),
-        }
+// FIXME copied from failure 1.0 prerelease; remove once actually released
+macro_rules! throw {
+    ($e:expr) => {
+        return Err(::std::convert::Into::into($e));
     }
-}
-mod errors {
-    pub use ::{Result, Error, ErrorKind, ResultExt};
 }
 
 #[cfg(test)]
@@ -57,6 +36,13 @@ macro_rules! assert_matches {
     };
 }
 
+#[derive(Debug, Fail)]
+#[fail(display = "Not nearly an integer: {}", value)]
+pub struct IntPrecisionError {
+    backtrace: ::failure::Backtrace,
+    value: f64,
+}
+
 pub mod helper {
     pub use ::oper::part::composite_perm_for_part_lifo;
 }
@@ -68,6 +54,7 @@ pub mod supercell {
         Builder,
         OwnedMetas,
         SupercellToken,
+        BigDisplacement,
     };
 }
 
@@ -81,10 +68,13 @@ mod element;
 // public reexports; API
 
 pub use ::oper::perm::{Perm, Permute};
+pub use ::oper::perm::InvalidPermutationError;
 pub use ::oper::part::{Part, Parted, Partition, Unlabeled};
+pub use ::oper::part::InvalidPartitionError;
 pub use ::core::lattice::Lattice;
 pub use ::core::coords::CoordsKind;
 pub use ::core::structure::{Structure, CoordStructure, ElementStructure};
+pub use ::core::structure::NonEquivalentLattice;
 
 pub use ::element::Element;
 

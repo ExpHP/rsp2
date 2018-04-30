@@ -1,6 +1,6 @@
 pub use ::tempdir_crate::TempDir as ActualTempDir;
 
-use ::std::io::Result;
+use ::std::io::Result as IoResult;
 use ::std::path::{Path, PathBuf};
 use ::std::ffi::{OsStr, OsString};
 
@@ -14,17 +14,17 @@ impl From<ActualTempDir> for TempDir {
 
 /// Forward everything to the tempdir crate.
 impl TempDir {
-    pub fn new(prefix: &str) -> Result<TempDir> {
+    pub fn new(prefix: &str) -> IoResult<TempDir> {
         ActualTempDir::new(prefix).map(Self::from)
     }
 
-    pub fn new_in<P: AsRef<Path>>(tmpdir: P, prefix: &str) -> Result<TempDir> {
+    pub fn new_in<P: AsRef<Path>>(tmpdir: P, prefix: &str) -> IoResult<TempDir> {
         ActualTempDir::new_in(tmpdir, prefix).map(Self::from)
     }
 
     pub fn path(&self) -> &Path { self.0.as_ref().unwrap().path() }
     pub fn into_path(mut self) -> PathBuf { self.0.take().unwrap().into_path() }
-    pub fn close(mut self) -> Result<()> { self.0.take().unwrap().close() }
+    pub fn close(mut self) -> IoResult<()> { self.0.take().unwrap().close() }
 }
 
 impl AsRef<Path> for TempDir {

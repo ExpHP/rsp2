@@ -1,8 +1,7 @@
-use ::{Result};
-use ::errors::ok;
+use ::FailResult;
 use ::rsp2_structure::supercell;
 use ::rsp2_structure::{CoordStructure, Structure, Lattice};
-use ::rsp2_array_utils::{map_arr, arr_from_fn, try_map_arr};
+use ::rsp2_array_utils::{arr_from_fn, try_map_arr};
 
 use ::rsp2_array_types::{V3, M3, dot};
 
@@ -54,7 +53,7 @@ impl Bonds {
     pub fn from_brute_force_very_dumb<M>(
         structure: &Structure<M>,
         range: f64,
-    ) -> Result<Self> {
+    ) -> FailResult<Self> {
         Self::_from_brute_force_very_dumb(
             structure.map_metadata_to(|_| ()),
             range,
@@ -65,7 +64,7 @@ impl Bonds {
     fn _from_brute_force_very_dumb(
         structure: CoordStructure,
         range: f64,
-    ) -> Result<Self> {
+    ) -> FailResult<Self> {
 
         // Construct a supercell large enough to contain all atoms that interact with an atom
         // in the centermost unit cell.
@@ -117,7 +116,7 @@ impl Bonds {
 fn sufficiently_large_centered_supercell(
     lattice: &Lattice,
     mut interaction_range: f64,
-) -> Result<supercell::Builder> {
+) -> FailResult<supercell::Builder> {
     // Search for a slightly larger range to account for numerical fuzz.
     interaction_range *= 1.0 + 1e-4;
 
@@ -181,7 +180,7 @@ fn sufficiently_large_centered_supercell(
                 "cell is too skewed for bond search"
             );
 
-            ok(dist(&good))
+            Ok(dist(&good))
         })
     };
     check_plane_distances(lattice.vectors())?;

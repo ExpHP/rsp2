@@ -1,4 +1,4 @@
-use ::Result;
+use ::failure::Error;
 use ::{Structure, Lattice};
 use ::{Permute, Perm};
 
@@ -100,7 +100,7 @@ impl LayersPerUnitCell {
 /// Normal is in fractional coords, and is currently limited such
 /// that it must be one of the lattice vectors.
 pub fn find_layers<M>(structure: &Structure<M>, normal: &V3<i32>, threshold: f64)
--> Result<Layers>
+-> Result<Layers, Error>
 {
     find_layers_impl(
         &structure.to_fracs(),
@@ -112,7 +112,7 @@ pub fn find_layers<M>(structure: &Structure<M>, normal: &V3<i32>, threshold: f64
 
 // monomorphic for less codegen
 fn find_layers_impl(fracs: &[V3<f64>], lattice: &Lattice, normal: &V3<i32>, cart_threshold: f64)
--> Result<Layers>
+-> Result<Layers, Error>
 {Ok({
     if fracs.len() == 0 {
         return Ok(Layers::NoAtoms);
@@ -191,7 +191,7 @@ fn find_layers_impl(fracs: &[V3<f64>], lattice: &Lattice, normal: &V3<i32>, cart
 fn assign_layers_impl_frac_1d(
     positions: &[f64],
     threshold: f64,
-) -> Result<Layers>
+) -> Result<Layers, Error>
 {Ok({
     let reduce = |x: f64| (x.fract() + 1.0).fract();
     assert_eq!(reduce(-1e-30), 0.0, "just making sure...");

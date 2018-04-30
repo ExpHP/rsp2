@@ -68,7 +68,7 @@ pub(crate) fn index_of_shortest(carts: &[V3], tol: f64) -> Option<usize>
 //--------------------------------------------------------
 pub(crate) use self::lockfile::{LockfilePath, LockfileGuard};
 mod lockfile {
-    use ::Result;
+    use ::FailResult;
     use ::std::fs::{OpenOptions};
     use ::std::io;
     use ::path_abs::{PathArc, PathFile, FileWrite};
@@ -83,7 +83,7 @@ mod lockfile {
 
     #[allow(dead_code)]
     impl LockfilePath {
-        pub fn try_lock(&self) -> Result<Option<LockfileGuard>> {
+        pub fn try_lock(&self) -> FailResult<Option<LockfileGuard>> {
             // 'create_new' is the magic sauce for avoiding race conditions
             let mut options = OpenOptions::new();
             options.write(true);
@@ -101,7 +101,7 @@ mod lockfile {
         }
 
         /// Retries until locking is successful. This could deadlock.
-        pub fn lock(&self) -> Result<Option<LockfileGuard>> {
+        pub fn lock(&self) -> FailResult<Option<LockfileGuard>> {
             let mut lock = self.try_lock()?;
             while lock.is_none() {
                 ::std::thread::sleep(Default::default());
@@ -118,10 +118,10 @@ mod lockfile {
 
     #[allow(dead_code)]
     impl LockfileGuard {
-        pub fn drop(mut self) -> Result<()>
+        pub fn drop(mut self) -> FailResult<()>
         { self._drop() }
 
-        fn _drop(&mut self) -> Result<()>
+        fn _drop(&mut self) -> FailResult<()>
         {
             // clone because goddammit path_abs
             self.0.clone().remove().map_err(Into::into)
@@ -137,8 +137,8 @@ mod lockfile {
 
 //--------------------------------------------------------
 
-pub(crate) fn tup2<T:Copy>(arr: [T; 2]) -> (T, T) { (arr[0], arr[1]) }
-pub(crate) fn tup3<T:Copy>(arr: [T; 3]) -> (T, T, T) { (arr[0], arr[1], arr[2]) }
+#[allow(unused)] pub(crate) fn tup2<T:Copy>(arr: [T; 2]) -> (T, T) { (arr[0], arr[1]) }
+#[allow(unused)] pub(crate) fn tup3<T:Copy>(arr: [T; 3]) -> (T, T, T) { (arr[0], arr[1], arr[2]) }
 
 //--------------------------------------------------------
 

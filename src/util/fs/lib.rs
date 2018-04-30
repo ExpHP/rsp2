@@ -1,6 +1,6 @@
 use ::std::path::{Path, PathBuf};
 use ::std::fs::{self, File};
-use ::std::io::{self, BufReader};
+use ::std::io::{BufReader};
 
 pub use cp_mv::{cp_a, mv, Copy, Move};
 mod cp_mv;
@@ -9,65 +9,68 @@ pub use tempdir::{ActualTempDir, TempDir};
 mod tempdir;
 
 #[macro_use]
-extern crate error_chain;
+extern crate failure;
 extern crate tempdir as tempdir_crate;
 #[macro_use]
 extern crate log;
 
-error_chain! {
-    foreign_links {
-        Io(io::Error);
-    }
-}
+use ::failure::ResultExt;
+
+pub type FailResult<T> = Result<T, ::failure::Error>;
 
 /// Wrapper around `File::open` that adds context.
-pub fn open<P: AsRef<Path>>(path: P) -> Result<File>
+pub fn open<P: AsRef<Path>>(path: P) -> FailResult<File>
 {
     File::open(path.as_ref())
-        .chain_err(|| format!("while opening file: '{}'", path.as_ref().display()))
+        .with_context(|e| format!("{}: could not open file: {}", path.as_ref().display(), e))
+        .map_err(Into::into)
 }
 
 /// Wrapper around `File::open` that adds context and makes a `BufReader`.
-pub fn open_text<P: AsRef<Path>>(path: P) -> Result<BufReader<File>>
+pub fn open_text<P: AsRef<Path>>(path: P) -> FailResult<BufReader<File>>
 { open(path).map(BufReader::new) }
 
 /// Wrapper around `File::create` that adds context.
-pub fn create<P: AsRef<Path>>(path: P) -> Result<File>
+pub fn create<P: AsRef<Path>>(path: P) -> FailResult<File>
 {
     File::create(path.as_ref())
-        .chain_err(|| format!("could not create file: '{}'", path.as_ref().display()))
+        .with_context(|e| format!("{}: could not create file: {}", path.as_ref().display(), e))
+        .map_err(Into::into)
 }
 
 /// Wrapper around `std::fs::copy` that adds context.
-pub fn copy<P: AsRef<Path>, Q: AsRef<Path>>(src: P, dest: Q) -> Result<()>
+pub fn copy<P: AsRef<Path>, Q: AsRef<Path>>(src: P, dest: Q) -> FailResult<()>
 {
     let (src, dest) = (src.as_ref(), dest.as_ref());
     fs::copy(src, dest)
         .map(|_| ()) // number of bytes; don't care
-        .chain_err(||
-            format!("could not copy file '{}' to '{}'",
-                src.display(), dest.display()))
+        .with_context(|e|
+            format!("could not copy file '{}' to '{}': {}",
+                src.display(), dest.display(), e))
+        .map_err(Into::into)
 }
 
 /// Wrapper around `std::fs::create_dir` that adds context.
-pub fn create_dir<P: AsRef<Path>>(dir: P) -> Result<()>
+pub fn create_dir<P: AsRef<Path>>(dir: P) -> FailResult<()>
 {
     fs::create_dir(dir.as_ref())
-        .chain_err(|| format!("could not create directory '{}'", dir.as_ref().display()))
+        .with_context(|e| format!("{}: could not create directory: {}", dir.as_ref().display(), e))
+        .map_err(Into::into)
 }
 
 /// Wrapper around `std::fs::canonicalize` that adds context.
-pub fn canonicalize<P: AsRef<Path>>(dir: P) -> Result<PathBuf>
+pub fn canonicalize<P: AsRef<Path>>(dir: P) -> FailResult<PathBuf>
 {
     fs::canonicalize(dir.as_ref())
-        .chain_err(|| format!("could not normalize: '{}'", dir.as_ref().display()))
+        .with_context(|e| format!("{}: could not normalize: {}", dir.as_ref().display(), e))
+        .map_err(Into::into)
 }
 
 /// Canonicalizes a path where the final component need not exist.
 ///
 /// NOTE: will behave strangely for paths that end in ..
 ///       due to how Path::parent is defined
-pub fn canonicalize_parent<P: AsRef<Path>>(path: P) -> Result<PathBuf>
+pub fn canonicalize_parent<P: AsRef<Path>>(path: P) -> FailResult<PathBuf>
 {
     let path = path.as_ref();
     if path.exists() {
@@ -85,27 +88,30 @@ fn split(path: &Path) -> Option<(&Path, &::std::ffi::OsStr)>
 { path.file_name().map(|name| (path.parent().unwrap(), name)) }
 
 /// Wrapper around `std::fs::remove_file` that adds context.
-pub fn remove_dir<P: AsRef<Path>>(dir: P) -> Result<()>
+pub fn remove_dir<P: AsRef<Path>>(dir: P) -> FailResult<()>
 {
     fs::remove_dir(dir.as_ref())
-        .chain_err(|| format!("could not remove directory: '{}'", dir.as_ref().display()))
+        .with_context(|e| format!("{}: could not remove directory: {}", dir.as_ref().display(), e))
+        .map_err(Into::into)
 }
 
 /// Wrapper around `std::fs::remove_file` that adds context.
-pub fn remove_file<P: AsRef<Path>>(dir: P) -> Result<()>
+pub fn remove_file<P: AsRef<Path>>(dir: P) -> FailResult<()>
 {
     fs::remove_file(dir.as_ref())
-        .chain_err(|| format!("could not remove file: '{}'", dir.as_ref().display()))
+        .with_context(|e| format!("{}: could not remove file: {}", dir.as_ref().display(), e))
+        .map_err(Into::into)
 }
 
 // Error-chaining wrapper around `hard_link`
-pub fn hard_link<P: AsRef<Path>, Q: AsRef<Path>>(src: P, dest: Q) -> Result<()>
+pub fn hard_link<P: AsRef<Path>, Q: AsRef<Path>>(src: P, dest: Q) -> FailResult<()>
 {
     let (src, dest) = (src.as_ref(), dest.as_ref());
     fs::hard_link(src, dest)
-        .chain_err(||
-            format!("could not hard-link '{}' to '{}'",
-                src.display(), dest.display()))
+        .with_context(|e|
+            format!("could not hard-link '{}' to '{}': {}",
+                src.display(), dest.display(), e))
+        .map_err(Into::into)
 }
 
 /// Simulates `rm -rf`.
@@ -115,7 +121,7 @@ pub fn hard_link<P: AsRef<Path>, Q: AsRef<Path>>(src: P, dest: Q) -> Result<()>
 /// * Does not require the path or its ancestors to exist.
 /// * **Does** fail if other problems occur (e.g. insufficient permissions).
 /// * Does **not** follow symbolic links.
-pub fn rm_rf<P: AsRef<Path>>(path: P) -> Result<()>
+pub fn rm_rf<P: AsRef<Path>>(path: P) -> FailResult<()>
 {
     use ::std::io::ErrorKind;
 
@@ -128,7 +134,7 @@ pub fn rm_rf<P: AsRef<Path>>(path: P) -> Result<()>
             match (e.kind(), path.is_dir()) {
                 (ErrorKind::NotFound, _) => { return Ok(()); },
                 (ErrorKind::Other, true) => {},
-                _ => return Err(e).chain_err(|| format!("could not delete: {}", path.display())),
+                _ => bail!("{}: could not delete: {}", path.display(), e),
             }
         }
     }
@@ -139,9 +145,9 @@ pub fn rm_rf<P: AsRef<Path>>(path: P) -> Result<()>
             match (e.kind(), path.is_file()) {
                 (ErrorKind::NotFound, _) => { return Ok(()); },
                 (ErrorKind::Other, true) => {
-                    bail!("could not delete '{}'; we're being trolled", path.display());
+                    bail!("{}: could not delete: we're being trolled", path.display());
                 },
-                _ => return Err(e).chain_err(|| format!("could not delete: {}", path.display())),
+                _ => bail!("{}: could not delete: {}", path.display(), e),
             }
         }
     }

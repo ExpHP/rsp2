@@ -1,4 +1,4 @@
-use ::Result;
+use ::FailResult;
 
 use ::rsp2_tasks_config::YamlRead;
 
@@ -31,20 +31,20 @@ enum ConfigSource {
 
 impl Config {
     /// May do path resolution and file IO
-    pub(crate) fn resolve_from_arg(s: &str) -> Result<Config>
+    pub(crate) fn resolve_from_arg(s: &str) -> FailResult<Config>
     { resolve_from_arg::resolve_from_arg(s) }
 }
 
 mod resolve_from_arg {
     use super::*;
 
-    pub(crate) fn resolve_from_arg(s: &str) -> Result<Config> {
+    pub(crate) fn resolve_from_arg(s: &str) -> FailResult<Config> {
         // NOTE: unapologetically, no mechanism is provided for escaping a path containing ':'.
         if s.contains(":") { lit_from_arg(s) }
         else { read_file_from_arg(s) }
     }
 
-    fn lit_from_arg(s: &str) -> Result<Config> {
+    fn lit_from_arg(s: &str) -> FailResult<Config> {
         let mut it = s.splitn(2, ":");
 
         let path = match it.next() {
@@ -63,7 +63,7 @@ mod resolve_from_arg {
     }
 
     // May do path resolution and file IO
-    fn read_file_from_arg(path: &str) -> Result<Config> {
+    fn read_file_from_arg(path: &str) -> FailResult<Config> {
         let path = PathFile::new(path)?;
         let yaml = YamlRead::from_reader(path.read()?)?;
         let source = ConfigSource::File(path);
@@ -92,7 +92,7 @@ impl ConfigSources {
     /// # Notice
     /// Relative paths will be resolved immediately, and possibly
     /// even opened, read, and parsed as yaml.
-    pub fn resolve_from_args<As>(args: As) -> Result<Self>
+    pub fn resolve_from_args<As>(args: As) -> FailResult<Self>
     where
         As: IntoIterator,
         As::Item: AsRef<str>,

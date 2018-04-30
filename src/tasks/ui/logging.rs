@@ -1,5 +1,4 @@
-use ::errors::{Result, ok};
-
+use ::FailResult;
 use ::std::fmt;
 use ::std::time;
 use ::log::{LogLevel, LogRecord};
@@ -24,7 +23,7 @@ mod fern {
     }
 
     impl DelayedLogFile {
-        pub fn start(&self, path: PathFile) -> Result<()> {
+        pub fn start(&self, path: PathFile) -> FailResult<()> {
             if let Ok(mut file) = self.file_rw.write() {
                 if file.is_some() {
                     bail!("The logfile has already been set!");
@@ -69,7 +68,7 @@ impl Verbosity {
         _ => Verbosity::MyEarsHurt,
     }}
 
-    pub fn from_env() -> Result<Self>
+    pub fn from_env() -> FailResult<Self>
     { ::env::verbosity().map(Self::from_int) }
 }
 
@@ -78,8 +77,8 @@ impl Verbosity {
 ///
 /// It returns an object for setting up `GLOBAL_LOGFILE`, leveraging the
 /// "unused variable" lint to help remind you to do this once possible.
-pub fn init_global_logger() -> Result<SetGlobalLogfile>
-{ok({
+pub fn init_global_logger() -> FailResult<SetGlobalLogfile>
+{
     use ::log::LogLevelFilter as L;
     use self::Verbosity as V;
 
@@ -114,8 +113,8 @@ pub fn init_global_logger() -> Result<SetGlobalLogfile>
 
     fern.apply()?;
 
-    SetGlobalLogfile(())
-})}
+    Ok(SetGlobalLogfile(()))
+}
 
 #[derive(Debug, Copy, Clone)]
 pub struct ColorizedLevel(pub LogLevel);
@@ -137,8 +136,8 @@ impl fmt::Display for ColorizedLevel {
 #[must_use = "The logfile has not been set up!"]
 pub struct SetGlobalLogfile(());
 impl SetGlobalLogfile {
-    pub fn start(self, path: PathFile) -> Result<()>
-    { GLOBAL_LOGFILE.start(path) }
+    pub fn start(self, path: PathFile) -> FailResult<()>
+    { GLOBAL_LOGFILE.start(path).map_err(Into::into) }
 }
 
 fn fmt_log_message_lines(

@@ -15,5 +15,5 @@ path = "lib.rs"
 !!log
 !!lazy-static
 !!chrono
-!!error-chain
+!!failure
 !!slice-of-array

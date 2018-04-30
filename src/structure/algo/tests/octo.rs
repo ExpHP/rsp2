@@ -244,7 +244,7 @@ mod tests {
         }
     }
 
-    type DataRef<G: 'static> = &'static Data<G>;
+    type DataRef<G> = &'static Data<G>;
     struct Data<G: 'static> {
         generators: &'static [G],
         compose: fn(&G, &G) -> G,

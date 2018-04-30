@@ -1,7 +1,7 @@
 
 extern crate serde;
 #[macro_use] extern crate serde_derive;
-#[macro_use] extern crate error_chain;
+#[macro_use] extern crate failure;
 #[macro_use] extern crate serde_json;
 
 #[cfg_attr(test, macro_use)] extern crate rsp2_assert_close;

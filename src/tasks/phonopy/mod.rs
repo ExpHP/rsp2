@@ -1,21 +1,49 @@
-use ::Result;
+use ::FailResult;
 use ::traits::{Save, Load, AsPath};
 use ::traits::save::Json;
+use ::errors::DisplayPathArc;
 
 use ::rsp2_phonopy_io::{symmetry_yaml, disp_yaml, conf};
 use ::std::io::BufReader;
 use ::std::io::prelude::*;
 use ::path_abs::{FileRead, FileWrite};
 use ::rsp2_array_types::V3;
+use ::failure::Backtrace;
 
 mod cmd;
 pub use self::cmd::*;
+
+// Directory types in this module follow a pattern of having the datatype constructed
+// after all files have been made; this is thrown when that is not upheld.
+#[derive(Debug, Fail)]
+#[fail(display = "Directory '{}' is missing required file '{}' for '{}'", dir, filename, ty)]
+pub(crate) struct MissingFileError {
+    backtrace: Backtrace,
+    ty: &'static str,
+    dir: DisplayPathArc,
+    filename: String,
+}
+
+#[derive(Debug, Fail)]
+#[fail(display = "phonopy failed with status {}", status)]
+pub(crate) struct PhonopyFailed {
+    backtrace: Backtrace,
+    pub status: ::std::process::ExitStatus,
+}
+
+impl MissingFileError {
+    fn new(ty: &'static str, dir: &AsPath, filename: String) -> Self {
+        let backtrace = Backtrace::new();
+        let dir = DisplayPathArc(dir.as_path().to_owned().into());
+        MissingFileError { backtrace, ty, dir, filename }
+    }
+}
 
 //--------------------------------------------------------
 
 pub type SymmetryYaml = symmetry_yaml::SymmetryYaml;
 impl Load for SymmetryYaml {
-    fn load<P: AsPath>(path: P) -> Result<Self>
+    fn load<P: AsPath>(path: P) -> FailResult<Self>
     { Ok(symmetry_yaml::read(open(path.as_path())?)?) }
 }
 
@@ -23,7 +51,7 @@ impl Load for SymmetryYaml {
 
 pub type DispYaml = disp_yaml::DispYaml;
 impl Load for DispYaml {
-    fn load<P: AsPath>(path: P) -> Result<Self>
+    fn load<P: AsPath>(path: P) -> FailResult<Self>
     { Ok(disp_yaml::read(open(path.as_path())?)?) }
 }
 
@@ -33,12 +61,12 @@ impl Load for DispYaml {
 #[derive(Debug, Clone, Default)]
 pub struct Conf(pub ::rsp2_phonopy_io::Conf);
 impl Load for Conf {
-    fn load<P: AsPath>(path: P) -> Result<Self>
+    fn load<P: AsPath>(path: P) -> FailResult<Self>
     { Ok(conf::read(open_text(path.as_path())?).map(Conf)?) }
 }
 
 impl Save for Conf {
-    fn save<P: AsPath>(&self, path: P) -> Result<()>
+    fn save<P: AsPath>(&self, path: P) -> FailResult<()>
     { Ok(conf::write(create(path.as_path())?, &self.0)?) }
 }
 
@@ -62,7 +90,7 @@ where
 }
 
 impl Load for Args {
-    fn load<P: AsPath>(path: P) -> Result<Self>
+    fn load<P: AsPath>(path: P) -> FailResult<Self>
     {
         use ::path_abs::FileRead;
         use ::util::ext_traits::PathNiceExt;
@@ -78,7 +106,7 @@ impl Load for Args {
 }
 
 impl Save for Args {
-    fn save<P: AsPath>(&self, path: P) -> Result<()>
+    fn save<P: AsPath>(&self, path: P) -> FailResult<()>
     {
         use ::path_abs::FileWrite;
         let mut file = FileWrite::create(path.as_path())?;
@@ -99,12 +127,12 @@ pub(crate) struct OtherSettings {
 }
 
 impl Load for OtherSettings {
-    fn load<P: AsPath>(path: P) -> Result<Self>
+    fn load<P: AsPath>(path: P) -> FailResult<Self>
     { Load::load(path).map(|Json(x)| x) }
 }
 
 impl Save for OtherSettings {
-    fn save<P: AsPath>(&self, path: P) -> Result<()>
+    fn save<P: AsPath>(&self, path: P) -> FailResult<()>
     { Json(self).save(path) }
 }
 
@@ -123,22 +151,22 @@ impl OtherSettings {
 pub(crate) struct QPositions(Vec<V3>);
 
 impl Load for QPositions {
-    fn load<P: AsPath>(path: P) -> Result<Self>
+    fn load<P: AsPath>(path: P) -> FailResult<Self>
     { Load::load(path).map(|Json(x)| x) }
 }
 
 impl Save for QPositions {
-    fn save<P: AsPath>(&self, path: P) -> Result<()>
+    fn save<P: AsPath>(&self, path: P) -> FailResult<()>
     { Json(self).save(path) }
 }
 
 //--------------------------------------------------------
 
-fn open<P: AsPath>(path: P) -> Result<FileRead>
+fn open<P: AsPath>(path: P) -> FailResult<FileRead>
 { Ok(FileRead::read(path.as_path())?) }
 
-fn open_text<P: AsPath>(path: P) -> Result<BufReader<FileRead>>
+fn open_text<P: AsPath>(path: P) -> FailResult<BufReader<FileRead>>
 { open(path).map(BufReader::new) }
 
-fn create<P: AsPath>(path: P) -> Result<FileWrite>
+fn create<P: AsPath>(path: P) -> FailResult<FileWrite>
 { Ok(FileWrite::create(path.as_path())?) }

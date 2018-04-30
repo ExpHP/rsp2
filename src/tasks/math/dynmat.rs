@@ -1,6 +1,8 @@
-use ::{Result, ErrorKind};
-use ::rsp2_array_types::{V3, M33, M3, dot};
-use ::rsp2_structure::{FracOp, Perm};
+#![allow(unused)] // FIXME
+
+use ::FailResult;
+use ::rsp2_array_types::{V3, M33, M3};
+use ::rsp2_structure::{Perm};
 use ::std::collections::HashMap;
 use ::slice_of_array::prelude::*;
 
@@ -38,7 +40,7 @@ impl ForceSets {
 
     /// NOTE: The error case is for singular matrices.
     /// (I wish I was using 'failure' right now...)
-    fn solve_force_constants(&self) -> Result<ForceConstants>
+    fn solve_force_constants(&self) -> FailResult<ForceConstants>
     {
         use ::util::zip_eq as z;
         let ForceSets {

@@ -1,4 +1,4 @@
-use ::errors::{Result};
+use ::errors::FailResult;
 
 use ::clap;
 use ::cmd::trial::{TrialDir, NewTrialDirArgs};
@@ -10,10 +10,12 @@ use ::ui::cli_deserialize::CliDeserialize;
 use ::util::ext_traits::{ArgMatchesExt};
 
 fn wrap_result_main<F>(main: F)
-    where F: FnOnce() -> Result<()>,
+    where F: FnOnce() -> FailResult<()>,
 {
     main().unwrap_or_else(|e| {
-        error!("{}", e.display_chain());
+        for cause in e.causes() {
+            error!("{}", cause);
+        }
         ::std::process::exit(1);
     });
 }
@@ -41,7 +43,7 @@ impl CliDeserialize for NewTrialDirArgs {
         ])
     }
 
-    fn _resolve_args(m: &clap::ArgMatches) -> Result<Self>
+    fn _resolve_args(m: &clap::ArgMatches) -> FailResult<Self>
     { Ok(NewTrialDirArgs {
         config_sources: ConfigSources::resolve_from_args(m.expect_values_of("config"))?,
         err_if_existing: !m.is_present("force"),
@@ -64,7 +66,7 @@ impl CliDeserialize for OptionalFileType {
         ])
     }
 
-    fn _resolve_args(m: &clap::ArgMatches) -> Result<Self> {
+    fn _resolve_args(m: &clap::ArgMatches) -> FailResult<Self> {
         Ok(OptionalFileType({
             if let Some(s) = m.value_of("structure_type") {
                 match s {
@@ -103,7 +105,7 @@ pub fn rsp2() {
             ])
         }
 
-        fn _resolve_args(m: &::clap::ArgMatches) -> Result<Self>
+        fn _resolve_args(m: &::clap::ArgMatches) -> FailResult<Self>
         { Ok(CliArgs {
             save_bands: m.is_present("save_bands"),
         })}

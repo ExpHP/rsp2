@@ -14,7 +14,7 @@ pub(crate) mod trial;
 mod acoustic_search;
 mod relaxation;
 
-use ::errors::{Error, ErrorKind, Result, ok};
+use ::{FailResult, FailOk};
 use ::rsp2_tasks_config::{self as cfg, Settings, NormalizationMode, SupercellSpec};
 use ::traits::{AsPath};
 use ::phonopy::{DirWithBands, DirWithDisps, DirWithForces};
@@ -64,8 +64,8 @@ impl TrialDir {
         file_format: StructureFileType,
         input: &PathFile,
         cli: CliArgs,
-    ) -> Result<()>
-    {ok({
+    ) -> FailResult<()>
+    {Ok({
         let lmp = LammpsBuilder::new(&settings.threading, &settings.potential.kind);
 
         // FIXME: rather than doing this here, other rsp2 binaries ought to be able
@@ -100,8 +100,8 @@ impl TrialDir {
         settings: &Settings,
         lmp: &LammpsBuilder,
         eva: &GammaSystemAnalysis,
-    ) -> Result<()>
-    {ok({
+    ) -> FailResult<()>
+    {Ok({
         if let (&Some(ref frequency), &Some(ref raman)) = (&eva.ev_frequencies, &eva.ev_raman_tensors) {
             #[derive(Serialize)]
             #[serde(rename_all = "kebab-case")]
@@ -141,8 +141,15 @@ impl TrialDir {
         self.write_summary_file(settings, lmp, eva)?;
     })}
 
-    fn write_poscar(&self, filename: &str, headline: &str, structure: &ElementStructure) -> Result<()>
-    {ok({
+    // log when writing poscar files, especially during loops
+    // (to remove any doubt about the iteration number)
+    fn write_poscar(
+        &self,
+        filename: &str,
+        headline: &str,
+        structure: &ElementStructure,
+    ) -> FailResult<()>
+    {Ok({
         use ::rsp2_structure_io::poscar;
         let file = self.create_file(filename)?;
         trace!("Writing '{}'", file.path().nice());
@@ -157,8 +164,8 @@ impl TrialDir {
         aux_info: aux_info::Info,
         phonopy: &PhonopyBuilder,
         structure: &ElementStructure,
-    ) -> Result<(DirWithBands<Box<AsPath>>, Vec<f64>, Basis3, GammaSystemAnalysis)>
-    {ok({
+    ) -> FailResult<(DirWithBands<Box<AsPath>>, Vec<f64>, Basis3, GammaSystemAnalysis)>
+    {Ok({
 
         let bands_dir = do_diagonalize(
             lmp, &settings.threading, phonopy, structure, save_bands, &[Q_GAMMA],
@@ -172,7 +179,7 @@ impl TrialDir {
         //       we would need to store image indices so that the correct cartesian
         //       vectors can be computed.
         //       For now, we just do it all from scratch each time.
-        let bonds = settings.bond_radius.map(|bond_radius| ok({
+        let bonds = settings.bond_radius.map(|bond_radius| FailOk({
             trace!("Computing bonds");
             Bonds::from_brute_force_very_dumb(&structure, bond_radius)?
         })).fold_ok()?;
@@ -211,7 +218,7 @@ fn do_diagonalize_at_gamma(
     phonopy: &PhonopyBuilder,
     structure: &ElementStructure,
     save_bands: Option<&PathArc>,
-) -> Result<(Vec<f64>, Basis3)>
+) -> FailResult<(Vec<f64>, Basis3)>
 {Ok({
     let dir = do_diagonalize(lmp, threading, phonopy, structure, save_bands, &[Q_GAMMA])?;
     read_eigensystem(&dir, &Q_GAMMA)?
@@ -224,8 +231,8 @@ fn do_diagonalize(
     structure: &ElementStructure,
     save_bands: Option<&PathArc>,
     points: &[V3],
-) -> Result<DirWithBands<Box<AsPath>>>
-{ok({
+) -> FailResult<DirWithBands<Box<AsPath>>>
+{Ok({
     let disp_dir = phonopy.displacements(&structure)?;
     let force_sets = do_force_sets_at_disps(&lmp, &threading, &disp_dir)?;
 
@@ -245,8 +252,8 @@ fn do_diagonalize(
 
 fn write_eigen_info_for_humans(
     analysis: &GammaSystemAnalysis,
-    writeln: &mut FnMut(String) -> Result<()>,
-) -> Result<()>
+    writeln: &mut FnMut(String) -> FailResult<()>,
+) -> FailResult<()>
 {
     analysis.make_columns(ev_analyses::ColumnsMode::ForHumans)
         .expect("(bug) no columns, not even frequency?")
@@ -256,11 +263,11 @@ fn write_eigen_info_for_humans(
 fn write_eigen_info_for_machines<W: Write>(
     analysis: &GammaSystemAnalysis,
     mut file: W,
-) -> Result<()>
+) -> FailResult<()>
 {
     analysis.make_columns(ev_analyses::ColumnsMode::ForMachines)
         .expect("(bug) no columns, not even frequency?")
-        .into_iter().map(|s| ok(writeln!(file, "{}", s)?)).collect()
+        .into_iter().map(|s| FailOk(writeln!(file, "{}", s)?)).collect()
 }
 
 impl TrialDir {
@@ -269,7 +276,7 @@ impl TrialDir {
         settings: &Settings,
         lmp: &LammpsBuilder,
         ev_analysis: &GammaSystemAnalysis,
-    ) -> Result<()> {ok({
+    ) -> FailResult<()> {Ok({
         use ::ui::cfg_merging::{make_nested_mapping, no_summary, merge_summaries};
         use ::rsp2_structure_io::poscar;
 
@@ -286,11 +293,11 @@ impl TrialDir {
         let mut out = vec![];
         out.push(ev_analysis.make_summary(settings));
         out.push({
-            let f = |structure: ElementStructure| ok({
+            let f = |structure: ElementStructure| FailOk({
                 let na = structure.num_atoms() as f64;
                 lmp.build(structure)?.compute_value()? / na
             });
-            let f_path = |s: &AsPath| ok(f(poscar::load(self.read_file(s)?)?)?);
+            let f_path = |s: &AsPath| FailOk(f(poscar::load(self.read_file(s)?)?)?);
 
             let initial = f_path(&"initial.vasp")?;
             let final_ = f_path(&"final.vasp")?;
@@ -322,15 +329,15 @@ fn do_force_sets_at_disps<P: AsPath + Send + Sync>(
     lmp: &LammpsBuilder,
     threading: &cfg::Threading,
     disp_dir: &DirWithDisps<P>,
-) -> Result<Vec<Vec<V3>>>
-{ok({
+) -> FailResult<Vec<Vec<V3>>>
+{Ok({
     use ::std::io::prelude::*;
     use ::rayon::prelude::*;
 
     trace!("Computing forces at displacements");
 
     let counter = ::util::AtomicCounter::new();
-    let compute = move |structure| ok({
+    let compute = move |structure| FailOk({
         let i = counter.inc();
         eprint!("\rdisp {} of {}", i + 1, disp_dir.displacements().len());
         ::std::io::stderr().flush().unwrap();
@@ -341,11 +348,11 @@ fn do_force_sets_at_disps<P: AsPath + Send + Sync>(
     let force_sets = match threading {
         &cfg::Threading::Lammps |
         &cfg::Threading::Serial => {
-            disp_dir.displaced_structures().map(compute).collect::<Result<Vec<_>>>()?
+            disp_dir.displaced_structures().map(compute).collect::<FailResult<Vec<_>>>()?
         },
         &cfg::Threading::Rayon => {
             let structures = disp_dir.displaced_structures().collect::<Vec<_>>();
-            structures.into_par_iter().map(compute).collect::<Result<Vec<_>>>()?
+            structures.into_par_iter().map(compute).collect::<FailResult<Vec<_>>>()?
         },
     };
     eprintln!();
@@ -355,7 +362,7 @@ fn do_force_sets_at_disps<P: AsPath + Send + Sync>(
 fn read_eigensystem<P: AsPath>(
     bands_dir: &DirWithBands<P>,
     q: &V3,
-) -> Result<(Vec<f64>, Basis3)>
+) -> FailResult<(Vec<f64>, Basis3)>
 {Ok({
     let index = ::util::index_of_nearest(&bands_dir.q_positions()?, q, 1e-4);
     let index = match index {
@@ -411,11 +418,11 @@ mod aux_info {
     const FILENAME: &'static str = "aux-analysis-info.json";
 
     impl TrialDir {
-        pub(crate) fn save_analysis_aux_info(&self, aux: &Info) -> Result<()>
-        { ok(::serde_json::to_writer(self.create_file(FILENAME)?, &aux)?) }
+        pub(crate) fn save_analysis_aux_info(&self, aux: &Info) -> FailResult<()>
+        { Ok(::serde_json::to_writer(self.create_file(FILENAME)?, &aux)?) }
 
-        pub(crate) fn load_analysis_aux_info(&self) -> Result<Info>
-        {ok({
+        pub(crate) fn load_analysis_aux_info(&self) -> FailResult<Info>
+        {Ok({
             let file = self.read_file(FILENAME)?;
             let de = &mut ::serde_json::Deserializer::from_reader(file);
             ::serde_ignored::deserialize(de, |path| {
@@ -439,21 +446,26 @@ impl TrialDir {
         self,
         settings: &cfg::EnergyPlotSettings,
         input: &PathDir,
-    ) -> Result<()>
-    {ok({
+    ) -> FailResult<()>
+    {Ok({
         // support either a force dir or a bands dir as input
         let bands_dir = match DirWithBands::from_existing(input.to_path_buf()) {
             // accept a bands dir
             Ok(dir) => dir.boxed(),
-            // try computing gamma bands from a force dir
-            Err(Error(ErrorKind::MissingFile(..), _)) => {
+            Err(e) => {
+                // try computing gamma bands from a force dir
+                use ::phonopy::MissingFileError;
+
+                // bail out on anything other than MissingFileError
+                // (this check is awkwardly written; I couldn't see a better way
+                //  to handle borrow-checking correctly)
+                let _ = e.downcast::<MissingFileError>()?;
                 DirWithForces::from_existing(&input)?
                     .build_bands()
                     .eigenvectors(true)
                     .compute(&[Q_GAMMA])?
                     .boxed()
             },
-            Err(e) => return Err(e),
         };
 
         let structure = bands_dir.structure()?;
@@ -495,7 +507,7 @@ impl TrialDir {
                     use ::std::sync::atomic::{AtomicUsize, Ordering};
                     let counter = AtomicUsize::new(0);
 
-                    move |pos| {ok({
+                    move |pos| {FailOk({
                         let i = counter.fetch_add(1, Ordering::SeqCst);
                         // println!("{:?}", pos.flat().iter().sum::<f64>());
 
@@ -575,7 +587,7 @@ impl TrialDir {
     pub(crate) fn run_save_bands_after_the_fact(
         self,
         settings: &Settings,
-    ) -> Result<()>
+    ) -> FailResult<()>
     {Ok({
         use ::rsp2_structure_io::poscar;
 
@@ -603,7 +615,7 @@ impl TrialDir {
     pub(crate) fn rerun_ev_analysis(
         self,
         settings: &Settings,
-    ) -> Result<()>
+    ) -> FailResult<()>
     {Ok({
         use ::rsp2_structure_io::poscar;
 
@@ -680,7 +692,7 @@ pub(crate) fn read_structure_file(
     //        (a function like this really shouldn't do ANY optimization,
     //         but I don't see any other place to do it without mega refactoring...)
     lmp: Option<&LammpsBuilder>,
-) -> Result<(ElementStructure, Option<Vec<usize>>, Option<Vec<ScMatrix>>)> {
+) -> FailResult<(ElementStructure, Option<Vec<usize>>, Option<Vec<ScMatrix>>)> {
     let (original_structure, atom_layers, layer_sc_mats);
     match file_format {
         StructureFileType::Poscar => {

@@ -26,39 +26,11 @@ mod stuff_from_core {
         /// Start index bound.
         ///
         /// Returns the start value as a `Bound`.
-        ///
-        /// # Examples
-        ///
-        /// ```
-        /// #![feature(collections_range)]
-        ///
-        /// # fn main() {
-        /// use std::ops::Bound::*;
-        /// use std::ops::RangeBounds;
-        ///
-        /// assert_eq!((..10).start(), Unbounded);
-        /// assert_eq!((3..10).start(), Included(&3));
-        /// # }
-        /// ```
         fn start(&self) -> Bound<&T>;
 
         /// End index bound.
         ///
         /// Returns the end value as a `Bound`.
-        ///
-        /// # Examples
-        ///
-        /// ```
-        /// #![feature(collections_range)]
-        ///
-        /// # fn main() {
-        /// use std::ops::Bound::*;
-        /// use std::ops::RangeBounds;
-        ///
-        /// assert_eq!((3..).end(), Unbounded);
-        /// assert_eq!((3..10).end(), Excluded(&10));
-        /// # }
-        /// ```
         fn end(&self) -> Bound<&T>;
     }
 

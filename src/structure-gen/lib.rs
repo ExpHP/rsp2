@@ -5,16 +5,11 @@ extern crate rsp2_array_types;
 extern crate serde;
 extern crate serde_yaml;
 #[macro_use] extern crate serde_derive;
-#[macro_use] extern crate error_chain;
+#[macro_use] extern crate failure;
 
-error_chain! {
-    foreign_links {
-        Io(::std::io::Error);
-        Yaml(::serde_yaml::Error);
-    }
-}
-// fewer type annotations
-fn ok<T>(x: T) -> Result<T> { Ok(x) }
+pub type FailResult<T> = ::std::result::Result<T, ::failure::Error>;
+#[allow(bad_style)] // less nails-on-chalkboard than Ok::<_, ::failure::Error>
+pub fn FailOk<T>(x: T) -> Result<T, ::failure::Error> { Ok(x) }
 
 mod assemble;
 pub use assemble::load_layers_yaml;

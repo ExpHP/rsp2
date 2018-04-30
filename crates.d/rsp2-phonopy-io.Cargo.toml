@@ -8,7 +8,7 @@ description = "Parses/writes some of phonopy's filetypes.  And some of rsp2's ow
 path = "lib.rs"
 
 [dependencies]
-!!error-chain
+!!failure
 !!nom
 !!serde
 !!serde-derive

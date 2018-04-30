@@ -1,12 +1,8 @@
 use ::{Lattice, CoordsKind, Element};
-use ::errors::*;
 use ::oper::{Perm, Permute};
 use ::oper::{Part, Partition};
 use ::oper::part::Unlabeled;
 use ::rsp2_array_types::{M33, V3, Unvee};
-
-use ::std::result::Result as StdResult;
-
 
 /// Pairs [`CoordsKind`] together with their [`Lattice`], and metadata.
 ///
@@ -55,11 +51,11 @@ impl<M> Structure<M> {
     // FIXME bad idea for stable interface, but good enough for now
     pub fn metadata(&self) -> &[M] { &self.meta }
 
-    pub fn try_map_metadata_into<M2, E, F>(self, f: F) -> StdResult<Structure<M2>, E>
-    where F: FnMut(M) -> StdResult<M2, E>,
+    pub fn try_map_metadata_into<M2, E, F>(self, f: F) -> Result<Structure<M2>, E>
+    where F: FnMut(M) -> Result<M2, E>,
     {Ok({
         let Structure { lattice, coords, meta } = self;
-        let meta = meta.into_iter().map(f).collect::<StdResult<_, E>>()?;
+        let meta = meta.into_iter().map(f).collect::<Result<_, E>>()?;
         Structure { lattice, coords, meta }
     })}
 
@@ -252,6 +248,13 @@ impl<M: 'static> Partition for Structure<M> {
     }
 }
 
+#[derive(Debug, Fail)]
+#[fail(display = "The new lattice is not equivalent to the original. (A B^-1 = {:?})", a_binv)]
+pub struct NonEquivalentLattice {
+    a_binv: [[f64; 3]; 3],
+    backtrace: ::failure::Backtrace,
+}
+
 impl<M> Structure<M> {
     pub fn translate_frac(&mut self, v: &V3)
     { ::util::translate_mut_n3_3(self.fracs_mut(), v); }
@@ -304,13 +307,18 @@ impl<M> Structure<M> {
     /// causes less of a disturbance to the positions of sites which
     /// are distant to the origin, in the case where one wishes to reduce
     /// the sites into the new unit cell afterwards.
-    pub fn use_equivalent_cell(&mut self, tol: f64, target_lattice: &Lattice) -> Result<()>
+    pub fn use_equivalent_cell(&mut self, tol: f64, target_lattice: &Lattice) -> Result<(), NonEquivalentLattice>
     {Ok({
         warn!("Untested code path: 1650857f-42df-47e4-8ff0-cdd9dcb85020");
         let unimodular = &self.lattice * target_lattice.inverse_matrix();
         let unimodular = match ::util::Tol(tol).unfloat_m33(unimodular.matrix()) {
             Ok(m) => m,
-            Err(_) => bail!(ErrorKind::NonEquivalentLattice(unimodular.matrix().into_array()))
+            Err(_) => {
+                throw!(NonEquivalentLattice {
+                    backtrace: ::failure::Backtrace::new(),
+                    a_binv: unimodular.matrix().into_array(),
+                })
+            },
         };
         self.apply_unimodular(&unimodular);
     })}

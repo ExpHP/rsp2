@@ -1,8 +1,8 @@
 
+use ::FailResult;
 use super::lammps::{LammpsBuilder, LammpsExt};
 use super::SupercellSpecExt;
 
-use ::errors::{Result, ok};
 use ::rsp2_tasks_config as cfg;
 
 use ::math::basis::Basis3;
@@ -79,8 +79,8 @@ pub(crate) fn perform_acoustic_search(
     eigenvectors: &Basis3,
     structure: &ElementStructure,
     settings: &cfg::Settings,
-) -> Result<Vec<ModeKind>>
-{ok({
+) -> FailResult<Vec<ModeKind>>
+{Ok({
     let &cfg::Settings {
         acoustic_search: cfg::AcousticSearch {
             expected_non_translations,

@@ -4,14 +4,14 @@
 // 2 or more elements.
 #![allow(unused_parens)]
 
-use ::Result;
+use ::FailResult;
 use ::rsp2_kets::Basis;
 use ::nom::*;
 use ::std::io::Read;
 use ::std::mem::size_of;
 
 
-pub fn read_eigenvector_npy<R: Read>(mut r: R) -> Result<Vec<Basis>> {
+pub fn read_eigenvector_npy<R: Read>(mut r: R) -> FailResult<Vec<Basis>> {
     let bytes = {
         let mut bytes = vec![];
         r.read_to_end(&mut bytes)?;
@@ -22,7 +22,7 @@ pub fn read_eigenvector_npy<R: Read>(mut r: R) -> Result<Vec<Basis>> {
         .or_else(|e| bail!("{:?}", e)) // generic, not displayable...
 }
 
-pub fn read_eigenvalue_npy<R: Read>(mut r: R) -> Result<Vec<Vec<f64>>> {
+pub fn read_eigenvalue_npy<R: Read>(mut r: R) -> FailResult<Vec<Vec<f64>>> {
     let bytes = {
         let mut bytes = vec![];
         r.read_to_end(&mut bytes)?;

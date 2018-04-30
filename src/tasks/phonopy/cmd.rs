@@ -14,9 +14,11 @@
 //! things was the biggest limitation of the previous API, which never
 //! exposed its own temporary directories.
 
-use ::{Error, Result, IoResult, ErrorKind};
+use ::FailResult;
+use ::{IoResult};
 use ::As3;
 
+use super::{MissingFileError, PhonopyFailed};
 use super::{Conf, DispYaml, SymmetryYaml, QPositions, Args, OtherSettings};
 use ::traits::{AsPath, HasTempDir, Save, Load};
 
@@ -78,9 +80,9 @@ impl Builder {
     /// Extend with configuration lines from a phonopy .conf file.
     /// If the file defines a value that was already set, the new
     ///  value from the file will take precedence.
-    // FIXME: Result<Self>... oh, THAT's why the general recommendation is for &mut Self
+    // FIXME: FailResult<Self>... oh, THAT's why the general recommendation is for &mut Self
     #[allow(unused)]
-    pub fn conf_from_file<R: BufRead>(self, file: R) -> Result<Self>
+    pub fn conf_from_file<R: BufRead>(self, file: R) -> FailResult<Self>
     {Ok({
         let mut me = self;
         for (key, value) in ::rsp2_phonopy_io::conf::read(file)? {
@@ -130,7 +132,7 @@ impl Builder {
     pub fn displacements(
         &self,
         structure: &ElementStructure,
-    ) -> Result<DirWithDisps<TempDir>>
+    ) -> FailResult<DirWithDisps<TempDir>>
     {
         self.finalize_config(structure)
             ._displacements(structure)
@@ -139,7 +141,7 @@ impl Builder {
     fn _displacements(
         &self,
         structure: &ElementStructure,
-    ) -> Result<DirWithDisps<TempDir>>
+    ) -> FailResult<DirWithDisps<TempDir>>
     {Ok({
         let dir = TempDir::new("rsp2")?;
         {
@@ -154,14 +156,15 @@ impl Builder {
 
             {
                 use std::os::unix::fs::OpenOptionsExt;
-                use ::errors::ResultExt;
+                use ::failure::ResultExt;
                 use ::util::ext_traits::PathNiceExt;
+                let path = dir.join(FNAME_HELPER_SCRIPT);
                 ::std::fs::OpenOptions::new()
                     .create(true)
                     .write(true)
                     .mode(0o777)
-                    .open(dir.join(FNAME_HELPER_SCRIPT))
-                    .chain_err(|| ErrorKind::from(format!("error while opening {}", dir.nice())))?
+                    .open(&path)
+                    .with_context(|e| format!("{}: error creating file: {}", path.nice(), e))?
                     .write_all(format!(r#"#!/bin/sh
 
 # This script simulates rsp2's calls to phonopy by adding
@@ -196,7 +199,7 @@ phonopy \
     pub fn symmetry(
         &self,
         structure: &ElementStructure,
-    ) -> Result<(Vec<FracOp>)>
+    ) -> FailResult<(Vec<FracOp>)>
     {
         self.finalize_config(structure)
             ._symmetry(structure)
@@ -209,7 +212,7 @@ phonopy \
     fn _symmetry(
         &self,
         structure: &ElementStructure,
-    ) -> Result<(Vec<FracOp>)>
+    ) -> FailResult<(Vec<FracOp>)>
     {Ok({
         let tmp = TempDir::new("rsp2")?;
         let tmp = tmp.path();
@@ -242,7 +245,7 @@ phonopy \
             // (In the future we may be able to instead return an object
             //  which will allow the spacegroup operators of the primitive
             //  to be applied in meaningful ways to the superstructure.)
-            ensure!(ratio == 1, ErrorKind::NonPrimitiveStructure);
+            ensure!(ratio == 1, "attempted to compute symmetry of a supercell");
         }
 
         let yaml = SymmetryYaml::load(tmp.join(FNAME_OUT_SYMMETRY))?;
@@ -252,7 +255,7 @@ phonopy \
                 let translation = FracTrans::from_floats(&op.translation)?;
                 FracOp::new(&rotation, &translation)
             }))
-            .collect::<Result<_>>()?
+            .collect::<FailResult<_>>()?
     })}
 }
 
@@ -282,7 +285,7 @@ pub struct DirWithDisps<P: AsPath> {
 }
 
 impl<P: AsPath> DirWithDisps<P> {
-    pub fn from_existing(dir: P) -> Result<Self>
+    pub fn from_existing(dir: P) -> FailResult<Self>
     {Ok({
         for name in &[
             "POSCAR",
@@ -292,8 +295,9 @@ impl<P: AsPath> DirWithDisps<P> {
             FNAME_OTHER_SETTINGS,
         ] {
             let path = dir.as_path().join(name);
-            ensure!(path.exists(),
-                ErrorKind::MissingFile("DirWithDisps", dir.as_path().to_owned(), name.to_string()));
+            if !path.exists() {
+                throw!(MissingFileError::new("DirWithDisps", &dir, name.to_string()));
+            }
         }
 
         trace!("Parsing disp.yaml...");
@@ -302,7 +306,7 @@ impl<P: AsPath> DirWithDisps<P> {
         } = Load::load(dir.as_path().join("disp.yaml"))?;
         let superstructure = superstructure.try_map_metadata_into(|d| {
             match Element::from_symbol(&d.symbol[..]) {
-                Some(e) => Ok::<_, Error>(e),
+                Some(e) => Ok(e),
                 None => bail!("invalid symbol in disp.yaml: {:?}", d.symbol),
             }
         })?;
@@ -333,7 +337,7 @@ impl<P: AsPath> DirWithDisps<P> {
     /// (which may serve as a template for one or more band computations).
     ///
     /// This variant creates a new temporary directory.
-    pub fn make_force_dir<Vs>(self, forces: Vs) -> Result<DirWithForces<TempDir>>
+    pub fn make_force_dir<Vs>(self, forces: Vs) -> FailResult<DirWithForces<TempDir>>
     where
         Vs: IntoIterator,
         <Vs as IntoIterator>::IntoIter: ExactSizeIterator,
@@ -349,7 +353,7 @@ impl<P: AsPath> DirWithDisps<P> {
     /// (which may serve as a template for one or more band computations).
     ///
     /// This variant uses the specified path.
-    pub fn make_force_dir_in_dir<Vs, Q>(self, forces: Vs, path: Q) -> Result<DirWithForces<Q>>
+    pub fn make_force_dir_in_dir<Vs, Q>(self, forces: Vs, path: Q) -> FailResult<DirWithForces<Q>>
     where
         Q: AsPath,
         Vs: IntoIterator,
@@ -361,7 +365,7 @@ impl<P: AsPath> DirWithDisps<P> {
     })}
 
     /// Creates the files expected by DirWithForces::from_existing
-    fn prepare_force_dir<Vs>(self, forces: Vs, path: &Path) -> Result<()>
+    fn prepare_force_dir<Vs>(self, forces: Vs, path: &Path) -> FailResult<()>
     where
         Vs: IntoIterator,
         <Vs as IntoIterator>::IntoIter: ExactSizeIterator,
@@ -427,7 +431,7 @@ pub struct DirWithForces<P: AsPath> {
 }
 
 impl<P: AsPath> DirWithForces<P> {
-    pub fn from_existing(dir: P) -> Result<Self>
+    pub fn from_existing(dir: P) -> FailResult<Self>
     {Ok({
         let settings = OtherSettings::load(dir.as_path().join(FNAME_OTHER_SETTINGS))?;
 
@@ -439,14 +443,15 @@ impl<P: AsPath> DirWithForces<P> {
             FNAME_CONF_DISPS,
         ] {
             let path = dir.as_path().join(name);
-            ensure!(path.exists(),
-                ErrorKind::MissingFile("DirWithForces", dir.as_path().to_owned(), name.to_string()));
+            if !path.exists() {
+                throw!(MissingFileError::new("DirWithForces", &dir, name.to_string()));
+            }
         }
         DirWithForces { dir, settings, cache_force_constants: true }
     })}
 
     #[allow(unused)]
-    pub fn structure(&self) -> Result<ElementStructure>
+    pub fn structure(&self) -> FailResult<ElementStructure>
     { Ok(poscar::load(open_text(self.path().join("POSCAR"))?)?) }
 
     /// Enable/disable caching of force constants.
@@ -494,7 +499,7 @@ impl<'moveck, 'p, P: AsPath> BandsBuilder<'moveck, 'p, P> {
     /// you from using it again) with a receiver of type `&mut self`. Basically, by associating
     /// the `&mut self` borrow with a lifetime parameter of the struct itself, the duration of
     /// the borrow is extended to cover the entire rest of the DirWithBands' existence.
-    pub fn compute(&'moveck mut self, q_points: &[V3]) -> Result<DirWithBands<TempDir>>
+    pub fn compute(&'moveck mut self, q_points: &[V3]) -> FailResult<DirWithBands<TempDir>>
     {Ok({
         let dir = TempDir::new("rsp2")?;
 
@@ -611,7 +616,7 @@ pub struct DirWithBands<P: AsPath> {
 
 
 impl<P: AsPath> DirWithBands<P> {
-    pub fn from_existing(dir: P) -> Result<Self>
+    pub fn from_existing(dir: P) -> FailResult<Self>
     {Ok({
         let settings = OtherSettings::load(dir.as_path().join(FNAME_OTHER_SETTINGS))?;
 
@@ -623,22 +628,23 @@ impl<P: AsPath> DirWithBands<P> {
             "q-positions.json",
         ] {
             let path = dir.as_path().join(name);
-            ensure!(path.exists(),
-                ErrorKind::MissingFile("DirWithBands", dir.as_path().to_owned(), name.to_string()));
+            if !path.exists() {
+                throw!(MissingFileError::new("DirWithBands", &dir, name.to_string()))
+            }
         }
 
         DirWithBands { settings, dir }
     })}
 
-    pub fn structure(&self) -> Result<ElementStructure>
+    pub fn structure(&self) -> FailResult<ElementStructure>
     { Ok(poscar::load(open_text(self.path().join("POSCAR"))?)?) }
 
-    pub fn q_positions(&self) -> Result<Vec<V3>>
+    pub fn q_positions(&self) -> FailResult<Vec<V3>>
     { Ok(QPositions::load(self.path().join("q-positions.json"))?.0) }
 
     /// This will be `None` if `.eigenvectors(true)` was not set prior
     /// to the band computation.
-    pub fn eigenvectors(&self) -> Result<Option<Vec<Basis>>>
+    pub fn eigenvectors(&self) -> FailResult<Option<Vec<Basis>>>
     {Ok({
         let path = self.path().join("eigenvector.npy");
         if path.exists() {
@@ -647,7 +653,7 @@ impl<P: AsPath> DirWithBands<P> {
         } else { None }
     })}
 
-    pub fn eigenvalues(&self) -> Result<Vec<Vec<f64>>>
+    pub fn eigenvalues(&self) -> FailResult<Vec<Vec<f64>>>
     {Ok({
         use ::rsp2_slice_math::{v};
         trace!("Reading eigenvectors...");
@@ -664,7 +670,7 @@ impl<P: AsPath> DirWithBands<P> {
 fn band_string(ks: &[V3]) -> String
 { ks.flat().iter().map(|x| x.to_string()).collect::<Vec<_>>().join(" ") }
 
-fn round_checked(x: f64, tol: f64) -> Result<i32>
+fn round_checked(x: f64, tol: f64) -> FailResult<i32>
 {Ok({
     let r = x.round();
     ensure!((r - x).abs() < tol, "not nearly integral: {}", x);
@@ -674,7 +680,7 @@ fn round_checked(x: f64, tol: f64) -> Result<i32>
 pub(crate) fn log_stdio_and_wait(
     mut cmd: ::std::process::Command,
     stdin: Option<String>,
-) -> Result<()>
+) -> FailResult<()>
 {Ok({
     use ::std::process::Stdio;
     use ::std::io::{BufRead, BufReader};
@@ -696,7 +702,7 @@ pub(crate) fn log_stdio_and_wait(
 
     let stdout_worker = {
         let f = BufReader::new(child.stdout.take().unwrap());
-        ::std::thread::spawn(move || -> Result<()> {Ok({
+        ::std::thread::spawn(move || -> FailResult<()> {Ok({
             for line in f.lines() {
                 ::stdout::log(&(line?[..]));
             }
@@ -705,7 +711,7 @@ pub(crate) fn log_stdio_and_wait(
 
     let stderr_worker = {
         let f = BufReader::new(child.stderr.take().unwrap());
-        ::std::thread::spawn(move || -> Result<()> {Ok({
+        ::std::thread::spawn(move || -> FailResult<()> {Ok({
             for line in f.lines() {
                 ::stderr::log(&(line?[..]));
             }
@@ -718,10 +724,14 @@ pub(crate) fn log_stdio_and_wait(
     let _ = stderr_worker.join();
 })}
 
-fn check_status(status: ::std::process::ExitStatus) -> Result<()>
-{Ok({
-    ensure!(status.success(), ErrorKind::PhonopyFailed(status));
-})}
+fn check_status(status: ::std::process::ExitStatus) -> Result<(), PhonopyFailed>
+{
+    if status.success() { Ok(()) }
+    else {
+        let backtrace = ::failure::Backtrace::new();
+        Err(PhonopyFailed { backtrace, status })
+    }
+}
 
 // Wrapper around `hard_link` which:
 // - falls back to copying if the destination is on another filesystem.
@@ -730,7 +740,7 @@ fn check_status(status: ::std::process::ExitStatus) -> Result<()>
 // The use case is where this may be used on many identical source files
 // for the same destination, possibly concurrently, in order to cache the
 // file for further reuse.
-pub fn cache_link<P: AsRef<Path>, Q: AsRef<Path>>(src: P, dest: Q) -> Result<()>
+pub fn cache_link<P: AsRef<Path>, Q: AsRef<Path>>(src: P, dest: Q) -> FailResult<()>
 {
     let (src, dest) = (src.as_ref(), dest.as_ref());
     hard_link(src, dest)
@@ -750,7 +760,7 @@ pub fn cache_link<P: AsRef<Path>, Q: AsRef<Path>>(src: P, dest: Q) -> Result<()>
 }
 
 // Like `cache_link` except it fails if the destination exists.
-pub fn copy_or_link<P: AsRef<Path>, Q: AsRef<Path>>(src: P, dest: Q) -> Result<()>
+pub fn copy_or_link<P: AsRef<Path>, Q: AsRef<Path>>(src: P, dest: Q) -> FailResult<()>
 {
     let (src, dest) = (src.as_ref(), dest.as_ref());
     hard_link(src, dest)

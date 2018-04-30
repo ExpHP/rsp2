@@ -24,7 +24,7 @@ rsp2-assert-close = { path = "../util/assert-close" }
 rsp2-slice-math = { path = "../util/slice-math" }
 rsp2-util-macros = { path = "../util/macros" }
 
-error-chain = "0.11"
+failure = "0.1"
 
 # FIXME make this dev-dependencies once rust-lang-nursery/rls#169 is fixed
 # FIXME use fern for less hax?

@@ -2,29 +2,29 @@
 // This is a reincarnation of assemble.py, in the form of
 // a rust library function rather than a CLI utility.
 
-use ::{Result, ok};
+use ::{FailResult, FailOk};
 
 use ::rsp2_structure::{CoordsKind, Lattice, CoordStructure};
 use ::std::io::Read;
 
 use ::rsp2_array_types::{M22, M33, V2, V3, mat, inv};
 
-pub fn load_layers_yaml<R: Read>(mut file: R) -> Result<Assemble>
+pub fn load_layers_yaml<R: Read>(mut file: R) -> FailResult<Assemble>
 { _load_layers_yaml(&mut file) }
 
 // Monomorphized to ensure YAML parsing code is generated in this crate
-fn _load_layers_yaml(file: &mut Read) -> Result<Assemble>
+fn _load_layers_yaml(file: &mut Read) -> FailResult<Assemble>
 {
     let cereal = ::serde_yaml::from_reader(file)?;
     assemble_from_cereal(cereal).map(|a| a)
 }
 
 // FIXME this really doesn't belong here, but it's the easiest reuse of code
-pub fn layer_sc_info_from_layers_yaml<R: Read>(mut file: R) -> Result<Vec<(M33<i32>, [u32; 3], usize)>>
+pub fn layer_sc_info_from_layers_yaml<R: Read>(mut file: R) -> FailResult<Vec<(M33<i32>, [u32; 3], usize)>>
 { _layer_sc_info_from_layers_yaml(&mut file) }
 
 // Monomorphized to ensure YAML parsing code is generated in this crate
-fn _layer_sc_info_from_layers_yaml(file: &mut Read) -> Result<Vec<(M33<i32>, [u32; 3], usize)>>
+fn _layer_sc_info_from_layers_yaml(file: &mut Read) -> FailResult<Vec<(M33<i32>, [u32; 3], usize)>>
 {
     let cereal = ::serde_yaml::from_reader(file)?;
     layer_sc_info_from_cereal(cereal)
@@ -173,7 +173,7 @@ mod middle {
     }
 }
 
-fn interpret_cereal(cereal: self::cereal::Root) -> Result<middle::Layers>
+fn interpret_cereal(cereal: self::cereal::Root) -> FailResult<middle::Layers>
 {Ok({
     let self::cereal::Root {
         a: lattice_a,
@@ -202,7 +202,7 @@ fn interpret_cereal(cereal: self::cereal::Root) -> Result<middle::Layers>
         pub enum Units { Cart, Frac }
 
         fn resolve_units<T>(name: &str, cart: Option<T>, frac: Option<T>)
-        -> Result<(Units, T)>
+        -> FailResult<(Units, T)>
         {Ok(match (cart, frac) {
             (None, None) => bail!("layer needs one of: frac-{0}, cart-{0}", name),
             (Some(_), Some(_)) => bail!("layer cannot have both of: frac-{0}, cart-{0}", name),
@@ -233,12 +233,12 @@ fn interpret_cereal(cereal: self::cereal::Root) -> Result<middle::Layers>
         let shift = V3([shift[0], shift[1], 0.0]);
         let repeat = [repeat[0], repeat[1], 1];
         middle::Layer { cart_lattice, frac_lattice, cart_sites, transform, repeat, shift }
-    })}).collect::<Result<Vec<_>>>()?;
+    })}).collect::<FailResult<Vec<_>>>()?;
 
     middle::Layers { lattice_a, full_lattice, layers, layer_seps, vacuum_sep }
 })}
 
-fn assemble_from_cereal(cereal: self::cereal::Root) -> Result<Assemble>
+fn assemble_from_cereal(cereal: self::cereal::Root) -> FailResult<Assemble>
 {Ok({
 
     let middle::Layers {
@@ -286,7 +286,7 @@ fn assemble_from_cereal(cereal: self::cereal::Root) -> Result<Assemble>
 })}
 
 // FIXME this really doesn't belong here, but it's the easiest reuse of code
-fn layer_sc_info_from_cereal(cereal: cereal::Root) -> Result<Vec<(M33<i32>, [u32; 3], usize)>>
+fn layer_sc_info_from_cereal(cereal: cereal::Root) -> FailResult<Vec<(M33<i32>, [u32; 3], usize)>>
 {Ok({
 
     let middle::Layers {
@@ -294,9 +294,9 @@ fn layer_sc_info_from_cereal(cereal: cereal::Root) -> Result<Vec<(M33<i32>, [u32
         layers,
     } = interpret_cereal(cereal)?;
 
-    layers.into_iter().map(|layer| ok({
+    layers.into_iter().map(|layer| FailOk({
         let matrix = *layer.frac_lattice.inverse_matrix();
-        let matrix = matrix.try_map(|x| ok({
+        let matrix = matrix.try_map(|x| FailOk({
             let r = x.round();
             ensure!((x - r).abs() <= 1e-3,
                 "layers file does not look like a true supercell of each layer (error est: {:e})",
@@ -307,7 +307,7 @@ fn layer_sc_info_from_cereal(cereal: cereal::Root) -> Result<Vec<(M33<i32>, [u32
         let primitive_atom_count = layer.cart_sites.len();
 
         (matrix, periods, primitive_atom_count)
-    })).collect::<Result<Vec<_>>>()?
+    })).collect::<FailResult<Vec<_>>>()?
 })}
 
 fn m22_to_m33(mat: &M22) -> M33

@@ -1,4 +1,4 @@
-use ::Result;
+use ::FailResult;
 use ::std::path::Path;
 use ::std::io::Result as IoResult;
 use ::std::path::PathBuf;
@@ -24,13 +24,13 @@ pub trait AsPath {
 
 pub trait DirLike: AsPath {
 
-    fn create_file(&self, name: &Path) -> Result<FileWrite>
+    fn create_file(&self, name: &Path) -> FailResult<FileWrite>
     { Ok(FileWrite::create(self.as_path().join(name))?) }
 
-    fn open(&self, name: &Path) -> Result<FileRead>
+    fn open(&self, name: &Path) -> FailResult<FileRead>
     { Ok(FileRead::read(self.as_path().join(name))?) }
 
-    fn append_file(&self, name: &Path) -> Result<FileWrite>
+    fn append_file(&self, name: &Path) -> FailResult<FileWrite>
     { Ok(FileWrite::append(self.as_path().join(name.as_path()))?) }
 
     // // A form of 'join' where path is verified to be a relative path.

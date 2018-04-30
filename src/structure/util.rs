@@ -2,7 +2,8 @@
 //       operations on variable length slices/vecs
 #[cfg(test)]
 use ::ordered_float::NotNaN;
-use ::errors::*;
+
+use ::IntPrecisionError;
 
 use ::rsp2_array_types::{V3, M33, M3};
 
@@ -44,17 +45,22 @@ pub(crate) fn eq_unordered_n3(a: &[V3], b: &[V3]) -> bool {
 pub(crate) struct Tol(pub(crate) f64);
 #[allow(unused)]
 impl Tol {
-    pub(crate) fn unfloat(&self, x: f64) -> Result<i32>
+    pub(crate) fn unfloat(&self, x: f64) -> Result<i32, IntPrecisionError>
     {Ok({
         let r = x.round();
-        ensure!((r - x).abs() <= self.0, ErrorKind::IntPrecisionError(x));
+        if (r - x).abs() > self.0 {
+            return Err(IntPrecisionError {
+                backtrace: ::failure::Backtrace::new(),
+                value: x,
+            });
+        }
         r as i32
     })}
 
-    pub(crate) fn unfloat_v3(&self, v: &V3) -> Result<V3<i32>>
+    pub(crate) fn unfloat_v3(&self, v: &V3) -> Result<V3<i32>, IntPrecisionError>
     { v.try_map(|x| self.unfloat(x)) }
 
-    pub(crate) fn unfloat_m33(&self, m: &M33) -> Result<M33<i32>>
+    pub(crate) fn unfloat_m33(&self, m: &M33) -> Result<M33<i32>, IntPrecisionError>
     { ::rsp2_array_utils::try_map_arr(m.0, |v| self.unfloat_v3(&v)).map(M3) }
 }
 

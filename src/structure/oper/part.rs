@@ -1,4 +1,3 @@
-use ::{Result, ErrorKind};
 use ::oper::Permute;
 
 /// Type of "a thing that has been partitioned."
@@ -48,6 +47,10 @@ pub struct Part<L> {
 // impl<L: Hash + Eq> Label<HashMap<L, Vec<usize>> for L;
 // impl<L> Label<Vec<(L, Vec<usize>)>> for L;
 
+#[derive(Debug, Fail)]
+#[fail(display = "Tried to construct an invalid partition.")]
+pub struct InvalidPartitionError(::failure::Backtrace);
+
 pub type Keys<'a, L> = Box<VeclikeIterator<Item=&'a L> + 'a>;
 pub type Indices<'a> = Box<VeclikeIterator<Item=&'a [usize]> + 'a>;
 
@@ -55,10 +58,12 @@ impl<L> Part<L> {
     /// Create a partition that decomposes a vector entirely.
     ///
     /// Every integer from 0 to the total length must appear once.
-    pub fn new(part: Parted<L, Vec<usize>>) -> Result<Self>
+    pub fn new(part: Parted<L, Vec<usize>>) -> Result<Self, InvalidPartitionError>
     {Ok({
         let index_limit = part.iter().map(|&(_, ref v)| v.len()).sum();
-        ensure!(Self::validate_part(&part, index_limit), ErrorKind::BadPart);
+        if !Self::validate_part(&part, index_limit) {
+            return Err(InvalidPartitionError(::failure::Backtrace::new()))
+        }
         Self { part, index_limit }
     })}
 
@@ -235,8 +240,7 @@ where
 #[deny(dead_code)]
 mod tests {
     use super::*;
-    use ::Error;
-    
+
     // FIXME: I don't see any tests where two labels have the same value...
 
     #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
@@ -300,19 +304,19 @@ mod tests {
     fn error() {
         // skipped an index
         assert_matches!{
-            Err(Error(ErrorKind::BadPart, _)),
+            Err(InvalidPartitionError(..)),
             Part::new(vec![ ((), vec![0, 1, 2, 4]) ]),
         }
 
         // duplicate, same vec
         assert_matches!{
-            Err(Error(ErrorKind::BadPart, _)),
+            Err(InvalidPartitionError(..)),
             Part::new(vec![ ((), vec![2, 1, 2, 4]) ]),
         }
 
         // duplicate, different vec
         assert_matches!{
-            Err(Error(ErrorKind::BadPart, _)),
+            Err(InvalidPartitionError(..)),
             Part::new(vec![
                 (true, vec![0, 2, 4]),
                 (false, vec![1, 2, 5]),

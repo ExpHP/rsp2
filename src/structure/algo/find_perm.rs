@@ -1,10 +1,10 @@
 use ::{Lattice, Structure, CoordStructure};
 use ::{FracRot, FracOp};
 use super::group::GroupTree;
+use ::failure::Backtrace;
 
 use ::rsp2_array_types::V3;
 
-use ::Result;
 use ::{Perm, Permute};
 
 /// Validate that structure is symmetric under the given operators.
@@ -15,7 +15,7 @@ pub fn dumb_symmetry_test(
     structure: &CoordStructure,
     ops: &[FracOp],
     tol: f64,
-) -> Result<()>
+) -> Result<(), PositionMatchError>
 {Ok({
     let lattice = structure.lattice();
     let from_fracs = structure.to_fracs();
@@ -75,7 +75,7 @@ pub(crate) fn of_spacegroup(
     prim_structure: &CoordStructure,
     ops: &[FracOp],
     tol: f64,
-) -> Result<Vec<Perm>>
+) -> Result<Vec<Perm>, PositionMatchError>
 {
     of_spacegroup_with_meta(prim_structure, ops, tol)
 }
@@ -87,9 +87,8 @@ pub(crate) fn of_spacegroup_with_meta<M: Ord>(
     prim_structure: &Structure<M>,
     ops: &[FracOp],
     tol: f64,
-) -> Result<Vec<Perm>>
+) -> Result<Vec<Perm>, PositionMatchError>
 {Ok({
-    use ::errors::*;
     let lattice = prim_structure.lattice();
     let from_fracs = prim_structure.to_fracs();
 
@@ -99,7 +98,7 @@ pub(crate) fn of_spacegroup_with_meta<M: Ord>(
     );
 
     tree.try_compute_homomorphism(
-        |op| Ok::<_, Error>({
+        |op| Ok::<_, PositionMatchError>({
             let to_fracs = op.transform_prim(&from_fracs);
             let perm = of_rotation_impl(lattice, prim_structure.metadata(), &from_fracs, &to_fracs[..], tol)?;
             dumb_validate_equivalent(
@@ -129,7 +128,7 @@ pub(crate) fn of_rotation(
     structure: &CoordStructure,
     rotation: &FracRot,
     tol: f64,
-) -> Result<Perm>
+) -> Result<Perm, PositionMatchError>
 { of_rotation_with_meta(structure, rotation, tol) }
 
 // NOTE: This version uses the metadata to group the atoms and potentially
@@ -140,7 +139,7 @@ pub(crate) fn of_rotation_with_meta<M: Ord>(
     structure: &Structure<M>,
     rotation: &FracRot,
     tol: f64,
-) -> Result<Perm>
+) -> Result<Perm, PositionMatchError>
 {Ok({
     let lattice = structure.lattice();
     let from_fracs = structure.to_fracs();
@@ -156,7 +155,7 @@ fn of_rotation_impl<M: Ord>(
     from_fracs: &[V3],
     to_fracs: &[V3],
     tol: f64,
-) -> Result<Perm>
+) -> Result<Perm, PositionMatchError>
 {Ok({
     use ::ordered_float::NotNaN;
     use ::CoordsKind::Fracs;
@@ -215,6 +214,13 @@ fn of_rotation_impl<M: Ord>(
         .permuted_by(&perm_to.inverted())
 })}
 
+#[derive(Debug, Fail)]
+pub enum PositionMatchError {
+    #[fail(display = "positions are too dissimilar")]
+    NoMatch(Backtrace),
+    #[fail(display = "multiple positions mapped to the same index")]
+    DuplicateMatch(Backtrace),
+}
 
 // Optimized for permutations near the identity.
 // NOTE: Lattice must be reduced so that the voronoi cell fits
@@ -224,7 +230,7 @@ fn brute_force_near_identity(
     from_fracs: &[V3],
     to_fracs: &[V3],
     tol: f64,
-) -> Result<Perm>
+) -> Result<Perm, PositionMatchError>
 {Ok({
 
     assert_eq!(from_fracs.len(), to_fracs.len());
@@ -270,14 +276,14 @@ fn brute_force_near_identity(
                 continue 'from;
             }
         }
-        bail!("positions are too dissimilar");
+        return Err(PositionMatchError::NoMatch(Backtrace::new()));
     }
 
-    ensure!(
-        perm.iter().all(|&x| x != UNSET),
-        "multiple positions mapped to the same index");
+    if perm.iter().any(|&x| x == UNSET) {
+        return Err(PositionMatchError::DuplicateMatch(Backtrace::new()));
+    }
 
-    Perm::from_vec(perm)?
+    Perm::from_vec(perm).expect("(BUG) invalid perm without match error!?")
 })}
 
 #[cfg(test)]

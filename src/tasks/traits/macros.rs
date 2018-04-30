@@ -13,7 +13,7 @@ macro_rules! derive_filetype_wrapper {
     (@one($Wrap:ident, Load) impl[$($par:tt)*] _ for $Ty:ty [where $($bnd:tt)*])
     => {
         impl<$($par)*> Load for $Ty where $($bnd)* {
-            fn load<P: ::AsPath>(path: P) -> ::Result<Self>
+            fn load<P: ::AsPath>(path: P) -> ::FailResult<Self>
             { Load::load().map(|$Wrap(x)| x) }
         }
     };
@@ -21,7 +21,7 @@ macro_rules! derive_filetype_wrapper {
     (@one($Wrap:ident, Save) impl[$($par:tt)*] _ for $Ty:ty [where $($bnd:tt)*])
     => {
         impl<$($par)*> Save for $Ty where $($bnd)* {
-            fn save<P: ::AsPath>(&self, path: P) -> ::Result<Self>
+            fn save<P: ::AsPath>(&self, path: P) -> ::FailResult<Self>
             { $Wrap::wrap_ref(self).save(path) }
         }
     };
@@ -143,7 +143,7 @@ macro_rules! impl_dirlike_boilerplate {
             /// the directory is simply lost. In the future, this may take
             /// '&mut self' and poison the object once the move has succeeded.
             pub fn relocate<Q: AsPath>(self, path: Q)
-            -> Result<$Type<PathBuf>>
+            -> FailResult<$Type<PathBuf>>
             {Ok({
                 // (use something that supports cross-filesystem moves)
                 mv(self.path(), path.as_path())?;

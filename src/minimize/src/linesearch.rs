@@ -33,16 +33,27 @@ impl<E, F> DiffFn1D<E> for F
 where F: FnMut(f64) -> Result<(f64, f64), E> { }
 
 /// `linesearch` error type
-error_chain! {
-    types {
-        Error, ErrorKind, ResultExt, LsResult;
-    }
+#[derive(Debug, Fail)]
+#[fail(display = "{}", kind)]
+pub struct LinesearchError {
+    backtrace: ::failure::Backtrace,
+    kind: ErrorKind,
+}
 
-    errors {
-        Uphill(slope: f64) {
-            description("Initial slope was positive")
-            display("Initial slope was positive: {}", slope)
-        }
+#[derive(Debug, Fail)]
+pub enum ErrorKind {
+    #[fail(display = "Initial slope was positive: {}", slope)]
+    Uphill { slope: f64 },
+
+    #[doc(hidden)]
+    #[fail(display = "impossible!")]
+    _Hidden,
+}
+
+impl From<ErrorKind> for LinesearchError {
+    fn from(kind: ErrorKind) -> Self {
+        let backtrace = ::failure::Backtrace::new();
+        LinesearchError { backtrace, kind }
     }
 }
 
@@ -50,7 +61,7 @@ pub fn linesearch<E, F>(
     settings: &Settings,
     mut alpha: f64,
     mut compute: F,
-) -> Result<f64, Either<Error, E>>
+) -> Result<f64, Either<LinesearchError, E>>
 where F: FnMut(f64) -> Result<(f64, f64), E>,
 {
     let mut compute = |alpha| compute(alpha).map_err(Right);
@@ -58,7 +69,9 @@ where F: FnMut(f64) -> Result<(f64, f64), E>,
     let (mut value, mut slope) = compute(0.0)?;
 
     assert!(alpha > 0.0, "non-positive initial alpha: {}", alpha);
-    ensure!(slope <= 0.0, Left(Error::from(ErrorKind::Uphill(slope))));
+    if slope > 0.0 {
+        return Err(Left(ErrorKind::Uphill { slope }.into()));
+    }
 
     let initial_value = value;
 

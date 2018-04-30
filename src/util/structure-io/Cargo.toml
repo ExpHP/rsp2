@@ -14,7 +14,7 @@ path = "lib.rs"
 
 [dependencies]
 itertools = "0.7"
-error-chain = "0.11"
+failure = "0.1"
 vasp-poscar = "0.1.1"
 
 rsp2-structure = { path = "../../structure" }

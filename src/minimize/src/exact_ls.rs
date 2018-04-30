@@ -1,24 +1,34 @@
-error_chain!{
-    types {
-        Error, ErrorKind, ResultExt, LsResult;
-    }
-    errors {
-        BadBound(b: f64) {
-            description("An input bound was too extreme")
-            display("The input bound was too extreme: {}", b)
-        }
-        GsBadValue(endvals: (f64, f64), value: f64) {
-            description("Golden search encountered value larger than endpoints")
-            display("Golden search encountered value larger than endpoints: {:?} vs {}", endvals, value)
-        }
-        NoMinimum {
-            description("The function appears to have no minimum")
-            display("The function appears to have no minimum", )
-        }
-        FunctionOutput(b: f64) {
-            description("The function produced an inscrutible value")
-            display("The function produced an inscrutible value: {}", b)
-        }
+use ::failure::Backtrace;
+
+#[derive(Debug, Fail)]
+#[fail(display = "{}", kind)]
+pub struct GoldenSearchError {
+    backtrace: Backtrace,
+    kind: ErrorKind,
+}
+
+#[derive(Debug, Fail)]
+pub enum ErrorKind {
+    #[fail(display = "The input bound was too extreme: {}", _0)]
+    BadBound(f64),
+    #[fail(display = "Golden search encountered value larger than endpoints: {:?} vs {}", endvals, value)]
+    GsBadValue {
+        endvals: (f64, f64),
+        value: f64,
+    },
+    #[fail(display = "The function appears to have no minimum")]
+    NoMinimum,
+    #[fail(display = "The function produced an inscrutible value: {}", _0)]
+    FunctionOutput(f64),
+    #[doc(hidden)]
+    #[fail(display = "impossible!")]
+    _Hidden,
+}
+
+impl From<ErrorKind> for GoldenSearchError {
+    fn from(kind: ErrorKind) -> Self {
+        let backtrace = Backtrace::new();
+        GoldenSearchError { backtrace, kind }
     }
 }
 
@@ -39,7 +49,7 @@ pub type ValueFn<'a, E> = FnMut(f64) -> Result<Value, E> + 'a;
 pub type SlopeFn<'a, E> = FnMut(f64) -> Result<Slope, E> + 'a;
 pub type OneDeeFn<'a, E> = FnMut(f64) -> Result<(Value, Slope), E> + 'a;
 
-fn check_mirroring_assumption(x0: f64) -> LsResult<()> {
+fn check_mirroring_assumption(x0: f64) -> Result<(), GoldenSearchError> {
     // Assumption:
     //
     // Given an IEEE-754 floating point number of any precision
@@ -54,7 +64,9 @@ fn check_mirroring_assumption(x0: f64) -> LsResult<()> {
     // at 'x0' and change its argument to '2*x0 - x', knowing
     // that the value at 'x0' (and more importantly, the sign
     // of the slope) has been identically preserved.
-    ensure!(2.0 * x0 - x0 == x0, ErrorKind::BadBound(x0));
+    if 2.0 * x0 - x0 != x0 {
+        return Err(ErrorKind::BadBound(x0).into());
+    }
     Ok(())
 }
 
@@ -62,7 +74,7 @@ pub fn linesearch<E, F>(
     from: f64,
     initial_step: f64,
     mut compute: F,
-) -> LsResult<Result<SlopeBound, E>>
+) -> Result<Result<SlopeBound, E>, GoldenSearchError>
 where F: FnMut(f64) -> Result<Slope, E>
 {
     // early wrapping:
@@ -71,13 +83,15 @@ where F: FnMut(f64) -> Result<Slope, E>
     //  - Result<Slope, Result<TheirError, OurError>> for easy short-circuiting
     let compute = move |alpha| {
         let slope = compute(alpha).map_err(Ok)?;
-        ensure!(slope.0.is_finite(), Err(ErrorKind::FunctionOutput(slope.0).into()));
+        if !slope.0.is_finite() {
+            return Err(Err(ErrorKind::FunctionOutput(slope.0).into()));
+        }
         trace!("LS-iter:  a: {:<23e}  s: {:<23e}", alpha, slope.0);
         Ok(SlopeBound { alpha, slope: slope.0 })
     };
 
     // make it possible to conditionally wrap the closure into another.
-    let mut compute: Box<FnMut(f64) -> Result<SlopeBound, Result<E, Error>>>
+    let mut compute: Box<FnMut(f64) -> Result<SlopeBound, Result<E, GoldenSearchError>>>
         = Box::new(compute);
 
     nest_err(|| {
@@ -103,14 +117,16 @@ where F: FnMut(f64) -> Result<Slope, E>
 
 fn find_initial<E>(
     (a, mut b): SlopeInterval,
-    compute: &mut FnMut(f64) -> Result<SlopeBound, Result<E, Error>>,
-) -> Result<SlopeInterval, Result<E, Error>>
+    compute: &mut FnMut(f64) -> Result<SlopeBound, Result<E, GoldenSearchError>>,
+) -> Result<SlopeInterval, Result<E, GoldenSearchError>>
 {
     assert!(a.slope <= 0.0);
     while b.slope < 0.0 {
         // double the interval width
         let new_alpha = b.alpha + (b.alpha - a.alpha);
-        ensure!(new_alpha.is_finite(), Err(ErrorKind::NoMinimum.into()));
+        if !new_alpha.is_finite() {
+            return Err(Err(ErrorKind::NoMinimum.into()));
+        }
         b = compute(new_alpha)?;
     }
     Ok((a, b))
@@ -236,7 +252,7 @@ impl Golden {
         interval: (f64, f64),
         mut compute: F,
     // NOTE: cannot return a bound due to issue mentioned in body
-    ) -> LsResult<Result<f64, E>>
+    ) -> Result<Result<f64, E>, GoldenSearchError>
     where F: FnMut(f64) -> Result<Value, E>
     {
         nest_err(|| {
@@ -245,7 +261,9 @@ impl Golden {
             //  - Result<Value, Result<TheirError, OurError>> for easy short-circuiting
             let mut compute = move |alpha| {
                 let value = compute(alpha).map_err(Ok)?;
-                ensure!(value.0.is_finite(), Err(ErrorKind::FunctionOutput(value.0).into()));
+                if !value.0.is_finite() {
+                    return Err(Err(ErrorKind::FunctionOutput(value.0).into()));
+                }
                 trace!("GS-iter:  a: {:<23e}  v: {:<23e}", alpha, value.0);
                 Ok(ValueBound { alpha, value: value.0 })
             };
