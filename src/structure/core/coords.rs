@@ -134,9 +134,9 @@ where V: Permute,
     }}
 }
 
-impl Partition for CoordsKind<Vec<V3>>
+impl<'iter> Partition<'iter> for CoordsKind<Vec<V3>>
 {
-    fn into_unlabeled_partitions<L>(self, part: &Part<L>) -> Unlabeled<Self>
+    fn into_unlabeled_partitions<L>(self, part: &'iter Part<L>) -> Unlabeled<'iter, Self>
     {
         let (tag, coords) = self.into_vec();
         Box::new(coords.into_unlabeled_partitions(part).map(move |c| Self::from_vec(tag, c)))

@@ -232,9 +232,8 @@ impl<M> Permute for Structure<M> {
     }
 }
 
-// ugh, 'static due to use of box. (and more generally, lack of GATs...)
-impl<M: 'static> Partition for Structure<M> {
-    fn into_unlabeled_partitions<L>(self, part: &Part<L>) -> Unlabeled<Self>
+impl<'iter, M: 'iter> Partition<'iter> for Structure<M> {
+    fn into_unlabeled_partitions<L>(self, part: &'iter Part<L>) -> Unlabeled<'iter, Self>
     {
         let Structure { lattice, coords, meta } = self;
 

@@ -143,13 +143,11 @@ impl<L> IntoIterator for Part<L> {
     { self.part.into_iter() }
 }
 
-// defaults for associated types are still unstable, so we'll just have to
-// force all impls to be Boxed.
 /// Return type of `into_unlabeled_partitions`.  You hafta use it, sorry.
 ///
-/// The lifetime is associated with the partition vector and not `self`,
-/// unfortunately, so prepare to see a lot of `Self: 'static` bounds...
-pub type Unlabeled<'part, T> = Box<VeclikeIterator<Item=T> + 'part>;
+/// One day, we will be able to replace it with an associated type on `Partition`
+/// (once existential types are supported on traits).
+pub type Unlabeled<'a, T> = Box<VeclikeIterator<Item=T> + 'a>;
 
 pub trait VeclikeIterator: ExactSizeIterator + DoubleEndedIterator {}
 
@@ -161,14 +159,19 @@ where T: ExactSizeIterator + DoubleEndedIterator {}
 /// By making this a trait, it can be implemented on types like rsp2's own
 /// `Structure<M>` (which at its core is fundamentally just an structure of
 /// arrays), or anything else that contains data per-atom (such as eigenvectors).
-pub trait Partition: Sized {
+///
+/// The lifetime argument ensures that the iterator returned by `into_unlabeled_partitions`
+/// does not outlive either Self or the partition; this allows the iterator to capture self
+/// by value, and the partition by reference. Ultimately, we would need both GATs and
+/// impl-Trait-on-Trait-impls to get rid of it.
+pub trait Partition<'iter>: Sized + 'iter {
     /// Variant of `into_partitions` which composes more easily, and is
     /// therefore the one you need to implement.
     ///
     /// It returns an iterator over the partitions of `self`.
     ///
     /// See `into_partitions` for more info.
-    fn into_unlabeled_partitions<L>(self, part: &Part<L>) -> Unlabeled<Self>;
+    fn into_unlabeled_partitions<L>(self, part: &'iter Part<L>) -> Unlabeled<'iter, Self>;
 
     /// Consume self to produce partitions.
     ///
@@ -181,12 +184,12 @@ pub trait Partition: Sized {
     /// The ordering within each partition of the output must reflect the
     /// original order of those elements relative to each other in the
     /// input vec, rather than the order of the indices in `part`.
-    fn into_partitions<L: Clone>(self, part: &Part<L>) -> Parted<L, Self>
+    fn into_partitions<L: Clone>(self, part: &'iter Part<L>) -> Parted<L, Self>
     { ::util::zip_eq(part.region_keys().cloned(), self.into_unlabeled_partitions(part)).collect() }
 }
 
-impl<T: 'static> Partition for Vec<T> {
-    fn into_unlabeled_partitions<L>(self, part: &Part<L>) -> Unlabeled<Self>
+impl<'iter, T: 'iter> Partition<'iter> for Vec<T> {
+    fn into_unlabeled_partitions<L>(self, part: &'iter Part<L>) -> Unlabeled<Self>
     {
         // permute all data for the first group to the very end,
         // with the second group before it, and etc.
@@ -223,12 +226,12 @@ pub fn composite_perm_for_part_lifo<L>(part: &Part<L>) -> ::Perm
     ::oper::Perm::argsort(&sort_keys)
 }
 
-impl<A, B> Partition for (A, B)
+impl<'iter, A, B> Partition<'iter> for (A, B)
 where
-    A: Partition + 'static,
-    B: Partition + 'static,
+    A: Partition<'iter> + 'iter,
+    B: Partition<'iter> + 'iter,
 {
-    fn into_unlabeled_partitions<L>(self, part: &Part<L>) -> Unlabeled<Self>
+    fn into_unlabeled_partitions<L>(self, part: &'iter Part<L>) -> Unlabeled<'iter, Self>
     {
         let a_parted = self.0.into_unlabeled_partitions(part);
         let b_parted = self.1.into_unlabeled_partitions(part);

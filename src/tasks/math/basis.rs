@@ -52,8 +52,8 @@ impl Permute for Ket3 {
     }}
 }
 
-impl Partition for Ket3 {
-    fn into_unlabeled_partitions<L>(self, part: &Part<L>) -> Unlabeled<Self>
+impl<'iter> Partition<'iter> for Ket3 {
+    fn into_unlabeled_partitions<L>(self, part: &'iter Part<L>) -> Unlabeled<'iter, Self>
     {Box::new({
         (self.real, self.imag)
             .into_unlabeled_partitions(part).into_iter()
@@ -61,9 +61,9 @@ impl Partition for Ket3 {
     })}
 }
 
-impl Partition for Basis3
+impl<'iter> Partition<'iter> for Basis3
 {
-    fn into_unlabeled_partitions<L>(self, part: &Part<L>) -> Unlabeled<Self>
+    fn into_unlabeled_partitions<L>(self, part: &'iter Part<L>) -> Unlabeled<'iter, Self>
     {Box::new({
         self.0.into_iter()
             // (over each ket)
