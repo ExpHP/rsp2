@@ -1,4 +1,5 @@
 use ::{Structure, Lattice, CoordsKind};
+use ::Perm;
 
 use ::rsp2_array_utils::{try_arr_from_fn};
 
@@ -302,6 +303,20 @@ impl SupercellToken {
     /// conventions for ordering used by the library.
     pub fn primitive_site_indices(&self) -> Vec<usize> {
         self.replicate(&(0..self.num_primitive_atoms).collect::<Vec<_>>())
+    }
+
+    /// Get a permutation representing translation by a unit cell lattice point.
+    ///
+    /// Please see "Permutations of symmetry operators" in `conventions.md` for
+    /// details about how this permutation is defined.
+    pub fn lattice_point_translation_perm(&self, _index: V3<i32>) -> Perm {
+        unimplemented!()
+
+    }
+
+    // permutation in the quotient space of unit cell indices
+    fn _lattice_point_perm(&self, _index: V3<i32>) -> Perm {
+        unimplemented!()
     }
 }
 

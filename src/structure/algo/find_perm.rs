@@ -71,6 +71,7 @@ fn dumb_validate_equivalent(
 
 // NOTE: Takes CoordStructure as a speedbump to prevent accidental use
 //       with inappropriate metadata.
+/// Compute permutations for all operators in a spacegroup.
 pub(crate) fn of_spacegroup(
     prim_structure: &CoordStructure,
     ops: &[FracOp],

@@ -110,6 +110,51 @@ impl Perm {
     /// being the slow (outer) index.
     pub fn with_inner(&self, faster: &Perm) -> Perm
     { faster.with_outer(self) }
+
+    pub fn pow_unsigned(&self, mut exp: u64) -> Perm {
+        // Exponentation by squaring (permutations form a monoid)
+
+        // NOTE: there's plenty of room to optimize the number of heap
+        //       allocations here
+        let mut acc = Perm::eye(self.len() as u32);
+        let mut base = self.clone();
+        while exp > 0 {
+            if (exp & 1) == 1 {
+                acc = acc.permuted_by(&base);
+            }
+            base = base.clone().permuted_by(&base);
+            exp /= 2;
+        }
+        acc
+    }
+
+    pub fn pow_signed(&self, exp: i64) -> Perm {
+        if exp < 0 {
+            self.inverted().pow_unsigned((-exp) as u64)
+        } else {
+            self.pow_unsigned(exp as u64)
+        }
+    }
+}
+
+#[test]
+fn test_pow_unsigned() {
+    for &len in &[0, 1, 4, 20] {
+        for _ in 0..5 {
+            let perm = Perm::random(len);
+            for &exp in &[0, 1, 4, 20, 21] {
+                let original = b"abcdefghijklmnopqrstuvwxyz"[..len as usize].to_owned();
+
+                let mut brute_force = original.clone();
+                for _ in 0..exp {
+                    brute_force = brute_force.permuted_by(&perm);
+                }
+
+                let fast = original.permuted_by(&perm.pow_unsigned(exp));
+                assert_eq!(fast, brute_force);
+            }
+        }
+    }
 }
 
 impl Perm {
