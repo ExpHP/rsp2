@@ -22,7 +22,7 @@ extern crate rsp2_fs_util;
 extern crate rsp2_linalg;
 #[macro_use] extern crate rsp2_util_macros;
 #[macro_use] extern crate rsp2_clap;
-#[cfg_attr(test, macro_use)] extern crate rsp2_assert_close;
+#[macro_use] extern crate rsp2_assert_close;
 
 #[macro_use] extern crate extension_trait;
 #[macro_use] extern crate enum_map;

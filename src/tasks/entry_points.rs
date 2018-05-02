@@ -239,3 +239,30 @@ pub fn bond_test() {
         Ok(())
     });
 }
+
+// %% CRATES: binary: rsp2-dynmat-test %%
+pub fn dynmat_test() {
+    wrap_result_main(|| {
+        let logfile = init_global_logger()?;
+
+        let (app, de) = CliDeserialize::augment_clap_app({
+            ::clap::App::new("rsp2-dynmat-test")
+                .version("negative 0.00.3-734.bubbles")
+                .author(crate_authors!{", "})
+                .about("blah")
+                .args(&[
+                    arg!( input=FORCES_DIR "phonopy forces dir (try --save-bands in main script)"),
+                ])
+        });
+        let matches = app.get_matches();
+        let dir_args = de.resolve_args(&matches)?;
+
+        let input = PathDir::new(matches.expect_value_of("input"))?;
+
+        let trial = TrialDir::create_new(dir_args)?;
+        logfile.start(PathFile::new(trial.new_logfile_path()?)?)?;
+
+        let settings = trial.read_settings()?;
+        trial.run_dynmat_test(&settings, &input)
+    });
+}

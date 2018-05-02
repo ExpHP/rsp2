@@ -8,6 +8,7 @@ description = "Fuzzy assertion macros for floats."
 path = "lib.rs"
 
 [dependencies]
+!!failure
 
 [features]
 !!NIGHTLY-FEATURE-LINE

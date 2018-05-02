@@ -13,6 +13,7 @@ description = "Fuzzy assertion macros for floats."
 path = "lib.rs"
 
 [dependencies]
+failure = "0.1"
 
 [features]
 nightly = ["beta"]

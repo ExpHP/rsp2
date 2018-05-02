@@ -34,7 +34,7 @@ use ::rsp2_structure::{ElementStructure, Element};
 use ::rsp2_structure::{FracRot, FracTrans, FracOp};
 use ::rsp2_phonopy_io::npy;
 
-use ::rsp2_array_types::V3;
+use ::rsp2_array_types::{V3};
 
 use ::slice_of_array::prelude::*;
 
@@ -195,7 +195,7 @@ phonopy \
         DirWithDisps::from_existing(dir)?
     })}
 
-    #[allow(unused)]
+    // FIXME: Should return a new DirWithSymmetry type.
     pub fn symmetry(
         &self,
         structure: &ElementStructure,
@@ -205,10 +205,6 @@ phonopy \
             ._symmetry(structure)
     }
 
-    // FIXME: Should return a new DirWithSymmetry type.
-    // FIXME: The 'symmetry-test' was the only binary shim that used this and
-    //        I removed it,  was removed during a refactor but
-    //        this is nontrivial.  I'd rather re-add the shim.
     fn _symmetry(
         &self,
         structure: &ElementStructure,
@@ -462,6 +458,18 @@ impl<P: AsPath> DirWithForces<P> {
     #[allow(unused)]
     pub fn cache_force_constants(&mut self, b: bool) -> &mut Self
     { self.cache_force_constants = b; self }
+
+    pub fn supercell_dims(&self) -> FailResult<V3<u32>>
+    {Ok({
+        // FIXME we should not need to be parsing strings for this
+        let Conf(conf) = Load::load(self.dir.join(FNAME_CONF_DISPS))?;
+        let nums = {
+            conf["DIM"].split_whitespace()
+                .map(|a| Ok(a.parse()?))
+                .collect::<FailResult<Vec<u32>>>()?
+        };
+        V3(nums.to_array())
+    })}
 
     /// Compute bands in a temp directory.
     ///

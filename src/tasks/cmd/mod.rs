@@ -33,6 +33,7 @@ use ::rsp2_array_utils::arr_from_fn;
 use ::rsp2_array_types::{V3, Unvee};
 use ::rsp2_structure::{CoordStructure, ElementStructure, Structure};
 use ::rsp2_structure::{Lattice};
+use ::rsp2_structure::supercell;
 use ::phonopy::Builder as PhonopyBuilder;
 use ::math::bands::ScMatrix;
 use ::rsp2_structure_io::poscar;
@@ -633,6 +634,72 @@ impl TrialDir {
         )?;
 
         self.write_ev_analysis_output_files(settings, &lmp, &ev_analysis)?;
+    })}
+}
+
+//=================================================================
+
+impl TrialDir {
+    pub(crate) fn run_dynmat_test(
+        self,
+        settings: &cfg::EnergyPlotSettings,
+        force_dir: &PathDir,
+    ) -> FailResult<()>
+    {Ok({
+        let force_dir = DirWithForces::from_existing(force_dir)?;
+
+        let prim_structure = poscar::load(PathFile::new(force_dir.join("POSCAR"))?.read()?)?;
+        let layers = {
+            ::rsp2_structure::find_layers(&prim_structure, &V3([0, 0, 1]), 0.25)?
+                .per_unit_cell().expect("Structure is not layered?")
+                .by_atom()
+        };
+
+        let (superstructure, sc_token) = {
+            let sc_dims = force_dir.supercell_dims()?;
+            assert!(
+                sc_dims.iter().all(|&x| x % 2 == 1),
+                "even supercell sizes not supported here"
+            );
+
+            let (our_superstructure, sc_token) = {
+                supercell::centered_diagonal(sc_dims.map(|x| x / 2).0)
+                    .build(prim_structure)
+            };
+            let phonopy_superstructure = force_dir.structure()?;
+
+            // cmon, big money, big money....
+            // if these assertions always succeed, it will save us a
+            // good deal of implementation work.
+            let err_msg = "\
+                phonopy's superstructure does not match rsp2's conventions! \
+                Unfortunately, support for this scenario is not yet implemented.\
+            ";
+            assert_close!(
+                abs=1e-10,
+                our_superstructure.lattice().matrix().unvee(),
+                phonopy_superstructure.lattice().matrix().unvee(),
+            );
+            assert_close!(
+                abs=1e-10,
+                our_superstructure.to_carts().unvee(),
+                phonopy_superstructure.to_carts().unvee(),
+            );
+            let _ = phonopy_superstructure;
+            (our_superstructure, sc_token)
+        };
+
+        let our_dynamical_matrix = {
+            unimplemented!();
+        };
+
+        // make phonopy compute dynamical matrix (as a gold standard)
+        // TODO: how to get the dynamical matrix from phonopy?
+        let phonopy_bands_dir = {
+            force_dir
+                .build_bands()
+                .compute(&[Q_GAMMA])?
+        };
     })}
 }
 
