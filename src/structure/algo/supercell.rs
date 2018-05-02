@@ -475,9 +475,12 @@ mod tests {
                 V3::from_fn(|_| thread_rng().gen_range(-15, 15))
             };
 
-            // translating the superstructure by a lattice point...
+            // translating the superstructure by a primitive cell lattice point...
             let translated = {
                 let mut s = superstructure.clone();
+                // (this is deliberately cartesian because we want to use a lattice point
+                //  of the primitive lattice, not the superlattice.
+                //  This works because the primitive lattice was set to be the identity matrix)
                 s.translate_cart(&lattice_point.map(|x| x as f64));
                 s
             };
