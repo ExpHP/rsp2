@@ -1,7 +1,7 @@
 use ::{Structure, Lattice, CoordsKind};
-use ::Perm;
+use ::{Perm};
 
-use ::rsp2_array_utils::{try_arr_from_fn};
+use ::rsp2_array_utils::{arr_from_fn, try_arr_from_fn};
 
 use ::rsp2_array_types::{V3};
 
@@ -43,8 +43,8 @@ impl Builder {
         self.build_with(structure, |meta, _| meta.clone())
     }
 
-    pub fn build_with<M, F>(&self, structure: Structure<M>, make_meta: F) -> (Structure<M>, SupercellToken)
-    where F: FnMut(&M, [u32; 3]) -> M,
+    pub fn build_with<M, M2, F>(&self, structure: Structure<M>, make_meta: F) -> (Structure<M2>, SupercellToken)
+    where F: FnMut(&M, [u32; 3]) -> M2,
     {
         diagonal_with(self.clone(), structure, make_meta)
     }
@@ -63,9 +63,9 @@ impl Builder {
 
 // ---------------------------------------------------------------
 
-fn diagonal_with<M, F>(builder: Builder, structure: Structure<M>, mut make_meta: F)
--> (Structure<M>, SupercellToken)
-where F: FnMut(&M, [u32; 3]) -> M,
+fn diagonal_with<M, M2, F>(builder: Builder, structure: Structure<M>, mut make_meta: F)
+-> (Structure<M2>, SupercellToken)
+where F: FnMut(&M, [u32; 3]) -> M2,
 {
     let Structure { lattice, coords, meta } = structure;
 
@@ -184,13 +184,13 @@ impl SupercellToken {
     /// * Reordering of atoms
     /// * Wrapping of positions (FIXME unnecessary limitation)
     /// * Images of an atom did not move by equal amounts (within `validation_radius`)
-    pub fn deconstruct_with<M, F>(
+    pub fn deconstruct_with<M, M2, F>(
         &self,
         validation_radius: f64,
-        structure: Structure<M>,
+        structure: Structure<M2>,
         mut fold_meta: F,
     ) -> Result<Structure<M>, BigDisplacement>
-    where F: FnMut(OwnedMetas<M>) -> M,
+    where F: FnMut(OwnedMetas<M2>) -> M,
     {
         assert_eq!(
             structure.num_atoms(), self.num_supercell_atoms(),
@@ -305,18 +305,23 @@ impl SupercellToken {
         self.replicate(&(0..self.num_primitive_atoms).collect::<Vec<_>>())
     }
 
-    /// Get a permutation representing translation by a unit cell lattice point.
+    /// Get a depermutation representing translation by a unit cell lattice point.
     ///
-    /// Please see "Permutations of symmetry operators" in `conventions.md` for
-    /// details about how this permutation is defined.
-    pub fn lattice_point_translation_perm(&self, _index: V3<i32>) -> Perm {
-        unimplemented!()
+    /// Please see `conventions.md` for an explanation of depermutations.
+    pub fn lattice_point_translation_deperm(&self, index: V3<i32>) -> Perm {
+        // Depermutations that permute the cells along each axis independently.
+        // (expressed in the quotient space of images along that axis)
+        let axis_deperms: [_; 3] = arr_from_fn(|k| {
+            Perm::eye(self.periods[k]).shift_signed(index[k])
+        });
 
-    }
-
-    // permutation in the quotient space of unit cell indices
-    fn _lattice_point_perm(&self, _index: V3<i32>) -> Perm {
-        unimplemented!()
+        // Construct the overall deperm as an outer product of deperms.
+        // this could be written as a fold, but I wanted to emphasize the order;
+        // the innermost perm must correspond to the fastest-varying index.
+        Perm::eye(self.num_primitive_atoms as u32)
+            .with_inner(&axis_deperms[0])
+            .with_inner(&axis_deperms[1])
+            .with_inner(&axis_deperms[2])
     }
 }
 
@@ -350,13 +355,12 @@ fn sc_lattice_vecs(periods: [u32; 3], offset: V3<i32>, lattice: &Lattice) -> Vec
 #[cfg(test)]
 #[deny(unused)]
 mod tests {
-
-    use ::rsp2_array_types::Envee;
+    use ::{Permute, Perm};
+    use ::{CoordsKind, Structure, Lattice};
+    use ::rsp2_array_types::{V3, Envee};
 
     #[test]
     fn diagonal_supercell_smoke_test() {
-        use ::{CoordsKind, Structure, Lattice};
-
         let coords = CoordsKind::Fracs(vec![[0.0, 0.0, 0.0]].envee());
 
         let original = Structure::new_coords(Lattice::eye(), coords);
@@ -378,8 +382,6 @@ mod tests {
 
     #[test]
     fn test_diagonal_supercell() {
-        use ::{CoordsKind, Structure, Lattice};
-
         // nondiagonal lattice so that matrix multiplication order matters.
         // carefully chosen so that the inverse has an exact representation.
         let lattice = Lattice::from(&[
@@ -410,8 +412,6 @@ mod tests {
 
     #[test]
     fn test_centered_diagonal_supercell() {
-        use ::{CoordsKind, Structure, Lattice};
-
         // nondiagonal lattice so that matrix multiplication order matters
         // carefully chosen so that the inverse has an exact representation.
         let lattice = Lattice::from(&[
@@ -443,5 +443,65 @@ mod tests {
         };
         let actual_carts = supercell.to_carts();
         assert!(::util::eq_unordered_n3(&expected_carts, &actual_carts), "{:?} {:?}", expected_carts, actual_carts);
+    }
+
+    #[test]
+    fn lattice_point_deperms() {
+        #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+        struct Label {
+            atom: u32,
+            cell: [u32; 3],
+        }
+
+        // make a superstructure whose metadata uniquely labels the sites.
+        let coords = CoordsKind::Carts(vec![
+            // something with an exact representation
+            [0.0, 0.0, 0.0],
+            [0.5, 0.5, 0.5],
+        ].envee());
+        let lattice = Lattice::eye();
+        let structure = Structure::new(lattice, coords, vec![0, 1]);
+        let (superstructure, sc_token) = {
+            // supercell is chosen to give exact floating representation.
+            // some dimensions are larger than 2 to ensure that there exist translational
+            //  symmetries that are not equal to their own inverses.
+            ::supercell::diagonal([8, 2, 4])
+                .build_with(structure, |&atom, cell| Label { atom, cell })
+        };
+
+        for _ in 0..10 {
+            let lattice_point = {
+                use ::rand::{thread_rng, Rng};
+                V3::from_fn(|_| thread_rng().gen_range(-15, 15))
+            };
+
+            // translating the superstructure by a lattice point...
+            let translated = {
+                let mut s = superstructure.clone();
+                s.translate_cart(&lattice_point.map(|x| x as f64));
+                s
+            };
+
+            // ...should be equivalent to applying the depermutation to the metadata...
+            let depermuted = {
+                let mut s = superstructure.clone();
+                let deperm = sc_token.lattice_point_translation_deperm(lattice_point);
+                let permuted_meta = s.metadata().to_vec().permuted_by(&deperm);
+                s.set_metadata(permuted_meta);
+                s
+            };
+
+            // ...when comparing positions for the same label, reduced into the supercell.
+            let canonicalized_coords = |mut structure: Structure<_>| {
+                let perm = Perm::argsort(structure.metadata());
+                structure = structure.permuted_by(&perm);
+                structure.reduce_positions();
+                structure.to_carts()
+            };
+            assert_eq!(
+                canonicalized_coords(translated),
+                canonicalized_coords(depermuted),
+            );
+        }
     }
 }

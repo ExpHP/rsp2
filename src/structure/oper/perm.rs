@@ -50,6 +50,7 @@ impl Perm {
     }
 
     // Checks invariants required by Perm for unsafe code.
+    #[cfg_attr(feature = "nightly", must_use = "doesn't assert")]
     fn validate_perm(xs: &[u32]) -> bool
     {
         let mut vec = xs.to_vec();
@@ -81,10 +82,68 @@ impl Perm {
     pub fn into_vec(self) -> Vec<u32>
     { self.0 }
 
+    #[cfg_attr(feature = "nightly", must_use = "not an in-place operation")]
     pub fn inverted(&self) -> Perm
     {
         // bah. less code to test...
         Self::argsort(&self.0)
+    }
+
+    // (this might sound niche, but it's not like we can safely expose `&mut [u32]`,
+    //  so what's the harm in having a niche method?)
+    /// Compose with the permutation that shifts elements forward.
+    ///
+    /// To construct the shift permutation itself, use `Perm::eye(n).shift_right(amt)`.
+    #[cfg(feature = "beta")]
+    #[cfg_attr(feature = "nightly", must_use = "not an in-place operation")]
+    pub fn shift_right(mut self, amt: u32) -> Self
+    {
+        self.0.shift_right(amt as usize);
+        self
+    }
+
+    /// Compose with the permutation that shifts elements backward.
+    ///
+    /// To construct the shift permutation itself, use `Perm::eye(n).shift_left(amt)`.
+    #[cfg(feature = "beta")]
+    #[cfg_attr(feature = "nightly", must_use = "not an in-place operation")]
+    pub fn shift_left(mut self, amt: u32) -> Self
+    {
+        self.0.shift_left(amt as usize);
+        self
+    }
+
+    /// Compose with the permutation that shifts elements forward.
+    #[cfg(not(feature = "beta"))]
+    #[cfg_attr(feature = "nightly", must_use = "not an in-place operation")]
+    pub fn shift_right(self, n: u32) -> Self
+    {
+        let len = self.len() as u32;
+        self.shift_left(len - (n % len))
+    }
+
+    /// Compose with the permutation that shifts elements forward.
+    #[cfg(not(feature = "beta"))]
+    #[cfg_attr(feature = "nightly", must_use = "not an in-place operation")]
+    pub fn shift_left(self, n: u32) -> Self
+    {
+        // FIXME FIXME kill this
+        let n = n % self.len() as u32;
+        let (old_a, old_b) = self.0.split_at(n as usize);
+        let mut new = old_b.to_vec();
+        new.extend(old_a);
+        unsafe { Perm::from_vec_unchecked(new) }
+    }
+
+    /// Compose with the permutation that shifts elements forward by a signed offset.
+    #[cfg_attr(feature = "nightly", must_use = "not an in-place operation")]
+    pub fn shift_signed(self, n: i32) -> Self
+    {
+        if n < 0 {
+            self.shift_left((-n) as u32)
+        } else {
+            self.shift_right(n as u32)
+        }
     }
 
     /// Construct the outer product of self and `slower`, with `self`
@@ -133,26 +192,6 @@ impl Perm {
             self.inverted().pow_unsigned((-exp) as u64)
         } else {
             self.pow_unsigned(exp as u64)
-        }
-    }
-}
-
-#[test]
-fn test_pow_unsigned() {
-    for &len in &[0, 1, 4, 20] {
-        for _ in 0..5 {
-            let perm = Perm::random(len);
-            for &exp in &[0, 1, 4, 20, 21] {
-                let original = b"abcdefghijklmnopqrstuvwxyz"[..len as usize].to_owned();
-
-                let mut brute_force = original.clone();
-                for _ in 0..exp {
-                    brute_force = brute_force.permuted_by(&perm);
-                }
-
-                let fast = original.permuted_by(&perm.pow_unsigned(exp));
-                assert_eq!(fast, brute_force);
-            }
         }
     }
 }
@@ -380,4 +419,45 @@ mod tests {
 
         assert_eq!(use_outer(vec![], vec![1, 0]), vec![]);
     }
+
+    #[test]
+    fn shift() {
+        assert_eq!(
+            vec![0, 1, 2, 3, 4, 5].permuted_by(&Perm::eye(6).shift_right(8)),
+            vec![4, 5, 0, 1, 2, 3],
+        );
+        assert_eq!(
+            vec![0, 1, 2, 3, 4, 5].permuted_by(&Perm::eye(6).shift_left(8)),
+            vec![2, 3, 4, 5, 0, 1],
+        );
+        assert_eq!(
+            vec![0, 1, 2, 3, 4, 5].permuted_by(&Perm::eye(6).shift_signed(8)),
+            vec![4, 5, 0, 1, 2, 3],
+        );
+        assert_eq!(
+            vec![0, 1, 2, 3, 4, 5].permuted_by(&Perm::eye(6).shift_signed(-8)),
+            vec![2, 3, 4, 5, 0, 1],
+        );
+    }
+
+    #[test]
+    fn pow_unsigned() {
+        for &len in &[0, 1, 4, 20] {
+            for _ in 0..5 {
+                let perm = Perm::random(len);
+                for &exp in &[0, 1, 4, 20, 21] {
+                    let original = b"abcdefghijklmnopqrstuvwxyz"[..len as usize].to_owned();
+
+                    let mut brute_force = original.clone();
+                    for _ in 0..exp {
+                        brute_force = brute_force.permuted_by(&perm);
+                    }
+
+                    let fast = original.permuted_by(&perm.pow_unsigned(exp));
+                    assert_eq!(fast, brute_force);
+                }
+            }
+        }
+    }
+
 }

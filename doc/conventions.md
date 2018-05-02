@@ -25,17 +25,15 @@ rsp2's convention matches how numpy works when arrays are indexed by integer arr
 
 Most code does not need even need to be aware of this convention thanks to the `Perm` type and `Permute` trait that largely abstract it away.  However, functions that produce permutations through means other than composition are generally expected to do so through `Perm::from_vec`, which requires one to be aware of this convention.
 
-### The permutation _of a symmetry operator_
+### Permutations representing symmetry operators
 
-This is a phrase you may encounter.  In rsp2, the permutation of a symmetry operator on positions **tries to represent that operator as a permutation on the positions.** You might be thinking, "well, _duh_," but there's actually a bit of nuance here you should be careful about.
+rsp2 picks a convention here that might seem unusual.  Let me explain the choices here, and explain which choice rsp2 uses, and why.
 
-In fact, some of the consequences are so counterintuitive that I am considering switching to a different convention.
-
-#### Convention used by rsp2
+#### The permutation of a symmetry operator
 
 Suppose you have a structure described by `coords` (which has `N` rows of `[f64; 3]` position data) and `lattice`.  Let `oper` be a symmetry operator (which may be translational, rotational, or both) on this structure.
 
-The permutation `perm` of a symmetry operator `oper` satisfies
+There must exist a permutation `perm` such that applying `oper` to `coords` should have the same effect as permuting by `perm`.  We call this the **permutation of a symmetry operator.**
 
 ```text
  coords.transformed_by(oper) ~~ coords.permuted_by(perm)
@@ -43,71 +41,66 @@ The permutation `perm` of a symmetry operator `oper` satisfies
 
 where `~~` is an equivalence relation[^get-real] which tests that, for all indices `i`, the `i`th position in the LHS is equivalent to the `i`th position in the RHS under the translational symmetry of `lattice`.
 
-After taking a moment to digest the above paragraphs, you may find yourself again thinking that this is all obvious and that I've just wasted your time.
-
-*Now* comes the tricky part, because it turns out this definition has some very surprising consequences.  It's possible that rsp2 actually made a _very poor choice_ here, and this definition might even be reconsidered!  (hopefully soon, before too much code depends on it!)
+After taking a moment to digest the above definition, it might seem that I am simply stating the obvious.  But, you see, *now* comes the tricky part, because it turns out these permutations have some very surprising properties.
 
 [^get-real]: I am ignoring issues of floating point precision here.  In reality, `equiv` must use a tolerance, and thus fails to be an equivalence relation in the strictest mathematical sense as it is not transitive.
 
-#### Meaning of this convention _in practice_
+#### Why permutations of symmetry operators suck
 
-**Tl;dr:** Challenge your instincts and think carefully before applying a permutation derived from symmetry to anything other than coordinate data. (it may be the case that you need to apply the inverse instead)
+The root of all trouble is the following:
 
-For simplicity of providing graphical descriptions, this example will use a pure translation operator (these show up in supercells).[^order-2] Suppose we have a supercell of a 1D structure along the Z axis with two atoms in the primitive cell. Suppose also that we have metadata that labels each site according to its primitive atom and unit cell index.
+*These permutations compose in the reverse order compared to the operators they describe.*
+
+Basically, if you have operators `R1` and `R2` and corresponding permutations `P1` and `P2`, then the effect of transforming first by `R1` then by `R2` is equivalent to permuting the coordinates *first* by `P2` and then by `P1`.  Weird, right?  But it makes sense if you think about it. After all, the permutation representation of an operator depends on what order the coords are initially arranged:
+
+```
+     x coords       ==>  permutation that mirrors along x
+  [ 1,  2, -1, -2]  ==>          [ 2, 3, 0, 1]
+  [-1, -2,  1,  2]  ==>          [ 2, 3, 0, 1]
+  [ 1, -1,  2, -2]  ==>          [ 1, 0, 3, 2]
+  [ 1, -2,  2, -1]  ==>          [ 3, 2, 1, 0]
+
+```
+
+So lets say that after computing a bunch of permutations for various operators, you apply one of your permutations to `coords` in order to simulate performing that operation.  By putting `coords` into a different order, *you just invalidated all of the permutations you computed,* and you now must correct each one by applying a similarity transform.
+
+What all of this tells us is that applying permutations to `coords` is something we generally want to *avoid doing.*  Which is too bad, because it's the use case that our definition was optimized for!
+
+#### The _depermutation_ of a symmetry operator
+
+Because permutations of symmetry operations are so troublesome conceptually, you might see local bindings, method names, and comments refer to another concept called the **depermutation of a symmetry operator.**  For a given `coords` and `oper`, it is the unique permutation `deperm` that satisfies
+
+```
+ coords.transformed_by(oper).permuted_by(deperm) ~~ coords
+```
+
+On other words, it's just the inverse of `perm`.  But the term "depermutation" was invented to deliberately avoid use of the term "inverse," because it has the potential to cause confusion.
+
+In rsp2, the `deperm` of an operator `oper` is considered to represent `oper` itself, not the inverse of `oper`! The difference between `perm` is in *how they are used.*
+
+#### Depermutations permute metadata in a composable manner
+
+Suppose we have a supercell of a 1D structure along the Z axis with two atoms in the primitive cell. Suppose also that we have metadata that labels each site according to its primitive atom and unit cell index.
 
  ```
   Fractional z: [0.01, 0.02, 0.26, 0.27, 0.51, 0.52, 0.76, 0.77]
         Labels: ["0a", "0b", "1a", "1b", "2a", "2b", "3a", "3b"]
  ```
 
-`Fractional z` is in units of the supercell lattice.  This supercell has 4 equivalent cells along Z, giving it a translational symmetry operator for the vector `(0, 0, 0.25)`. The corresponding permutation is `[2, 3, 4, 5, 6, 7, 0, 1]`.
+`Fractional z` is in units of the supercell lattice.  This supercell has 4 equivalent cells along Z, giving it a translational symmetry operator with vector `(0, 0, 0.25)`. The permutation of this operator is `perm = [2, 3, 4, 5, 6, 7, 0, 1]`, and the depermutation is `deperm = [6, 7, 0, 1, 2, 3, 4, 5]`.
 
-As stated before, applying the perm **only to the coordinates** has the same effect as applying the translation, causing each atom to appear to move by `(0, 0, 0.25)`:
+Both of these permutations can be used to create a structure where the each label appears to have been displaced by a vector of `(0, 0, 0.25)`.  You can **apply `perm` to the coordinates:** (leaving metadata untouched)
 
 ```
   Fractional z: [0.26, 0.27, 0.51, 0.52, 0.76, 0.77, 0.01, 0.02]
         Labels: ["0a", "0b", "1a", "1b", "2a", "2b", "3a", "3b"]
- ```
+```
 
-However, if we instead applied the perm **only to the labels**, it would appear to have the opposite effect; each label will appear to have moved by a fractional displacement of `(0, 0, −0.25)`!
+...or you can **apply `deperm` to the metadata:** (leaving the coordinates untouched)
 
 ```
   Fractional z: [0.01, 0.02, 0.26, 0.27, 0.51, 0.52, 0.76, 0.77]
-        Labels: ["1a", "1b", "2a", "2b", "3a", "3b", "0a", "0b"]
+        Labels: ["3a", "3b", "0a", "0b", "1a", "1b", "2a", "2b"]
 ```
 
-There'd be a snag of some sort here no matter what convention we used; but in our case, **it gets worse.**
-
-[^order-2]: The only space group operators that are easy to depict in 1D are all of order 2, but the effect demonstrated in this example is only visible in operators whose order is at least 3.
-
-#### How permutations of symmetry operators compose
-
-**Tl;dr:** Thanks to the convention used by rsp2, permutations of symmetry operators appear to compose _in the wrong direction._
-
-Basically, it comes down to this:
-
-* Symmetry operators act in positional space.  Writing positions as `Nx3` matrices, symmetry operators are `3x3` matrices applied (in transpose) on the RHS.
-* Permutations act in index space.  Writing positions as `Nx3` matrices, permutations are `NxN` matrices applied on the LHS.
-
-So if `X` is an `Nx3` matrix of positions, and we have two symmetry operators `R1` and `R2` with known permutations `P1` and `P2`.  Let's see how they compose:
-
-```
-Suppose  P1 X = X R1.T
-    and  P2 X = X R2.T
-
-   then:    P2 X inv(R2.T) = X
-         P1 P2 X inv(R2.T) = X R1.T
-                   P1 P2 X = X R1.T R2.T
-```
-
-In other words, `x.transformed_by(r1).transformed_by(r2)` is equivalent to `x.permuted_by(p2).permuted_by(p1)`.  The permutations need to be applied in reverse order!
-
-#### Another possible convention
-
-It turns out there is another way to look at things: What if we instead worked with the permutation that *undoes* a symmetry operation?
-
-```
-  coords.transformed_by(oper).permuted_by(perm) ~~ coords
-```
-
-This definition would eliminate each of the surprising consequences previously described, and the most surprising effect it introduces is easily summed up by the word "undoes."  As far as I can tell, this is a much nicer concept to work with.
+The advantage of using `deperm` is that it composes properly; because the coords were left untouched, all previously-computed perms and deperms are still valid descriptions of their corresponding operators.
