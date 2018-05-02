@@ -3,6 +3,7 @@
 use ::FailResult;
 use ::rsp2_array_types::{V3, M33, M3};
 use ::rsp2_structure::{Perm};
+use ::rsp2_structure::supercell::SupercellToken;
 use ::std::collections::HashMap;
 use ::slice_of_array::prelude::*;
 
@@ -15,14 +16,45 @@ pub struct ForceSets {
 }
 
 impl ForceSets {
-    // `perm` should describe the symmop as a permutation, such that applying the
-    // operator moves the atom at `coords[i]` to `coords[perm[i]]`
-    fn derive_from_symmetry(&self, cart_rot: &M33, perm: &Perm) -> Self {
-        let atom_displaced = self.atom_displaced.iter().map(|&i| perm[i]).collect();
-        let atom_affected = self.atom_affected.iter().map(|&i| perm[i]).collect();
+    // `deperm` should describe the symmop as a depermutation
+    //
+    // see conventions.md for info about depermutations.
+    fn derive_from_symmetry(
+        &self,
+        sc_token: &SupercellToken,
+        cart_rot: &M33,
+        deperm: &Perm,
+    ) -> Self {
+
+        let (atom_displaced, atom_affected) = {
+            let cells = sc_token.signed_cell_indices();
+            ::util::zip_eq(&self.atom_displaced, &self.atom_displaced)
+                .map(|(&displaced, &affected)| {
+                    // rotate the atoms to a new index
+                    let mut displaced = deperm[displaced];
+                    let mut affected = deperm[affected];
+
+                    // make sure 'displaced' is in the center cell
+                    let cell = cells[displaced as usize];
+                    if cell != V3([0, 0, 0]) {
+                        // FIXME I imagine this has the potential to be very slow,
+                        //       maybe we should make an intermediate data structure
+                        //       with all the lattice point deperms
+                        let inv_deperm = sc_token.lattice_point_translation_deperm(-cell);
+                        affected = inv_deperm[affected];
+                        displaced = inv_deperm[displaced];
+                    }
+                    assert_eq!(cells[displaced as usize], V3([0, 0, 0]));
+
+                    (displaced, affected)
+                }).unzip()
+        };
+
+        // rotate the cartesian vectors
         let cart_op_t = cart_rot.t();
         let cart_force = self.cart_force.iter().map(|v| v * &cart_op_t).collect();
         let cart_displacement = self.cart_displacement.iter().map(|v| v * &cart_op_t).collect();
+
         ForceSets { atom_displaced, atom_affected, cart_force, cart_displacement }
     }
 
@@ -38,9 +70,7 @@ impl ForceSets {
         })
     }
 
-    /// NOTE: The error case is for singular matrices.
-    /// (I wish I was using 'failure' right now...)
-    fn solve_force_constants(&self) -> FailResult<ForceConstants>
+    fn solve_force_constants(&self, sc_token: &SupercellToken) -> FailResult<ForceConstants>
     {
         use ::util::zip_eq as z;
         let ForceSets {
