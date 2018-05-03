@@ -10,6 +10,15 @@ macro_rules! assert_close {
 }
 
 #[macro_export]
+macro_rules! debug_assert_close {
+    ($($t:tt)*) => {{
+        #[cfg(debug_assertions)] {
+            assert_close!{$($t)*}
+        }
+    }};
+}
+
+#[macro_export]
 macro_rules! assert_close_impl {
     (@parsing [rel=$tol:expr, $($rest:tt)*] [$($assignment:tt)*]) => {
         assert_close_impl!(@parsing [$($rest)*] [$($assignment)* [@rel $tol]]);
@@ -193,6 +202,11 @@ mod tests {
             fn check_close(&self, _: &S, _: ::Tolerances) -> Result<(), ::CheckCloseError<Self::Scalar>> { Ok(()) }
         }
         assert_close!(
+            abs=1e-10,
+            S.x().x().x(),
+            S.x().x().x(),
+        );
+        debug_assert_close!(
             abs=1e-10,
             S.x().x().x(),
             S.x().x().x(),
