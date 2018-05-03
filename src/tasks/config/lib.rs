@@ -341,7 +341,6 @@ fn test_defaults()
     let _ = Threading::default();
     let _ = ScaleRangesLayerSepStyle::default();
     let _ = EvLoop::default();
-    let _ = Tweaks::default();
     let _ = AcousticSearch::default();
 }
 
