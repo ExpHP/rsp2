@@ -272,15 +272,8 @@ fn test_pseudoinverse() {
             Err(_) => panic!("SVD convergence failure for size {:?}", (r, c)),
         };
         let prod = dot(&*p_inv, &mat);
-        for i in 0..c {
-            for j in 0..c {
-                // NOTE: I've seen up to 1.2e-10 absolute error on a long run
-                if i == j {
-                    assert_close!(abs=1e-8, 1.0, prod[(i, j)], "{:#?}", prod);
-                } else {
-                    assert_close!(abs=1e-8, 0.0, prod[(i, j)], "{:#?}", prod);
-                }
-            }
-        }
+        let eye = Array2::eye(c);
+        // NOTE: I've seen up to 1.2e-10 absolute error on a long run
+        assert_close!(abs=1e-8, eye.as_slice().unwrap(), prod.as_slice().unwrap());
     }
 }

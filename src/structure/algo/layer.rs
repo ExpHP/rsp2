@@ -382,9 +382,7 @@ mod tests {
                     let LayersPerUnitCell { groups: actual_groups, gaps: actual_gaps } = actual;
                     let LayersPerUnitCell { groups: expected_groups, gaps: expected_gaps } = expected;
                     assert_eq!(actual_groups, expected_groups);
-                    for (a, b) in ::util::zip_eq(actual_gaps, expected_gaps) {
-                        assert_close!(abs=1e-13, a, b);
-                    }
+                    assert_close!(abs=1e-13, actual_gaps, expected_gaps);
                 },
                 (actual, expected) => assert_eq!(actual, expected),
             }

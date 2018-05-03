@@ -453,11 +453,7 @@ mod tests {
             [11./50.,  7./50.],
         ]);
 
-        for r in 0..2 {
-            for c in 0..2 {
-                assert_close!(abs=1e-12, expected[r][c], actual[r][c]);
-            }
-        }
+        assert_close!(abs=1e-12, expected.unvee(), actual.unvee());
     }
 
     #[test]
@@ -474,10 +470,6 @@ mod tests {
             [ 1./3.,  0./1., -1./9. ],
         ]);
 
-        for r in 0..3 {
-            for c in 0..3 {
-                assert_close!(abs=1e-12, expected[r][c], actual[r][c]);
-            }
-        }
+        assert_close!(abs=1e-12, expected.unvee(), actual.unvee());
     }
 }

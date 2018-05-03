@@ -905,9 +905,7 @@ mod tests {
         let initial_point = uniform_n(15, -10.0, 10.0);
         let settings: Settings = from_json!({"stop-condition": {"grad-max": 1e-11}});
         let result = super::acgsd(&settings, &initial_point, quadratic_test_fn!(&target)).unwrap();
-        for (a,b) in izip!(result.position, target) {
-            assert_close!(a, b);
-        }
+        assert_close!(result.position, target);
     }
 
     // Test that tolerance tests can succeed as early as they ought to be capable of,
@@ -1019,9 +1017,7 @@ mod tests {
             ).unwrap();
 
             assert_close!(rel=1e-5, output.value, Trid(d).min_value());
-            for (a,b) in izip!(output.position, Trid(d).min_position()) {
-                assert_close!(rel=1e-5, a, b);
-            }
+            assert_close!(rel=1e-5, output.position, Trid(d).min_position());
         }
     }
 
