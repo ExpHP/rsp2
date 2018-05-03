@@ -141,9 +141,6 @@ pub fn shear_plot() {
 
         let (app, de) = CliDeserialize::augment_clap_app({
             ::clap::App::new("rsp2-shear-plot")
-                .version("negative 0.00.3-734.bubbles")
-                .author(crate_authors!{", "})
-                .about("blah")
                 .args(&[
                     arg!( input=FORCES_DIR "phonopy forces dir (try --save-bands in main script)"),
                 ])
@@ -168,9 +165,6 @@ pub fn save_bands_after_the_fact() {
 
         let (app, de) = CliDeserialize::augment_clap_app({
             ::clap::App::new("rsp2-save-bands")
-                .version("negative 0.00.3-734.bubbles")
-                .author(crate_authors!{", "})
-                .about("blah")
                 .args(&[
                     arg!( trial_dir=TRIAL_DIR "existing trial directory"),
                 ])
@@ -194,7 +188,6 @@ pub fn rerun_analysis() {
 
         let (app, de) = CliDeserialize::augment_clap_app({
             ::clap::App::new("rsp2-rerun-analysis")
-                .author(crate_authors!{", "})
                 .args(&[
                     arg!( trial_dir=TRIAL_DIR "existing trial directory"),
                 ])
@@ -218,9 +211,6 @@ pub fn bond_test() {
 
         let (app, de) = CliDeserialize::augment_clap_app({
             ::clap::App::new("rsp2-bond-test")
-                .version("negative 0.00.3-734.bubbles")
-                .author(crate_authors!{", "})
-                .about("blah")
                 .args(&[
                     arg!( input=STRUCTURE ""),
                 ])
@@ -247,9 +237,6 @@ pub fn dynmat_test() {
 
         let (app, de) = CliDeserialize::augment_clap_app({
             ::clap::App::new("rsp2-dynmat-test")
-                .version("negative 0.00.3-734.bubbles")
-                .author(crate_authors!{", "})
-                .about("blah")
                 .args(&[
                     arg!( input=STRUCTURE ""),
                 ])
