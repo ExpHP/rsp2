@@ -13,7 +13,6 @@ pub use self::filetypes::{conf, Conf};
 pub use self::filetypes::symmetry_yaml::{self, SymmetryYaml};
 pub use self::filetypes::disp_yaml::{self, DispYaml};
 pub use self::filetypes::force_sets;
-pub use self::filetypes::sparse_sets;
 
 mod filetypes;
 pub mod npy;

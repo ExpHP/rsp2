@@ -81,7 +81,6 @@ impl TrialDir {
 
         self.write_poscar("initial.vasp", "Initial structure", &original_structure)?;
         let phonopy = phonopy_builder_from_settings(&settings.phonons, original_structure.lattice());
-        let phonopy = phonopy.use_sparse_sets(settings.tweaks.sparse_sets);
 
         let (structure, ev_analysis, final_bands_dir) = self.do_main_ev_loop(
             settings, &cli, &lmp, &atom_layers, &layer_sc_mats,
@@ -595,7 +594,6 @@ impl TrialDir {
 
         let structure = poscar::load(self.read_file("./final.vasp")?)?;
         let phonopy = phonopy_builder_from_settings(&settings.phonons, structure.lattice());
-        let phonopy = phonopy.use_sparse_sets(settings.tweaks.sparse_sets);
         do_diagonalize(
             &lmp, &settings.threading, &phonopy, &structure,
             Some(&self.save_bands_dir()),
@@ -623,7 +621,6 @@ impl TrialDir {
 
         let structure = poscar::load(self.read_file("./final.vasp")?)?;
         let phonopy = phonopy_builder_from_settings(&settings.phonons, structure.lattice());
-        let phonopy = phonopy.use_sparse_sets(settings.tweaks.sparse_sets);
 
         let aux_info = self.load_analysis_aux_info()?;
 
@@ -661,7 +658,6 @@ impl TrialDir {
 
         self.write_poscar("initial.vasp", "Initial structure", &prim_structure)?;
         let phonopy = phonopy_builder_from_settings(&settings.phonons, prim_structure.lattice());
-        let phonopy = phonopy.use_sparse_sets(settings.tweaks.sparse_sets);
         let disp_dir = phonopy.displacements(&prim_structure)?;
 
         let (superstructure, sc_token) = {
@@ -688,18 +684,24 @@ impl TrialDir {
                 abs=1e-10,
                 our_superstructure.lattice().matrix().unvee(),
                 phonopy_superstructure.lattice().matrix().unvee(),
+                "{}", err_msg,
             );
             assert_close!(
                 abs=1e-10,
                 our_superstructure.to_carts().unvee(),
                 phonopy_superstructure.to_carts().unvee(),
+                "{}", err_msg,
             );
             let _ = phonopy_superstructure;
             (our_superstructure, sc_token)
         };
 
+        let _ = superstructure;
+        let _ = sc_token;
+        let _ = cli;
+
+        unimplemented!();
         let our_dynamical_matrix = {
-            unimplemented!();
         };
 
         // make phonopy compute dynamical matrix (as a gold standard)
@@ -709,6 +711,9 @@ impl TrialDir {
             //    .build_bands()
             //    .compute(&[Q_GAMMA])?
         };
+
+        let _ = our_dynamical_matrix;
+        let _ = phonopy_bands_dir;
     })}
 }
 

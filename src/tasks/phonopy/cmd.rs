@@ -19,7 +19,7 @@ use ::{IoResult};
 use ::As3;
 
 use super::{MissingFileError, PhonopyFailed};
-use super::{Conf, DispYaml, SymmetryYaml, QPositions, Args, OtherSettings};
+use super::{Conf, DispYaml, SymmetryYaml, QPositions, Args};
 use ::traits::{AsPath, HasTempDir, Save, Load};
 
 use ::rsp2_structure_io::poscar;
@@ -44,7 +44,6 @@ const THZ_TO_WAVENUMBER: f64 = 33.35641;
 pub struct Builder {
     symprec: Option<f64>,
     conf: Conf,
-    more: OtherSettings,
 }
 
 impl Default for Builder {
@@ -52,9 +51,6 @@ impl Default for Builder {
         Builder {
             symprec: None,
             conf: Default::default(),
-            more: OtherSettings {
-                use_sparse_sets: false,
-            },
         }
     }
 }
@@ -64,7 +60,9 @@ const FNAME_SETTINGS_ARGS: &'static str = "disp.args";
 const FNAME_HELPER_SCRIPT: &'static str = "phonopy";
 const FNAME_CONF_DISPS: &'static str = "disp.conf";
 const FNAME_CONF_BANDS: &'static str = "band.conf";
+#[allow(unused)]
 const FNAME_CONF_SYMMETRY: &'static str = "phonopy.conf";
+#[allow(unused)]
 const FNAME_OUT_SYMMETRY: &'static str = "symmetry.yaml";
 
 impl Builder {
@@ -98,9 +96,6 @@ impl Builder {
             format!("{} {} {}", a, b, c)
         })
     }
-
-    pub fn use_sparse_sets(mut self, value: bool) -> Self
-    { self.more.use_sparse_sets = value; self }
 
     fn args_from_settings(&self) -> Args
     {
@@ -152,7 +147,6 @@ impl Builder {
             self.conf.save(dir.join(FNAME_CONF_DISPS))?;
             poscar::dump(create(dir.join("POSCAR"))?, "blah", &structure)?;
             extra_args.save(dir.join(FNAME_SETTINGS_ARGS))?;
-            self.more.save(dir.join(FNAME_OTHER_SETTINGS))?;
 
             {
                 use std::os::unix::fs::OpenOptionsExt;
@@ -277,7 +271,6 @@ pub struct DirWithDisps<P: AsPath> {
     // that code using `DirWithDisps` will need them.
     pub(crate) superstructure: ElementStructure,
     pub(crate) displacements: Vec<(usize, V3)>,
-    pub(crate) settings: OtherSettings,
 }
 
 impl<P: AsPath> DirWithDisps<P> {
@@ -306,9 +299,8 @@ impl<P: AsPath> DirWithDisps<P> {
                 None => bail!("invalid symbol in disp.yaml: {:?}", d.symbol),
             }
         })?;
-        let settings = Load::load(dir.as_path().join(FNAME_OTHER_SETTINGS))?;
 
-        DirWithDisps { dir, superstructure, displacements, settings }
+        DirWithDisps { dir, superstructure, displacements }
     })}
 
     #[allow(unused)]
@@ -329,7 +321,7 @@ impl<P: AsPath> DirWithDisps<P> {
             .map(move |&disp| apply_displacement(&self.superstructure, disp))
     })}
 
-    /// Write FORCE_SETS (or SPARSE_SETS) to create a `DirWithForces`
+    /// Write FORCE_SETS to create a `DirWithForces`
     /// (which may serve as a template for one or more band computations).
     ///
     /// This variant creates a new temporary directory.
@@ -345,7 +337,7 @@ impl<P: AsPath> DirWithDisps<P> {
         self.make_force_dir_in_dir(forces, out)?
     })}
 
-    /// Write FORCE_SETS (or SPARSE_SETS) to create a `DirWithForces`
+    /// Write FORCE_SETS to create a `DirWithForces`
     /// (which may serve as a template for one or more band computations).
     ///
     /// This variant uses the specified path.
@@ -380,24 +372,12 @@ impl<P: AsPath> DirWithDisps<P> {
         }
         let _ = copy(disp_dir.join(FNAME_HELPER_SCRIPT), path.join(FNAME_HELPER_SCRIPT));
 
-        match self.settings.use_sparse_sets {
-            false => {
-                trace!("Writing FORCE_SETS...");
-                ::rsp2_phonopy_io::force_sets::write(
-                    create(path.join("FORCE_SETS"))?,
-                    &self.displacements,
-                    forces,
-                )?;
-            },
-            true => {
-                trace!("Writing SPARSE_SETS...");
-                ::rsp2_phonopy_io::sparse_sets::write(
-                    create(path.join("SPARSE_SETS"))?,
-                    &self.displacements,
-                    forces,
-                )?;
-            },
-        }
+        trace!("Writing FORCE_SETS...");
+        ::rsp2_phonopy_io::force_sets::write(
+            create(path.join("FORCE_SETS"))?,
+            &self.displacements,
+            forces,
+        )?;
     })}
 }
 
@@ -422,19 +402,16 @@ impl<P: AsPath> DirWithDisps<P> {
 #[derive(Debug, Clone)]
 pub struct DirWithForces<P: AsPath> {
     dir: P,
-    settings: OtherSettings,
     cache_force_constants: bool,
 }
 
 impl<P: AsPath> DirWithForces<P> {
     pub fn from_existing(dir: P) -> FailResult<Self>
     {Ok({
-        let settings = OtherSettings::load(dir.as_path().join(FNAME_OTHER_SETTINGS))?;
-
         // Sanity check
         for name in &[
             "POSCAR",
-            settings.force_sets_filename(),
+            "FORCE_SETS",
             FNAME_SETTINGS_ARGS,
             FNAME_CONF_DISPS,
         ] {
@@ -443,7 +420,7 @@ impl<P: AsPath> DirWithForces<P> {
                 throw!(MissingFileError::new("DirWithForces", &dir, name.to_string()));
             }
         }
-        DirWithForces { dir, settings, cache_force_constants: true }
+        DirWithForces { dir, cache_force_constants: true }
     })}
 
     #[allow(unused)]
@@ -458,18 +435,6 @@ impl<P: AsPath> DirWithForces<P> {
     #[allow(unused)]
     pub fn cache_force_constants(&mut self, b: bool) -> &mut Self
     { self.cache_force_constants = b; self }
-
-    pub fn supercell_dims(&self) -> FailResult<V3<u32>>
-    {Ok({
-        // FIXME we should not need to be parsing strings for this
-        let Conf(conf) = Load::load(self.dir.join(FNAME_CONF_DISPS))?;
-        let nums = {
-            conf["DIM"].split_whitespace()
-                .map(|a| Ok(a.parse()?))
-                .collect::<FailResult<Vec<u32>>>()?
-        };
-        V3(nums.to_array())
-    })}
 
     /// Compute bands in a temp directory.
     ///
@@ -526,8 +491,10 @@ impl<'moveck, 'p, P: AsPath> BandsBuilder<'moveck, 'p, P> {
             ] {
                 copy(src.join(name), dir.join(name))?;
             }
-            {
-                let name = self.dir_with_forces.settings.force_sets_filename();
+
+            for name in &[
+                "FORCE_SETS",
+            ] {
                 copy_or_link(src.join(name), dir.join(name))?;
             }
 
@@ -618,7 +585,6 @@ import os; os.unlink('band.hdf5')
 /// may instead cause a panic, or may not be detected as early as possible.
 #[derive(Debug, Clone)]
 pub struct DirWithBands<P: AsPath> {
-    settings: OtherSettings,
     dir: P,
 }
 
@@ -626,12 +592,10 @@ pub struct DirWithBands<P: AsPath> {
 impl<P: AsPath> DirWithBands<P> {
     pub fn from_existing(dir: P) -> FailResult<Self>
     {Ok({
-        let settings = OtherSettings::load(dir.as_path().join(FNAME_OTHER_SETTINGS))?;
-
         // Sanity check
         for name in &[
             "POSCAR",
-            settings.force_sets_filename(),
+            "FORCE_SETS",
             "eigenvalue.npy",
             "q-positions.json",
         ] {
@@ -641,7 +605,7 @@ impl<P: AsPath> DirWithBands<P> {
             }
         }
 
-        DirWithBands { settings, dir }
+        DirWithBands { dir }
     })}
 
     pub fn structure(&self) -> FailResult<ElementStructure>
@@ -678,6 +642,7 @@ impl<P: AsPath> DirWithBands<P> {
 fn band_string(ks: &[V3]) -> String
 { ks.flat().iter().map(|x| x.to_string()).collect::<Vec<_>>().join(" ") }
 
+#[allow(unused)]
 fn round_checked(x: f64, tol: f64) -> FailResult<i32>
 {Ok({
     let r = x.round();
@@ -785,19 +750,19 @@ pub fn copy_or_link<P: AsRef<Path>, Q: AsRef<Path>>(src: P, dest: Q) -> FailResu
 impl_dirlike_boilerplate!{
     type: {DirWithDisps<_>}
     member: self.dir
-    other_members: [self.displacements, self.settings, self.superstructure]
+    other_members: [self.displacements, self.superstructure]
 }
 
 impl_dirlike_boilerplate!{
     type: {DirWithForces<_>}
     member: self.dir
-    other_members: [self.cache_force_constants, self.settings]
+    other_members: [self.cache_force_constants]
 }
 
 impl_dirlike_boilerplate!{
     type: {DirWithBands<_>}
     member: self.dir
-    other_members: [self.settings]
+    other_members: []
 }
 
 #[cfg(test)]

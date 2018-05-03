@@ -119,33 +119,6 @@ impl Save for Args {
 
 //--------------------------------------------------------
 
-/// Type representing Builder config that goes beyond simple adjustments to phonopy's input.
-#[derive(Serialize, Deserialize)]
-#[derive(Debug, Clone)]
-pub(crate) struct OtherSettings {
-    use_sparse_sets: bool,
-}
-
-impl Load for OtherSettings {
-    fn load<P: AsPath>(path: P) -> FailResult<Self>
-    { Load::load(path).map(|Json(x)| x) }
-}
-
-impl Save for OtherSettings {
-    fn save<P: AsPath>(&self, path: P) -> FailResult<()>
-    { Json(self).save(path) }
-}
-
-impl OtherSettings {
-    fn force_sets_filename(&self) -> &'static str
-    { match self.use_sparse_sets {
-        true => "SPARSE_SETS",
-        false => "FORCE_SETS",
-    }}
-}
-
-//--------------------------------------------------------
-
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, Default)]
 pub(crate) struct QPositions(Vec<V3>);

@@ -96,9 +96,6 @@ pub struct Settings {
 
     #[serde(default)]
     pub ev_loop: EvLoop,
-
-    #[serde(default)]
-    pub tweaks: Tweaks,
 }
 derive_yaml_read!{Settings}
 
@@ -232,14 +229,6 @@ pub enum EigenvectorChase {
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
-pub struct Tweaks {
-    #[serde(default = "self::defaults::tweaks::sparse_sets")]
-    pub sparse_sets: bool,
-}
-
-#[derive(Serialize, Deserialize)]
-#[derive(Debug, Clone, PartialEq)]
-#[serde(rename_all = "kebab-case")]
 pub struct Phonons {
     pub symmetry_tolerance: f64,
     pub displacement_distance: f64,
@@ -338,10 +327,6 @@ impl Default for EvLoop {
     fn default() -> Self { from_empty_mapping().unwrap() }
 }
 
-impl Default for Tweaks {
-    fn default() -> Self { from_empty_mapping().unwrap() }
-}
-
 impl Default for AcousticSearch {
     fn default() -> Self { from_empty_mapping().unwrap() }
 }
@@ -368,10 +353,6 @@ fn from_empty_mapping<T: for<'de> ::serde::Deserialize<'de>>() -> ::serde_yaml::
 // --------------------------------------------------------
 
 mod defaults {
-    pub(crate) mod tweaks {
-        pub(crate) fn sparse_sets() -> bool { false }
-    }
-
     pub(crate) mod scale_ranges {
         pub(crate) fn repeat_count() -> u32 { 1 }
         pub(crate) fn warn() -> Option<f64> { Some(0.01) }

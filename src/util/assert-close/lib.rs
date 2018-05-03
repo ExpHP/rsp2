@@ -23,7 +23,7 @@ macro_rules! assert_close_impl {
     (@parsing [$a:expr, $b:expr, $($fmt:tt)+] $assignments:tt) => {
         assert_close_impl!(@expand $assignments [@comp $a, $b] [@fmt $($fmt)+])
     };
-    (@expand [$($assignment:tt)*] [@comp $a:expr, $b:expr] [@fmt $($fmt:expr),+] ) => {
+    (@expand [$($assignment:tt)*] [@comp $a:expr, $b:expr] [@fmt $($fmt:tt)+] ) => {
         #[allow(unused_mut)]
         #[allow(unused_assignments)]
         {
@@ -39,7 +39,7 @@ macro_rules! assert_close_impl {
             if let Err(e) = $crate::CheckClose::check_close(&a, &b, $crate::Tolerances { abs, rel }) {
                 panic!(
                 "{} (tolerances: rel={}, abs={})\n left: {:?}\nright: {:?}\n{}",
-                 format!($($fmt),*), rel, abs, a, b, e);
+                 format!($($fmt)*), rel, abs, a, b, e);
             }
         }
     };
@@ -196,6 +196,12 @@ mod tests {
             abs=1e-10,
             S.x().x().x(),
             S.x().x().x(),
+        );
+        assert_close!(
+            abs=1e-10,
+            S.x().x().x(),
+            S.x().x().x(),
+            "{}", "hello",
         );
     }
 
