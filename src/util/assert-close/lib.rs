@@ -224,4 +224,10 @@ mod tests {
     fn not_close() {
         assert_close!(abs=0.0, rel=0.0, 1.0, 1.1);
     }
+
+    #[test]
+    #[cfg_attr(debug_assertions, should_panic)]
+    fn debug_not_close() {
+        debug_assert_close!(abs=0.0, rel=0.0, 1.0, 1.1);
+    }
 }
