@@ -176,10 +176,10 @@ pub fn save_bands_after_the_fact() {
                 ])
         });
         let matches = app.get_matches();
-        let () = de.resolve_args(&matches)?;
+        let dir_args = de.resolve_args(&matches)?;
 
-        let trial = PathDir::new(matches.expect_value_of("trial_dir"))?;
-        let trial = TrialDir::from_existing(&trial)?;
+        let old_trial = PathDir::new(matches.expect_value_of("trial_dir"))?;
+        let trial = TrialDir::create_new(dir_args)?;
         logfile.start(PathFile::new(trial.new_logfile_path()?)?)?;
 
         let settings = trial.read_settings()?;
@@ -251,18 +251,19 @@ pub fn dynmat_test() {
                 .author(crate_authors!{", "})
                 .about("blah")
                 .args(&[
-                    arg!( input=FORCES_DIR "phonopy forces dir (try --save-bands in main script)"),
+                    arg!( input=STRUCTURE ""),
                 ])
         });
         let matches = app.get_matches();
-        let dir_args = de.resolve_args(&matches)?;
+        let (dir_args, (filetype, extra_args)) = de.resolve_args(&matches)?;
 
-        let input = PathDir::new(matches.expect_value_of("input"))?;
+        let input = PathFile::new(matches.expect_value_of("input"))?;
+        let filetype = OptionalFileType::or_guess(filetype, &input);
 
         let trial = TrialDir::create_new(dir_args)?;
         logfile.start(PathFile::new(trial.new_logfile_path()?)?)?;
 
         let settings = trial.read_settings()?;
-        trial.run_dynmat_test(&settings, &input)
+        trial.run_dynmat_test(&settings, filetype, &input, extra_args)
     });
 }

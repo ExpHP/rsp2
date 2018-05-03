@@ -80,7 +80,7 @@ impl TrialDir {
         )?;
 
         self.write_poscar("initial.vasp", "Initial structure", &original_structure)?;
-        let phonopy = phonopy_builder_from_settings(&settings.phonons, &original_structure);
+        let phonopy = phonopy_builder_from_settings(&settings.phonons, original_structure.lattice());
         let phonopy = phonopy.use_sparse_sets(settings.tweaks.sparse_sets);
 
         let (structure, ev_analysis, final_bands_dir) = self.do_main_ev_loop(
@@ -314,15 +314,14 @@ impl TrialDir {
     })}
 }
 
-fn phonopy_builder_from_settings<M>(
+fn phonopy_builder_from_settings(
     settings: &cfg::Phonons,
-    // the structure is needed to resolve the correct supercell size
-    structure: &Structure<M>,
+    lattice: &Lattice,
 ) -> PhonopyBuilder {
     PhonopyBuilder::new()
         .symmetry_tolerance(settings.symmetry_tolerance)
         .conf("DISPLACEMENT_DISTANCE", format!("{:e}", settings.displacement_distance))
-        .supercell_dim(settings.supercell.dim_for_unitcell(structure.lattice()))
+        .supercell_dim(settings.supercell.dim_for_unitcell(lattice))
         .conf("DIAG", ".FALSE.")
 }
 
@@ -595,7 +594,7 @@ impl TrialDir {
         let lmp = LammpsBuilder::new(&settings.threading, &settings.potential.kind);
 
         let structure = poscar::load(self.read_file("./final.vasp")?)?;
-        let phonopy = phonopy_builder_from_settings(&settings.phonons, &structure);
+        let phonopy = phonopy_builder_from_settings(&settings.phonons, structure.lattice());
         let phonopy = phonopy.use_sparse_sets(settings.tweaks.sparse_sets);
         do_diagonalize(
             &lmp, &settings.threading, &phonopy, &structure,
@@ -623,7 +622,7 @@ impl TrialDir {
         let lmp = LammpsBuilder::new(&settings.threading, &settings.potential.kind);
 
         let structure = poscar::load(self.read_file("./final.vasp")?)?;
-        let phonopy = phonopy_builder_from_settings(&settings.phonons, &structure);
+        let phonopy = phonopy_builder_from_settings(&settings.phonons, structure.lattice());
         let phonopy = phonopy.use_sparse_sets(settings.tweaks.sparse_sets);
 
         let aux_info = self.load_analysis_aux_info()?;
@@ -642,31 +641,41 @@ impl TrialDir {
 impl TrialDir {
     pub(crate) fn run_dynmat_test(
         self,
-        settings: &cfg::EnergyPlotSettings,
-        force_dir: &PathDir,
+        settings: &Settings,
+        file_format: StructureFileType,
+        input: &PathFile,
+        cli: CliArgs,
     ) -> FailResult<()>
     {Ok({
-        let force_dir = DirWithForces::from_existing(force_dir)?;
+        let lmp = LammpsBuilder::new(&settings.threading, &settings.potential.kind);
 
-        let prim_structure = poscar::load(PathFile::new(force_dir.join("POSCAR"))?.read()?)?;
-        let layers = {
-            ::rsp2_structure::find_layers(&prim_structure, &V3([0, 0, 1]), 0.25)?
-                .per_unit_cell().expect("Structure is not layered?")
-                .by_atom()
-        };
+        // FIXME: rather than doing this here, other rsp2 binaries ought to be able
+        //        to support the other file formats as well.
+        //
+        //        That said, the REASON for doing it here is that, currently, a
+        //        number of optional computational steps are toggled on/off based
+        //        on the input file format.
+        let (prim_structure, _atom_layers, _layer_sc_mats) = read_structure_file(
+            Some(settings), file_format, input, Some(&lmp),
+        )?;
+
+        self.write_poscar("initial.vasp", "Initial structure", &prim_structure)?;
+        let phonopy = phonopy_builder_from_settings(&settings.phonons, prim_structure.lattice());
+        let phonopy = phonopy.use_sparse_sets(settings.tweaks.sparse_sets);
+        let disp_dir = phonopy.displacements(&prim_structure)?;
 
         let (superstructure, sc_token) = {
-            let sc_dims = force_dir.supercell_dims()?;
+            let sc_dims = settings.phonons.supercell.dim_for_unitcell(prim_structure.lattice());
             assert!(
                 sc_dims.iter().all(|&x| x % 2 == 1),
                 "even supercell sizes not supported here"
             );
 
             let (our_superstructure, sc_token) = {
-                supercell::centered_diagonal(sc_dims.map(|x| x / 2).0)
+                supercell::centered_diagonal(V3(sc_dims).map(|x| x / 2).0)
                     .build(prim_structure)
             };
-            let phonopy_superstructure = force_dir.structure()?;
+            let phonopy_superstructure = disp_dir.superstructure();
 
             // cmon, big money, big money....
             // if these assertions always succeed, it will save us a
@@ -696,9 +705,9 @@ impl TrialDir {
         // make phonopy compute dynamical matrix (as a gold standard)
         // TODO: how to get the dynamical matrix from phonopy?
         let phonopy_bands_dir = {
-            force_dir
-                .build_bands()
-                .compute(&[Q_GAMMA])?
+            //force_dir
+            //    .build_bands()
+            //    .compute(&[Q_GAMMA])?
         };
     })}
 }
