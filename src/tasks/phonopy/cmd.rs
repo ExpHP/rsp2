@@ -55,7 +55,6 @@ impl Default for Builder {
     }
 }
 
-const FNAME_OTHER_SETTINGS: &'static str = "rsp2-phonopy.json";
 const FNAME_SETTINGS_ARGS: &'static str = "disp.args";
 const FNAME_HELPER_SCRIPT: &'static str = "phonopy";
 const FNAME_CONF_DISPS: &'static str = "disp.conf";
@@ -281,7 +280,6 @@ impl<P: AsPath> DirWithDisps<P> {
             "disp.yaml",
             FNAME_CONF_DISPS,
             FNAME_SETTINGS_ARGS,
-            FNAME_OTHER_SETTINGS,
         ] {
             let path = dir.as_path().join(name);
             if !path.exists() {
@@ -366,7 +364,6 @@ impl<P: AsPath> DirWithDisps<P> {
             "disp.yaml",
             FNAME_CONF_DISPS,
             FNAME_SETTINGS_ARGS,
-            FNAME_OTHER_SETTINGS,
         ] {
             copy(disp_dir.join(name), path.join(name))?;
         }
@@ -487,7 +484,6 @@ impl<'moveck, 'p, P: AsPath> BandsBuilder<'moveck, 'p, P> {
                 "POSCAR",
                 FNAME_CONF_DISPS,
                 FNAME_SETTINGS_ARGS,
-                FNAME_OTHER_SETTINGS,
             ] {
                 copy(src.join(name), dir.join(name))?;
             }
