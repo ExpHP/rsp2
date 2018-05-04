@@ -284,6 +284,16 @@ impl SupercellToken {
         V3(self.periods).map(|x| x / 2)
     }
 
+    /// Convert an unsigned cell index to signed.
+    pub fn signed_cell_index(&self, v: V3<u32>) -> V3<i32> {
+        v.map(|x| x as i32) + self.offset
+    }
+
+    /// Convert a signed cell index to unsigned.
+    pub fn unsigned_cell_index(&self, v: V3<i32>) -> V3<u32> {
+        (v - self.offset).map(|x| x as u32)
+    }
+
     /// Defines which image of the primitive cell each atom in the supercell belongs to.
     ///
     /// Each image of the primitive cell is represented by the integral coordinates of the
@@ -465,6 +475,21 @@ mod tests {
         };
         let actual_carts = supercell.to_carts();
         assert!(::util::eq_unordered_n3(&expected_carts, &actual_carts), "{:?} {:?}", expected_carts, actual_carts);
+    }
+
+    #[test]
+    fn cell_index_conversions() {
+        let sc_token = ::supercell::diagonal([2, 5, 3]).into_sc_token(7);
+        let signed = sc_token.signed_cell_indices();
+        let unsigned = sc_token.cell_indices();
+        ::itertools::assert_equal(
+            signed.iter().cloned(),
+            unsigned.iter().map(|&v| sc_token.signed_cell_index(v)),
+        );
+        ::itertools::assert_equal(
+            unsigned.iter().cloned(),
+            signed.iter().map(|&v| sc_token.unsigned_cell_index(v)),
+        );
     }
 
     #[test]

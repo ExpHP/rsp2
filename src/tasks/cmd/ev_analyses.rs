@@ -31,7 +31,7 @@ use super::acoustic_search;
 #[derive(Debug, Clone)]                         pub struct EvClassifications(pub Vec<acoustic_search::ModeKind>);
 #[derive(Debug, Clone)]                         pub struct EvFrequencies(pub Vec<f64>);
 #[derive(Debug, Clone)]                         pub struct EvEigenvectors(pub Basis3);
-#[derive(Debug, Clone)]                         pub struct Bonds(pub ::math::bonds::Bonds);
+#[derive(Debug, Clone)]                         pub struct Bonds(pub ::math::bonds::CartBonds);
 
 pub use self::gamma_system_analysis::GammaSystemAnalysis;
 pub mod gamma_system_analysis {

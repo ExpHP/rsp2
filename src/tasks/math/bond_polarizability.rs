@@ -6,7 +6,7 @@
 use ::FailResult;
 use ::util::zip_eq;
 use ::math::basis::Basis3;
-use ::math::bonds::{Bond, Bonds};
+use ::math::bonds::{CartBond, CartBonds};
 use ::enum_map::EnumMap;
 use ::rsp2_array_types::{dot, mat, V3, M33};
 use ::rsp2_structure::{Element};
@@ -75,6 +75,7 @@ pub fn default_CH_pol_constants() -> PolConstants {
 }
 
 #[allow(bad_style)]
+#[allow(unused)] // FIXME
 pub fn nanotube_CC_pol_constants() -> PolConstants {
     enum_map!{
         BondType::CC => Some(PolConstant {
@@ -175,7 +176,7 @@ impl RamanTensor {
 fn raman_tensor(
     eigenvector: &[V3],
     masses: &[f64],
-    bonds: &Bonds,
+    bonds: &CartBonds,
     types: &[Element],
     pol_constants: &PolConstants,
 ) -> FailResult<M33> {
@@ -185,7 +186,7 @@ fn raman_tensor(
     let mut tensor = M33::zero();
     let mut ignored_count = 0;
     let mut ignored_distance = 0.0_f64;
-    for Bond { from, to, cart_vector: bond_vector } in bonds {
+    for CartBond { from, to, cart_vector: bond_vector } in bonds {
         let bond_type = BondType::from_elements(types[from], types[to])?;
 
         // phonon eigenvector for this atom, need to mass normalize
@@ -235,6 +236,7 @@ fn raman_tensor(
 
 pub enum LightPolarization {
     // previously:  avg = false, backscatter = (ignored)
+    #[allow(unused)]
     Polarized {
         incident: V3,
         scattered: V3,
@@ -252,7 +254,7 @@ pub struct Input<'a> {
     pub ev_eigenvectors: &'a Basis3,
     pub atom_elements: &'a [Element],
     pub atom_masses: &'a [f64],
-    pub bonds: &'a Bonds,
+    pub bonds: &'a CartBonds,
 }
 
 impl<'a> Input<'a> {

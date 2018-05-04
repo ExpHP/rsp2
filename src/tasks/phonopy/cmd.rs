@@ -189,6 +189,7 @@ phonopy \
     })}
 
     // FIXME: Should return a new DirWithSymmetry type.
+    #[allow(unused)]
     pub fn symmetry(
         &self,
         structure: &ElementStructure,

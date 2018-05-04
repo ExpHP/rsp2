@@ -22,7 +22,7 @@ use ::phonopy::{DirWithBands, DirWithDisps, DirWithForces};
 use ::util::{tup2};
 use ::util::ext_traits::{OptionResultExt, PathNiceExt};
 use ::math::basis::Basis3;
-use ::math::bonds::Bonds;
+use ::math::bonds::FracBonds;
 
 use ::path_abs::{PathArc, PathFile, PathDir};
 use ::rsp2_structure::consts::CARBON;
@@ -170,13 +170,13 @@ impl TrialDir {
         trace!("============================");
         trace!("Finished diagonalization");
 
-        // NOTE: in order to reuse the results of the bond search between iterations,
-        //       we would need to store image indices so that the correct cartesian
-        //       vectors can be computed.
-        //       For now, we just do it all from scratch each time.
+        // FIXME: only the CartBonds need to be recomputed each iteration;
+        //       we could keep the FracBonds around between iterations.
         let bonds = settings.bond_radius.map(|bond_radius| FailOk({
             trace!("Computing bonds");
-            Bonds::from_brute_force_very_dumb(&structure, bond_radius)?
+            let coords = structure.map_metadata_to(|_| ());
+            FracBonds::from_brute_force_very_dumb(&coords, bond_radius)?
+                .to_cart_bonds(&coords)
         })).fold_ok()?;
 
         trace!("Computing eigensystem info");
@@ -653,13 +653,13 @@ impl TrialDir {
         // phonopy.
         let (superstructure, sc_token, displacements) = self._dynmat_test__supercell_and_displacements(settings, &prim_structure, disp_dir)?;
 
-
         let _ = superstructure;
         let _ = sc_token;
+        let _ = displacements;
         let _ = cli;
 
         unimplemented!();
-        #[allow(dead_code)] {
+        #[allow(unreachable_code)] {
             let our_dynamical_matrix = {
             };
 
@@ -677,6 +677,7 @@ impl TrialDir {
         }
     })}
 
+    #[allow(non_snake_case)]
     fn _dynmat_test__supercell_and_displacements<P: AsPath>(
         &self,
         settings: &Settings,

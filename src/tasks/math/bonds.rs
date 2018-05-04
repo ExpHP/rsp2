@@ -1,24 +1,57 @@
 use ::FailResult;
 use ::rsp2_structure::supercell;
-use ::rsp2_structure::{CoordStructure, Structure, Lattice};
+use ::rsp2_structure::{CoordStructure, Lattice};
 use ::rsp2_array_utils::{arr_from_fn, try_map_arr};
 
 use ::rsp2_array_types::{V3, M3, dot};
 
+/// Bond data in a more widely-reusable form.
+///
+/// The following actions will invalidate the bonds:
+///
+/// * removal, addition, or reordering of sites
+/// * mapping of coordinates into the unit cell
+/// * unimodular transformations of the lattice
+///
+/// The following actions are okay:
+///
+/// * motion of atoms, even if they cross cell boundaries,
+///   (so long as relative distances do not change enough that the
+///    bonds WOULD change)
+/// * cartesian transformations of the lattice (preserving frac coords)
+///
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
-pub struct Bonds {
+pub struct FracBonds {
+    num_atoms: usize, // used for sanity checks
     from: Vec<usize>,
     to: Vec<usize>,
-    // FIXME: Rather than the cartesian vectors (which change as the structure
-    //        relaxes), we should keep the `[i32; 3]` image indices.
-    //        Then a function could be provided that computes the V3s from a
-    //        structure, assuming the bonds haven't changed.
-    cart_vectors: Vec<V3>,
+    // Rather than the cartesian vectors (which change as the structure relaxes),
+    // we keep differences in image index (as cell_to - cell_from).
+    //
+    // This also saves us from constantly having to worry about "nearest images",
+    // as long as the positions don't get reduced.
+    image_diff: Vec<V3<i32>>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
+pub struct CartBonds {
+    num_atoms: usize, // used for sanity checks
+    from: Vec<usize>,
+    to: Vec<usize>,
+    cart_vector: Vec<V3<f64>>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct Bond<V = V3> {
+pub struct FracBond<V = V3<i32>> {
+    pub from: usize,
+    pub to: usize,
+    pub image_diff: V,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct CartBond<V = V3<f64>> {
     pub from: usize,
     pub to: usize,
     pub cart_vector: V,
@@ -30,62 +63,72 @@ pub trait VeclikeIterator: ExactSizeIterator + DoubleEndedIterator {}
 
 impl<I> VeclikeIterator for I where I: ExactSizeIterator + DoubleEndedIterator {}
 
-pub type Iter<'a> = Box<VeclikeIterator<Item = Bond<&'a V3>> + 'a>;
-impl<'a> IntoIterator for &'a Bonds {
-    type Item = Bond<&'a V3>;
-    type IntoIter = Iter<'a>;
+pub type FracIter<'a> = Box<VeclikeIterator<Item = FracBond<&'a V3<i32>>> + 'a>;
+impl<'a> IntoIterator for &'a FracBonds {
+    type Item = FracBond<&'a V3<i32>>;
+    type IntoIter = FracIter<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
         Box::new(izip!(
             self.from.iter().cloned(),
             self.to.iter().cloned(),
-            self.cart_vectors.iter(),
-        ).map(|(from, to, cart_vector)| Bond { from, to, cart_vector }))
+            self.image_diff.iter(),
+        ).map(|(from, to, image_diff)| FracBond { from, to, image_diff }))
+    }
+}
+
+pub type CartIter<'a> = Box<VeclikeIterator<Item = CartBond<&'a V3>> + 'a>;
+impl<'a> IntoIterator for &'a CartBonds {
+    type Item = CartBond<&'a V3>;
+    type IntoIter = CartIter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        Box::new(izip!(
+            self.from.iter().cloned(),
+            self.to.iter().cloned(),
+            self.cart_vector.iter(),
+        ).map(|(from, to, cart_vector)| CartBond { from, to, cart_vector }))
     }
 }
 
 //=================================================================
 
-impl Bonds {
+impl FracBonds {
     pub fn len(&self) -> usize
     { self.from.len() }
+}
 
-    pub fn from_brute_force_very_dumb<M>(
-        structure: &Structure<M>,
-        range: f64,
-    ) -> FailResult<Self> {
-        Self::_from_brute_force_very_dumb(
-            structure.map_metadata_to(|_| ()),
-            range,
-        )
-    }
+impl CartBonds {
+    pub fn len(&self) -> usize
+    { self.from.len() }
+}
 
-    // monomorphic
-    fn _from_brute_force_very_dumb(
-        structure: CoordStructure,
+impl FracBonds {
+    pub fn from_brute_force_very_dumb(
+        structure: &CoordStructure,
         range: f64,
     ) -> FailResult<Self> {
 
         // Construct a supercell large enough to contain all atoms that interact with an atom
         // in the centermost unit cell.
         let sc_builder = sufficiently_large_centered_supercell(structure.lattice(), range)?;
-        let (superstructure, sc_info) = sc_builder.build(structure);
-        let centermost_cell = sc_info.center_cell_index();
+        let (superstructure, sc_info) = sc_builder.build(structure.clone());
+        let centermost_cell = sc_info.signed_cell_index(sc_info.center_cell_index());
 
         let mut from = vec![];
         let mut to = vec![];
-        let mut cart_vectors = vec![];
+        let mut image_diff = vec![];
 
         let carts = superstructure.to_carts();
-        let cells = sc_info.cell_indices();
+        let cells = sc_info.signed_cell_indices();
         let sites = sc_info.primitive_site_indices();
 
-        for (cell_from, &site_from, &cart_from) in izip!(cells, &sites, &carts) {
+        for (&cell_from, &site_from, &cart_from) in izip!(&cells, &sites, &carts) {
             if cell_from != centermost_cell {
                 continue;
             }
 
-            for (&site_to, &cart_to) in izip!(&sites, &carts) {
+            for (&cell_to, &site_to, &cart_to) in izip!(&cells, &sites, &carts) {
                 let vector = cart_to - cart_from;
                 if vector.sqnorm() < range * range {
                     if site_from == site_to {
@@ -93,12 +136,35 @@ impl Bonds {
                     }
                     from.push(site_from);
                     to.push(site_to);
-                    cart_vectors.push(vector);
+                    image_diff.push(cell_to - cell_from);
                 }
             }
         }
         assert_ne!(from.len(), 0, "(BUG) nothing in center cell?");
-        Ok(Bonds { from, to, cart_vectors })
+        let num_atoms = structure.num_atoms();
+        Ok(FracBonds { num_atoms, from, to, image_diff })
+    }
+
+    pub fn to_cart_bonds(&self, coords: &CoordStructure) -> CartBonds {
+        let FracBonds { num_atoms, ref from, ref to, ref image_diff } = *self;
+        let from = from.to_vec();
+        let to = to.to_vec();
+
+        // (NOTE: we'd also get ruined by reordering of coordinates or mapping into
+        //        the unit cell; but those are too difficult to test)
+        assert_eq!(num_atoms, coords.num_atoms(), "number of atoms has changed!");
+        let lattice = coords.lattice();
+        let carts = coords.to_carts();
+
+        let cart_vector = {
+            ::util::zip_eq(::util::zip_eq(&from, &to), image_diff)
+                .map(|((&from, &to), image_diff)| {
+                    let cart_image_diff = image_diff.map(|x| x as f64) * lattice.matrix();
+                    carts[to] - carts[from] + cart_image_diff
+                })
+                .collect()
+        };
+        CartBonds { num_atoms, from, to, cart_vector }
     }
 }
 
