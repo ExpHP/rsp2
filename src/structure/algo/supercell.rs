@@ -37,17 +37,22 @@ pub fn centered_diagonal(extra_images: [u32; 3]) -> Builder {
 }
 
 impl Builder {
+    pub fn absolute_offset(mut self, min_image: V3<i32>) -> Builder {
+        self.offset = min_image; self
+    }
+
+    pub fn center(mut self, center: V3<i32>) -> Builder {
+        let natural_center = V3(self.diagonal).map(|x| (x / 2) as i32);
+        self.offset = center - natural_center; self
+    }
+
     pub fn build<M>(&self, structure: Structure<M>) -> (Structure<M>, SupercellToken)
     where M: Clone,
-    {
-        self.build_with(structure, |meta, _| meta.clone())
-    }
+    { self.build_with(structure, |meta, _| meta.clone()) }
 
     pub fn build_with<M, M2, F>(&self, structure: Structure<M>, make_meta: F) -> (Structure<M2>, SupercellToken)
     where F: FnMut(&M, [u32; 3]) -> M2,
-    {
-        diagonal_with(self.clone(), structure, make_meta)
-    }
+    { diagonal_with(self.clone(), structure, make_meta) }
 }
 
 // ---------------------------------------------------------------
@@ -77,7 +82,7 @@ where F: FnMut(&M, [u32; 3]) -> M2,
     let num_sc = (sc.periods[0] * sc.periods[1] * sc.periods[2]) as usize;
     let num_supercell_atoms = num_sc * coords.len();
 
-    let sc_carts = sc_lattice_vecs(sc.periods, sc.offset, &lattice);
+    let sc_carts = image_sc_lattice_vecs(sc.periods, sc.offset, &lattice);
     let mut new_carts = Vec::with_capacity(num_supercell_atoms);
     for atom_cart in coords.into_carts(&lattice) {
         let old_len = new_carts.len();
@@ -85,7 +90,7 @@ where F: FnMut(&M, [u32; 3]) -> M2,
         ::util::translate_mut_n3_3(&mut new_carts[old_len..], &atom_cart);
     }
 
-    let sc_idx = sc_indices(sc.periods);
+    let sc_idx = image_cell_indices(sc.periods);
     let mut new_meta = Vec::with_capacity(num_supercell_atoms);
     for m in meta {
         for idx in &sc_idx {
@@ -205,7 +210,7 @@ impl SupercellToken {
 
         let out_carts = {
             let neg_offsets = {
-                let mut vs = sc_lattice_vecs(periods, offset, &primitive_lattice);
+                let mut vs = image_sc_lattice_vecs(periods, offset, &primitive_lattice);
                 for v in &mut vs {
                     *v *= -1.0;
                 }
@@ -268,6 +273,17 @@ impl SupercellToken {
         })
     }
 
+    /// Get the cell index of the centermost cell.
+    ///
+    /// Ties on even-dimensioned axes are broken towards zero.
+    ///
+    /// If you need this, then you've probably written some dumb
+    /// algorithm that only works with odd-dimensioned supercells
+    /// that are at least 3x3x3 large. You should fix that.
+    pub fn center_cell_index(&self) -> V3<u32> {
+        V3(self.periods).map(|x| x / 2)
+    }
+
     /// Defines which image of the primitive cell each atom in the supercell belongs to.
     ///
     /// Each image of the primitive cell is represented by the integral coordinates of the
@@ -278,7 +294,7 @@ impl SupercellToken {
     /// This function is constant for any given supercell; it merely exists to define the
     /// conventions for ordering used by the library.
     pub fn cell_indices(&self) -> Vec<V3<u32>> {
-        sc_indices(self.periods).iter().cloned()
+        image_cell_indices(self.periods).iter().cloned()
             .cycle().take(self.num_supercell_atoms())
             .collect()
     }
@@ -292,7 +308,7 @@ impl SupercellToken {
     /// This function is constant for any given supercell; it merely exists to define the
     /// conventions for ordering used by the library.
     pub fn signed_cell_indices(&self) -> Vec<V3<i32>> {
-        signed_sc_indices(self.periods, self.offset).iter().cloned()
+        image_signed_cell_indices(self.periods, self.offset).iter().cloned()
             .cycle().take(self.num_supercell_atoms())
             .collect()
     }
@@ -310,7 +326,7 @@ impl SupercellToken {
     /// Please see `conventions.md` for an explanation of depermutations.
     pub fn lattice_point_translation_deperm(&self, index: V3<i32>) -> Perm {
         // Depermutations that permute the cells along each axis independently.
-        // (expressed in the quotient space of images along that axis)
+        // (expressed in the quotient spaces of images along those axes)
         let axis_deperms: [_; 3] = arr_from_fn(|k| {
             Perm::eye(self.periods[k]).shift_signed(index[k])
         });
@@ -325,9 +341,12 @@ impl SupercellToken {
     }
 }
 
-// supercell indices in the library's preferred order
-fn sc_indices(periods: [u32; 3]) -> Vec<V3<u32>> {
-    let mut out = Vec::with_capacity((periods[0] * periods[1] * periods[2]) as usize);
+//--------------------------------
+// functions prefixed with 'image' describe the quotient space of unit cell images.
+// (which is of size 'periods.iter().product()')
+
+fn image_cell_indices(periods: [u32; 3]) -> Vec<V3<u32>> {
+    let mut out = Vec::with_capacity(periods.iter().product::<u32>() as usize);
     for ia in 0..periods[0] {
         for ib in 0..periods[1] {
             for ic in 0..periods[2] {
@@ -338,16 +357,14 @@ fn sc_indices(periods: [u32; 3]) -> Vec<V3<u32>> {
     out
 }
 
-// signed lattice point indices in the library's preferred order
-fn signed_sc_indices(periods: [u32; 3], offset: V3<i32>) -> Vec<V3<i32>> {
-    sc_indices(periods).into_iter()
+fn image_signed_cell_indices(periods: [u32; 3], offset: V3<i32>) -> Vec<V3<i32>> {
+    image_cell_indices(periods).into_iter()
         .map(|idx| idx.map(|x| x as i32) + offset)
         .collect()
 }
 
-// cartesian supercell image offsets in the library's preferred order
-fn sc_lattice_vecs(periods: [u32; 3], offset: V3<i32>, lattice: &Lattice) -> Vec<V3> {
-    signed_sc_indices(periods, offset).into_iter()
+fn image_sc_lattice_vecs(periods: [u32; 3], offset: V3<i32>, lattice: &Lattice) -> Vec<V3> {
+    image_signed_cell_indices(periods, offset).into_iter()
         .map(|idx| idx.map(|x| x as f64) * lattice.matrix())
         .collect()
 }
@@ -496,8 +513,8 @@ mod tests {
 
             // ...when comparing positions for the same label, reduced into the supercell.
             let canonicalized_coords = |mut structure: Structure<_>| {
-                let perm = Perm::argsort(structure.metadata());
-                structure = structure.permuted_by(&perm);
+                let sorting_perm = Perm::argsort(structure.metadata());
+                structure = structure.permuted_by(&sorting_perm);
                 structure.reduce_positions();
                 structure.to_carts()
             };

@@ -70,14 +70,14 @@ impl Bonds {
         // in the centermost unit cell.
         let sc_builder = sufficiently_large_centered_supercell(structure.lattice(), range)?;
         let (superstructure, sc_info) = sc_builder.build(structure);
-        let centermost_cell = V3([0, 0, 0]);
+        let centermost_cell = sc_info.center_cell_index();
 
         let mut from = vec![];
         let mut to = vec![];
         let mut cart_vectors = vec![];
 
         let carts = superstructure.to_carts();
-        let cells = sc_info.signed_cell_indices();
+        let cells = sc_info.cell_indices();
         let sites = sc_info.primitive_site_indices();
 
         for (cell_from, &site_from, &cart_from) in izip!(cells, &sites, &carts) {

@@ -668,8 +668,7 @@ impl TrialDir {
             );
 
             let (our_superstructure, sc_token) = {
-                supercell::centered_diagonal(V3(sc_dims).map(|x| x / 2).0)
-                    .build(prim_structure)
+                supercell::diagonal(sc_dims).build(prim_structure)
             };
             let phonopy_superstructure = disp_dir.superstructure();
 
