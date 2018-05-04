@@ -39,11 +39,9 @@ There must exist a permutation `perm` such that applying `oper` to `coords` shou
  coords.transformed_by(oper) ~~ coords.permuted_by(perm)
 ```
 
-where `~~` is an equivalence relation[^get-real] which tests that, for all indices `i`, the `i`th position in the LHS is equivalent to the `i`th position in the RHS under the translational symmetry of `lattice`.
+where `~~` is an equivalence relation[^1] which tests that, for all indices `i`, the `i`th position in the LHS is equivalent to the `i`th position in the RHS under the translational symmetry of `lattice`.
 
 After taking a moment to digest the above definition, it might seem that I am simply stating the obvious.  But, you see, *now* comes the tricky part, because it turns out these permutations have some very surprising properties.
-
-[^get-real]: I am ignoring issues of floating point precision here.  In reality, `equiv` must use a tolerance, and thus fails to be an equivalence relation in the strictest mathematical sense as it is not transitive.
 
 #### Why permutations of symmetry operators suck
 
@@ -104,3 +102,7 @@ Both of these permutations can be used to create a structure where the each labe
 ```
 
 The advantage of using `deperm` is that it composes properly; because the coords were left untouched, all previously-computed perms and deperms are still valid descriptions of their corresponding operators.
+
+## Footnotes
+
+[^1]: I am ignoring issues of floating point precision here.  In reality, `equiv` must use a tolerance, and thus fails to be an equivalence relation in the strictest mathematical sense as it is not transitive.
