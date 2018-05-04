@@ -3,6 +3,7 @@ use ::std::ops::Mul;
 use ::std::sync::Arc;
 
 use ::rsp2_array_types::{V3, M33, M3, mat, inv};
+use ::rsp2_assert_close::{CheckClose, Tolerances, CheckCloseError};
 
 /// A 3x3 matrix with a precomputed inverse.
 #[derive(Debug, Clone)]
@@ -184,6 +185,15 @@ impl<'a, 'b> Mul<&'b Lattice> for &'a M33 {
 
     fn mul(self, other: &'b Lattice) -> Lattice {
         Lattice::new(&(self * other.matrix()))
+    }
+}
+
+impl CheckClose for Lattice {
+    type Scalar = f64;
+
+    fn check_close(&self, other: &Lattice, tol: Tolerances) -> Result<(), CheckCloseError> {
+        use ::rsp2_array_types::Unvee;
+        self.matrix().unvee().check_close(&other.matrix().unvee(), tol)
     }
 }
 

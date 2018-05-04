@@ -25,7 +25,12 @@ impl ForceSets {
         cart_rot: &M33,
         deperm: &Perm,
     ) -> Self {
-
+        panic!(
+            "FIXME using centered cells to avoid worrying about PBC is dumb. \
+            The bond graph / cutoff search can already do this for us.  \
+            All we need to do is to add V3<i32> image diffs to the bond graph and forces.\
+            "
+        );
         let (atom_displaced, atom_affected) = {
             let cells = sc_token.signed_cell_indices();
             ::util::zip_eq(&self.atom_displaced, &self.atom_displaced)

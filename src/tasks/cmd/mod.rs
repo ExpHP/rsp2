@@ -31,9 +31,10 @@ use ::rsp2_slice_math::{vnorm};
 use ::slice_of_array::prelude::*;
 use ::rsp2_array_utils::arr_from_fn;
 use ::rsp2_array_types::{V3, Unvee};
-use ::rsp2_structure::{CoordStructure, ElementStructure, Structure};
+use ::rsp2_structure::{CoordStructure, ElementStructure};
 use ::rsp2_structure::{Lattice};
 use ::rsp2_structure::supercell;
+use ::rsp2_structure::Permute;
 use ::phonopy::Builder as PhonopyBuilder;
 use ::math::bands::ScMatrix;
 use ::rsp2_structure_io::poscar;
@@ -69,12 +70,6 @@ impl TrialDir {
     {Ok({
         let lmp = LammpsBuilder::new(&settings.threading, &settings.potential.kind);
 
-        // FIXME: rather than doing this here, other rsp2 binaries ought to be able
-        //        to support the other file formats as well.
-        //
-        //        That said, the REASON for doing it here is that, currently, a
-        //        number of optional computational steps are toggled on/off based
-        //        on the input file format.
         let (original_structure, atom_layers, layer_sc_mats) = read_structure_file(
             Some(settings), file_format, input, Some(&lmp),
         )?;
@@ -646,12 +641,6 @@ impl TrialDir {
     {Ok({
         let lmp = LammpsBuilder::new(&settings.threading, &settings.potential.kind);
 
-        // FIXME: rather than doing this here, other rsp2 binaries ought to be able
-        //        to support the other file formats as well.
-        //
-        //        That said, the REASON for doing it here is that, currently, a
-        //        number of optional computational steps are toggled on/off based
-        //        on the input file format.
         let (prim_structure, _atom_layers, _layer_sc_mats) = read_structure_file(
             Some(settings), file_format, input, Some(&lmp),
         )?;
@@ -660,60 +649,83 @@ impl TrialDir {
         let phonopy = phonopy_builder_from_settings(&settings.phonons, prim_structure.lattice());
         let disp_dir = phonopy.displacements(&prim_structure)?;
 
-        let (superstructure, sc_token) = {
-            let sc_dims = settings.phonons.supercell.dim_for_unitcell(prim_structure.lattice());
-            assert!(
-                sc_dims.iter().all(|&x| x % 2 == 1),
-                "even supercell sizes not supported here"
-            );
+        // Make a supercell, and determine how our ordering of the supercell differs from
+        // phonopy.
+        let (superstructure, sc_token, displacements) = self._dynmat_test__supercell_and_displacements(settings, &prim_structure, disp_dir)?;
 
-            let (our_superstructure, sc_token) = {
-                supercell::diagonal(sc_dims).build(prim_structure)
-            };
-            let phonopy_superstructure = disp_dir.superstructure();
-
-            // cmon, big money, big money....
-            // if these assertions always succeed, it will save us a
-            // good deal of implementation work.
-            let err_msg = "\
-                phonopy's superstructure does not match rsp2's conventions! \
-                Unfortunately, support for this scenario is not yet implemented.\
-            ";
-            assert_close!(
-                abs=1e-10,
-                our_superstructure.lattice().matrix().unvee(),
-                phonopy_superstructure.lattice().matrix().unvee(),
-                "{}", err_msg,
-            );
-            assert_close!(
-                abs=1e-10,
-                our_superstructure.to_carts().unvee(),
-                phonopy_superstructure.to_carts().unvee(),
-                "{}", err_msg,
-            );
-            let _ = phonopy_superstructure;
-            (our_superstructure, sc_token)
-        };
 
         let _ = superstructure;
         let _ = sc_token;
         let _ = cli;
 
         unimplemented!();
-        let our_dynamical_matrix = {
-        };
+        #[allow(dead_code)] {
+            let our_dynamical_matrix = {
+            };
 
-        // make phonopy compute dynamical matrix (as a gold standard)
-        // TODO: how to get the dynamical matrix from phonopy?
-        let phonopy_bands_dir = {
-            //force_dir
-            //    .build_bands()
-            //    .compute(&[Q_GAMMA])?
-        };
+            // make phonopy compute dynamical matrix (as a gold standard)
+            // TODO: how to get the dynamical matrix from phonopy?
+            let phonopy_bands_dir = {
+                //force_dir
+                //    .build_bands()
+                //    .compute(&[Q_GAMMA])?
+            };
 
-        let _ = our_dynamical_matrix;
-        let _ = phonopy_bands_dir;
+            let _ = our_dynamical_matrix;
+            let _ = phonopy_bands_dir;
+
+        }
     })}
+
+    fn _dynmat_test__supercell_and_displacements<P: AsPath>(
+        &self,
+        settings: &Settings,
+        prim_structure: &ElementStructure,
+        disp_dir: DirWithDisps<P>,
+    ) -> FailResult<(ElementStructure, ::rsp2_structure::supercell::SupercellToken, Vec<(usize, V3)>)> {
+        let sc_dims = settings.phonons.supercell.dim_for_unitcell(prim_structure.lattice());
+
+        let (our_superstructure, sc_token) = supercell::diagonal(sc_dims).build(prim_structure.clone());
+        let phonopy_superstructure = disp_dir.superstructure();
+
+        // make phonopy match us
+        let perm_from_phonopy = phonopy_superstructure.perm_to_match_coords(&our_superstructure, 1e-10)?;
+        let phonopy_superstructure = phonopy_superstructure.clone().permuted_by(&perm_from_phonopy);
+
+        // cmon, big money, big money....
+        // if these assertions always succeed, it will save us a
+        // good deal of implementation work.
+        let err_msg = "\
+            phonopy's superstructure does not match rsp2's conventions! \
+            Unfortunately, support for this scenario is not yet implemented.\
+        ";
+        assert_close!(
+            abs=1e-10,
+            our_superstructure.lattice(), phonopy_superstructure.lattice(),
+            "{}", err_msg,
+        );
+        let diffs = {
+            ::util::zip_eq(our_superstructure.to_carts(), phonopy_superstructure.to_carts())
+                .map(|(a, b)| (a - b) * our_superstructure.lattice().inverse_matrix())
+                .map(|v| v.map(|x| x - x.round()))
+                .map(|v| v * our_superstructure.lattice().matrix())
+                .collect::<Vec<_>>()
+        };
+        assert_close!(
+            abs=1e-10,
+            vec![[0.0; 3]; diffs.len()],
+            diffs.unvee(),
+            "{}", err_msg,
+        );
+        let _ = phonopy_superstructure;
+
+        let displacements = {
+            disp_dir.displacements().iter()
+                .map(|_| unimplemented!("FIXME get correct indices via perm"))
+                .collect::<Vec<_>>()
+        };
+        Ok((our_superstructure, sc_token, displacements))
+    }
 }
 
 //=================================================================

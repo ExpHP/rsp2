@@ -101,7 +101,7 @@ pub(crate) fn of_spacegroup_with_meta<M: Ord>(
     tree.try_compute_homomorphism(
         |op| Ok::<_, PositionMatchError>({
             let to_fracs = op.transform_prim(&from_fracs);
-            let perm = of_rotation_impl(lattice, prim_structure.metadata(), &from_fracs, &to_fracs[..], tol)?;
+            let perm = brute_force_with_sort_trick(lattice, prim_structure.metadata(), &from_fracs, &to_fracs[..], tol)?;
             dumb_validate_equivalent(
                 lattice,
                 &to_fracs[..],
@@ -147,10 +147,10 @@ pub(crate) fn of_rotation_with_meta<M: Ord>(
     let to_fracs = rotation.transform_prim(&from_fracs);
     let meta = structure.metadata();
 
-    of_rotation_impl(lattice, meta, &from_fracs, &to_fracs, tol)?
+    brute_force_with_sort_trick(lattice, meta, &from_fracs, &to_fracs, tol)?
 })}
 
-fn of_rotation_impl<M: Ord>(
+pub(crate) fn brute_force_with_sort_trick<M: Ord>(
     lattice: &Lattice,
     meta: &[M],
     from_fracs: &[V3],
@@ -325,7 +325,7 @@ mod tests {
         let (original, perm, permuted) = random_problem(20);
         let lattice = Lattice::random_uniform(1.0);
 
-        let output = super::of_rotation_impl(
+        let output = super::brute_force_with_sort_trick(
             &lattice, &[(); 20], &original, &permuted, 1e-5,
         ).unwrap();
 

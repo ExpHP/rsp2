@@ -321,6 +321,9 @@ impl SupercellToken {
         self.replicate(&(0..self.num_primitive_atoms).collect::<Vec<_>>())
     }
 
+    // !!! This function affects the supercell convention !!! (SUPERCELL-CONV)
+    // When modifying it, you must modify all functions that have this label.
+    //
     /// Get a depermutation representing translation by a unit cell lattice point.
     ///
     /// Please see `conventions.md` for an explanation of depermutations.
@@ -345,6 +348,8 @@ impl SupercellToken {
 // functions prefixed with 'image' describe the quotient space of unit cell images.
 // (which is of size 'periods.iter().product()')
 
+// !!! This function affects the supercell convention !!! (SUPERCELL-CONV)
+// When modifying it, you must modify all functions that have this label.
 fn image_cell_indices(periods: [u32; 3]) -> Vec<V3<u32>> {
     let mut out = Vec::with_capacity(periods.iter().product::<u32>() as usize);
     for ia in 0..periods[0] {

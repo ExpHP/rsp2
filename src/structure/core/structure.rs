@@ -329,6 +329,32 @@ impl<M> Structure<M> {
         self.reduce_positions_fast(); // -> [0.0, 1.0)
     }
 
+    /// Get the permutation that, when applied to this structure, makes the
+    /// coords match another.
+    pub fn perm_to_match_coords<M2>(
+        &self,
+        other: &Structure<M2>,
+        tol: f64,
+    ) -> Result<Perm, ::algo::find_perm::PositionMatchError>
+    {
+        // (include abs; arbitrary lattices may have near-zero cancellations)
+        // (NOTE: maybe this test on the lattice should use a larger or smaller
+        //        tolerance than the perm search. Haven't thought it through)
+        assert_eq!(self.num_atoms(), other.num_atoms());
+        assert_close!(rel=tol, abs=tol,
+            self.lattice().matrix().unvee(),
+            other.lattice().matrix().unvee(),
+        );
+        let meta = vec![(); self.coords.len()];
+        ::algo::find_perm::brute_force_with_sort_trick(
+            self.lattice(),
+            &meta,
+            &self.to_fracs(),
+            &other.to_fracs(),
+            tol,
+        )
+    }
+
     /// Reduces all fractional coordinates into [0.0, 1.0].
     ///
     /// Yes, that is a doubly inclusive range.

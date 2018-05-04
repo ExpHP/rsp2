@@ -1,6 +1,6 @@
 extern crate rsp2_array_utils;
 extern crate rsp2_array_types;
-#[cfg(test)] #[macro_use] extern crate rsp2_assert_close;
+#[macro_use] extern crate rsp2_assert_close;
 
 
 extern crate ordered_float;
