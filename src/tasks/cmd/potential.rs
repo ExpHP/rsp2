@@ -67,13 +67,8 @@ impl PotentialBuilder {
 
     // laziest route to easily adapt code that used to receive
     // an InnerBuilder directly (that's what LammpsBuilder USED to be)
-    pub(crate) fn with_modified_inner<F>(&self, mut f: F) -> Self
-    where F: FnMut(&mut InnerBuilder) -> &mut InnerBuilder,
-    {
-        let mut out = self.clone();
-        let _ = f(&mut out.builder);
-        out
-    }
+    pub(crate) fn threaded(&self, threaded: bool) -> Self
+    { let mut me = self.clone(); me.builder.threaded(threaded); me }
 
     pub(crate) fn flat_diff_fn(&self, structure: ElementStructure) -> FailResult<Box<DynFlatDiffFn<'static>>>
     {Ok({

@@ -224,7 +224,7 @@ fn do_relax(
     let sc_dims = potential_settings.supercell.dim_for_unitcell(structure.lattice());
     let (supercell, sc_token) = supercell::diagonal(sc_dims).build(structure);
 
-    let mut flat_diff_fn = pot.with_modified_inner(|b| b.threaded(true)).flat_diff_fn(supercell.clone())?;
+    let mut flat_diff_fn = pot.threaded(true).flat_diff_fn(supercell.clone())?;
     let relaxed_flat = ::rsp2_minimize::acgsd(
         cg_settings,
         supercell.to_carts().flat(),
@@ -297,7 +297,7 @@ fn _do_cg_along_evecs(
     let flat_evecs: Vec<_> = evecs.iter().map(|ev| ev.flat()).collect();
     let init_pos = supercell.to_carts();
 
-    let mut flat_diff_fn = pot.with_modified_inner(|b| b.threaded(true)).flat_diff_fn(supercell.clone())?;
+    let mut flat_diff_fn = pot.threaded(true).flat_diff_fn(supercell.clone())?;
     let relaxed_coeffs = ::rsp2_minimize::acgsd(
         cg_settings,
         &vec![0.0; evecs.len()],
@@ -319,7 +319,7 @@ fn do_minimize_along_evec(
     let sc_dims = settings.supercell.dim_for_unitcell(structure.lattice());
     let (structure, sc_token) = supercell::diagonal(sc_dims).build(structure);
     let evec = sc_token.replicate(evec);
-    let mut diff_fn = pot.with_modified_inner(|b| b.threaded(true)).flat_diff_fn(structure.clone())?;
+    let mut diff_fn = pot.threaded(true).flat_diff_fn(structure.clone())?;
 
     let from_structure = structure;
     let direction = &evec[..];
