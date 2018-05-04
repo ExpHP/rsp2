@@ -20,21 +20,18 @@ const DEFAULT_AIREBO_LJ_ENABLED:      bool = true;
 const DEFAULT_AIREBO_TORSION_ENABLED: bool = false;
 
 pub type DynPotential = Box<Potential<Meta=Element>>;
-pub type Lammps = ::rsp2_lammps_wrap::Lammps<DynPotential>;
+//pub type Lammps = ::rsp2_lammps_wrap::Lammps<DynPotential>;
 
-extension_trait! {
-    pub LammpsExt for Lammps {
-        fn flat_diff_fn<'a>(
-            &'a mut self,
-        ) -> Box<FnMut(&[f64]) -> FailResult<(f64, Vec<f64>)> + 'a>
-        {
-            Box::new(move |pos| Ok({
-                self.set_carts(pos.nest())?;
-                self.compute().map(|(v, g)| (v, g.unvee().flat().to_vec()))?
-            }))
-        }
-    }
-}
+/// Trait aliases
+pub trait FlatDiffFn: FnMut(&[f64]) -> FailResult<(f64, Vec<f64>)> {}
+pub trait DiffFn: FnMut(ElementStructure) -> FailResult<(f64, Vec<V3>)> {}
+
+impl<F> FlatDiffFn for F where F: FnMut(&[f64]) -> FailResult<(f64, Vec<f64>)> {}
+impl<F> DiffFn for F where F: FnMut(ElementStructure) -> FailResult<(f64, Vec<V3>)> {}
+
+/// Alias for the trait alias object types, to work around #23856
+pub type DynFlatDiffFn<'a> = FlatDiffFn<Output=FailResult<(f64, Vec<f64>)>> + 'a;
+pub type DynDiffFn<'a> = DiffFn<Output=FailResult<(f64, Vec<V3>)>> + 'a;
 
 // A bundle of everything we need to initialize a Lammps API object.
 //
@@ -71,15 +68,32 @@ impl PotentialBuilder {
     // laziest route to easily adapt code that used to receive
     // an InnerBuilder directly (that's what LammpsBuilder USED to be)
     pub(crate) fn with_modified_inner<F>(&self, mut f: F) -> Self
-        where F: FnMut(&mut InnerBuilder) -> &mut InnerBuilder,
+    where F: FnMut(&mut InnerBuilder) -> &mut InnerBuilder,
     {
         let mut out = self.clone();
         let _ = f(&mut out.builder);
         out
     }
 
-    pub(crate) fn build(&self, structure: ElementStructure) -> FailResult<Lammps>
+    pub(crate) fn flat_diff_fn(&self, structure: ElementStructure) -> FailResult<Box<DynFlatDiffFn<'static>>>
     {Ok({
+        let mut lmp = self.build_lammps(structure)?;
+        Box::new(move |pos: &[f64]| Ok({
+            lmp.set_carts(pos.nest())?;
+            lmp.compute().map(|(v, g)| (v, g.unvee().flat().to_vec()))?
+        }))
+    })}
+
+    pub(crate) fn diff_fn(&self, structure: ElementStructure) -> FailResult<Box<DynDiffFn<'static>>>
+    {Ok({
+        let mut lmp = self.build_lammps(structure)?;
+        Box::new(move |structure: ElementStructure| Ok({
+            lmp.set_structure(structure)?;
+            lmp.compute()?
+        }))
+    })}
+
+    fn build_lammps(&self, structure: ElementStructure) -> FailResult<::rsp2_lammps_wrap::Lammps<DynPotential>> {
         let potential: DynPotential = match self.potential {
             cfg::PotentialKind::Airebo(ref cfg) => {
                 Box::new(Airebo::from(cfg))
@@ -88,8 +102,34 @@ impl PotentialBuilder {
                 Box::new(KolmogorovCrespiZ::from(cfg))
             },
         };
-        self.builder.build(potential, structure)?
-    })}
+        self.builder.build(potential, structure)
+            .map_err(Into::into)
+    }
+
+    /// Do a one-off computation.
+    ///
+    /// This only exists for convenience.
+    pub(crate) fn compute(&self, structure: &ElementStructure) -> FailResult<(f64, Vec<V3>)>
+    { self.build_lammps(structure.clone())?.compute() }
+
+    /// Do a one-off computation of potential.
+    ///
+    /// Lammps is initialized from scratch, and dropped at the end.
+    /// This only exists for convenience.
+    pub(crate) fn compute_value(&self, structure: &ElementStructure) -> FailResult<f64>
+    { self.build_lammps(structure.clone())?.compute_value() }
+
+    /// Do a one-off computation of gradient.
+    ///
+    /// This only exists for convenience.
+    pub(crate) fn compute_grad(&self, structure: &ElementStructure) -> FailResult<Vec<V3>>
+    { self.build_lammps(structure.clone())?.compute_grad() }
+
+    /// Do a one-off computation of force.
+    ///
+    /// This only exists for convenience.
+    pub(crate) fn compute_force(&self, structure: &ElementStructure) -> FailResult<Vec<V3>>
+    { self.build_lammps(structure.clone())?.compute_force() }
 }
 
 pub use self::airebo::Airebo;

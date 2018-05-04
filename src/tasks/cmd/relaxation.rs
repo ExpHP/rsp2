@@ -1,6 +1,6 @@
 use super::trial::TrialDir;
 use super::GammaSystemAnalysis;
-use super::potential::{Lammps, PotentialBuilder, LammpsExt};
+use super::potential::{PotentialBuilder, DynFlatDiffFn};
 use super::CliArgs;
 use super::{write_eigen_info_for_humans, write_eigen_info_for_machines};
 use super::SupercellSpecExt;
@@ -224,11 +224,11 @@ fn do_relax(
     let sc_dims = potential_settings.supercell.dim_for_unitcell(structure.lattice());
     let (supercell, sc_token) = supercell::diagonal(sc_dims).build(structure);
 
-    let mut pot = pot.with_modified_inner(|b| b.threaded(true)).build(supercell.clone())?;
+    let mut flat_diff_fn = pot.with_modified_inner(|b| b.threaded(true)).flat_diff_fn(supercell.clone())?;
     let relaxed_flat = ::rsp2_minimize::acgsd(
         cg_settings,
         supercell.to_carts().flat(),
-        &mut *pot.flat_diff_fn(),
+        &mut *flat_diff_fn,
     ).unwrap().position;
 
     let supercell = supercell.with_coords(CoordsKind::Carts(relaxed_flat.nest().to_vec()));
@@ -297,11 +297,11 @@ fn _do_cg_along_evecs(
     let flat_evecs: Vec<_> = evecs.iter().map(|ev| ev.flat()).collect();
     let init_pos = supercell.to_carts();
 
-    let mut pot = pot.with_modified_inner(|b| b.threaded(true)).build(supercell.clone())?;
+    let mut flat_diff_fn = pot.with_modified_inner(|b| b.threaded(true)).flat_diff_fn(supercell.clone())?;
     let relaxed_coeffs = ::rsp2_minimize::acgsd(
         cg_settings,
         &vec![0.0; evecs.len()],
-        &mut *lammps_constrained_diff_fn(&mut pot, init_pos.flat(), &flat_evecs),
+        &mut *lammps_constrained_diff_fn(&mut *flat_diff_fn, init_pos.flat(), &flat_evecs),
     ).unwrap().position;
 
     let final_flat_pos = flat_constrained_position(init_pos.flat(), &relaxed_coeffs, &flat_evecs);
@@ -319,7 +319,7 @@ fn do_minimize_along_evec(
     let sc_dims = settings.supercell.dim_for_unitcell(structure.lattice());
     let (structure, sc_token) = supercell::diagonal(sc_dims).build(structure);
     let evec = sc_token.replicate(evec);
-    let mut pot = pot.with_modified_inner(|b| b.threaded(true)).build(structure.clone())?;
+    let mut diff_fn = pot.with_modified_inner(|b| b.threaded(true)).flat_diff_fn(structure.clone())?;
 
     let from_structure = structure;
     let direction = &evec[..];
@@ -329,7 +329,7 @@ fn do_minimize_along_evec(
         pos
     };
     let alpha = ::rsp2_minimize::exact_ls(0.0, 1e-4, |alpha| {
-        let gradient = pot.flat_diff_fn()(&pos_at_alpha(alpha))?.1;
+        let gradient = diff_fn(&pos_at_alpha(alpha))?.1;
         let slope = vdot(&gradient[..], direction.flat());
         FailOk(::rsp2_minimize::exact_ls::Slope(slope))
     })??.alpha;
@@ -345,21 +345,19 @@ fn warn_on_improvable_lattice_params(
 ) -> FailResult<()>
 {Ok({
     const SCALE_AMT: f64 = 1e-6;
-    let mut pot = pot.build(structure.clone())?;
-    let center_value = pot.compute_value()?;
+    let mut diff_fn = pot.diff_fn(structure.clone())?;
+    let center_value = diff_fn(structure.clone())?.0;
 
     let shrink_value = {
         let mut structure = structure.clone();
         structure.scale_vecs(&[1.0 - SCALE_AMT, 1.0 - SCALE_AMT, 1.0]);
-        pot.set_structure(structure)?;
-        pot.compute_value()?
+        diff_fn(structure)?.0
     };
 
     let enlarge_value = {
         let mut structure = structure.clone();
         structure.scale_vecs(&[1.0 + SCALE_AMT, 1.0 + SCALE_AMT, 1.0]);
-        pot.set_structure(structure)?;
-        pot.compute_value()?
+        diff_fn(structure)?.0
     };
 
     if shrink_value.min(enlarge_value) < center_value {
@@ -385,13 +383,14 @@ fn flat_constrained_position(
 //
 // There will be one coordinate for each eigenvector.
 fn lammps_constrained_diff_fn<'a>(
-    pot: &'a mut Lammps,
+    // operates on 3N coords
+    flat_3n_diff_fn: &'a mut DynFlatDiffFn<'a>,
+    // K values, K <= 3N
     flat_init_pos: &'a [f64],
+    // K eigenvectors
     flat_evs: &'a [&[f64]],
 ) -> Box<FnMut(&[f64]) -> FailResult<(f64, Vec<f64>)> + 'a>
 {
-    let mut compute_from_3n_flat = pot.flat_diff_fn();
-
     Box::new(move |coeffs| Ok({
         assert_eq!(coeffs.len(), flat_evs.len());
 
@@ -403,7 +402,7 @@ fn lammps_constrained_diff_fn<'a>(
         // (though the following is transposed for our row-centric formalism)
         let flat_pos = flat_constrained_position(flat_init_pos, coeffs, flat_evs);
 
-        let (value, flat_grad) = compute_from_3n_flat(&flat_pos)?;
+        let (value, flat_grad) = flat_3n_diff_fn(&flat_pos)?;
 
         let grad = dot_mat_vec_dumb(flat_evs, &flat_grad);
         (value, grad)
@@ -521,7 +520,7 @@ pub(crate) fn optimize_layer_parameters(
         }
 
         let get_value = || FailOk({
-            pot.build(carbon(&builder.borrow().assemble()))?.compute_value()?
+            pot.compute_value(&carbon(&builder.borrow().assemble()))?
         });
 
         // optimize them one-by-one.

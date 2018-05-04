@@ -1,6 +1,6 @@
 
 use ::FailResult;
-use super::potential::{PotentialBuilder, LammpsExt};
+use super::potential::{PotentialBuilder};
 use super::SupercellSpecExt;
 
 use ::rsp2_tasks_config as cfg;
@@ -127,8 +127,7 @@ pub(crate) fn perform_acoustic_search(
     // look at the negative eigenvectors for rotations and true imaginary modes
     let sc_dims = supercell_spec.dim_for_unitcell(structure.lattice());
     let (superstructure, sc_token) = supercell::diagonal(sc_dims).build(structure.clone());
-    let mut pot = pot.with_modified_inner(|b| b.threaded(true)).build(superstructure.clone())?;
-    let mut diff_at_pos = pot.flat_diff_fn();
+    let mut diff_at_pos = pot.with_modified_inner(|b| b.threaded(true)).flat_diff_fn(superstructure.clone())?;
 
     let pos_0 = superstructure.to_carts();
     let grad_0 = diff_at_pos(pos_0.flat())?.1;

@@ -288,11 +288,11 @@ impl TrialDir {
         let mut out = vec![];
         out.push(ev_analysis.make_summary(settings));
         out.push({
-            let f = |structure: ElementStructure| FailOk({
+            let f = |structure: &ElementStructure| FailOk({
                 let na = structure.num_atoms() as f64;
-                pot.build(structure)?.compute_value()? / na
+                pot.compute_value(structure)? / na
             });
-            let f_path = |s: &AsPath| FailOk(f(poscar::load(self.read_file(s)?)?)?);
+            let f_path = |s: &AsPath| FailOk(f(&poscar::load(self.read_file(s)?)?)?);
 
             let initial = f_path(&"initial.vasp")?;
             let final_ = f_path(&"final.vasp")?;
@@ -331,22 +331,22 @@ fn do_force_sets_at_disps<P: AsPath + Send + Sync>(
     trace!("Computing forces at displacements");
 
     let counter = ::util::AtomicCounter::new();
-    let compute = move |structure| FailOk({
+    let compute = move |structure: &ElementStructure| FailOk({
         let i = counter.inc();
         eprint!("\rdisp {} of {}", i + 1, disp_dir.displacements().len());
         ::std::io::stderr().flush().unwrap();
 
-        pot.build(structure)?.compute_force()?
+        pot.compute_force(structure)?
     });
 
     let force_sets = match threading {
         &cfg::Threading::Lammps |
         &cfg::Threading::Serial => {
-            disp_dir.displaced_structures().map(compute).collect::<FailResult<Vec<_>>>()?
+            disp_dir.displaced_structures().map(|s| compute(&s)).collect::<FailResult<Vec<_>>>()?
         },
         &cfg::Threading::Rayon => {
             let structures = disp_dir.displaced_structures().collect::<Vec<_>>();
-            structures.into_par_iter().map(compute).collect::<FailResult<Vec<_>>>()?
+            structures.into_par_iter().map(|s| compute(&s)).collect::<FailResult<Vec<_>>>()?
         },
     };
     eprintln!();
@@ -506,10 +506,8 @@ impl TrialDir {
                         // println!("{:?}", pos.flat().iter().sum::<f64>());
 
                         eprint!("\rdatapoint {:>6} of {}", i, w * h);
-                        let pot = PotentialBuilder::new(&settings.threading, &settings.potential);
-                        let mut pot = pot.build(structure.clone())?;
-                        pot.set_carts(&pos)?;
-                        pot.compute_grad()?
+                        PotentialBuilder::new(&settings.threading, &settings.potential)
+                            .compute_grad(&structure.clone().with_carts(pos.to_vec()))?
                     })}
                 }
             )?
