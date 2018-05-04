@@ -170,10 +170,10 @@ pub fn save_bands_after_the_fact() {
                 ])
         });
         let matches = app.get_matches();
-        let dir_args = de.resolve_args(&matches)?;
+        let () = de.resolve_args(&matches)?;
 
-        let old_trial = PathDir::new(matches.expect_value_of("trial_dir"))?;
-        let trial = TrialDir::create_new(dir_args)?;
+        let trial = PathDir::new(matches.expect_value_of("trial_dir"))?;
+        let trial = TrialDir::from_existing(&trial)?;
         logfile.start(PathFile::new(trial.new_logfile_path()?)?)?;
 
         let settings = trial.read_settings()?;
