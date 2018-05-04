@@ -1,6 +1,6 @@
 use super::trial::TrialDir;
 use super::GammaSystemAnalysis;
-use super::lammps::{Lammps, LammpsBuilder, LammpsExt};
+use super::potential::{Lammps, PotentialBuilder, LammpsExt};
 use super::CliArgs;
 use super::{write_eigen_info_for_humans, write_eigen_info_for_machines};
 use super::SupercellSpecExt;
@@ -31,7 +31,7 @@ impl TrialDir {
         &self,
         settings: &Settings,
         cli: &CliArgs,
-        lmp: &LammpsBuilder,
+        pot: &PotentialBuilder,
         atom_layers: &Option<Vec<usize>>,
         layer_sc_mats: &Option<Vec<ScMatrix>>,
         phonopy: &PhonopyBuilder,
@@ -49,7 +49,7 @@ impl TrialDir {
             trace!("============================");
             trace!("Begin relaxation # {}", iteration);
 
-            let structure = do_relax(&lmp, &settings.cg, &settings.potential, structure)?;
+            let structure = do_relax(&pot, &settings.cg, &settings.potential, structure)?;
 
             trace!("============================");
 
@@ -85,7 +85,7 @@ impl TrialDir {
                 };
 
                 self.do_post_relaxation_computations(
-                    settings, save_bands.as_ref(), lmp, aux_info, phonopy, &structure,
+                    settings, save_bands.as_ref(), pot, aux_info, phonopy, &structure,
                 )?
             };
 
@@ -96,7 +96,7 @@ impl TrialDir {
             }
 
             let (structure, did_chasing) = self.maybe_do_ev_chasing(
-                settings, lmp, structure, &ev_analysis, &evals, &evecs,
+                settings, pot, structure, &ev_analysis, &evals, &evecs,
             )?;
 
             self.write_poscar(
@@ -105,7 +105,7 @@ impl TrialDir {
                 &structure,
             )?;
 
-            warn_on_improvable_lattice_params(&lmp, &structure)?;
+            warn_on_improvable_lattice_params(&pot, &structure)?;
 
             match loop_state.step(did_chasing) {
                 EvLoopStatus::KeepGoing => {
@@ -126,7 +126,7 @@ impl TrialDir {
     fn maybe_do_ev_chasing(
         &self,
         settings: &Settings,
-        lmp: &LammpsBuilder,
+        pot: &PotentialBuilder,
         structure: ElementStructure,
         ev_analysis: &GammaSystemAnalysis,
         evals: &[f64],
@@ -150,7 +150,7 @@ impl TrialDir {
             n => {
                 trace!("Chasing {} bad eigenvectors...", n);
                 let structure = do_eigenvector_chase(
-                    &lmp,
+                    &pot,
                     &settings.ev_chase,
                     &settings.potential,
                     structure,
@@ -215,7 +215,7 @@ impl EvLoopFsm {
 //-----------------------------------------------------------------------------
 
 fn do_relax(
-    lmp: &LammpsBuilder,
+    pot: &PotentialBuilder,
     cg_settings: &cfg::Acgsd,
     potential_settings: &cfg::Potential,
     structure: ElementStructure,
@@ -224,11 +224,11 @@ fn do_relax(
     let sc_dims = potential_settings.supercell.dim_for_unitcell(structure.lattice());
     let (supercell, sc_token) = supercell::diagonal(sc_dims).build(structure);
 
-    let mut lmp = lmp.with_modified_inner(|b| b.threaded(true)).build(supercell.clone())?;
+    let mut pot = pot.with_modified_inner(|b| b.threaded(true)).build(supercell.clone())?;
     let relaxed_flat = ::rsp2_minimize::acgsd(
         cg_settings,
         supercell.to_carts().flat(),
-        &mut *lmp.flat_diff_fn(),
+        &mut *pot.flat_diff_fn(),
     ).unwrap().position;
 
     let supercell = supercell.with_coords(CoordsKind::Carts(relaxed_flat.nest().to_vec()));
@@ -236,7 +236,7 @@ fn do_relax(
 })}
 
 fn do_eigenvector_chase(
-    lmp: &LammpsBuilder,
+    pot: &PotentialBuilder,
     chase_settings: &cfg::EigenvectorChase,
     potential_settings: &cfg::Potential,
     mut structure: ElementStructure,
@@ -246,7 +246,7 @@ fn do_eigenvector_chase(
     match *chase_settings {
         cfg::EigenvectorChase::OneByOne => {
             for &(ref name, evec) in bad_evecs {
-                let (alpha, new_structure) = do_minimize_along_evec(lmp, potential_settings, structure, &evec[..])?;
+                let (alpha, new_structure) = do_minimize_along_evec(pot, potential_settings, structure, &evec[..])?;
                 info!("Optimized along {}, a = {:e}", name, alpha);
 
                 structure = new_structure;
@@ -256,7 +256,7 @@ fn do_eigenvector_chase(
         cfg::EigenvectorChase::Acgsd(ref cg_settings) => {
             let evecs: Vec<_> = bad_evecs.iter().map(|&(_, ev)| ev).collect();
             do_cg_along_evecs(
-                lmp,
+                pot,
                 cg_settings,
                 potential_settings,
                 structure,
@@ -267,7 +267,7 @@ fn do_eigenvector_chase(
 })}
 
 fn do_cg_along_evecs<V, I>(
-    lmp: &LammpsBuilder,
+    pot: &PotentialBuilder,
     cg_settings: &cfg::Acgsd,
     potential_settings: &cfg::Potential,
     structure: ElementStructure,
@@ -279,11 +279,11 @@ where
 {Ok({
     let evecs: Vec<_> = evecs.into_iter().collect();
     let refs: Vec<_> = evecs.iter().map(|x| x.as_ref()).collect();
-    _do_cg_along_evecs(lmp, cg_settings, potential_settings, structure, &refs)?
+    _do_cg_along_evecs(pot, cg_settings, potential_settings, structure, &refs)?
 })}
 
 fn _do_cg_along_evecs(
-    lmp: &LammpsBuilder,
+    pot: &PotentialBuilder,
     cg_settings: &cfg::Acgsd,
     potential_settings: &cfg::Potential,
     structure: ElementStructure,
@@ -297,11 +297,11 @@ fn _do_cg_along_evecs(
     let flat_evecs: Vec<_> = evecs.iter().map(|ev| ev.flat()).collect();
     let init_pos = supercell.to_carts();
 
-    let mut lmp = lmp.with_modified_inner(|b| b.threaded(true)).build(supercell.clone())?;
+    let mut pot = pot.with_modified_inner(|b| b.threaded(true)).build(supercell.clone())?;
     let relaxed_coeffs = ::rsp2_minimize::acgsd(
         cg_settings,
         &vec![0.0; evecs.len()],
-        &mut *lammps_constrained_diff_fn(&mut lmp, init_pos.flat(), &flat_evecs),
+        &mut *lammps_constrained_diff_fn(&mut pot, init_pos.flat(), &flat_evecs),
     ).unwrap().position;
 
     let final_flat_pos = flat_constrained_position(init_pos.flat(), &relaxed_coeffs, &flat_evecs);
@@ -310,7 +310,7 @@ fn _do_cg_along_evecs(
 })}
 
 fn do_minimize_along_evec(
-    lmp: &LammpsBuilder,
+    pot: &PotentialBuilder,
     settings: &cfg::Potential,
     structure: ElementStructure,
     evec: &[V3],
@@ -319,7 +319,7 @@ fn do_minimize_along_evec(
     let sc_dims = settings.supercell.dim_for_unitcell(structure.lattice());
     let (structure, sc_token) = supercell::diagonal(sc_dims).build(structure);
     let evec = sc_token.replicate(evec);
-    let mut lmp = lmp.with_modified_inner(|b| b.threaded(true)).build(structure.clone())?;
+    let mut pot = pot.with_modified_inner(|b| b.threaded(true)).build(structure.clone())?;
 
     let from_structure = structure;
     let direction = &evec[..];
@@ -329,7 +329,7 @@ fn do_minimize_along_evec(
         pos
     };
     let alpha = ::rsp2_minimize::exact_ls(0.0, 1e-4, |alpha| {
-        let gradient = lmp.flat_diff_fn()(&pos_at_alpha(alpha))?.1;
+        let gradient = pot.flat_diff_fn()(&pos_at_alpha(alpha))?.1;
         let slope = vdot(&gradient[..], direction.flat());
         FailOk(::rsp2_minimize::exact_ls::Slope(slope))
     })??.alpha;
@@ -340,26 +340,26 @@ fn do_minimize_along_evec(
 })}
 
 fn warn_on_improvable_lattice_params(
-    lmp: &LammpsBuilder,
+    pot: &PotentialBuilder,
     structure: &ElementStructure,
 ) -> FailResult<()>
 {Ok({
     const SCALE_AMT: f64 = 1e-6;
-    let mut lmp = lmp.build(structure.clone())?;
-    let center_value = lmp.compute_value()?;
+    let mut pot = pot.build(structure.clone())?;
+    let center_value = pot.compute_value()?;
 
     let shrink_value = {
         let mut structure = structure.clone();
         structure.scale_vecs(&[1.0 - SCALE_AMT, 1.0 - SCALE_AMT, 1.0]);
-        lmp.set_structure(structure)?;
-        lmp.compute_value()?
+        pot.set_structure(structure)?;
+        pot.compute_value()?
     };
 
     let enlarge_value = {
         let mut structure = structure.clone();
         structure.scale_vecs(&[1.0 + SCALE_AMT, 1.0 + SCALE_AMT, 1.0]);
-        lmp.set_structure(structure)?;
-        lmp.compute_value()?
+        pot.set_structure(structure)?;
+        pot.compute_value()?
     };
 
     if shrink_value.min(enlarge_value) < center_value {
@@ -385,12 +385,12 @@ fn flat_constrained_position(
 //
 // There will be one coordinate for each eigenvector.
 fn lammps_constrained_diff_fn<'a>(
-    lmp: &'a mut Lammps,
+    pot: &'a mut Lammps,
     flat_init_pos: &'a [f64],
     flat_evs: &'a [&[f64]],
 ) -> Box<FnMut(&[f64]) -> FailResult<(f64, Vec<f64>)> + 'a>
 {
-    let mut compute_from_3n_flat = lmp.flat_diff_fn();
+    let mut compute_from_3n_flat = pot.flat_diff_fn();
 
     Box::new(move |coeffs| Ok({
         assert_eq!(coeffs.len(), flat_evs.len());
@@ -447,7 +447,7 @@ fn dot_mat_vec_dumb(mat: &[&[f64]], vec: &[f64]) -> Vec<f64>
 
 pub(crate) fn optimize_layer_parameters(
     settings: &cfg::ScaleRanges,
-    lmp: &LammpsBuilder,
+    pot: &PotentialBuilder,
     mut builder: Assemble,
 ) -> FailResult<Assemble>
 {Ok({
@@ -521,7 +521,7 @@ pub(crate) fn optimize_layer_parameters(
         }
 
         let get_value = || FailOk({
-            lmp.build(carbon(&builder.borrow().assemble()))?.compute_value()?
+            pot.build(carbon(&builder.borrow().assemble()))?.compute_value()?
         });
 
         // optimize them one-by-one.

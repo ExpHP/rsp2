@@ -2,8 +2,8 @@
 
 pub(crate) mod integrate_2d;
 
-use self::lammps::{LammpsBuilder};
-mod lammps;
+use self::potential::{PotentialBuilder};
+mod potential;
 
 use self::ev_analyses::GammaSystemAnalysis;
 mod ev_analyses;
@@ -68,17 +68,17 @@ impl TrialDir {
         cli: CliArgs,
     ) -> FailResult<()>
     {Ok({
-        let lmp = LammpsBuilder::new(&settings.threading, &settings.potential.kind);
+        let pot = PotentialBuilder::new(&settings.threading, &settings.potential.kind);
 
         let (original_structure, atom_layers, layer_sc_mats) = read_structure_file(
-            Some(settings), file_format, input, Some(&lmp),
+            Some(settings), file_format, input, Some(&pot),
         )?;
 
         self.write_poscar("initial.vasp", "Initial structure", &original_structure)?;
         let phonopy = phonopy_builder_from_settings(&settings.phonons, original_structure.lattice());
 
         let (structure, ev_analysis, final_bands_dir) = self.do_main_ev_loop(
-            settings, &cli, &lmp, &atom_layers, &layer_sc_mats,
+            settings, &cli, &pot, &atom_layers, &layer_sc_mats,
             &phonopy, original_structure,
         )?;
         let _do_not_drop_the_bands_dir = final_bands_dir;
@@ -87,13 +87,13 @@ impl TrialDir {
 
         write_eigen_info_for_machines(&ev_analysis, self.create_file("eigenvalues.final")?)?;
 
-        self.write_ev_analysis_output_files(settings, &lmp, &ev_analysis)?;
+        self.write_ev_analysis_output_files(settings, &pot, &ev_analysis)?;
     })}
 
     fn write_ev_analysis_output_files(
         &self,
         settings: &Settings,
-        lmp: &LammpsBuilder,
+        pot: &PotentialBuilder,
         eva: &GammaSystemAnalysis,
     ) -> FailResult<()>
     {Ok({
@@ -133,7 +133,7 @@ impl TrialDir {
             })?;
         }
 
-        self.write_summary_file(settings, lmp, eva)?;
+        self.write_summary_file(settings, pot, eva)?;
     })}
 
     // log when writing poscar files, especially during loops
@@ -155,7 +155,7 @@ impl TrialDir {
         &self,
         settings: &Settings,
         save_bands: Option<&PathArc>,
-        lmp: &LammpsBuilder,
+        pot: &PotentialBuilder,
         aux_info: aux_info::Info,
         phonopy: &PhonopyBuilder,
         structure: &ElementStructure,
@@ -163,7 +163,7 @@ impl TrialDir {
     {Ok({
 
         let bands_dir = do_diagonalize(
-            lmp, &settings.threading, phonopy, structure, save_bands, &[Q_GAMMA],
+            pot, &settings.threading, phonopy, structure, save_bands, &[Q_GAMMA],
         )?;
         let (evals, evecs) = read_eigensystem(&bands_dir, &Q_GAMMA)?;
 
@@ -185,7 +185,7 @@ impl TrialDir {
             use self::ev_analyses::*;
 
             let classifications = acoustic_search::perform_acoustic_search(
-                &lmp, &evals, &evecs, &structure, settings,
+                &pot, &evals, &evecs, &structure, settings,
             )?;
 
             let aux_info::Info { atom_layers, atom_masses, layer_sc_mats } = aux_info;
@@ -208,19 +208,19 @@ impl TrialDir {
 
 #[allow(unused)]
 fn do_diagonalize_at_gamma(
-    lmp: &LammpsBuilder,
+    pot: &PotentialBuilder,
     threading: &cfg::Threading,
     phonopy: &PhonopyBuilder,
     structure: &ElementStructure,
     save_bands: Option<&PathArc>,
 ) -> FailResult<(Vec<f64>, Basis3)>
 {Ok({
-    let dir = do_diagonalize(lmp, threading, phonopy, structure, save_bands, &[Q_GAMMA])?;
+    let dir = do_diagonalize(pot, threading, phonopy, structure, save_bands, &[Q_GAMMA])?;
     read_eigensystem(&dir, &Q_GAMMA)?
 })}
 
 fn do_diagonalize(
-    lmp: &LammpsBuilder,
+    pot: &PotentialBuilder,
     threading: &cfg::Threading,
     phonopy: &PhonopyBuilder,
     structure: &ElementStructure,
@@ -229,7 +229,7 @@ fn do_diagonalize(
 ) -> FailResult<DirWithBands<Box<AsPath>>>
 {Ok({
     let disp_dir = phonopy.displacements(&structure)?;
-    let force_sets = do_force_sets_at_disps(&lmp, &threading, &disp_dir)?;
+    let force_sets = do_force_sets_at_disps(&pot, &threading, &disp_dir)?;
 
     let bands_dir = disp_dir
         .make_force_dir(&force_sets)?
@@ -269,7 +269,7 @@ impl TrialDir {
     fn write_summary_file(
         &self,
         settings: &Settings,
-        lmp: &LammpsBuilder,
+        pot: &PotentialBuilder,
         ev_analysis: &GammaSystemAnalysis,
     ) -> FailResult<()> {Ok({
         use ::ui::cfg_merging::{make_nested_mapping, no_summary, merge_summaries};
@@ -290,7 +290,7 @@ impl TrialDir {
         out.push({
             let f = |structure: ElementStructure| FailOk({
                 let na = structure.num_atoms() as f64;
-                lmp.build(structure)?.compute_value()? / na
+                pot.build(structure)?.compute_value()? / na
             });
             let f_path = |s: &AsPath| FailOk(f(poscar::load(self.read_file(s)?)?)?);
 
@@ -320,7 +320,7 @@ fn phonopy_builder_from_settings(
 }
 
 fn do_force_sets_at_disps<P: AsPath + Send + Sync>(
-    lmp: &LammpsBuilder,
+    pot: &PotentialBuilder,
     threading: &cfg::Threading,
     disp_dir: &DirWithDisps<P>,
 ) -> FailResult<Vec<Vec<V3>>>
@@ -336,7 +336,7 @@ fn do_force_sets_at_disps<P: AsPath + Send + Sync>(
         eprint!("\rdisp {} of {}", i + 1, disp_dir.displacements().len());
         ::std::io::stderr().flush().unwrap();
 
-        lmp.build(structure)?.compute_force()?
+        pot.build(structure)?.compute_force()?
     });
 
     let force_sets = match threading {
@@ -506,10 +506,10 @@ impl TrialDir {
                         // println!("{:?}", pos.flat().iter().sum::<f64>());
 
                         eprint!("\rdatapoint {:>6} of {}", i, w * h);
-                        let lmp = LammpsBuilder::new(&settings.threading, &settings.potential);
-                        let mut lmp = lmp.build(structure.clone())?;
-                        lmp.set_carts(&pos)?;
-                        lmp.compute_grad()?
+                        let pot = PotentialBuilder::new(&settings.threading, &settings.potential);
+                        let mut pot = pot.build(structure.clone())?;
+                        pot.set_carts(&pos)?;
+                        pot.compute_grad()?
                     })}
                 }
             )?
@@ -585,12 +585,12 @@ impl TrialDir {
     {Ok({
         use ::rsp2_structure_io::poscar;
 
-        let lmp = LammpsBuilder::new(&settings.threading, &settings.potential.kind);
+        let pot = PotentialBuilder::new(&settings.threading, &settings.potential.kind);
 
         let structure = poscar::load(self.read_file("./final.vasp")?)?;
         let phonopy = phonopy_builder_from_settings(&settings.phonons, structure.lattice());
         do_diagonalize(
-            &lmp, &settings.threading, &phonopy, &structure,
+            &pot, &settings.threading, &phonopy, &structure,
             Some(&self.save_bands_dir()),
             &[Q_GAMMA, Q_K],
         )?;
@@ -612,7 +612,7 @@ impl TrialDir {
     {Ok({
         use ::rsp2_structure_io::poscar;
 
-        let lmp = LammpsBuilder::new(&settings.threading, &settings.potential.kind);
+        let pot = PotentialBuilder::new(&settings.threading, &settings.potential.kind);
 
         let structure = poscar::load(self.read_file("./final.vasp")?)?;
         let phonopy = phonopy_builder_from_settings(&settings.phonons, structure.lattice());
@@ -621,10 +621,10 @@ impl TrialDir {
 
         let save_bands = None;
         let (_, _, _, ev_analysis) = self.do_post_relaxation_computations(
-            settings, save_bands, &lmp, aux_info, &phonopy, &structure,
+            settings, save_bands, &pot, aux_info, &phonopy, &structure,
         )?;
 
-        self.write_ev_analysis_output_files(settings, &lmp, &ev_analysis)?;
+        self.write_ev_analysis_output_files(settings, &pot, &ev_analysis)?;
     })}
 }
 
@@ -639,10 +639,10 @@ impl TrialDir {
         cli: CliArgs,
     ) -> FailResult<()>
     {Ok({
-        let lmp = LammpsBuilder::new(&settings.threading, &settings.potential.kind);
+        let pot = PotentialBuilder::new(&settings.threading, &settings.potential.kind);
 
         let (prim_structure, _atom_layers, _layer_sc_mats) = read_structure_file(
-            Some(settings), file_format, input, Some(&lmp),
+            Some(settings), file_format, input, Some(&pot),
         )?;
 
         self.write_poscar("initial.vasp", "Initial structure", &prim_structure)?;
@@ -751,7 +751,7 @@ impl TrialDir {
 
 //     let structure = poscar::load(open(poscar)?)?;
 
-//     let lmp = LammpsBuilder::new(&cfg::Threading::Lammps, &potential);
+//     let pot = LammpsBuilder::new(&cfg::Threading::Lammps, &potential);
 
 //     create_dir(&outdir)?;
 //     {
@@ -764,7 +764,7 @@ impl TrialDir {
 //         poscar::dump(create("./input.vasp")?, "", &structure)?;
 
 //         let disp_dir = phonopy.displacements(&structure)?;
-//         let force_sets = do_force_sets_at_disps(&lmp, &cfg::Threading::Rayon, &disp_dir)?;
+//         let force_sets = do_force_sets_at_disps(&pot, &cfg::Threading::Rayon, &disp_dir)?;
 //         disp_dir.make_force_dir_in_dir(&force_sets, ".")?;
 
 //         cwd_guard.pop()?;
@@ -784,7 +784,7 @@ pub(crate) fn read_structure_file(
     // FIXME: that's really inconsistent and dumb.
     //        (a function like this really shouldn't do ANY optimization,
     //         but I don't see any other place to do it without mega refactoring...)
-    lmp: Option<&LammpsBuilder>,
+    pot: Option<&PotentialBuilder>,
 ) -> FailResult<(ElementStructure, Option<Vec<usize>>, Option<Vec<ScMatrix>>)> {
     let (original_structure, atom_layers, layer_sc_mats);
     match file_format {
@@ -798,9 +798,9 @@ pub(crate) fn read_structure_file(
             use ::rsp2_structure_gen::layer_sc_info_from_layers_yaml;
 
             let mut layer_builder = load_layers_yaml(input.read()?)?;
-            if let (Some(settings), Some(lmp)) = (settings, lmp) {
+            if let (Some(settings), Some(pot)) = (settings, pot) {
                 layer_builder = self::relaxation::optimize_layer_parameters(
-                    &settings.scale_ranges, lmp, layer_builder,
+                    &settings.scale_ranges, pot, layer_builder,
                 )?;
             }
             original_structure = carbon(&layer_builder.assemble());

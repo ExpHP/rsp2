@@ -41,7 +41,7 @@ extension_trait! {
 // It is nothing more than a bundle of configuration, and can be freely
 // sent across threads.
 #[derive(Debug, Clone)]
-pub(crate) struct LammpsBuilder {
+pub(crate) struct PotentialBuilder {
     pub(crate) builder: InnerBuilder,
     pub(crate) potential: cfg::PotentialKind,
 }
@@ -50,14 +50,14 @@ fn assert_send_sync<S: Send + Sync>() {}
 
 #[allow(unused)]
 fn assert_lammps_builder_send_sync() {
-    assert_send_sync::<LammpsBuilder>();
+    assert_send_sync::<PotentialBuilder>();
 }
 
-impl LammpsBuilder {
+impl PotentialBuilder {
     pub(crate) fn new(
         threading: &cfg::Threading,
         potential: &cfg::PotentialKind,
-    ) -> LammpsBuilder
+    ) -> PotentialBuilder
     {
         let mut builder = InnerBuilder::new();
         builder.append_log("lammps.log");
@@ -65,7 +65,7 @@ impl LammpsBuilder {
 
         let potential = potential.clone();
 
-        LammpsBuilder { builder, potential }
+        PotentialBuilder { builder, potential }
     }
 
     // laziest route to easily adapt code that used to receive
