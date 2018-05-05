@@ -1,5 +1,5 @@
 use ::rsp2_array_utils::{map_arr};
-use ::std::ops::Mul;
+use ::std::ops::{Mul, Div};
 use ::std::sync::Arc;
 
 use ::rsp2_array_types::{V3, M33, M3, mat, inv};
@@ -187,6 +187,39 @@ impl<'a, 'b> Mul<&'b Lattice> for &'a M33 {
         Lattice::new(&(self * other.matrix()))
     }
 }
+
+impl<'a, 'b> Mul<&'b Lattice> for &'a V3 {
+    type Output = V3;
+
+    fn mul(self, other: &'b Lattice) -> V3 {
+        self * other.matrix()
+    }
+}
+
+impl<'b> Mul<&'b Lattice> for V3 {
+    type Output = V3;
+
+    fn mul(self, other: &'b Lattice) -> V3 {
+        self * other.matrix()
+    }
+}
+
+impl<'a, 'b> Div<&'b Lattice> for &'a V3 {
+    type Output = V3;
+
+    fn div(self, other: &'b Lattice) -> V3 {
+        self * other.inverse_matrix()
+    }
+}
+
+impl<'b> Div<&'b Lattice> for V3 {
+    type Output = V3;
+
+    fn div(self, other: &'b Lattice) -> V3 {
+        self * other.inverse_matrix()
+    }
+}
+
 
 impl CheckClose for Lattice {
     type Scalar = f64;

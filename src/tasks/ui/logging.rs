@@ -5,11 +5,23 @@ use ::log::{LogLevel, LogRecord};
 use ::fern::FernLog;
 use ::path_abs::{FileWrite, PathFile};
 
-pub use self::fern::{DelayedLogFile, GLOBAL_LOGFILE};
+pub use self::fern::{CapturableStderr, DelayedLogFile, GLOBAL_LOGFILE};
 mod fern {
     use super::*;
     use ::std::sync::RwLock;
     use ::std::io::prelude::*;
+
+    /// Fern logger that uses `eprintln!`.
+    ///
+    /// This is NOT the same as using `::std::io::stderr()`, because that would
+    /// not get captured properly by the unit test harness.
+    pub struct CapturableStderr;
+
+    impl FernLog for CapturableStderr {
+        fn log_args(&self, payload: &fmt::Arguments, _original: &LogRecord) {
+            eprintln!("{}", payload);
+        }
+    }
 
     /// A log file for fern that can be created *after* logger initialization.
     #[derive(Debug, Default)]
@@ -109,11 +121,25 @@ pub fn init_global_logger() -> FailResult<SetGlobalLogfile>
         // Yes, this really is deliberately boxing a reference (a 'static one).
         // The reason is simply because chain asks for a Box.
         .chain(Box::new(&*GLOBAL_LOGFILE) as Box<FernLog>)
-        .chain(::std::io::stderr());
+        .chain(Box::new(CapturableStderr) as Box<FernLog>);
 
     fern.apply()?;
 
     Ok(SetGlobalLogfile(()))
+}
+
+/// Called by tests to have log output written to the captured stderr, for easier debugging.
+///
+/// Be aware that once one test function calls this, it remains active for the rest.
+/// As a result, it may *appear* that you do not need to call this to see log output
+/// (but you should!).
+///
+/// Tests do not rely on the specific logging framework and output format used by rsp2.
+/// At least, they shouldn't.  (As a rule of thumb, a test should remain just as effective
+/// if all calls to this function were removed.)
+#[cfg(test)]
+pub fn init_test_logger() {
+    let _ = init_global_logger();
 }
 
 #[derive(Debug, Copy, Clone)]

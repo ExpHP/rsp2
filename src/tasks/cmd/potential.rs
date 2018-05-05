@@ -5,7 +5,8 @@
 // (which are decisions that `rsp2_lammps_wrap` has largely chosen to defer)
 
 use ::FailResult;
-use ::rsp2_structure::{Layers, Element, Structure, ElementStructure, consts};
+use ::rsp2_structure::{Structure, ElementStructure, consts};
+use ::rsp2_structure::{Layers, Element};
 use ::rsp2_tasks_config as cfg;
 #[allow(unused)] // rustc bug
 use ::rsp2_array_types::{V3, Unvee};
@@ -33,20 +34,20 @@ pub type DynFlatDiffFn<'a> = FlatDiffFn<Output=FailResult<(f64, Vec<f64>)>> + 'a
 pub(crate) use self::lammps::Builder as PotentialBuilder;
 
 /// This is `FnMut(ElementStructure) -> FailResult<(f64, Vec<V3>)>` with convenience methods.
-pub trait DiffFn {
+pub trait DiffFn<Meta = Element> {
     /// Compute the value and gradient.
-    fn compute(&mut self, structure: &ElementStructure) -> FailResult<(f64, Vec<V3>)>;
+    fn compute(&mut self, structure: &Structure<Meta>) -> FailResult<(f64, Vec<V3>)>;
 
     /// Convenience method to compute the potential.
-    fn compute_value(&mut self, structure: &ElementStructure) -> FailResult<f64>
+    fn compute_value(&mut self, structure: &Structure<Meta>) -> FailResult<f64>
     { Ok(self.compute(structure)?.0) }
 
     /// Convenience method to compute the gradient.
-    fn compute_grad(&mut self, structure: &ElementStructure) -> FailResult<Vec<V3>>
+    fn compute_grad(&mut self, structure: &Structure<Meta>) -> FailResult<Vec<V3>>
     { Ok(self.compute(structure)?.1) }
 
     /// Convenience method to compute the force.
-    fn compute_force(&mut self, structure: &ElementStructure) -> FailResult<Vec<V3>>
+    fn compute_force(&mut self, structure: &Structure<Meta>) -> FailResult<Vec<V3>>
     {
         let mut force = self.compute_grad(structure)?;
         for v in &mut force { *v = -*v; }
@@ -109,7 +110,7 @@ mod lammps {
         {
             // a DiffFn 'lambda' whose type will be erased
             struct MyDiffFn(::rsp2_lammps_wrap::Lammps<DynLammpsPotential>);
-            impl DiffFn for MyDiffFn {
+            impl DiffFn<Element> for MyDiffFn {
                 fn compute(&mut self, structure: &ElementStructure) -> FailResult<(f64, Vec<V3>)> {
                     let lmp = &mut self.0;
 
@@ -177,7 +178,7 @@ mod lammps {
     /// like `pot.diff_fn(structure.clone()).compute(&structure)`, which is both
     /// confusing and awkward.
     pub struct OneOff<'a>(&'a Builder);
-    impl<'a> DiffFn for OneOff<'a> {
+    impl<'a> DiffFn<Element> for OneOff<'a> {
         fn compute(&mut self, structure: &ElementStructure) -> FailResult<(f64, Vec<V3>)>
         {
             let mut lmp = self.0.build_lammps(structure.clone())?;
@@ -445,6 +446,149 @@ mod lammps {
             assert_eq!(f_ok(&[I, I, I]), vec![pair(1, 2), pair(1, 3), pair(2, 3)]);
             assert_eq!(f_ok(&[I, I, V]), vec![pair(1, 2), pair(2, 3)]);
             assert_eq!(f_ok(&[I, I, I, I]), vec![pair(1, 2), pair(1, 4), pair(2, 3), pair(3, 4)]);
+        }
+    }
+}
+
+// Dummy potentials for testing purposes
+mod test {
+    use super::*;
+
+    pub struct ConvergeTowards {
+        target: Structure<()>,
+    }
+
+    impl ConvergeTowards {
+        pub fn new<M>(structure: Structure<M>) -> Self
+        { ConvergeTowards { target: structure.map_metadata_into(|_| ()) } }
+    }
+
+    impl<M> DiffFn<M> for ConvergeTowards {
+        fn compute(&mut self, structure: &Structure<M>) -> FailResult<(f64, Vec<V3>)> {
+            (&*self).compute(structure)
+        }
+    }
+
+    // ConvergeTowards does not get mutated
+    impl<'a, M> DiffFn<M> for &'a ConvergeTowards {
+        fn compute(&mut self, structure: &Structure<M>) -> FailResult<(f64, Vec<V3>)> {
+            assert_eq!(structure.num_atoms(), self.target.num_atoms());
+            assert_close!(abs=1e-8, structure.lattice(), self.target.lattice());
+
+            // Each position in `structure` experiences a force generated only by the
+            // corresponding position in `target`.
+
+            // In fractional coords, the potential is:
+            //
+            //    Sum_a  Product_k { cos[(x[a,k] - xtarg[a,k] - 0.5) 2 pi] }
+            //    (atom)  (axis)
+            //
+            // This is a periodic function with a minimum at each image of the target point,
+            // and derivatives that are continuous everywhere.
+            use ::std::f64::consts::PI;
+
+            let cur_fracs = structure.to_fracs();
+            let target_fracs = self.target.to_fracs();
+            let args_by_coord = {
+                ::util::zip_eq(&cur_fracs, target_fracs)
+                    .map(|(c, t)| V3::from_fn(|k| (c[k] - t[k] - 0.5) * 2.0 * PI))
+                    .collect::<Vec<_>>()
+            };
+            let cos_by_coord = args_by_coord.iter().map(|&v| v.map(f64::cos)).collect::<Vec<_>>();
+            let sin_by_coord = args_by_coord.iter().map(|&v| v.map(f64::sin)).collect::<Vec<_>>();
+
+            let value = {
+                cos_by_coord.iter().map(|v| v.iter().product::<f64>()).sum()
+            };
+            let frac_grad = {
+                ::util::zip_eq(&cos_by_coord, &sin_by_coord)
+                    .map(|(cosines, sines)| { // by atom
+                        // each term is -2pi times a product of two of the cosines
+                        //   with one of the sines.
+                        - 2.0 * PI * V3::from_fn(|k0| {
+                            (0..3).map(|k| {
+                                if k == k0 { sines[k] }
+                                else { cosines[k] }
+                            }).product()
+                        })
+                    })
+            };
+            // To convert to cartesian, use:
+            //    (nabla_cart V).T = (nabla_frac V).T L^-1
+            let cart_grad = frac_grad.map(|v| v / structure.lattice()).collect::<Vec<_>>();
+            Ok((value, cart_grad))
+        }
+    }
+
+    impl ConvergeTowards {
+        // FIXME inherent methods do not make for a generic interface
+        pub(crate) fn flat_diff_fn(&self) -> Box<DynFlatDiffFn>
+        {
+            let mut structure = self.target.clone();
+            Box::new(move |pos: &[f64]| Ok({
+                structure.set_carts(pos.nest().to_vec());
+                let (value, grad) = {self}.compute(&structure)?;
+                (value, grad.unvee().flat().to_vec())
+            }))
+        }
+    }
+
+    #[cfg(test)]
+    #[deny(unused)]
+    mod tests {
+        use super::*;
+        use rsp2_structure::{Lattice, CoordsKind};
+        use ::rsp2_array_types::Envee;
+
+        #[test]
+        fn converge_towards() {
+            ::ui::logging::init_test_logger();
+
+            let lattice = Lattice::from(&[
+                // chosen arbitrarily
+                [ 2.0,  3.0, 4.0],
+                [-1.0,  7.0, 8.0],
+                [-3.0, -4.0, 7.0],
+            ]);
+
+            let target_coords = CoordsKind::Fracs(vec![
+                [ 0.1, 0.7, 3.3],
+                [ 1.2, 1.5, 4.3],
+                [ 0.1, 1.2, 7.8],
+                [-0.6, 0.1, 0.8],
+            ].envee());
+            let start_coords = CoordsKind::Fracs(vec![
+                [ 1.2, 1.5, 4.3],
+                [ 0.1, 0.7, 3.3],
+                [-0.6, 0.1, 0.4],
+                [ 0.1, 1.2, 7.8],
+            ].envee());
+            let expected_fracs = vec![
+                [ 1.1, 1.7, 4.3],
+                [ 0.2, 0.5, 3.3],
+                [-0.9, 0.2, 0.8],
+                [ 0.4, 1.1, 7.8],
+            ];
+
+            let meta = vec![(); start_coords.len()];
+            let target = Structure::new(lattice.clone(), target_coords.clone(), meta.clone());
+            let start = Structure::new(lattice.clone(), start_coords.clone(), meta.clone());
+
+            let diff_fn = ConvergeTowards::new(target);
+            let cg_settings = &from_json!{{
+                "stop-condition": {"grad-max": 1e-25},
+                "alpha-guess-first": 0.1,
+            }};
+
+            let data = ::rsp2_minimize::acgsd(
+                cg_settings,
+                start.to_carts().flat(),
+                &mut *diff_fn.flat_diff_fn(),
+            ).unwrap();
+            println!("{:?}", data.gradient);
+            let final_carts = data.position.nest::<V3>().to_vec();
+            let final_fracs = final_carts.iter().map(|v| v / &lattice).collect::<Vec<_>>();
+            assert_close!(final_fracs.unvee(), expected_fracs)
         }
     }
 }
