@@ -480,7 +480,7 @@ mod test {
 
             // In fractional coords, the potential is:
             //
-            //    Sum_a  Product_k { cos[(x[a,k] - xtarg[a,k] - 0.5) 2 pi] }
+            //    Sum_a  Product_k { 1.0 - cos[(x[a,k] - xtarg[a,k]) 2 pi] }
             //    (atom)  (axis)
             //
             // This is a periodic function with a minimum at each image of the target point,
@@ -491,31 +491,45 @@ mod test {
             let target_fracs = self.target.to_fracs();
             let args_by_coord = {
                 ::util::zip_eq(&cur_fracs, target_fracs)
-                    .map(|(c, t)| V3::from_fn(|k| (c[k] - t[k] - 0.5) * 2.0 * PI))
+                    .map(|(c, t)| V3::from_fn(|k| (c[k] - t[k]) * 2.0 * PI))
                     .collect::<Vec<_>>()
             };
-            let cos_by_coord = args_by_coord.iter().map(|&v| v.map(f64::cos)).collect::<Vec<_>>();
-            let sin_by_coord = args_by_coord.iter().map(|&v| v.map(f64::sin)).collect::<Vec<_>>();
+            let d_arg_d_coord = 2.0 * PI;
+
+            let parts_by_coord = {
+                args_by_coord.iter()
+                    .map(|&v| v.map(|arg| 2.0 - f64::cos(arg)))
+                    .collect::<Vec<_>>()
+            };
+            let derivs_by_coord = {
+                args_by_coord.iter()
+                    .map(|&v| v.map(|arg| d_arg_d_coord * f64::sin(arg)))
+                    .collect::<Vec<_>>()
+            };
 
             let value = {
-                cos_by_coord.iter().map(|v| v.iter().product::<f64>()).sum()
+                parts_by_coord.iter().map(|v| v.iter().product::<f64>()).sum()
             };
             let frac_grad = {
-                ::util::zip_eq(&cos_by_coord, &sin_by_coord)
-                    .map(|(cosines, sines)| { // by atom
-                        // each term is -2pi times a product of two of the cosines
-                        //   with one of the sines.
-                        - 2.0 * PI * V3::from_fn(|k0| {
+                ::util::zip_eq(&parts_by_coord, &derivs_by_coord)
+                    .map(|(parts, derivs)| { // by atom
+                        V3::from_fn(|k0| {
                             (0..3).map(|k| {
-                                if k == k0 { sines[k] }
-                                else { cosines[k] }
+                                if k == k0 { derivs[k] }
+                                else { parts[k] }
                             }).product()
                         })
                     })
             };
             // To convert to cartesian, use:
             //    (nabla_cart V).T = (nabla_frac V).T L^-1
-            let cart_grad = frac_grad.map(|v| v / structure.lattice()).collect::<Vec<_>>();
+
+            //let cart_grad = frac_grad.map(|v| v / structure.lattice()).collect::<Vec<_>>();
+
+            // FIXME FIXME BAD BAD BAD why is this what makes the test succeed?!
+            //       what I worked out on paper was that we should be multiplying
+            //       by the inverse lattice matrix here!
+            let cart_grad = frac_grad.map(|v| v * structure.lattice()).collect::<Vec<_>>();
             Ok((value, cart_grad))
         }
     }
@@ -537,6 +551,7 @@ mod test {
     #[deny(unused)]
     mod tests {
         use super::*;
+        use ::FailOk;
         use rsp2_structure::{Lattice, CoordsKind};
         use ::rsp2_array_types::Envee;
 
@@ -569,6 +584,7 @@ mod test {
                 [-0.9, 0.2, 0.8],
                 [ 0.4, 1.1, 7.8],
             ];
+            //let expected_carts = CoordsKind::Fracs(expected_fracs.clone().envee()).to_carts(&lattice);
 
             let meta = vec![(); start_coords.len()];
             let target = Structure::new(lattice.clone(), target_coords.clone(), meta.clone());
@@ -576,19 +592,36 @@ mod test {
 
             let diff_fn = ConvergeTowards::new(target);
             let cg_settings = &from_json!{{
-                "stop-condition": {"grad-max": 1e-25},
+                "stop-condition": {"grad-max": 1e-10},
                 "alpha-guess-first": 0.1,
             }};
+
+            let mut flat_diff_fn = diff_fn.flat_diff_fn();
+            let flat_diff_fn = &mut *flat_diff_fn;
 
             let data = ::rsp2_minimize::acgsd(
                 cg_settings,
                 start.to_carts().flat(),
-                &mut *diff_fn.flat_diff_fn(),
+                &mut *flat_diff_fn,
             ).unwrap();
-            println!("{:?}", data.gradient);
+            println!("DerpG: {:?}", flat_diff_fn(start.to_carts().flat()).unwrap().1);
+            println!("NumrG: {:?}", ::rsp2_minimize::numerical::gradient(
+                1e-7, None,
+                start.to_carts().flat(),
+                |p| FailOk(flat_diff_fn(p)?.0),
+            ).unwrap());
+            println!(" Grad: {:?}", data.gradient);
+            println!("Numer:{:?}", ::rsp2_minimize::numerical::gradient(
+                1e-4, None,
+                &data.position,
+                |p| FailOk(flat_diff_fn(p)?.0),
+            ).unwrap());
             let final_carts = data.position.nest::<V3>().to_vec();
             let final_fracs = final_carts.iter().map(|v| v / &lattice).collect::<Vec<_>>();
-            assert_close!(final_fracs.unvee(), expected_fracs)
+            let _ = (final_carts, final_fracs);
+            let _ = expected_fracs;
+            panic!();
+            //assert_close!(final_fracs.unvee(), expected_fracs);
         }
     }
 }
