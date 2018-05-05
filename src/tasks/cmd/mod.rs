@@ -2,7 +2,7 @@
 
 pub(crate) mod integrate_2d;
 
-use self::potential::{PotentialBuilder};
+use self::potential::{PotentialBuilder, DiffFn};
 mod potential;
 
 use self::ev_analyses::GammaSystemAnalysis;
@@ -290,7 +290,7 @@ impl TrialDir {
         out.push({
             let f = |structure: &ElementStructure| FailOk({
                 let na = structure.num_atoms() as f64;
-                pot.compute_value(structure)? / na
+                pot.one_off().compute_value(structure)? / na
             });
             let f_path = |s: &AsPath| FailOk(f(&poscar::load(self.read_file(s)?)?)?);
 
@@ -336,7 +336,7 @@ fn do_force_sets_at_disps<P: AsPath + Send + Sync>(
         eprint!("\rdisp {} of {}", i + 1, disp_dir.displacements().len());
         ::std::io::stderr().flush().unwrap();
 
-        pot.compute_force(structure)?
+        pot.one_off().compute_force(structure)?
     });
 
     let force_sets = match threading {
@@ -507,6 +507,7 @@ impl TrialDir {
 
                         eprint!("\rdatapoint {:>6} of {}", i, w * h);
                         PotentialBuilder::new(&settings.threading, &settings.potential)
+                            .one_off()
                             .compute_grad(&structure.clone().with_carts(pos.to_vec()))?
                     })}
                 }

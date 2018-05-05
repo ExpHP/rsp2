@@ -1,6 +1,6 @@
 use super::trial::TrialDir;
 use super::GammaSystemAnalysis;
-use super::potential::{PotentialBuilder, DynFlatDiffFn};
+use super::potential::{PotentialBuilder, DiffFn, DynFlatDiffFn};
 use super::CliArgs;
 use super::{write_eigen_info_for_humans, write_eigen_info_for_machines};
 use super::SupercellSpecExt;
@@ -346,18 +346,18 @@ fn warn_on_improvable_lattice_params(
 {Ok({
     const SCALE_AMT: f64 = 1e-6;
     let mut diff_fn = pot.diff_fn(structure.clone())?;
-    let center_value = diff_fn(structure.clone())?.0;
+    let center_value = diff_fn.compute_value(structure)?;
 
     let shrink_value = {
         let mut structure = structure.clone();
         structure.scale_vecs(&[1.0 - SCALE_AMT, 1.0 - SCALE_AMT, 1.0]);
-        diff_fn(structure)?.0
+        diff_fn.compute_value(&structure)?
     };
 
     let enlarge_value = {
         let mut structure = structure.clone();
         structure.scale_vecs(&[1.0 + SCALE_AMT, 1.0 + SCALE_AMT, 1.0]);
-        diff_fn(structure)?.0
+        diff_fn.compute_value(&structure)?
     };
 
     if shrink_value.min(enlarge_value) < center_value {
@@ -520,7 +520,11 @@ pub(crate) fn optimize_layer_parameters(
         }
 
         let get_value = || FailOk({
-            pot.compute_value(&carbon(&builder.borrow().assemble()))?
+            // FIXME: I'm not sure why this is a one-off computation; I should try
+            //        reusing a single lammps instance and see what happens.
+            //
+            //        (maybe I had issues with "lost atoms" errors or something)
+            pot.one_off().compute_value(&carbon(&builder.borrow().assemble()))?
         });
 
         // optimize them one-by-one.

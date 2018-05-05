@@ -21,19 +21,40 @@ const DEFAULT_AIREBO_TORSION_ENABLED: bool = false;
 
 //pub type Lammps = ::rsp2_lammps_wrap::Lammps<DynPotential>;
 
-/// Trait aliases
+/// Trait alias for a function producing flat potential and gradient,
+/// for compatibility with `rsp2_minimize`.
 pub trait FlatDiffFn: FnMut(&[f64]) -> FailResult<(f64, Vec<f64>)> {}
-pub trait DiffFn: FnMut(ElementStructure) -> FailResult<(f64, Vec<V3>)> {}
 
 impl<F> FlatDiffFn for F where F: FnMut(&[f64]) -> FailResult<(f64, Vec<f64>)> {}
-impl<F> DiffFn for F where F: FnMut(ElementStructure) -> FailResult<(f64, Vec<V3>)> {}
 
-/// Alias for the trait alias object types, to work around #23856
+// Type aliases for the trait object types, to work around #23856
 pub type DynFlatDiffFn<'a> = FlatDiffFn<Output=FailResult<(f64, Vec<f64>)>> + 'a;
-pub type DynDiffFn<'a> = DiffFn<Output=FailResult<(f64, Vec<V3>)>> + 'a;
 
-// FIXME goal is to reduce the scope of the interface, and turn this into a trait.
 pub(crate) use self::lammps::Builder as PotentialBuilder;
+
+/// This is `FnMut(ElementStructure) -> FailResult<(f64, Vec<V3>)>` with convenience methods.
+pub trait DiffFn {
+    /// Compute the value and gradient.
+    fn compute(&mut self, structure: &ElementStructure) -> FailResult<(f64, Vec<V3>)>;
+
+    /// Convenience method to compute the potential.
+    fn compute_value(&mut self, structure: &ElementStructure) -> FailResult<f64>
+    { Ok(self.compute(structure)?.0) }
+
+    /// Convenience method to compute the gradient.
+    fn compute_grad(&mut self, structure: &ElementStructure) -> FailResult<Vec<V3>>
+    { Ok(self.compute(structure)?.1) }
+
+    /// Convenience method to compute the force.
+    fn compute_force(&mut self, structure: &ElementStructure) -> FailResult<Vec<V3>>
+    {
+        let mut force = self.compute_grad(structure)?;
+        for v in &mut force { *v = -*v; }
+        Ok(force)
+    }
+}
+
+/// All usage of the public API presented by `rsp2_lammps_wrap` is encapsulated here.
 mod lammps {
     use super::*;
 
@@ -43,10 +64,10 @@ mod lammps {
 
     pub type DynLammpsPotential = Box<LammpsPotential<Meta=Element>>;
 
-    // A bundle of everything we need to initialize a Lammps API object.
-    //
-    // It is nothing more than a bundle of configuration, and can be freely
-    // sent across threads.
+    /// A bundle of everything we need to initialize a Lammps API object.
+    ///
+    /// It is nothing more than a bundle of configuration, and can be freely
+    /// sent across threads.
     #[derive(Debug, Clone)]
     pub(crate) struct Builder {
         inner: InnerBuilder,
@@ -78,21 +99,46 @@ mod lammps {
         pub(crate) fn threaded(&self, threaded: bool) -> Self
         { let mut me = self.clone(); me.inner.threaded(threaded); me }
 
+        /// Initialize Lammps to make a DiffFn.
+        ///
+        /// This keeps the Lammps instance between calls to save time.
+        ///
+        /// Some data may be pre-allocated or precomputed based on the input structure,
+        /// so the resulting DiffFn may not support arbitrary structures as input.
+        pub(crate) fn diff_fn(&self, structure: ElementStructure) -> FailResult<Box<DiffFn>>
+        {
+            // a DiffFn 'lambda' whose type will be erased
+            struct MyDiffFn(::rsp2_lammps_wrap::Lammps<DynLammpsPotential>);
+            impl DiffFn for MyDiffFn {
+                fn compute(&mut self, structure: &ElementStructure) -> FailResult<(f64, Vec<V3>)> {
+                    self.0.set_structure(structure.clone())?;
+                    Ok(self.0.compute()?)
+                }
+            }
+            let lmp = self.build_lammps(structure)?;
+            Ok(Box::new(MyDiffFn(lmp)) as Box<_>)
+        }
+
+
+        // FIXME: Not sure how to accomodate other potentials yet here.
+        //        I tried moving it to the DiffFn trait, but there is a bit of
+        //        nuance in that a flat_diff_fn produced by Builder should be 'static,
+        //        while one produced by a DiffFn should borrow `from &mut self`.
+        //
+        /// Convenience method to get a function suitable for `rsp2_minimize`.
+        ///
+        /// The structure given to this is used to supply the lattice and element data.
+        /// Also, some other data may be precomputed from it.
+        ///
+        /// Because Boxes don't implement `Fn` traits for technical reasons,
+        /// you will likely need to write `&mut *pot.flat_diff_fn()` in order to get
+        /// a `&mut DynFlatDiffFn`.
         pub(crate) fn flat_diff_fn(&self, structure: ElementStructure) -> FailResult<Box<DynFlatDiffFn<'static>>>
         {Ok({
             let mut lmp = self.build_lammps(structure)?;
             Box::new(move |pos: &[f64]| Ok({
                 lmp.set_carts(pos.nest())?;
                 lmp.compute().map(|(v, g)| (v, g.unvee().flat().to_vec()))?
-            }))
-        })}
-
-        pub(crate) fn diff_fn(&self, structure: ElementStructure) -> FailResult<Box<DynDiffFn<'static>>>
-        {Ok({
-            let mut lmp = self.build_lammps(structure)?;
-            Box::new(move |structure: ElementStructure| Ok({
-                lmp.set_structure(structure)?;
-                lmp.compute()?
             }))
         })}
 
@@ -113,30 +159,21 @@ mod lammps {
                 .map_err(Into::into)
         }
 
-        /// Do a one-off computation.
-        ///
-        /// This only exists for convenience.
-        pub(crate) fn compute(&self, structure: &ElementStructure) -> FailResult<(f64, Vec<V3>)>
-        { self.build_lammps(structure.clone())?.compute() }
+        pub(crate) fn one_off(&self) -> OneOff { OneOff(self) }
+    }
 
-        /// Do a one-off computation of potential.
-        ///
-        /// Lammps is initialized from scratch, and dropped at the end.
-        /// This only exists for convenience.
-        pub(crate) fn compute_value(&self, structure: &ElementStructure) -> FailResult<f64>
-        { self.build_lammps(structure.clone())?.compute_value() }
-
-        /// Do a one-off computation of gradient.
-        ///
-        /// This only exists for convenience.
-        pub(crate) fn compute_grad(&self, structure: &ElementStructure) -> FailResult<Vec<V3>>
-        { self.build_lammps(structure.clone())?.compute_grad() }
-
-        /// Do a one-off computation of force.
-        ///
-        /// This only exists for convenience.
-        pub(crate) fn compute_force(&self, structure: &ElementStructure) -> FailResult<Vec<V3>>
-        { self.build_lammps(structure.clone())?.compute_force() }
+    /// One-off computations for convenience.  Lammps will be initialized from
+    /// stratch, and dropped at the end.
+    ///
+    /// Usage: `pot.one_off().compute(&structure)`
+    ///
+    /// These are provided because otherwise, you end up needing to write stuff
+    /// like `pot.diff_fn(structure.clone()).compute(&structure)`, which is both
+    /// confusing and awkward.
+    pub struct OneOff<'a>(&'a Builder);
+    impl<'a> DiffFn for OneOff<'a> {
+        fn compute(&mut self, structure: &ElementStructure) -> FailResult<(f64, Vec<V3>)>
+        { Ok(self.0.build_lammps(structure.clone())?.compute()?) }
     }
 
     pub use self::airebo::Airebo;
