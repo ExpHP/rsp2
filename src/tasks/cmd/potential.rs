@@ -111,8 +111,12 @@ mod lammps {
             struct MyDiffFn(::rsp2_lammps_wrap::Lammps<DynLammpsPotential>);
             impl DiffFn for MyDiffFn {
                 fn compute(&mut self, structure: &ElementStructure) -> FailResult<(f64, Vec<V3>)> {
-                    self.0.set_structure(structure.clone())?;
-                    Ok(self.0.compute()?)
+                    let lmp = &mut self.0;
+
+                    lmp.set_structure(structure.clone())?;
+                    let value = lmp.compute_value()?;
+                    let grad = lmp.compute_grad()?;
+                    Ok((value, grad))
                 }
             }
             let lmp = self.build_lammps(structure)?;
@@ -138,7 +142,9 @@ mod lammps {
             let mut lmp = self.build_lammps(structure)?;
             Box::new(move |pos: &[f64]| Ok({
                 lmp.set_carts(pos.nest())?;
-                lmp.compute().map(|(v, g)| (v, g.unvee().flat().to_vec()))?
+                let value = lmp.compute_value()?;
+                let grad = lmp.compute_grad()?;
+                (value, grad.unvee().flat().to_vec())
             }))
         })}
 
@@ -173,7 +179,12 @@ mod lammps {
     pub struct OneOff<'a>(&'a Builder);
     impl<'a> DiffFn for OneOff<'a> {
         fn compute(&mut self, structure: &ElementStructure) -> FailResult<(f64, Vec<V3>)>
-        { Ok(self.0.build_lammps(structure.clone())?.compute()?) }
+        {
+            let mut lmp = self.0.build_lammps(structure.clone())?;
+            let value = lmp.compute_value()?;
+            let grad = lmp.compute_grad()?;
+            Ok((value, grad))
+        }
     }
 
     pub use self::airebo::Airebo;

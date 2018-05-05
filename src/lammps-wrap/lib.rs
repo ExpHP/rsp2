@@ -809,14 +809,7 @@ impl<P: Potential> Lammps<P> {
 //       Don't worry about being sloppy with redundant calls;
 //       the method was designed for such usage.
 impl<P: Potential> Lammps<P> {
-
-    pub fn compute(&mut self) -> FailResult<(f64, Vec<V3>)>
-    {Ok({
-        self.update_computation()?;
-
-        (self.compute_value()?, self.compute_grad()?)
-    })}
-
+    /// Get the potential, possibly performing some computations if necessary.
     pub fn compute_value(&mut self) -> FailResult<f64>
     {Ok({
         self.update_computation()?;
@@ -824,6 +817,7 @@ impl<P: Potential> Lammps<P> {
         unsafe { self.ptr.borrow_mut().extract_compute_0d("RSP2_PE") }?
     })}
 
+    /// Get the forces, possibly performing some computations if necessary.
     pub fn compute_force(&mut self) -> FailResult<Vec<V3>>
     {Ok({
         self.update_computation()?;
@@ -832,6 +826,7 @@ impl<P: Potential> Lammps<P> {
         grad.nest::<[_; 3]>().to_vec().envee()
     })}
 
+    /// Get the gradient, possibly performing some computations if necessary.
     pub fn compute_grad(&mut self) -> FailResult<Vec<V3>>
     {Ok({
         self.update_computation()?;
@@ -843,14 +838,14 @@ impl<P: Potential> Lammps<P> {
         grad
     })}
 
+    /// Get the pressure tensor, possibly performing some computations if necessary.
     pub fn compute_pressure(&mut self) -> FailResult<[f64; 6]>
     {Ok({
         self.update_computation()?;
 
-        // as_array().clone() doesn't manage type inference here as well as deref...
-        *unsafe {
+        unsafe {
             self.ptr.borrow_mut().extract_compute_1d("RSP2_Pressure", ComputeStyle::Global, 6)
-        }?.as_array()
+        }?.to_array()
     })}
 }
 
