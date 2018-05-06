@@ -521,15 +521,10 @@ mod test {
                         })
                     })
             };
-            // To convert to cartesian, use:
-            //    (nabla_cart V).T = (nabla_frac V).T L^-1
 
-            //let cart_grad = frac_grad.map(|v| v / structure.lattice()).collect::<Vec<_>>();
-
-            // FIXME FIXME BAD BAD BAD why is this what makes the test succeed?!
-            //       what I worked out on paper was that we should be multiplying
-            //       by the inverse lattice matrix here!
-            let cart_grad = frac_grad.map(|v| v * structure.lattice()).collect::<Vec<_>>();
+            // Partial derivatives transform like reciprocal coords.
+            let recip = structure.lattice().reciprocal();
+            let cart_grad = frac_grad.map(|v| v * &recip).collect::<Vec<_>>();
             Ok((value, cart_grad))
         }
     }
@@ -611,17 +606,14 @@ mod test {
                 |p| FailOk(flat_diff_fn(p)?.0),
             ).unwrap());
             println!(" Grad: {:?}", data.gradient);
-            println!("Numer:{:?}", ::rsp2_minimize::numerical::gradient(
-                1e-4, None,
+            println!("Numer: {:?}", ::rsp2_minimize::numerical::gradient(
+                1e-7, None,
                 &data.position,
                 |p| FailOk(flat_diff_fn(p)?.0),
             ).unwrap());
             let final_carts = data.position.nest::<V3>().to_vec();
             let final_fracs = final_carts.iter().map(|v| v / &lattice).collect::<Vec<_>>();
-            let _ = (final_carts, final_fracs);
-            let _ = expected_fracs;
-            panic!();
-            //assert_close!(final_fracs.unvee(), expected_fracs);
+            assert_close!(final_fracs.unvee(), expected_fracs);
         }
     }
 }

@@ -5,7 +5,16 @@ use ::std::sync::Arc;
 use ::rsp2_array_types::{V3, M33, M3, mat, inv};
 use ::rsp2_assert_close::{CheckClose, Tolerances, CheckCloseError};
 
-/// A 3x3 matrix with a precomputed inverse.
+/// Defines a vector basis for periodic boundary conditions in three dimensions.
+///
+/// This type currently has two conflated roles:
+///
+/// * A linear transformation between "fractional" data to "cartesian" data.
+///   See [`CoordsKind`] for definitions.
+/// * A 3x3 matrix with a precomputed inverse.
+///   (you might see this usage referred to as "abuse"...)
+///
+/// [`CoordsKind`]: enum.CoordsKind.html
 #[derive(Debug, Clone)]
 pub struct Lattice {
     matrix: Arc<M33>,
@@ -35,15 +44,36 @@ impl Lattice {
         Self::new(&M3(*vectors))
     }
 
-    /// Invert the lattice.
-    #[inline]
-    pub fn inverted(&self) -> Self {
+    // NOTE: There's no inverse or transpose because they're basically
+    //       never the right answer. (at least, I've yet to see any problem
+    //       that is solved by them)
+    //
+    //       In virtually all circumstances (barring a couple of spots that basically
+    //       amount to abuse), a Lattice in RSP2 is something that you multiply against
+    //       "fractional" data (which may be real-space fractional, or reciprocal
+    //       fractional, or even partial derivatives of something with respect to one
+    //       of these bases) to produce "cartesian" data.
+    //
+    //       In these circumstances, the inverse and transpose are never useful.
+    //       (the inverse *matrix* is useful, but not as a Lattice)
+    //            - ML
+    //
+    /// Get the reciprocal lattice.
+    ///
+    /// This is defined as the inverse transpose. **There is no 2 PI factor.**
+    /// It is the lattice that transforms between reciprocal space fractional
+    /// and reciprocal space Euclidean coordinates.
+    ///
+    /// Notice that partial derivatives with respect to a coordinate system
+    /// also transform like the reciprocal of that coordinate system.
+    #[inline] // for dead-code elimination of matrices we don't use
+    pub fn reciprocal(&self) -> Self {
         // FIXME: *strictly speaking* this violates the invariant that 'inverse'
         //        is uniquely determined by 'matrix', which our PartialEq
         //        relies on.
         Self {
-            matrix: self.inverse.clone(),
-            inverse: self.matrix.clone(),
+            matrix: Arc::new(self.inverse.t()),
+            inverse: Arc::new(self.matrix.t()),
         }
     }
 
@@ -161,6 +191,9 @@ impl<'a> From<&'a [[f64; 3]; 3]> for Lattice {
 // FIXME so far I have managed to accidentally flip the order of virtually
 //       every multiplication with a lattice that I have written, despite my
 //       love of row-based matrices. Maybe the '*' operator is just a bad idea.
+//
+// FIXME given my declaration that lattices are always for conversion between
+//       fractional and cartesian data, this impl shouldn't exist.
 impl<'a, 'b> Mul<&'b Lattice> for &'a Lattice {
     type Output = Lattice;
 

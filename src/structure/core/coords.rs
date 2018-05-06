@@ -13,7 +13,31 @@ use ::rsp2_array_types::{V3, M33};
 //       structure types, so that views of them can be constructed.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CoordsKind<V = Vec<V3>> {
+    /// Data that is expressed in a Euclidean basis.
+    ///
+    /// This includes:
+    ///
+    /// * Cartesian coordinates, in units of length.
+    /// * Reciprocal cartesian coordinates, in units of inverse length
+    ///   **without the 2 PI factor**.
+    /// * Partial derivatives of a function with respect to cartesian coordinates.
+    ///   (These conveniently transform like reciprocal cartesian coords.)
+    ///
+    /// ...or basically, anything represented in a form where "distance" is a
+    /// meaningful concept, and where normalization can be meaningfully performed.
     Carts(V),
+
+    /// Data that is expressed in a fractional basis.
+    ///
+    /// This includes:
+    ///
+    /// * Fractional coordinates, as coefficients of lattice vectors.
+    /// * Reciprocal fractional coordinates, as coefficients of a reciprocal lattice.
+    /// * Partial derivatives of a function with respect to fractional coordinates.
+    ///   (These conveniently transform like reciprocal fractional coords.)
+    ///
+    /// Generally speaking, these are representations where integers have a
+    /// special meaning, and where distance is poorly defined.
     Fracs(V),
 }
 
