@@ -706,9 +706,9 @@ impl TrialDir {
         );
         let diffs = {
             ::util::zip_eq(our_superstructure.to_carts(), phonopy_superstructure.to_carts())
-                .map(|(a, b)| (a - b) * our_superstructure.lattice().inverse_matrix())
+                .map(|(a, b)| (a - b) / our_superstructure.lattice())
                 .map(|v| v.map(|x| x - x.round()))
-                .map(|v| v * our_superstructure.lattice().matrix())
+                .map(|v| v * our_superstructure.lattice())
                 .collect::<Vec<_>>()
         };
         assert_close!(

@@ -380,7 +380,7 @@ fn image_signed_cell_indices(periods: [u32; 3], offset: V3<i32>) -> Vec<V3<i32>>
 
 fn image_sc_lattice_vecs(periods: [u32; 3], offset: V3<i32>, lattice: &Lattice) -> Vec<V3> {
     image_signed_cell_indices(periods, offset).into_iter()
-        .map(|idx| idx.map(|x| x as f64) * lattice.matrix())
+        .map(|idx| idx.map(|x| x as f64) * lattice)
         .collect()
 }
 

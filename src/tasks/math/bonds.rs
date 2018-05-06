@@ -159,7 +159,7 @@ impl FracBonds {
         let cart_vector = {
             ::util::zip_eq(::util::zip_eq(&from, &to), image_diff)
                 .map(|((&from, &to), image_diff)| {
-                    let cart_image_diff = image_diff.map(|x| x as f64) * lattice.matrix();
+                    let cart_image_diff = image_diff.map(|x| x as f64) * lattice;
                     carts[to] - carts[from] + cart_image_diff
                 })
                 .collect()

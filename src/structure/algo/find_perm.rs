@@ -269,7 +269,7 @@ fn brute_force_near_identity(
 
             let distance2 = {
                 let diff = (from_fracs[from] - to_fracs[to]).map(|x| x - x.round());
-                let cart = diff * lattice.matrix();
+                let cart = diff * lattice;
                 cart.sqnorm()
             };
             if distance2 < tol * tol {
