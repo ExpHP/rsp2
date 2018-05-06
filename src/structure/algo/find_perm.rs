@@ -1,4 +1,4 @@
-use ::{Lattice, Structure, CoordStructure};
+use ::{Lattice, Coords};
 use ::{FracRot, FracOp};
 use super::group::GroupTree;
 use ::failure::Backtrace;
@@ -12,7 +12,7 @@ use ::{Perm, Permute};
 /// Slow, and not even always correct. (the voronoi cell of the lattice
 /// must be fully contained within one cell image in each direction)
 pub fn dumb_symmetry_test(
-    structure: &CoordStructure,
+    structure: &Coords,
     ops: &[FracOp],
     tol: f64,
 ) -> Result<(), PositionMatchError>
@@ -73,19 +73,21 @@ fn dumb_validate_equivalent(
 //       with inappropriate metadata.
 /// Compute permutations for all operators in a spacegroup.
 pub(crate) fn of_spacegroup(
-    prim_structure: &CoordStructure,
+    prim_structure: &Coords,
     ops: &[FracOp],
     tol: f64,
 ) -> Result<Vec<Perm>, PositionMatchError>
 {
-    of_spacegroup_with_meta(prim_structure, ops, tol)
+    let dummy_meta = vec![(); prim_structure.num_atoms()];
+    of_spacegroup_with_meta(prim_structure, &dummy_meta, ops, tol)
 }
 
 // NOTE: This version uses the metadata to group the atoms and potentially
 //       elide even more comparisons. Is it effective? No idea! But adding it
 //       came at zero extra cost for `M = ()`, so I figured it's worth trying out.
 pub(crate) fn of_spacegroup_with_meta<M: Ord>(
-    prim_structure: &Structure<M>,
+    prim_structure: &Coords,
+    metadata: &[M],
     ops: &[FracOp],
     tol: f64,
 ) -> Result<Vec<Perm>, PositionMatchError>
@@ -101,7 +103,7 @@ pub(crate) fn of_spacegroup_with_meta<M: Ord>(
     tree.try_compute_homomorphism(
         |op| Ok::<_, PositionMatchError>({
             let to_fracs = op.transform_prim(&from_fracs);
-            let perm = brute_force_with_sort_trick(lattice, prim_structure.metadata(), &from_fracs, &to_fracs[..], tol)?;
+            let perm = brute_force_with_sort_trick(lattice, metadata, &from_fracs, &to_fracs[..], tol)?;
             dumb_validate_equivalent(
                 lattice,
                 &to_fracs[..],
@@ -126,18 +128,22 @@ pub(crate) fn of_spacegroup_with_meta<M: Ord>(
 //       with inappropriate metadata.
 #[allow(unused)]
 pub(crate) fn of_rotation(
-    structure: &CoordStructure,
+    structure: &Coords,
     rotation: &FracRot,
     tol: f64,
 ) -> Result<Perm, PositionMatchError>
-{ of_rotation_with_meta(structure, rotation, tol) }
+{
+    let dummy_meta = vec![(); structure.num_atoms()];
+    of_rotation_with_meta(structure, &dummy_meta, rotation, tol)
+}
 
 // NOTE: This version uses the metadata to group the atoms and potentially
 //       elide even more comparisons. Is it effective? No idea! But adding it
 //       came at zero extra cost for `M = ()`, so I figured it's worth trying out.
 #[allow(unused)]
 pub(crate) fn of_rotation_with_meta<M: Ord>(
-    structure: &Structure<M>,
+    structure: &Coords,
+    meta: &[M],
     rotation: &FracRot,
     tol: f64,
 ) -> Result<Perm, PositionMatchError>
@@ -145,7 +151,6 @@ pub(crate) fn of_rotation_with_meta<M: Ord>(
     let lattice = structure.lattice();
     let from_fracs = structure.to_fracs();
     let to_fracs = rotation.transform_prim(&from_fracs);
-    let meta = structure.metadata();
 
     brute_force_with_sort_trick(lattice, meta, &from_fracs, &to_fracs, tol)?
 })}

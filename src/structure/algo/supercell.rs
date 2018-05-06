@@ -1,4 +1,4 @@
-use ::{Structure, Lattice, CoordsKind};
+use ::{Structure, Lattice, CoordsKind, Coords};
 use ::{Perm};
 
 use ::rsp2_array_utils::{arr_from_fn, try_arr_from_fn};
@@ -46,13 +46,52 @@ impl Builder {
         self.offset = center - natural_center; self
     }
 
-    pub fn build<M>(&self, structure: Structure<M>) -> (Structure<M>, SupercellToken)
-    where M: Clone,
-    { self.build_with(structure, |meta, _| meta.clone()) }
+    pub fn build<S>(&self, structure: S) -> (S, SupercellToken)
+    where
+        S: Supercellable,
+        S::Meta: Clone,
+    {
+        let (supercell, sc_token) = self.build_with(structure, |meta, _| meta.clone());
+        (S::from_structure(supercell), sc_token)
+    }
 
-    pub fn build_with<M, M2, F>(&self, structure: Structure<M>, make_meta: F) -> (Structure<M2>, SupercellToken)
-    where F: FnMut(&M, [u32; 3]) -> M2,
-    { diagonal_with(self.clone(), structure, make_meta) }
+    pub fn build_with<S, M2, F>(&self, structure: S, make_meta: F) -> (Structure<M2>, SupercellToken)
+    where
+        S: Supercellable,
+        F: FnMut(&S::Meta, [u32; 3]) -> M2,
+    {
+        let structure = structure.into_structure();
+        diagonal_with(self.clone(), structure, make_meta)
+    }
+}
+
+/// Compatability shim from Coords to old CoordStructure, which supercell
+/// is still based around.
+pub trait Supercellable {
+    type Meta;
+
+    fn into_structure(self) -> Structure<Self::Meta>;
+    fn from_structure(structure: Structure<Self::Meta>) -> Self;
+}
+
+impl<M> Supercellable for Structure<M> {
+    type Meta = M;
+
+    fn into_structure(self) -> Structure<Self::Meta> { self }
+    fn from_structure(structure: Structure<Self::Meta>) -> Self { structure }
+}
+
+impl Supercellable for Coords {
+    type Meta = ();
+
+    fn into_structure(self) -> Structure<Self::Meta> {
+        let dummy_meta = vec![(); self.num_atoms()];
+        self.with_metadata(dummy_meta)
+    }
+    fn from_structure(structure: Structure<Self::Meta>) -> Self {
+        let Structure { lattice, coords, .. } = structure;
+        Coords::new(lattice, coords)
+    }
 }
 
 // ---------------------------------------------------------------
@@ -170,8 +209,10 @@ impl SupercellToken {
     /// * Wrapping of positions (FIXME unnecessary limitation)
     /// * Images of an atom did not move by equal amounts (within `validation_radius`)
     #[inline]
-    pub fn deconstruct<M>(&self, validation_radius: f64, structure: Structure<M>)
-    -> Result<Structure<M>, BigDisplacement>
+    pub fn deconstruct<S>(&self, validation_radius: f64, structure: S)
+    -> Result<S, BigDisplacement>
+    where
+        S: Supercellable,
     {
         self.deconstruct_with(
             validation_radius,
@@ -189,14 +230,18 @@ impl SupercellToken {
     /// * Reordering of atoms
     /// * Wrapping of positions (FIXME unnecessary limitation)
     /// * Images of an atom did not move by equal amounts (within `validation_radius`)
-    pub fn deconstruct_with<M, M2, F>(
+    pub fn deconstruct_with<S, S2, F>(
         &self,
         validation_radius: f64,
-        structure: Structure<M2>,
+        structure: S2,
         mut fold_meta: F,
-    ) -> Result<Structure<M>, BigDisplacement>
-    where F: FnMut(OwnedMetas<M2>) -> M,
+    ) -> Result<S, BigDisplacement>
+    where
+        S: Supercellable,
+        S2: Supercellable,
+        F: FnMut(OwnedMetas<S2::Meta>) -> S::Meta,
     {
+        let structure = structure.into_structure();
         assert_eq!(
             structure.num_atoms(), self.num_supercell_atoms(),
             "wrong # of atoms in supercell",
@@ -266,11 +311,11 @@ impl SupercellToken {
             out_meta.into_iter().rev().collect()
         };
 
-        Ok(Structure {
+        Ok(S::from_structure(Structure {
             lattice: primitive_lattice,
             coords: CoordsKind::Carts(out_carts),
             meta: out_meta,
-        })
+        }))
     }
 
     /// Get the cell index of the centermost cell.
@@ -388,14 +433,14 @@ fn image_sc_lattice_vecs(periods: [u32; 3], offset: V3<i32>, lattice: &Lattice) 
 #[deny(unused)]
 mod tests {
     use ::{Permute, Perm};
-    use ::{CoordsKind, Structure, Lattice};
+    use ::{Coords, CoordsKind, Structure, Lattice};
     use ::rsp2_array_types::{V3, Envee};
 
     #[test]
     fn diagonal_supercell_smoke_test() {
         let coords = CoordsKind::Fracs(vec![[0.0, 0.0, 0.0]].envee());
 
-        let original = Structure::new_coords(Lattice::eye(), coords);
+        let original = Coords::new(Lattice::eye(), coords);
         let (supercell, sc_token) = ::supercell::diagonal([2, 2, 2]).build(original.clone());
 
         assert_eq!(supercell.num_atoms(), 8);
@@ -427,7 +472,7 @@ mod tests {
             [ 0.0,  0.5, 0.5], // cart: [ 0.0, +1.0, +1.0]
         ].envee());
 
-        let original = Structure::new_coords(lattice, coords);
+        let original = Coords::new(lattice, coords);
         let (supercell, sc_token) = ::supercell::diagonal([4, 2, 2]).build(original.clone());
         let deconstructed = sc_token.deconstruct(1e-10, supercell.clone()).unwrap();
 
@@ -456,7 +501,7 @@ mod tests {
             [0.25, 0.75, 1.5],
         ].envee());
 
-        let original = Structure::new_coords(lattice, coords);
+        let original = Coords::new(lattice, coords);
         let (supercell, sc_token) = {
             ::supercell::centered_diagonal([0, 2, 1])
                 .build(original.clone())

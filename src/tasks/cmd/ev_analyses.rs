@@ -10,7 +10,7 @@ use ::itertools::Itertools;
 use ::rsp2_tasks_config::Settings;
 
 #[allow(unused)] // compiler bug
-use ::rsp2_structure::{CoordStructure, Part, Partition, Element};
+use ::rsp2_structure::{Coords, Part, Partition, Element};
 
 use ::std::fmt;
 use ::serde_yaml::Value as YamlValue;
@@ -23,7 +23,7 @@ use super::acoustic_search;
 //
 // NOTE: Since a lot of the wrapped types are just vectors, the naming convention
 //       is to prefix the name with each thing they are indexed over (in order)
-#[derive(Debug, Clone)]                         pub struct AtomCoordinates(pub CoordStructure);
+#[derive(Debug, Clone)]                         pub struct AtomCoordinates(pub Coords);
 #[derive(Debug, Clone, Serialize, Deserialize)] pub struct AtomLayers(pub Vec<usize>);
 #[derive(Debug, Clone)]                         pub struct AtomElements(pub Vec<Element>);
 #[derive(Debug, Clone, Serialize, Deserialize)] pub struct AtomMasses(pub Vec<f64>);
@@ -257,7 +257,7 @@ fn _unfold_probs(
 ) -> FailResult<UnfoldProbs> {
     let part = Part::from_ord_keys(atom_layers.0.iter());
     let layer_partial_coords = atom_coords.0
-        .map_metadata_to(|_| ())
+        .clone()
         .into_unlabeled_partitions(&part)
         .collect_vec();
 

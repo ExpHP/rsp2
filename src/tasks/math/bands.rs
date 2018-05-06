@@ -1,5 +1,5 @@
 
-use ::rsp2_structure::{CoordsKind, Lattice, CoordStructure};
+use ::rsp2_structure::{CoordsKind, Lattice, Coords};
 use ::rsp2_kets::{Ket, KetRef, Rect};
 use ::rsp2_array_utils::{arr_from_fn};
 use ::rsp2_array_types::{V3, M33, dot, mat};
@@ -148,7 +148,7 @@ pub fn unfold_gamma_phonon(
     // supporting <M: Eq + Hash>, with the semantics that atoms with
     // non-equal metadata are "distinct" and contributions between
     // them to a projection cannot cancel.
-    superstructure: &CoordStructure,
+    superstructure: &Coords,
     // eigenvector_q: &SuperFracQ, // NOTE: only gamma now
     eigenvector: KetRef,
     supercell_matrix: &ScMatrix,
@@ -179,7 +179,7 @@ pub struct GammaUnfolder {
 impl GammaUnfolder {
     pub fn from_config(
         config: &Config,
-        superstructure: &CoordStructure,
+        superstructure: &Coords,
         sc_matrix: &ScMatrix,
         // eigenvector_q: &V3, // reduced by sc lattice
     ) -> GammaUnfolder
@@ -310,7 +310,7 @@ mod tests {
     #[test]
     fn simple_unfold() {
         fn do_it(
-            structure: &CoordStructure,
+            structure: &Coords,
             sc_vec: V3<i32>,
             expect_index: &[[u32; 3]],
             eigenvector: Vec<V3>,
@@ -352,7 +352,7 @@ mod tests {
         //--------------------------------------------
         // easy 1D case
         // 1 atom per primitive cell
-        let structure = CoordStructure::new_coords(
+        let structure = Coords::new(
             Lattice::diagonal(&[1.0, 1.0, 4.0]),
             CoordsKind::Carts(vec![
                 [0.0, 0.0, 0.0],
@@ -394,7 +394,7 @@ mod tests {
         //--------------------------------------------
         // supercell along multiple dimensions
         // 1 atom per primitive cell
-        let structure = CoordStructure::new_coords(
+        let structure = Coords::new(
             Lattice::diagonal(&[2.0, 2.0, 1.0]),
             CoordsKind::Carts(vec![
                 [0.0, 0.0, 0.0],
@@ -440,7 +440,7 @@ mod tests {
         // hopefully, this will catch bugs involving incorrect
         //   usage of matrices vs their transpose.
         // 1 atom per primitive cell
-        let structure = CoordStructure::new_coords(
+        let structure = Coords::new(
             Lattice::from(&[
                 [1.0, 0.0, 0.0],
                 [-0.5, 0.5 * 3_f64.sqrt(), 0.0],
@@ -467,7 +467,7 @@ mod tests {
 
         //--------------------------------------------
         // primitive structure with more than one atom
-        let structure = CoordStructure::new_coords(
+        let structure = Coords::new(
             Lattice::from(&[
                 // graphene cell (2 atoms per primitive),
                 // doubled along b (4 atoms per supercell)

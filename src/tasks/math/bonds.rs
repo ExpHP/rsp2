@@ -1,6 +1,6 @@
 use ::FailResult;
 use ::rsp2_structure::supercell;
-use ::rsp2_structure::{CoordStructure, Lattice};
+use ::rsp2_structure::{Coords, Lattice};
 use ::rsp2_array_utils::{arr_from_fn, try_map_arr};
 
 use ::rsp2_array_types::{V3, M3, dot};
@@ -105,7 +105,7 @@ impl CartBonds {
 
 impl FracBonds {
     pub fn from_brute_force_very_dumb(
-        structure: &CoordStructure,
+        structure: &Coords,
         range: f64,
     ) -> FailResult<Self> {
 
@@ -145,7 +145,7 @@ impl FracBonds {
         Ok(FracBonds { num_atoms, from, to, image_diff })
     }
 
-    pub fn to_cart_bonds(&self, coords: &CoordStructure) -> CartBonds {
+    pub fn to_cart_bonds(&self, coords: &Coords) -> CartBonds {
         let FracBonds { num_atoms, ref from, ref to, ref image_diff } = *self;
         let from = from.to_vec();
         let to = to.to_vec();

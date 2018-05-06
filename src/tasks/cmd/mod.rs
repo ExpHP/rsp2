@@ -31,7 +31,7 @@ use ::rsp2_slice_math::{vnorm};
 use ::slice_of_array::prelude::*;
 use ::rsp2_array_utils::arr_from_fn;
 use ::rsp2_array_types::{V3, Unvee};
-use ::rsp2_structure::{CoordStructure, ElementStructure};
+use ::rsp2_structure::{Coords, ElementStructure};
 use ::rsp2_structure::{Lattice};
 use ::rsp2_structure::supercell;
 use ::rsp2_structure::Permute;
@@ -174,7 +174,7 @@ impl TrialDir {
         //       we could keep the FracBonds around between iterations.
         let bonds = settings.bond_radius.map(|bond_radius| FailOk({
             trace!("Computing bonds");
-            let coords = structure.map_metadata_to(|_| ());
+            let coords = structure.drop_metadata_to();
             FracBonds::from_brute_force_very_dumb(&coords, bond_radius)?
                 .to_cart_bonds(&coords)
         })).fold_ok()?;
@@ -196,7 +196,7 @@ impl TrialDir {
                 layer_sc_mats,
                 ev_classifications: Some(EvClassifications(classifications)),
                 atom_elements:      Some(AtomElements(structure.metadata().to_vec())),
-                atom_coords:        Some(AtomCoordinates(structure.map_metadata_to(|_| ()))),
+                atom_coords:        Some(AtomCoordinates(structure.drop_metadata_to())),
                 ev_frequencies:     Some(EvFrequencies(evals.clone())),
                 ev_eigenvectors:    Some(EvEigenvectors(evecs.clone())),
                 bonds:              bonds.map(Bonds),
@@ -386,20 +386,21 @@ fn read_eigensystem<P: AsPath>(
 // HACK: These adapters are temporary to help the existing code
 //       (written only with carbon in mind) adapt to Structure.
 #[allow(unused)]
-fn carbon(structure: &CoordStructure) -> ElementStructure
+fn carbon(coords: &Coords) -> ElementStructure
 {
     // I want it PAINTED BLACK!
-    structure.map_metadata_to(|_| CARBON)
+    let meta = vec![CARBON; coords.num_atoms()];
+    coords.clone().with_metadata(meta)
 }
 
 #[allow(unused)] // if this isn't used, I'm *glad*
-fn uncarbon(structure: &ElementStructure) -> CoordStructure
+fn uncarbon(structure: &ElementStructure) -> Coords
 {
     assert!(structure.metadata().iter().all(|&e| e == CARBON),
         "if you want to use this code on non-carbon stuff, you better \
         do something about all the carbon-specific code.  Look for calls \
         to `carbon()`");
-    structure.map_metadata_to(|_| ())
+    structure.drop_metadata_to()
 }
 
 //=================================================================

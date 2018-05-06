@@ -223,8 +223,8 @@ pub fn bond_test() {
 
         let (structure, _, _) = ::cmd::read_structure_file(None, filetype, &input, None)?;
 
-        let bonds = ::math::bonds::FracBonds::from_brute_force_very_dumb(&structure.map_metadata_to(|_| ()), 1.8)?;
-        let bonds = bonds.to_cart_bonds(&structure.map_metadata_to(|_| ()));
+        let bonds = ::math::bonds::FracBonds::from_brute_force_very_dumb(&structure.drop_metadata_to(), 1.8)?;
+        let bonds = bonds.to_cart_bonds(&structure.drop_metadata_to());
         ::serde_json::to_writer(::std::io::stdout(), &bonds)?;
         println!(""); // flush, dammit
         Ok(())
