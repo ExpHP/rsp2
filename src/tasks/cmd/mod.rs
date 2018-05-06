@@ -174,9 +174,8 @@ impl TrialDir {
         //       we could keep the FracBonds around between iterations.
         let bonds = settings.bond_radius.map(|bond_radius| FailOk({
             trace!("Computing bonds");
-            let coords = structure.drop_metadata_to();
-            FracBonds::from_brute_force_very_dumb(&coords, bond_radius)?
-                .to_cart_bonds(&coords)
+            FracBonds::from_brute_force_very_dumb(&structure, bond_radius)?
+                .to_cart_bonds(&structure)
         })).fold_ok()?;
 
         trace!("Computing eigensystem info");
@@ -190,13 +189,14 @@ impl TrialDir {
 
             let aux_info::Info { atom_layers, atom_masses, layer_sc_mats } = aux_info;
 
+            let coords: &Coords = &structure;
             gamma_system_analysis::Input {
                 atom_masses,
                 atom_layers,
                 layer_sc_mats,
                 ev_classifications: Some(EvClassifications(classifications)),
                 atom_elements:      Some(AtomElements(structure.metadata().to_vec())),
-                atom_coords:        Some(AtomCoordinates(structure.drop_metadata_to())),
+                atom_coords:        Some(AtomCoordinates(coords.clone())),
                 ev_frequencies:     Some(EvFrequencies(evals.clone())),
                 ev_eigenvectors:    Some(EvEigenvectors(evecs.clone())),
                 bonds:              bonds.map(Bonds),
@@ -400,7 +400,8 @@ fn uncarbon(structure: &ElementStructure) -> Coords
         "if you want to use this code on non-carbon stuff, you better \
         do something about all the carbon-specific code.  Look for calls \
         to `carbon()`");
-    structure.drop_metadata_to()
+    let coords: &Coords = structure;
+    coords.clone()
 }
 
 //=================================================================

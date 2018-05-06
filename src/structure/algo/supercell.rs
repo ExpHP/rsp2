@@ -89,8 +89,7 @@ impl Supercellable for Coords {
         self.with_metadata(dummy_meta)
     }
     fn from_structure(structure: Structure<Self::Meta>) -> Self {
-        let Structure { lattice, coords, .. } = structure;
-        Coords::new(lattice, coords)
+        structure.coords
     }
 }
 
@@ -111,7 +110,8 @@ fn diagonal_with<M, M2, F>(builder: Builder, structure: Structure<M>, mut make_m
 -> (Structure<M2>, SupercellToken)
 where F: FnMut(&M, [u32; 3]) -> M2,
 {
-    let Structure { lattice, coords, meta } = structure;
+    let Structure { coords, meta } = structure;
+    let Coords { lattice, coords } = coords;
 
     // construct a SupercellToken ASAP so that we know the rest of the code
     // works for general supercell matrices
@@ -138,8 +138,10 @@ where F: FnMut(&M, [u32; 3]) -> M2,
     }
 
     let structure = Structure {
-        lattice: &sc.integer_lattice * &lattice,
-        coords: CoordsKind::Carts(new_carts),
+        coords: Coords {
+            lattice: &sc.integer_lattice * &lattice,
+            coords: CoordsKind::Carts(new_carts),
+        },
         meta: new_meta,
     };
 
@@ -249,7 +251,8 @@ impl SupercellToken {
 
         let num_cells = self.num_cells();
         let SupercellToken { periods, offset, ref integer_lattice, num_primitive_atoms } = *self;
-        let Structure { lattice, coords, meta } = structure;
+        let Structure { coords, meta } = structure;
+        let Coords { lattice, coords } = coords;
 
         let primitive_lattice = integer_lattice.inverse_matrix() * &lattice;
 
@@ -312,8 +315,10 @@ impl SupercellToken {
         };
 
         Ok(S::from_structure(Structure {
-            lattice: primitive_lattice,
-            coords: CoordsKind::Carts(out_carts),
+            coords: Coords {
+                lattice: primitive_lattice,
+                coords: CoordsKind::Carts(out_carts),
+            },
             meta: out_meta,
         }))
     }
