@@ -43,24 +43,29 @@ const DEFAULT_AIREBO_TORSION_ENABLED: bool = false;
 /// It is a generic type parameter because some implementation may benefit
 /// from using their own type (using an adapter to expose a PotentialBuilder
 /// implementation with the default metadata type).
-pub trait PotentialBuilder<Meta = Element>: Send + Sync {
+pub trait PotentialBuilder<Meta = Element>
+    : Send + Sync
+    // 'static just makes the signatures of the trait easier.
+    //
+    // Supporting PotentialBuilders with borrowed data is as cumbersome as it is possible,
+    // infecting function signatures all over the module (see commit 6c36bddbb08d21),
+    // and there is little to be gained because PotentialBuilders are rarely created.
+    + 'static
+{
     /// Sometimes called as a last-minute hint to control threading
     /// within the potential based on the current circumstances.
     ///
     /// Implementations that do not care may simply call `box_clone()`.
     #[cfg_attr(feature = "nightly", must_use = "this is not an in-place mutation!")]
-    fn threaded<'a>(&self, _threaded: bool) -> Box<PotentialBuilder<Meta> + 'a>
-    where Self: 'a;
+    fn threaded(&self, _threaded: bool) -> Box<PotentialBuilder<Meta>>;
 
     /// "Clone" the trait object.
-    fn box_clone<'a>(&self) -> Box<PotentialBuilder<Meta> + 'a>
-    where Self: 'a;
+    fn box_clone(&self) -> Box<PotentialBuilder<Meta>>;
 
     /// dumb dumb dumb stupid implementation detail.
     ///
     /// A default implementation cannot be provided. Just return `self`.
-    fn _as_ref_dyn<'a>(&self) -> & (PotentialBuilder<Meta> + 'a)
-    where Self: 'a;
+    fn _as_ref_dyn(&self) -> &PotentialBuilder<Meta>;
 
     /// Create the DiffFn.  This does potentially expensive initialization, maybe calling out
     /// to external C APIs and etc.
@@ -68,22 +73,28 @@ pub trait PotentialBuilder<Meta = Element>: Send + Sync {
     /// **NOTE:** This takes a structure for historic (read: dumb) reasons.  Hopefully it can
     /// be removed soon. For now, just make sure to give it something with the same chemical
     /// composition, number of atoms, and lattice type as the structures you'll be computing.
-    fn initialize_diff_fn<'a>(&self, structure: Structure<Meta>) -> FailResult<Box<DiffFn<Meta> + 'a>>
-    where Self: 'a;
+    fn initialize_diff_fn(&self, structure: Structure<Meta>) -> FailResult<Box<DiffFn<Meta>>>;
 
     /// Convenience method to get a function suitable for `rsp2_minimize`.
     ///
-    /// The structure given to this is used to supply the lattice and element data.
+    /// The structure given to this is used to supply the lattice and metadata.
     /// Also, some other data may be precomputed from it.
     ///
     /// Because Boxes don't implement `Fn` traits for technical reasons,
     /// you will likely need to write `&mut *flat_diff_fn` in order to get
     /// a `&mut DynFlatDiffFn`.
-    fn initialize_flat_diff_fn<'a>(&self, structure: Structure<Meta>) -> FailResult<Box<DynFlatDiffFn<'a>>>
-    where
-        Self: 'a,
-        Meta: 'a, // FIXME annoying, required by default impl
-    ;
+    fn initialize_flat_diff_fn(&self, structure: Structure<Meta>) -> FailResult<Box<DynFlatDiffFn<'static>>>
+    where Meta: Clone + 'static
+    {
+        let mut diff_fn = self.initialize_diff_fn(structure.clone())?;
+        let mut structure = structure;
+        Ok(Box::new(move |pos: &[f64]| Ok({
+            structure.set_carts(pos.nest().to_vec());
+
+            let (value, grad) = diff_fn.compute(&structure)?;
+            (value, grad.unvee().flat().to_vec())
+        })))
+    }
 
     /// Convenience adapter for one-off computations.
     ///
@@ -96,42 +107,20 @@ pub trait PotentialBuilder<Meta = Element>: Send + Sync {
     /// This is provided because otherwise, you end up needing to write stuff
     /// like `pot.initialize_diff_fn(structure.clone()).compute(&structure)`, which
     /// is both confusing and awkward.
-    fn one_off<'r, 'a: 'r>(&'r self) -> OneOff<'r, 'a, Meta>
-    where
-        Self: 'a,
-        Meta: Clone,
+    fn one_off<'r>(&'r self) -> OneOff<'r, Meta>
+    where Meta: Clone,
     { OneOff(self._as_ref_dyn()) }
 }
 
 /// A simple implementation of `box_clone` that most implementors of `PotentialBuilder`
 /// can use as long as they implement `Clone`.
-pub fn simple_box_clone<'a, P, Meta>(pot: &P) -> Box<PotentialBuilder<Meta> + 'a>
+pub fn simple_box_clone<P, Meta>(pot: &P) -> Box<PotentialBuilder<Meta>>
 where
-    P: PotentialBuilder<Meta> + Clone + 'a,
+    P: PotentialBuilder<Meta> + Clone,
 { Box::new(pot.clone()) }
 
-/// A simple implementation of `initialize_flat_diff_fn` that most implementors of
-/// `PotentialBuilder` can use as long as their metadata type implements `Clone`.
-pub fn simple_initialize_flat_diff_fn<'a, P, M>(
-    pot: &P,
-    structure: Structure<M>,
-) -> FailResult<Box<DynFlatDiffFn<'a>>>
-where
-    P: PotentialBuilder<M> + 'a,
-    M: Clone + 'a,
-{Ok({
-    let mut diff_fn = pot.initialize_diff_fn(structure.clone())?;
-    let mut structure = structure;
-    Box::new(move |pos: &[f64]| Ok({
-        structure.set_carts(pos.nest().to_vec());
-
-        let (value, grad) = diff_fn.compute(&structure)?;
-        (value, grad.unvee().flat().to_vec())
-    }))
-})}
-
-impl<'a, M> Clone for Box<PotentialBuilder<M> + 'a>
-where M: 'a, // FIXME why is this necessary? PotentialBuilder doesn't borrow from M...
+impl<M> Clone for Box<PotentialBuilder<M>>
+where M: 'static, // FIXME why is this necessary? PotentialBuilder doesn't borrow from M...
 {
     fn clone(&self) -> Self { self.box_clone() }
 }
@@ -175,8 +164,8 @@ pub trait DiffFn<Meta> {
 }
 
 /// See `PotentialBuilder::one_off` for more information.
-pub struct OneOff<'r, 'bld: 'r, M: 'r>(&'r (PotentialBuilder<M> + 'bld));
-impl<'r, 'bld: 'r, M: Clone> DiffFn<M> for OneOff<'r, 'bld, M> {
+pub struct OneOff<'a, M: 'a>(&'a PotentialBuilder<M>);
+impl<'a, M: Clone + 'static> DiffFn<M> for OneOff<'a, M> {
     fn compute(&mut self, structure: &Structure<M>) -> FailResult<(f64, Vec<V3>)> {
         self.0.initialize_diff_fn(structure.clone())?.compute(structure)
     }
@@ -282,27 +271,17 @@ mod lammps {
     impl<P: Clone + LammpsPotential + Send + Sync + 'static> PotentialBuilder<P::Meta> for Builder<P>
     where P::Meta: Clone,
     {
-        fn threaded<'a>(&self, threaded: bool) -> Box<PotentialBuilder<P::Meta> + 'a>
-        where Self: 'a,
+        fn threaded(&self, threaded: bool) -> Box<PotentialBuilder<P::Meta>>
         { Box::new(<Builder<_>>::threaded(self, threaded)) }
 
-        fn box_clone<'a>(&self) -> Box<PotentialBuilder<P::Meta> + 'a>
-        where Self: 'a,
+        fn box_clone(&self) -> Box<PotentialBuilder<P::Meta>>
         { simple_box_clone(self) }
 
-        fn _as_ref_dyn<'a>(&self) -> & (PotentialBuilder<P::Meta> + 'a) where Self: 'a
+        fn _as_ref_dyn(&self) -> &PotentialBuilder<P::Meta>
         { self }
 
-        fn initialize_diff_fn<'a>(&self, structure: Structure<P::Meta>) -> FailResult<Box<DiffFn<P::Meta> + 'a>>
-        where Self: 'a
+        fn initialize_diff_fn(&self, structure: Structure<P::Meta>) -> FailResult<Box<DiffFn<P::Meta>>>
         { self.diff_fn(structure) }
-
-        fn initialize_flat_diff_fn<'a>(
-            &self,
-            structure: Structure<P::Meta>,
-        ) -> FailResult<Box<DynFlatDiffFn<'a>>>
-        where Self: 'a,
-        { simple_initialize_flat_diff_fn(self, structure) }
     }
 
     pub use self::airebo::Airebo;
@@ -577,19 +556,16 @@ pub mod test {
     pub struct Zero;
 
     impl<Meta: Clone> PotentialBuilder<Meta> for Zero {
-        fn threaded<'a>(&self, _threaded: bool) -> Box<PotentialBuilder<Meta> + 'a>
-        where Self: 'a,
+        fn threaded(&self, _threaded: bool) -> Box<PotentialBuilder<Meta>>
         { self.box_clone() }
 
-        fn box_clone<'a>(&self) -> Box<PotentialBuilder<Meta> + 'a>
-        where Self: 'a,
+        fn box_clone<'a>(&self) -> Box<PotentialBuilder<Meta>>
         { simple_box_clone(self) }
 
-        fn _as_ref_dyn<'a>(&self) -> & (PotentialBuilder<Meta> + 'a) where Self: 'a
+        fn _as_ref_dyn<'a>(&self) -> &PotentialBuilder<Meta>
         { self }
 
-        fn initialize_diff_fn<'a>(&self, _: Structure<Meta>) -> FailResult<Box<DiffFn<Meta> + 'a>>
-        where Self: 'a
+        fn initialize_diff_fn<'a>(&self, _: Structure<Meta>) -> FailResult<Box<DiffFn<Meta>>>
         {
             struct Diff;
             impl<M> DiffFn<M> for Diff {
@@ -599,13 +575,6 @@ pub mod test {
             }
             Ok(Box::new(Diff) as Box<_>)
         }
-
-        fn initialize_flat_diff_fn<'a>(
-            &self,
-            structure: Structure<Meta>,
-        ) -> FailResult<Box<DynFlatDiffFn<'a>>>
-        where Self: 'a, Meta: 'a,
-        { simple_initialize_flat_diff_fn(self, structure) }
     }
 
     /// A test Potential that creates a chain along the Z axis.
@@ -619,41 +588,30 @@ pub mod test {
     }
 
     impl<Meta: Clone> PotentialBuilder<Meta> for ConvergeTowards {
-        fn threaded<'a>(&self, _threaded: bool) -> Box<PotentialBuilder<Meta> + 'a>
-        where Self: 'a,
+        fn threaded(&self, _threaded: bool) -> Box<PotentialBuilder<Meta>>
         { self.box_clone() }
 
-        fn box_clone<'a>(&self) -> Box<PotentialBuilder<Meta> + 'a> where Self: 'a,
+        fn box_clone(&self) -> Box<PotentialBuilder<Meta>>
         { simple_box_clone(self) }
 
-        fn _as_ref_dyn<'a>(&self) -> & (PotentialBuilder<Meta> + 'a) where Self: 'a
+        fn _as_ref_dyn(&self) -> &PotentialBuilder<Meta>
         { self }
 
-        fn initialize_diff_fn<'a>(&self, _: Structure<Meta>) -> FailResult<Box<DiffFn<Meta> + 'a>>
-        where Self: 'a
+        fn initialize_diff_fn(&self, _: Structure<Meta>) -> FailResult<Box<DiffFn<Meta>>>
         { Ok(Box::new(self.clone()) as Box<_>) }
-
-        fn initialize_flat_diff_fn<'a>(
-            &self,
-            structure: Structure<Meta>,
-        ) -> FailResult<Box<DynFlatDiffFn<'a>>>
-        where Self: 'a, Meta: 'a,
-        { simple_initialize_flat_diff_fn(self, structure) }
     }
 
     impl<Meta: Clone> PotentialBuilder<Meta> for Chainify {
-        fn threaded<'a>(&self, _threaded: bool) -> Box<PotentialBuilder<Meta> + 'a>
-            where Self: 'a,
+        fn threaded(&self, _threaded: bool) -> Box<PotentialBuilder<Meta>>
         { self.box_clone() }
 
-        fn box_clone<'a>(&self) -> Box<PotentialBuilder<Meta> + 'a> where Self: 'a,
+        fn box_clone(&self) -> Box<PotentialBuilder<Meta>>
         { simple_box_clone(self) }
 
-        fn _as_ref_dyn<'a>(&self) -> & (PotentialBuilder<Meta> + 'a) where Self: 'a
+        fn _as_ref_dyn(&self) -> & (PotentialBuilder<Meta>)
         { self }
 
-        fn initialize_diff_fn<'a>(&self, structure: Structure<Meta>) -> FailResult<Box<DiffFn<Meta> + 'a>>
-            where Self: 'a
+        fn initialize_diff_fn(&self, structure: Structure<Meta>) -> FailResult<Box<DiffFn<Meta>>>
         {
             let na = structure.num_atoms();
             let fracs = (0..na).map(|i| {
@@ -663,13 +621,6 @@ pub mod test {
             let target = Coords::new(structure.lattice().clone(), coords);
             Ok(Box::new(ConvergeTowards::new(target)) as Box<_>)
         }
-
-        fn initialize_flat_diff_fn<'a>(
-            &self,
-            structure: Structure<Meta>,
-        ) -> FailResult<Box<DynFlatDiffFn<'a>>>
-            where Self: 'a, Meta: 'a,
-        { simple_initialize_flat_diff_fn(self, structure) }
     }
 
     impl ConvergeTowards {
