@@ -59,6 +59,10 @@ thru = lambda f: lambda g: lambda *a, **kw: f(g(*a, **kw)) # pylint: disable=E06
 
 #------------
 
+KIND_SPECIAL = object()
+KIND_INTERNAL_DEP = object()
+KIND_EXTERNAL_DEP = object()
+
 @register
 class Gen:
     cmd = 'gen'
@@ -89,56 +93,12 @@ class Gen:
                 if not src.is_file():  # pylint: disable=E1101
                     parser.error('{}: no such file'.format(src))
 
-            # callbacks that generate substitutions for the line !!some-crate-name,
-            # which accept keyword arguments that are documented down by where the
-            # callback is called
-            def gen_constant(s):
-                return lambda **_ignored: s
-
-            def gen_relpath_to(dep_name, dep_dir):
-                def inner(*, cur_dir, **_ignored):
-                    # Don't use Path for this because:
-                    # - It has no normpath equivalent that doesn't follow links (wtf?)
-                    # - Its relpath equivalent is too strict
-                    rel = os.path.normpath(os.path.relpath(dep_dir, cur_dir))
-                    return f'{dep_name} = {{ path = "{rel}" }}'
-                return inner
-
-            def gen_members_as_pathdeps(**_ignored):
-                root = get_root_package(parser.error)
-                lines = []
-                for (name, path) in crates.items():
-                    if name != root:
-                        lines.append(f'{name} = {{ path = "{path}" }}')
-                return '\n'.join(lines)
-
             # FIXME vvv this is waaaaaay too application-specific.
             binary_shim_pairs = get_binary_shim_pairs()
             make_binary_shims(binary_shim_pairs)
             # FIXME ^^^ this is waaaaaay too application-specific.
 
-            # build a dash-insensitive lookup table of callbacks
-            lookup_d = {
-                # name = "crate-name"
-                'CRATE-NAME-LINE': lambda *, cur_name, **_ignored: f'name = "{cur_name}"',
-
-                # builtin macros
-                'WORKSPACE-MEMBERS-AS-PATH-DEPS': gen_members_as_pathdeps,
-
-                # FIXME this is waaaaaay too application-specific.
-                'BINARY-SHIM-BIN-ENTRIES': macro_subst_for_binary_shims(binary_shim_pairs),
-
-                # FIXME this is waaaaaay too application-specific.
-                'NIGHTLY-FEATURE-LINE': macro_subst_for_nightly_feature(crates, parser.error),
-            }
-            # for defining new macros
-            lookup_put = lambda k, v: lookup_d.__setitem__(canonicalize_crate(k), v)
-            lookup_get = lambda k: lookup_d.get(canonicalize_crate(k))
-
-            for (name, path) in crates.items():
-                lookup_put(name, gen_relpath_to(name, path))
-            for (name, version) in preferred_versions.items():
-                lookup_put(name, gen_constant('{} = {}'.format(name, inline_toml(version))))
+            lookup_get = make_callback_lookup(parser.error)
 
             # Make all target directories symlinks to the root package's target,
             # to help reduce duplicate build artefacts even if we are not a
@@ -194,7 +154,7 @@ class Gen:
                             write(line)
                             continue
 
-                        func = lookup_get(macro)
+                        (_kind, func) = lookup_get(macro)
                         if func is None:
                             s = f"{src_path}:{i}: unknown macro: {format_macro(macro)}"
                             parser.error(s)
@@ -206,6 +166,61 @@ class Gen:
                             # The name of the crate whose Cargo.toml we are generating.
                             cur_name=name,
                         ))
+
+def make_callback_lookup(fail):
+    with pushd(search_for_root(fail)):
+        data = read_master_config(fail)
+        crates = data.pop('crates')
+        preferred_versions = data.pop('preferred-versions')
+
+        # callbacks that generate substitutions for the line !!some-crate-name,
+        # which accept keyword arguments that are documented down by where the
+        # callback is called
+        def gen_constant(s):
+            return lambda **_ignored: s
+
+        def gen_relpath_to(dep_name, dep_dir):
+            def inner(*, cur_dir, **_ignored):
+                # Don't use Path for this because:
+                # - It has no normpath equivalent that doesn't follow links (wtf?)
+                # - Its relpath equivalent is too strict
+                rel = os.path.normpath(os.path.relpath(dep_dir, cur_dir))
+                return f'{dep_name} = {{ path = "{rel}" }}'
+            return inner
+
+        def gen_members_as_pathdeps(**_ignored):
+            root = get_root_package(fail)
+            lines = []
+            for (name, path) in crates.items():
+                if name != root:
+                    lines.append(f'{name} = {{ path = "{path}" }}')
+            return '\n'.join(lines)
+
+        binary_shim_pairs = get_binary_shim_pairs()
+
+        # for defining new macros
+        lookup_put = lambda k, v: lookup_d.__setitem__(canonicalize_crate(k), v)
+        lookup_get = lambda k: lookup_d.get(canonicalize_crate(k))
+
+        # build a dash-insensitive lookup table of callbacks
+        lookup_d = {
+            # name = "crate-name"
+            'CRATE-NAME-LINE': (KIND_SPECIAL, lambda *, cur_name, **_ignored: f'name = "{cur_name}"'),
+
+            # builtin macros
+            'WORKSPACE-MEMBERS-AS-PATH-DEPS': (KIND_SPECIAL, gen_members_as_pathdeps),
+
+            # FIXME this is waaaaaay too application-specific.
+            'BINARY-SHIM-BIN-ENTRIES': (KIND_SPECIAL, macro_subst_for_binary_shims(binary_shim_pairs)),
+        }
+        # FIXME this is waaaaaay too application-specific.
+        lookup_d['NIGHTLY-FEATURE-LINE'] = (KIND_SPECIAL, macro_subst_for_nightly_feature(lookup_get, crates, fail))
+
+        for (name, path) in crates.items():
+            lookup_put(name, (KIND_INTERNAL_DEP, gen_relpath_to(name, path)))
+        for (name, version) in preferred_versions.items():
+            lookup_put(name, (KIND_EXTERNAL_DEP, gen_constant('{} = {}'.format(name, inline_toml(version)))))
+    return lookup_get
 
 # a makeshift toml.dumps that uses inline tables
 def inline_toml(x):
@@ -325,8 +340,6 @@ class New:
         # make the directory
         path.mkdir()
         with open(root_rel_src_toml_path(name), 'w') as f:
-            f.write(CARGO_TOML_TEMPLATE.format(name))
-        with open(path / "Cargo.toml", 'w') as f:
             f.write(CARGO_TOML_TEMPLATE.format(name))
         with open(path / 'lib.rs', 'w') as f:
             f.write('''
@@ -745,7 +758,7 @@ fn main() {{
 def macro_subst_for_binary_shims(pairs):
     def gen(**_ignored):
         entries = []
-        for (bin, func) in pairs:
+        for (bin, _func) in pairs:
             lines = [
                 f"[[bin]]\n",
                 f'name = "{bin}"\n',
@@ -755,10 +768,24 @@ def macro_subst_for_binary_shims(pairs):
         return '\n'.join(entries)
     return gen
 
-def macro_subst_for_nightly_feature(crates, fail):
-    g = get_internal_dep_graph(crates, fail)
+def macro_subst_for_nightly_feature(lookup_get, crates, fail):
+    root_name = get_root_package(fail)
     def gen(*, cur_name, **_ignored):
-        deps = list(g.edge[cur_name])
+        deps = []
+        if cur_name == root_name:
+            deps = sorted([name for name in crates if name != root_name])
+        else:
+            deps = []
+            with open(root_rel_src_toml_path(cur_name)) as f:
+                for line in f:
+                    macro = line_as_macro(line)
+                    if macro is None:
+                        continue
+
+                    (kind, _func) = lookup_get(macro)
+                    if kind is KIND_INTERNAL_DEP:
+                        deps.append(macro)
+
         def recursive_feature_line(feature, base_list=()):
             toml_strs = [f'"{f}"' for f in base_list]
             toml_strs += sorted([f'"{d}/{feature}"' for d in deps])
