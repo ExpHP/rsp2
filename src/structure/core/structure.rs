@@ -532,9 +532,12 @@ impl<'iter> Partition<'iter> for Coords {
     }
 }
 
+//--------------------------------------------------------------------------------------------------
+
 #[cfg(test)]
 mod compiletest {
     use super::*;
+    use ::rsp2_array_types::Envee;
 
     fn assert_send_sync<S: Send + Sync>() {}
 
@@ -542,5 +545,111 @@ mod compiletest {
     fn structure_is_send_and_sync() {
         assert_send_sync::<Coords>();
         assert_send_sync::<Structure<()>>();
+    }
+
+    #[test]
+    fn typos_are_bad_mmmkay() {
+        // every time we have two functions that do cart vs frac, there
+        // is a chance for them to get flipped in a nasty typo that the
+        // type system cannot catch.
+        // head these concerns off pre-emptively.
+
+        let coords = CoordsKind::Fracs(vec![[0.5, 0.0, 0.0]].envee());
+        let lattice = Lattice::diagonal(&[2.0, 1.0, 1.0]);
+        let coords = Coords::new(lattice, coords);
+
+        // Structure has all of those dumb trivially-forwarded methods,
+        // creating even more room for potential typos.
+        // We must test them just as thoroughly.
+        let structure = coords.clone().with_uniform_metadata(());
+
+        const ORIG_FRACS: [V3; 1] = [V3([0.5, 0.0, 0.0])];
+        const ORIG_CARTS: [V3; 1] = [V3([1.0, 0.0, 0.0])];
+
+        // Make them mutable so we can test functions like `ensure_carts`.
+        // (we won't be changing any of the actual coordinates until near
+        //  the very end of the test)
+        let mut coords = coords;
+        let mut structure = structure;
+
+        assert_eq!(coords.to_carts(), ORIG_CARTS.to_vec());
+        assert_eq!(coords.to_fracs(), ORIG_FRACS.to_vec());
+        assert_eq!(structure.to_carts(), ORIG_CARTS.to_vec());
+        assert_eq!(structure.to_fracs(), ORIG_FRACS.to_vec());
+
+        // `*_mut` is the perfect opportunity to indirectly test `ensure_only_*`,
+        // because there is simply no way that these methods can preserve the
+        // other coordinate system's data and still be correct.
+        assert_eq!(coords.carts_mut(), &mut ORIG_CARTS);
+        assert_eq!(coords.as_carts_cached(), Some(&ORIG_CARTS[..]));
+        assert_eq!(coords.as_fracs_cached(), None);
+        assert_eq!(coords.fracs_mut(), &mut ORIG_FRACS);
+        assert_eq!(coords.as_fracs_cached(), Some(&ORIG_FRACS[..]));
+        assert_eq!(coords.as_carts_cached(), None);
+
+        assert_eq!(structure.carts_mut(), &mut ORIG_CARTS);
+        assert_eq!(structure.as_carts_cached(), Some(&ORIG_CARTS[..]));
+        assert_eq!(structure.as_fracs_cached(), None);
+        assert_eq!(structure.fracs_mut(), &mut ORIG_FRACS);
+        assert_eq!(structure.as_fracs_cached(), Some(&ORIG_FRACS[..]));
+        assert_eq!(structure.as_carts_cached(), None);
+
+        coords.ensure_carts();
+        assert_eq!(coords.as_carts_cached(), Some(&ORIG_CARTS[..]));
+        coords.ensure_fracs();
+        assert_eq!(coords.as_fracs_cached(), Some(&ORIG_FRACS[..]));
+
+        structure.ensure_carts();
+        assert_eq!(structure.as_carts_cached(), Some(&ORIG_CARTS[..]));
+        structure.ensure_fracs();
+        assert_eq!(structure.as_fracs_cached(), Some(&ORIG_FRACS[..]));
+
+        // these last few will temporarily change the coordinates.
+        // We'll put them back each time in the second step.
+        coords.set_carts(vec![[2.0, 0.0, 0.0]].envee());
+        assert_eq!(coords.to_carts(), vec![[2.0, 0.0, 0.0]].envee());
+        assert_eq!(coords.to_fracs(), vec![[1.0, 0.0, 0.0]].envee());
+        coords.set_fracs(vec![[0.5, 0.0, 0.0]].envee());
+        assert_eq!(coords.to_carts(), vec![[1.0, 0.0, 0.0]].envee());
+        assert_eq!(coords.to_fracs(), vec![[0.5, 0.0, 0.0]].envee());
+
+        structure.set_carts(vec![[2.0, 0.0, 0.0]].envee());
+        assert_eq!(structure.to_carts(), vec![[2.0, 0.0, 0.0]].envee());
+        assert_eq!(structure.to_fracs(), vec![[1.0, 0.0, 0.0]].envee());
+        structure.set_fracs(vec![[0.5, 0.0, 0.0]].envee());
+        assert_eq!(structure.to_carts(), vec![[1.0, 0.0, 0.0]].envee());
+        assert_eq!(structure.to_fracs(), vec![[0.5, 0.0, 0.0]].envee());
+
+        let coords = coords.with_carts(vec![[2.0, 0.0, 0.0]].envee());
+        assert_eq!(coords.to_carts(), vec![[2.0, 0.0, 0.0]].envee());
+        assert_eq!(coords.to_fracs(), vec![[1.0, 0.0, 0.0]].envee());
+        let coords = coords.with_fracs(vec![[0.5, 0.0, 0.0]].envee());
+        assert_eq!(coords.to_carts(), vec![[1.0, 0.0, 0.0]].envee());
+        assert_eq!(coords.to_fracs(), vec![[0.5, 0.0, 0.0]].envee());
+
+        let structure = structure.with_carts(vec![[2.0, 0.0, 0.0]].envee());
+        assert_eq!(structure.to_carts(), vec![[2.0, 0.0, 0.0]].envee());
+        assert_eq!(structure.to_fracs(), vec![[1.0, 0.0, 0.0]].envee());
+        let structure = structure.with_fracs(vec![[0.5, 0.0, 0.0]].envee());
+        assert_eq!(structure.to_carts(), vec![[1.0, 0.0, 0.0]].envee());
+        assert_eq!(structure.to_fracs(), vec![[0.5, 0.0, 0.0]].envee());
+
+        let mut coords = coords;
+        coords.translate_cart(&V3([1.0, 0.0, 0.0]));
+        assert_eq!(coords.to_carts(), vec![[2.0, 0.0, 0.0]].envee());
+        assert_eq!(coords.to_fracs(), vec![[1.0, 0.0, 0.0]].envee());
+        coords.translate_frac(&V3([-0.5, 0.0, 0.0]));
+        assert_eq!(coords.to_carts(), vec![[1.0, 0.0, 0.0]].envee());
+        assert_eq!(coords.to_fracs(), vec![[0.5, 0.0, 0.0]].envee());
+        let _ = coords;
+
+        let mut structure = structure;
+        structure.translate_cart(&V3([1.0, 0.0, 0.0]));
+        assert_eq!(structure.to_carts(), vec![[2.0, 0.0, 0.0]].envee());
+        assert_eq!(structure.to_fracs(), vec![[1.0, 0.0, 0.0]].envee());
+        structure.translate_frac(&V3([-0.5, 0.0, 0.0]));
+        assert_eq!(structure.to_carts(), vec![[1.0, 0.0, 0.0]].envee());
+        assert_eq!(structure.to_fracs(), vec![[0.5, 0.0, 0.0]].envee());
+        let _ = structure;
     }
 }
