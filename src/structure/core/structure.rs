@@ -113,6 +113,13 @@ impl Coords {
     /// Add the given vector as metadata. Zero-cost.
     pub fn with_metadata<M>(self, meta: Vec<M>) -> Structure<M>
     { Structure::from_coords(self, meta) }
+
+    /// Add a constant value as metadata.
+    pub fn with_uniform_metadata<M: Clone>(self, meta: M) -> Structure<M>
+    {
+        let meta = vec![meta; self.coords.len()];
+        Structure::from_coords(self, meta)
+    }
 }
 
 /// # Chainable metadata modification

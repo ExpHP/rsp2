@@ -85,8 +85,7 @@ impl Supercellable for Coords {
     type Meta = ();
 
     fn into_structure(self) -> Structure<Self::Meta> {
-        let dummy_meta = vec![(); self.num_atoms()];
-        self.with_metadata(dummy_meta)
+        self.with_uniform_metadata(())
     }
     fn from_structure(structure: Structure<Self::Meta>) -> Self {
         structure.coords

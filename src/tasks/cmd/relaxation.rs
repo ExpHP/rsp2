@@ -49,7 +49,7 @@ impl TrialDir {
             trace!("============================");
             trace!("Begin relaxation # {}", iteration);
 
-            let structure = do_relax(&pot, &settings.cg, &settings.potential, structure)?;
+            let structure = do_relax(pot, &settings.cg, &settings.potential, structure)?;
 
             trace!("============================");
 
@@ -105,7 +105,7 @@ impl TrialDir {
                 &structure,
             )?;
 
-            warn_on_improvable_lattice_params(&pot, &structure)?;
+            warn_on_improvable_lattice_params(pot, &structure)?;
 
             match loop_state.step(did_chasing) {
                 EvLoopStatus::KeepGoing => {
@@ -150,7 +150,7 @@ impl TrialDir {
             n => {
                 trace!("Chasing {} bad eigenvectors...", n);
                 let structure = do_eigenvector_chase(
-                    &pot,
+                    pot,
                     &settings.ev_chase,
                     &settings.potential,
                     structure,
@@ -224,7 +224,7 @@ fn do_relax(
     let sc_dims = potential_settings.supercell.dim_for_unitcell(structure.lattice());
     let (supercell, sc_token) = supercell::diagonal(sc_dims).build(structure);
 
-    let mut flat_diff_fn = pot.threaded(true).flat_diff_fn(supercell.clone())?;
+    let mut flat_diff_fn = pot.threaded(true).initialize_flat_diff_fn(supercell.clone())?;
     let relaxed_flat = ::rsp2_minimize::acgsd(
         cg_settings,
         supercell.to_carts().flat(),
@@ -297,7 +297,7 @@ fn _do_cg_along_evecs(
     let flat_evecs: Vec<_> = evecs.iter().map(|ev| ev.flat()).collect();
     let init_pos = supercell.to_carts();
 
-    let mut flat_diff_fn = pot.threaded(true).flat_diff_fn(supercell.clone())?;
+    let mut flat_diff_fn = pot.threaded(true).initialize_flat_diff_fn(supercell.clone())?;
     let relaxed_coeffs = ::rsp2_minimize::acgsd(
         cg_settings,
         &vec![0.0; evecs.len()],
@@ -319,7 +319,7 @@ fn do_minimize_along_evec(
     let sc_dims = settings.supercell.dim_for_unitcell(structure.lattice());
     let (structure, sc_token) = supercell::diagonal(sc_dims).build(structure);
     let evec = sc_token.replicate(evec);
-    let mut diff_fn = pot.threaded(true).flat_diff_fn(structure.clone())?;
+    let mut diff_fn = pot.threaded(true).initialize_flat_diff_fn(structure.clone())?;
 
     let from_structure = structure;
     let direction = &evec[..];
@@ -345,7 +345,7 @@ fn warn_on_improvable_lattice_params(
 ) -> FailResult<()>
 {Ok({
     const SCALE_AMT: f64 = 1e-6;
-    let mut diff_fn = pot.diff_fn(structure.clone())?;
+    let mut diff_fn = pot.initialize_diff_fn(structure.clone())?;
     let center_value = diff_fn.compute_value(structure)?;
 
     let shrink_value = {
@@ -447,7 +447,7 @@ fn dot_mat_vec_dumb(mat: &[&[f64]], vec: &[f64]) -> Vec<f64>
 pub(crate) fn optimize_layer_parameters(
     settings: &cfg::ScaleRanges,
     pot: &PotentialBuilder,
-    mut builder: Assemble,
+    mut layer_builder: Assemble,
 ) -> FailResult<Assemble>
 {Ok({
     pub use ::rsp2_minimize::exact_ls::{Value, Golden};
@@ -462,12 +462,12 @@ pub(crate) fn optimize_layer_parameters(
         repeat_count,
     } = *settings;
 
-    let n_seps = builder.layer_seps().len();
+    let n_seps = layer_builder.layer_seps().len();
 
     // abuse RefCell for some DRYness
-    let builder = RefCell::new(builder);
+    let layer_builder = RefCell::new(layer_builder);
     {
-        let builder = &builder;
+        let layer_builder = &layer_builder;
 
         // Make a bunch of closures representing quantities that can be optimized.
         // (NOTE: this is the only part that really contains stuff specific to layers)
@@ -476,7 +476,7 @@ pub(crate) fn optimize_layer_parameters(
             optimizables.push((
                 (format!("lattice parameter"), parameter_spec.clone()),
                 Box::new(|s| {
-                    builder.borrow_mut().scale = s;
+                    layer_builder.borrow_mut().scale = s;
                 }),
             ));
 
@@ -486,7 +486,7 @@ pub(crate) fn optimize_layer_parameters(
                         optimizables.push((
                             (format!("layer sep {}", i), layer_sep_spec.clone()),
                             Box::new(move |s| {
-                                builder.borrow_mut().layer_seps()[i] = s;
+                                layer_builder.borrow_mut().layer_seps()[i] = s;
                             }),
                         ));
                     }
@@ -495,7 +495,7 @@ pub(crate) fn optimize_layer_parameters(
                     optimizables.push((
                         (format!("layer sep"), layer_sep_spec.clone()),
                         Box::new(move |s| {
-                            for dest in builder.borrow_mut().layer_seps() {
+                            for dest in layer_builder.borrow_mut().layer_seps() {
                                 *dest = s;
                             }
                         })
@@ -524,7 +524,7 @@ pub(crate) fn optimize_layer_parameters(
             //        reusing a single lammps instance and see what happens.
             //
             //        (maybe I had issues with "lost atoms" errors or something)
-            pot.one_off().compute_value(&carbon(&builder.borrow().assemble()))?
+            pot.one_off().compute_value(&carbon(layer_builder.borrow().assemble()))?
         });
 
         // optimize them one-by-one.
@@ -569,7 +569,7 @@ pub(crate) fn optimize_layer_parameters(
         } // for ... in repeat_count
     } // RefCell borrow scope
 
-    builder.into_inner()
+    layer_builder.into_inner()
 })}
 
 //-----------------------------------------------------------------------------

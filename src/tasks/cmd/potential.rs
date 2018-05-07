@@ -20,7 +20,119 @@ const DEFAULT_AIREBO_LJ_SIGMA:    f64 = 3.0; // (cutoff, x3.4 A)
 const DEFAULT_AIREBO_LJ_ENABLED:      bool = true;
 const DEFAULT_AIREBO_TORSION_ENABLED: bool = false;
 
-//pub type Lammps = ::rsp2_lammps_wrap::Lammps<DynPotential>;
+/// This is what gets passed around by very high level code to represent a
+/// potential function in very high-level code. Basically:
+///
+/// * Configuration is read to produce one of these.
+///   A trait is used instead of an enum to increase the flexibility of the
+///   implementation, and to localize the impact that newly added potentials
+///   have on the rest of the codebase.
+///
+/// * This thing is sendable across threads and should be relatively cheap
+///   to clone (basically a bundle of config data). Most code passes
+///   it around as a trait object because there is little to be gained from
+///   static dispatch in such high level code.
+///
+/// * When it is time to compute, you build the `DiffFn`, which will have a
+///   method for computing potential and gradient. Preferably, you should
+///   try to use the same `DiffFn` for numerous computations (subject to
+///   some limitations that are... not currently very well-specified.
+///   See the `DiffFn` trait)
+///
+/// The default Metadata type here is the one used by all high-level code.
+/// It is a generic type parameter because some implementation may benefit
+/// from using their own type (using an adapter to expose a PotentialBuilder
+/// implementation with the default metadata type).
+pub trait PotentialBuilder<Meta = Element>: Send + Sync {
+    /// Sometimes called as a last-minute hint to control threading
+    /// within the potential based on the current circumstances.
+    ///
+    /// The default implementation simply ignores this.
+    #[cfg_attr(feature = "nightly", must_use = "this is not an in-place mutation!")]
+    fn threaded<'a>(&self, _threaded: bool) -> Box<PotentialBuilder<Meta> + 'a>
+    where Self: 'a,
+    { self.box_clone() }
+
+    /// "Clone" the trait object.
+    fn box_clone<'a>(&self) -> Box<PotentialBuilder<Meta> + 'a>
+    where Self: 'a;
+
+    /// dumb dumb dumb stupid implementation detail.
+    ///
+    /// A default implementation cannot be provided. Just return `self`.
+    fn _as_ref_dyn<'a>(&self) -> & (PotentialBuilder<Meta> + 'a)
+    where Self: 'a;
+
+    /// Create the DiffFn.  This does potentially expensive initialization, maybe calling out
+    /// to external C APIs and etc.
+    ///
+    /// **NOTE:** This takes a structure for historic (read: dumb) reasons.  Hopefully it can
+    /// be removed soon. For now, just make sure to give it something with the same chemical
+    /// composition, number of atoms, and lattice type as the structures you'll be computing.
+    fn initialize_diff_fn<'a>(&self, structure: Structure<Meta>) -> FailResult<Box<DiffFn<Meta> + 'a>>
+    where Self: 'a;
+
+    /// Convenience method to get a function suitable for `rsp2_minimize`.
+    ///
+    /// The structure given to this is used to supply the lattice and element data.
+    /// Also, some other data may be precomputed from it.
+    ///
+    /// Because Boxes don't implement `Fn` traits for technical reasons,
+    /// you will likely need to write `&mut *flat_diff_fn` in order to get
+    /// a `&mut DynFlatDiffFn`.
+    fn initialize_flat_diff_fn<'a>(&self, structure: Structure<Meta>) -> FailResult<Box<DynFlatDiffFn<'a>>>
+    where Self: 'a;
+
+    /// Convenience adapter for one-off computations.
+    ///
+    /// The output type is a DiffFn instance that will initialize the true `DiffFn`
+    /// from scratch each time it is called. (though presumably, you only intend
+    /// to call it once!)
+    ///
+    /// Usage: `pot.one_off().compute(&structure)`
+    ///
+    /// This is provided because otherwise, you end up needing to write stuff
+    /// like `pot.initialize_diff_fn(structure.clone()).compute(&structure)`, which
+    /// is both confusing and awkward.
+    fn one_off<'r, 'a: 'r>(&'r self) -> OneOff<'r, 'a, Meta>
+    where
+        Self: 'a,
+        Meta: Clone,
+    { OneOff(self._as_ref_dyn()) }
+}
+
+/// A simple implementation of `box_clone` that most implementors of `PotentialBuilder`
+/// can use as long as they implement `Clone`.
+pub fn simple_box_clone<'a, P, Meta>(pot: &P) -> Box<PotentialBuilder<Meta> + 'a>
+where
+    P: PotentialBuilder<Meta> + Clone + 'a,
+{ Box::new(pot.clone()) }
+
+/// A simple implementation of `initialize_flat_diff_fn` that most implementors of
+/// `PotentialBuilder` can use as long as their metadata type implements `Clone`.
+pub fn simple_initialize_flat_diff_fn<'a, P, M>(
+    pot: &P,
+    structure: Structure<M>,
+) -> FailResult<Box<DynFlatDiffFn<'a>>>
+where
+    P: PotentialBuilder<M> + 'a,
+    M: Clone + 'a,
+{Ok({
+    let mut diff_fn = pot.initialize_diff_fn(structure.clone())?;
+    let mut structure = structure;
+    Box::new(move |pos: &[f64]| Ok({
+        structure.set_carts(pos.nest().to_vec());
+
+        let (value, grad) = diff_fn.compute(&structure)?;
+        (value, grad.unvee().flat().to_vec())
+    }))
+})}
+
+impl<'a, M> Clone for Box<PotentialBuilder<M> + 'a>
+where M: 'a, // FIXME why is this necessary? PotentialBuilder doesn't borrow from M...
+{
+    fn clone(&self) -> Self { self.box_clone() }
+}
 
 /// Trait alias for a function producing flat potential and gradient,
 /// for compatibility with `rsp2_minimize`.
@@ -31,10 +143,15 @@ impl<F> FlatDiffFn for F where F: FnMut(&[f64]) -> FailResult<(f64, Vec<f64>)> {
 // Type aliases for the trait object types, to work around #23856
 pub type DynFlatDiffFn<'a> = FlatDiffFn<Output=FailResult<(f64, Vec<f64>)>> + 'a;
 
-pub(crate) use self::lammps::Builder as PotentialBuilder;
-
 /// This is `FnMut(ElementStructure) -> FailResult<(f64, Vec<V3>)>` with convenience methods.
-pub trait DiffFn<Meta = Element> {
+///
+/// A `DiffFn` may contain pre-computed or cached data that is only valid for
+/// certain structures.  Most code that handles `DiffFns` must handle them
+/// opaquely, so generally speaking, *all code that uses a `DiffFn`* is subject
+/// to *union of the limitations across all of the implementations.*
+///
+/// (...not a huge deal since all uses and all implementations are local to this crate)
+pub trait DiffFn<Meta> {
     /// Compute the value and gradient.
     fn compute(&mut self, structure: &Structure<Meta>) -> FailResult<(f64, Vec<V3>)>;
 
@@ -55,7 +172,16 @@ pub trait DiffFn<Meta = Element> {
     }
 }
 
+/// See `PotentialBuilder::one_off` for more information.
+pub struct OneOff<'r, 'bld: 'r, M: 'r>(&'r (PotentialBuilder<M> + 'bld));
+impl<'r, 'bld: 'r, M: Clone> DiffFn<M> for OneOff<'r, 'bld, M> {
+    fn compute(&mut self, structure: &Structure<M>) -> FailResult<(f64, Vec<V3>)> {
+        self.0.initialize_diff_fn(structure.clone())?.compute(structure)
+    }
+}
+
 /// All usage of the public API presented by `rsp2_lammps_wrap` is encapsulated here.
+pub(crate) use self::lammps::Builder as LammpsPotentialBuilder;
 mod lammps {
     use super::*;
 
@@ -106,7 +232,7 @@ mod lammps {
         ///
         /// Some data may be pre-allocated or precomputed based on the input structure,
         /// so the resulting DiffFn may not support arbitrary structures as input.
-        pub(crate) fn diff_fn(&self, structure: ElementStructure) -> FailResult<Box<DiffFn>>
+        pub(crate) fn diff_fn(&self, structure: ElementStructure) -> FailResult<Box<DiffFn<Element>>>
         {
             // a DiffFn 'lambda' whose type will be erased
             struct MyDiffFn(::rsp2_lammps_wrap::Lammps<DynLammpsPotential>);
@@ -124,31 +250,6 @@ mod lammps {
             Ok(Box::new(MyDiffFn(lmp)) as Box<_>)
         }
 
-
-        // FIXME: Not sure how to accomodate other potentials yet here.
-        //        I tried moving it to the DiffFn trait, but there is a bit of
-        //        nuance in that a flat_diff_fn produced by Builder should be 'static,
-        //        while one produced by a DiffFn should borrow `from &mut self`.
-        //
-        /// Convenience method to get a function suitable for `rsp2_minimize`.
-        ///
-        /// The structure given to this is used to supply the lattice and element data.
-        /// Also, some other data may be precomputed from it.
-        ///
-        /// Because Boxes don't implement `Fn` traits for technical reasons,
-        /// you will likely need to write `&mut *pot.flat_diff_fn()` in order to get
-        /// a `&mut DynFlatDiffFn`.
-        pub(crate) fn flat_diff_fn(&self, structure: ElementStructure) -> FailResult<Box<DynFlatDiffFn<'static>>>
-        {Ok({
-            let mut lmp = self.build_lammps(structure)?;
-            Box::new(move |pos: &[f64]| Ok({
-                lmp.set_carts(pos.nest())?;
-                let value = lmp.compute_value()?;
-                let grad = lmp.compute_grad()?;
-                (value, grad.unvee().flat().to_vec())
-            }))
-        })}
-
         fn build_lammps(
             &self,
             structure: ElementStructure,
@@ -165,27 +266,30 @@ mod lammps {
             self.inner.build(potential, structure)
                 .map_err(Into::into)
         }
-
-        pub(crate) fn one_off(&self) -> OneOff { OneOff(self) }
     }
 
-    /// One-off computations for convenience.  Lammps will be initialized from
-    /// stratch, and dropped at the end.
-    ///
-    /// Usage: `pot.one_off().compute(&structure)`
-    ///
-    /// These are provided because otherwise, you end up needing to write stuff
-    /// like `pot.diff_fn(structure.clone()).compute(&structure)`, which is both
-    /// confusing and awkward.
-    pub struct OneOff<'a>(&'a Builder);
-    impl<'a> DiffFn<Element> for OneOff<'a> {
-        fn compute(&mut self, structure: &ElementStructure) -> FailResult<(f64, Vec<V3>)>
-        {
-            let mut lmp = self.0.build_lammps(structure.clone())?;
-            let value = lmp.compute_value()?;
-            let grad = lmp.compute_grad()?;
-            Ok((value, grad))
-        }
+    impl PotentialBuilder<Element> for Builder {
+        fn threaded<'a>(&self, threaded: bool) -> Box<PotentialBuilder<Element> + 'a>
+        where Self: 'a,
+        { Box::new(<Builder>::threaded(self, threaded)) }
+
+        fn box_clone<'a>(&self) -> Box<PotentialBuilder<Element> + 'a>
+        where Self: 'a,
+        { simple_box_clone(self) }
+
+        fn _as_ref_dyn<'a>(&self) -> & (PotentialBuilder<Element> + 'a) where Self: 'a
+        { self }
+
+        fn initialize_diff_fn<'a>(&self, structure: Structure<Element>) -> FailResult<Box<DiffFn<Element> + 'a>>
+        where Self: 'a
+        { self.diff_fn(structure) }
+
+        fn initialize_flat_diff_fn<'a>(
+            &self,
+            structure: Structure<Element>,
+        ) -> FailResult<Box<DynFlatDiffFn<'a>>>
+        where Self: 'a,
+        { simple_initialize_flat_diff_fn(self, structure) }
     }
 
     pub use self::airebo::Airebo;
@@ -451,16 +555,20 @@ mod lammps {
 }
 
 // Dummy potentials for testing purposes
-mod test {
+// TODO actually, I intend to make something from here a selectable
+//      option in settings.yaml, so the `#[cfg(test)]` is temporary.
+#[cfg(test)]
+pub mod test {
     use super::*;
+    use ::rsp2_structure::Coords;
 
     pub struct ConvergeTowards {
-        target: Structure<()>,
+        target: Coords,
     }
 
     impl ConvergeTowards {
-        pub fn new<M>(structure: Structure<M>) -> Self
-        { ConvergeTowards { target: structure.map_metadata_into(|_| ()) } }
+        pub fn new(coords: Coords) -> Self
+        { ConvergeTowards { target: coords.clone() } }
     }
 
     impl<M> DiffFn<M> for ConvergeTowards {
@@ -533,7 +641,7 @@ mod test {
         // FIXME inherent methods do not make for a generic interface
         pub(crate) fn flat_diff_fn(&self) -> Box<DynFlatDiffFn>
         {
-            let mut structure = self.target.clone();
+            let mut structure = self.target.clone().with_uniform_metadata(());
             Box::new(move |pos: &[f64]| Ok({
                 structure.set_carts(pos.nest().to_vec());
                 let (value, grad) = {self}.compute(&structure)?;
@@ -582,7 +690,7 @@ mod test {
             //let expected_carts = CoordsKind::Fracs(expected_fracs.clone().envee()).to_carts(&lattice);
 
             let meta = vec![(); start_coords.len()];
-            let target = Structure::new(lattice.clone(), target_coords.clone(), meta.clone());
+            let target = Coords::new(lattice.clone(), target_coords.clone());
             let start = Structure::new(lattice.clone(), start_coords.clone(), meta.clone());
 
             let diff_fn = ConvergeTowards::new(target);

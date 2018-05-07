@@ -3,6 +3,7 @@
 pub(crate) mod integrate_2d;
 
 use self::potential::{PotentialBuilder, DiffFn};
+use self::potential::LammpsPotentialBuilder; // FIXME stop using this
 mod potential;
 
 use self::ev_analyses::GammaSystemAnalysis;
@@ -68,7 +69,7 @@ impl TrialDir {
         cli: CliArgs,
     ) -> FailResult<()>
     {Ok({
-        let pot = PotentialBuilder::new(&settings.threading, &settings.potential.kind);
+        let pot = LammpsPotentialBuilder::new(&settings.threading, &settings.potential.kind);
 
         let (original_structure, atom_layers, layer_sc_mats) = read_structure_file(
             Some(settings), file_format, input, Some(&pot),
@@ -184,7 +185,7 @@ impl TrialDir {
             use self::ev_analyses::*;
 
             let classifications = acoustic_search::perform_acoustic_search(
-                &pot, &evals, &evecs, &structure, settings,
+                pot, &evals, &evecs, &structure, settings,
             )?;
 
             let aux_info::Info { atom_layers, atom_masses, layer_sc_mats } = aux_info;
@@ -229,7 +230,7 @@ fn do_diagonalize(
 ) -> FailResult<DirWithBands<Box<AsPath>>>
 {Ok({
     let disp_dir = phonopy.displacements(&structure)?;
-    let force_sets = do_force_sets_at_disps(&pot, &threading, &disp_dir)?;
+    let force_sets = do_force_sets_at_disps(pot, &threading, &disp_dir)?;
 
     let bands_dir = disp_dir
         .make_force_dir(&force_sets)?
@@ -383,25 +384,11 @@ fn read_eigensystem<P: AsPath>(
 #[allow(unused)] const Q_K: V3 = V3([1f64/3.0, 1.0/3.0, 0.0]);
 #[allow(unused)] const Q_K_PRIME: V3 = V3([2.0 / 3f64, 2.0 / 3f64, 0.0]);
 
-// HACK: These adapters are temporary to help the existing code
-//       (written only with carbon in mind) adapt to Structure.
 #[allow(unused)]
-fn carbon(coords: &Coords) -> ElementStructure
+fn carbon(coords: Coords) -> ElementStructure
 {
     // I want it PAINTED BLACK!
-    let meta = vec![CARBON; coords.num_atoms()];
-    coords.clone().with_metadata(meta)
-}
-
-#[allow(unused)] // if this isn't used, I'm *glad*
-fn uncarbon(structure: &ElementStructure) -> Coords
-{
-    assert!(structure.metadata().iter().all(|&e| e == CARBON),
-        "if you want to use this code on non-carbon stuff, you better \
-        do something about all the carbon-specific code.  Look for calls \
-        to `carbon()`");
-    let coords: &Coords = structure;
-    coords.clone()
+    coords.with_uniform_metadata(CARBON)
 }
 
 //=================================================================
@@ -508,7 +495,7 @@ impl TrialDir {
                         // println!("{:?}", pos.flat().iter().sum::<f64>());
 
                         eprint!("\rdatapoint {:>6} of {}", i, w * h);
-                        PotentialBuilder::new(&settings.threading, &settings.potential)
+                        LammpsPotentialBuilder::new(&settings.threading, &settings.potential)
                             .one_off()
                             .compute_grad(&structure.clone().with_carts(pos.to_vec()))?
                     })}
@@ -586,7 +573,7 @@ impl TrialDir {
     {Ok({
         use ::rsp2_structure_io::poscar;
 
-        let pot = PotentialBuilder::new(&settings.threading, &settings.potential.kind);
+        let pot = LammpsPotentialBuilder::new(&settings.threading, &settings.potential.kind);
 
         let structure = poscar::load(self.read_file("./final.vasp")?)?;
         let phonopy = phonopy_builder_from_settings(&settings.phonons, structure.lattice());
@@ -613,7 +600,7 @@ impl TrialDir {
     {Ok({
         use ::rsp2_structure_io::poscar;
 
-        let pot = PotentialBuilder::new(&settings.threading, &settings.potential.kind);
+        let pot = LammpsPotentialBuilder::new(&settings.threading, &settings.potential.kind);
 
         let structure = poscar::load(self.read_file("./final.vasp")?)?;
         let phonopy = phonopy_builder_from_settings(&settings.phonons, structure.lattice());
@@ -640,7 +627,7 @@ impl TrialDir {
         cli: CliArgs,
     ) -> FailResult<()>
     {Ok({
-        let pot = PotentialBuilder::new(&settings.threading, &settings.potential.kind);
+        let pot = LammpsPotentialBuilder::new(&settings.threading, &settings.potential.kind);
 
         let (prim_structure, _atom_layers, _layer_sc_mats) = read_structure_file(
             Some(settings), file_format, input, Some(&pot),
@@ -804,7 +791,7 @@ pub(crate) fn read_structure_file(
                     &settings.scale_ranges, pot, layer_builder,
                 )?;
             }
-            original_structure = carbon(&layer_builder.assemble());
+            original_structure = carbon(layer_builder.assemble());
 
             layer_sc_mats = Some({
                 layer_sc_info_from_layers_yaml(input.read()?)?
