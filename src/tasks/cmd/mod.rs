@@ -3,7 +3,6 @@
 pub(crate) mod integrate_2d;
 
 use self::potential::{PotentialBuilder, DiffFn};
-use self::potential::LammpsPotentialBuilder; // FIXME stop using this
 mod potential;
 
 use self::ev_analyses::GammaSystemAnalysis;
@@ -69,17 +68,17 @@ impl TrialDir {
         cli: CliArgs,
     ) -> FailResult<()>
     {Ok({
-        let pot = LammpsPotentialBuilder::new(&settings.threading, &settings.potential.kind);
+        let pot = PotentialBuilder::from_config(&settings.threading, &settings.potential.kind);
 
         let (original_structure, atom_layers, layer_sc_mats) = read_structure_file(
-            Some(settings), file_format, input, Some(&pot),
+            Some(settings), file_format, input, Some(&*pot),
         )?;
 
         self.write_poscar("initial.vasp", "Initial structure", &original_structure)?;
         let phonopy = phonopy_builder_from_settings(&settings.phonons, original_structure.lattice());
 
         let (structure, ev_analysis, final_bands_dir) = self.do_main_ev_loop(
-            settings, &cli, &pot, &atom_layers, &layer_sc_mats,
+            settings, &cli, &*pot, &atom_layers, &layer_sc_mats,
             &phonopy, original_structure,
         )?;
         let _do_not_drop_the_bands_dir = final_bands_dir;
@@ -88,7 +87,7 @@ impl TrialDir {
 
         write_eigen_info_for_machines(&ev_analysis, self.create_file("eigenvalues.final")?)?;
 
-        self.write_ev_analysis_output_files(settings, &pot, &ev_analysis)?;
+        self.write_ev_analysis_output_files(settings, &*pot, &ev_analysis)?;
     })}
 
     fn write_ev_analysis_output_files(
@@ -495,7 +494,7 @@ impl TrialDir {
                         // println!("{:?}", pos.flat().iter().sum::<f64>());
 
                         eprint!("\rdatapoint {:>6} of {}", i, w * h);
-                        LammpsPotentialBuilder::new(&settings.threading, &settings.potential)
+                        PotentialBuilder::from_config(&settings.threading, &settings.potential)
                             .one_off()
                             .compute_grad(&structure.clone().with_carts(pos.to_vec()))?
                     })}
@@ -573,12 +572,12 @@ impl TrialDir {
     {Ok({
         use ::rsp2_structure_io::poscar;
 
-        let pot = LammpsPotentialBuilder::new(&settings.threading, &settings.potential.kind);
+        let pot = PotentialBuilder::from_config(&settings.threading, &settings.potential.kind);
 
         let structure = poscar::load(self.read_file("./final.vasp")?)?;
         let phonopy = phonopy_builder_from_settings(&settings.phonons, structure.lattice());
         do_diagonalize(
-            &pot, &settings.threading, &phonopy, &structure,
+            &*pot, &settings.threading, &phonopy, &structure,
             Some(&self.save_bands_dir()),
             &[Q_GAMMA, Q_K],
         )?;
@@ -600,7 +599,7 @@ impl TrialDir {
     {Ok({
         use ::rsp2_structure_io::poscar;
 
-        let pot = LammpsPotentialBuilder::new(&settings.threading, &settings.potential.kind);
+        let pot = PotentialBuilder::from_config(&settings.threading, &settings.potential.kind);
 
         let structure = poscar::load(self.read_file("./final.vasp")?)?;
         let phonopy = phonopy_builder_from_settings(&settings.phonons, structure.lattice());
@@ -609,10 +608,10 @@ impl TrialDir {
 
         let save_bands = None;
         let (_, _, _, ev_analysis) = self.do_post_relaxation_computations(
-            settings, save_bands, &pot, aux_info, &phonopy, &structure,
+            settings, save_bands, &*pot, aux_info, &phonopy, &structure,
         )?;
 
-        self.write_ev_analysis_output_files(settings, &pot, &ev_analysis)?;
+        self.write_ev_analysis_output_files(settings, &*pot, &ev_analysis)?;
     })}
 }
 
@@ -627,10 +626,10 @@ impl TrialDir {
         cli: CliArgs,
     ) -> FailResult<()>
     {Ok({
-        let pot = LammpsPotentialBuilder::new(&settings.threading, &settings.potential.kind);
+        let pot = PotentialBuilder::from_config(&settings.threading, &settings.potential.kind);
 
         let (prim_structure, _atom_layers, _layer_sc_mats) = read_structure_file(
-            Some(settings), file_format, input, Some(&pot),
+            Some(settings), file_format, input, Some(&*pot),
         )?;
 
         self.write_poscar("initial.vasp", "Initial structure", &prim_structure)?;

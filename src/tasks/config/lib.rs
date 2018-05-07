@@ -192,6 +192,10 @@ pub struct Potential {
 pub enum PotentialKind {
     #[serde(rename = "airebo")] Airebo(PotentialAirebo),
     #[serde(rename = "kc-z")] KolmogorovCrespiZ(PotentialKolmogorovCrespiZ),
+    /// V = 0
+    #[serde(rename = "test-func-zero")] TestZero,
+    /// Arranges atoms into a chain along the first lattice vector.
+    #[serde(rename = "test-func-chainify")] TestChainify,
 }
 
 #[derive(Serialize, Deserialize)]

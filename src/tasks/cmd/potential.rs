@@ -47,11 +47,10 @@ pub trait PotentialBuilder<Meta = Element>: Send + Sync {
     /// Sometimes called as a last-minute hint to control threading
     /// within the potential based on the current circumstances.
     ///
-    /// The default implementation simply ignores this.
+    /// Implementations that do not care may simply call `box_clone()`.
     #[cfg_attr(feature = "nightly", must_use = "this is not an in-place mutation!")]
     fn threaded<'a>(&self, _threaded: bool) -> Box<PotentialBuilder<Meta> + 'a>
-    where Self: 'a,
-    { self.box_clone() }
+    where Self: 'a;
 
     /// "Clone" the trait object.
     fn box_clone<'a>(&self) -> Box<PotentialBuilder<Meta> + 'a>
@@ -81,7 +80,10 @@ pub trait PotentialBuilder<Meta = Element>: Send + Sync {
     /// you will likely need to write `&mut *flat_diff_fn` in order to get
     /// a `&mut DynFlatDiffFn`.
     fn initialize_flat_diff_fn<'a>(&self, structure: Structure<Meta>) -> FailResult<Box<DynFlatDiffFn<'a>>>
-    where Self: 'a;
+    where
+        Self: 'a,
+        Meta: 'a, // FIXME annoying, required by default impl
+    ;
 
     /// Convenience adapter for one-off computations.
     ///
@@ -180,8 +182,29 @@ impl<'r, 'bld: 'r, M: Clone> DiffFn<M> for OneOff<'r, 'bld, M> {
     }
 }
 
+impl PotentialBuilder {
+    pub(crate) fn from_config(
+        threading: &cfg::Threading,
+        config: &cfg::PotentialKind,
+    ) -> Box<PotentialBuilder> {
+        match *config {
+            cfg::PotentialKind::Airebo(ref cfg) => {
+                let lammps_pot = self::lammps::Airebo::from(cfg);
+                let pot = self::lammps::Builder::new(threading, lammps_pot);
+                Box::new(pot)
+            },
+            cfg::PotentialKind::KolmogorovCrespiZ(ref cfg) => {
+                let lammps_pot = self::lammps::KolmogorovCrespiZ::from(cfg);
+                let pot = self::lammps::Builder::new(threading, lammps_pot);
+                Box::new(pot)
+            },
+            cfg::PotentialKind::TestZero => Box::new(self::test::Zero),
+            cfg::PotentialKind::TestChainify => Box::new(self::test::Chainify),
+        }
+    }
+}
+
 /// All usage of the public API presented by `rsp2_lammps_wrap` is encapsulated here.
-pub(crate) use self::lammps::Builder as LammpsPotentialBuilder;
 mod lammps {
     use super::*;
 
@@ -189,55 +212,58 @@ mod lammps {
     use ::rsp2_lammps_wrap::Builder as InnerBuilder;
     use ::rsp2_lammps_wrap::Potential as LammpsPotential;
 
-    pub type DynLammpsPotential = Box<LammpsPotential<Meta=Element>>;
-
     /// A bundle of everything we need to initialize a Lammps API object.
     ///
     /// It is nothing more than a bundle of configuration, and can be freely
     /// sent across threads.
     #[derive(Debug, Clone)]
-    pub(crate) struct Builder {
+    pub(crate) struct Builder<P> {
         inner: InnerBuilder,
-        potential: cfg::PotentialKind,
+        pub potential: P,
     }
 
     fn assert_send_sync<S: Send + Sync>() {}
 
     #[allow(unused)] // compile-time test
     fn assert_lammps_builder_send_sync() {
-        assert_send_sync::<Builder>();
+        assert_send_sync::<Builder<()>>();
     }
 
-    impl Builder {
+    impl<P: Clone> Builder<P>
+    {
         pub(crate) fn new(
             threading: &cfg::Threading,
-            potential: &cfg::PotentialKind,
-        ) -> Builder
-        {
+            potential: P,
+        ) -> Self {
             let mut inner = InnerBuilder::new();
             inner.append_log("lammps.log");
             inner.threaded(*threading == cfg::Threading::Lammps);
 
-            let potential = potential.clone();
-
             Builder { inner, potential }
         }
 
-        pub(crate) fn threaded(&self, threaded: bool) -> Self
-        { let mut me = self.clone(); me.inner.threaded(threaded); me }
+        pub(crate) fn threaded(&self, threaded: bool) -> Self {
+            let mut me = self.clone();
+            me.inner.threaded(threaded);
+            me
+        }
+    }
 
+    impl<P: LammpsPotential + Clone + Send + Sync + 'static> Builder<P>
+    where P::Meta: Clone,
+    {
         /// Initialize Lammps to make a DiffFn.
         ///
         /// This keeps the Lammps instance between calls to save time.
         ///
         /// Some data may be pre-allocated or precomputed based on the input structure,
         /// so the resulting DiffFn may not support arbitrary structures as input.
-        pub(crate) fn diff_fn(&self, structure: ElementStructure) -> FailResult<Box<DiffFn<Element>>>
+        pub(crate) fn diff_fn(&self, structure: Structure<P::Meta>) -> FailResult<Box<DiffFn<P::Meta>>>
         {
             // a DiffFn 'lambda' whose type will be erased
-            struct MyDiffFn(::rsp2_lammps_wrap::Lammps<DynLammpsPotential>);
-            impl DiffFn<Element> for MyDiffFn {
-                fn compute(&mut self, structure: &ElementStructure) -> FailResult<(f64, Vec<V3>)> {
+            struct MyDiffFn<M: Clone>(::rsp2_lammps_wrap::Lammps<Box<LammpsPotential<Meta=M>>>);
+            impl<M: Clone> DiffFn<M> for MyDiffFn<M> {
+                fn compute(&mut self, structure: &Structure<M>) -> FailResult<(f64, Vec<V3>)> {
                     let lmp = &mut self.0;
 
                     lmp.set_structure(structure.clone())?;
@@ -246,47 +272,34 @@ mod lammps {
                     Ok((value, grad))
                 }
             }
-            let lmp = self.build_lammps(structure)?;
-            Ok(Box::new(MyDiffFn(lmp)) as Box<_>)
-        }
 
-        fn build_lammps(
-            &self,
-            structure: ElementStructure,
-        ) -> FailResult<::rsp2_lammps_wrap::Lammps<DynLammpsPotential>>
-        {
-            let potential: DynLammpsPotential = match self.potential {
-                cfg::PotentialKind::Airebo(ref cfg) => {
-                    Box::new(Airebo::from(cfg))
-                },
-                cfg::PotentialKind::KolmogorovCrespiZ(ref cfg) => {
-                    Box::new(KolmogorovCrespiZ::from(cfg))
-                },
-            };
-            self.inner.build(potential, structure)
-                .map_err(Into::into)
+            let lammps_pot = Box::new(self.potential.clone()) as Box<LammpsPotential<Meta=P::Meta>>;
+            let lmp = self.inner.build(lammps_pot, structure)?;
+            Ok(Box::new(MyDiffFn::<P::Meta>(lmp)) as Box<_>)
         }
     }
 
-    impl PotentialBuilder<Element> for Builder {
-        fn threaded<'a>(&self, threaded: bool) -> Box<PotentialBuilder<Element> + 'a>
+    impl<P: Clone + LammpsPotential + Send + Sync + 'static> PotentialBuilder<P::Meta> for Builder<P>
+    where P::Meta: Clone,
+    {
+        fn threaded<'a>(&self, threaded: bool) -> Box<PotentialBuilder<P::Meta> + 'a>
         where Self: 'a,
-        { Box::new(<Builder>::threaded(self, threaded)) }
+        { Box::new(<Builder<_>>::threaded(self, threaded)) }
 
-        fn box_clone<'a>(&self) -> Box<PotentialBuilder<Element> + 'a>
+        fn box_clone<'a>(&self) -> Box<PotentialBuilder<P::Meta> + 'a>
         where Self: 'a,
         { simple_box_clone(self) }
 
-        fn _as_ref_dyn<'a>(&self) -> & (PotentialBuilder<Element> + 'a) where Self: 'a
+        fn _as_ref_dyn<'a>(&self) -> & (PotentialBuilder<P::Meta> + 'a) where Self: 'a
         { self }
 
-        fn initialize_diff_fn<'a>(&self, structure: Structure<Element>) -> FailResult<Box<DiffFn<Element> + 'a>>
+        fn initialize_diff_fn<'a>(&self, structure: Structure<P::Meta>) -> FailResult<Box<DiffFn<P::Meta> + 'a>>
         where Self: 'a
         { self.diff_fn(structure) }
 
         fn initialize_flat_diff_fn<'a>(
             &self,
-            structure: Structure<Element>,
+            structure: Structure<P::Meta>,
         ) -> FailResult<Box<DynFlatDiffFn<'a>>>
         where Self: 'a,
         { simple_initialize_flat_diff_fn(self, structure) }
@@ -555,15 +568,108 @@ mod lammps {
 }
 
 // Dummy potentials for testing purposes
-// TODO actually, I intend to make something from here a selectable
-//      option in settings.yaml, so the `#[cfg(test)]` is temporary.
-#[cfg(test)]
 pub mod test {
     use super::*;
-    use ::rsp2_structure::Coords;
+    use ::rsp2_structure::{Coords, CoordsKind};
 
+    /// The test Potential `V = 0`.
+    #[derive(Debug, Clone)]
+    pub struct Zero;
+
+    impl<Meta: Clone> PotentialBuilder<Meta> for Zero {
+        fn threaded<'a>(&self, _threaded: bool) -> Box<PotentialBuilder<Meta> + 'a>
+        where Self: 'a,
+        { self.box_clone() }
+
+        fn box_clone<'a>(&self) -> Box<PotentialBuilder<Meta> + 'a>
+        where Self: 'a,
+        { simple_box_clone(self) }
+
+        fn _as_ref_dyn<'a>(&self) -> & (PotentialBuilder<Meta> + 'a) where Self: 'a
+        { self }
+
+        fn initialize_diff_fn<'a>(&self, _: Structure<Meta>) -> FailResult<Box<DiffFn<Meta> + 'a>>
+        where Self: 'a
+        {
+            struct Diff;
+            impl<M> DiffFn<M> for Diff {
+                fn compute(&mut self, structure: &Structure<M>) -> FailResult<(f64, Vec<V3>)> {
+                    Ok((0.0, vec![V3([0.0; 3]); structure.num_atoms()]))
+                }
+            }
+            Ok(Box::new(Diff) as Box<_>)
+        }
+
+        fn initialize_flat_diff_fn<'a>(
+            &self,
+            structure: Structure<Meta>,
+        ) -> FailResult<Box<DynFlatDiffFn<'a>>>
+        where Self: 'a, Meta: 'a,
+        { simple_initialize_flat_diff_fn(self, structure) }
+    }
+
+    /// A test Potential that creates a chain along the Z axis.
+    #[derive(Debug, Clone)]
+    pub struct Chainify;
+
+    /// A test DiffFn that moves atoms to fixed positions.
+    #[derive(Debug, Clone)]
     pub struct ConvergeTowards {
         target: Coords,
+    }
+
+    impl<Meta: Clone> PotentialBuilder<Meta> for ConvergeTowards {
+        fn threaded<'a>(&self, _threaded: bool) -> Box<PotentialBuilder<Meta> + 'a>
+        where Self: 'a,
+        { self.box_clone() }
+
+        fn box_clone<'a>(&self) -> Box<PotentialBuilder<Meta> + 'a> where Self: 'a,
+        { simple_box_clone(self) }
+
+        fn _as_ref_dyn<'a>(&self) -> & (PotentialBuilder<Meta> + 'a) where Self: 'a
+        { self }
+
+        fn initialize_diff_fn<'a>(&self, _: Structure<Meta>) -> FailResult<Box<DiffFn<Meta> + 'a>>
+        where Self: 'a
+        { Ok(Box::new(self.clone()) as Box<_>) }
+
+        fn initialize_flat_diff_fn<'a>(
+            &self,
+            structure: Structure<Meta>,
+        ) -> FailResult<Box<DynFlatDiffFn<'a>>>
+        where Self: 'a, Meta: 'a,
+        { simple_initialize_flat_diff_fn(self, structure) }
+    }
+
+    impl<Meta: Clone> PotentialBuilder<Meta> for Chainify {
+        fn threaded<'a>(&self, _threaded: bool) -> Box<PotentialBuilder<Meta> + 'a>
+            where Self: 'a,
+        { self.box_clone() }
+
+        fn box_clone<'a>(&self) -> Box<PotentialBuilder<Meta> + 'a> where Self: 'a,
+        { simple_box_clone(self) }
+
+        fn _as_ref_dyn<'a>(&self) -> & (PotentialBuilder<Meta> + 'a) where Self: 'a
+        { self }
+
+        fn initialize_diff_fn<'a>(&self, structure: Structure<Meta>) -> FailResult<Box<DiffFn<Meta> + 'a>>
+            where Self: 'a
+        {
+            let na = structure.num_atoms();
+            let fracs = (0..na).map(|i| {
+                V3([i as f64 / na as f64, 0.5, 0.5])
+            }).collect();
+            let coords = CoordsKind::Fracs(fracs);
+            let target = Coords::new(structure.lattice().clone(), coords);
+            Ok(Box::new(ConvergeTowards::new(target)) as Box<_>)
+        }
+
+        fn initialize_flat_diff_fn<'a>(
+            &self,
+            structure: Structure<Meta>,
+        ) -> FailResult<Box<DynFlatDiffFn<'a>>>
+            where Self: 'a, Meta: 'a,
+        { simple_initialize_flat_diff_fn(self, structure) }
     }
 
     impl ConvergeTowards {
@@ -637,19 +743,6 @@ pub mod test {
         }
     }
 
-    impl ConvergeTowards {
-        // FIXME inherent methods do not make for a generic interface
-        pub(crate) fn flat_diff_fn(&self) -> Box<DynFlatDiffFn>
-        {
-            let mut structure = self.target.clone().with_uniform_metadata(());
-            Box::new(move |pos: &[f64]| Ok({
-                structure.set_carts(pos.nest().to_vec());
-                let (value, grad) = {self}.compute(&structure)?;
-                (value, grad.unvee().flat().to_vec())
-            }))
-        }
-    }
-
     #[cfg(test)]
     #[deny(unused)]
     mod tests {
@@ -699,7 +792,7 @@ pub mod test {
                 "alpha-guess-first": 0.1,
             }};
 
-            let mut flat_diff_fn = diff_fn.flat_diff_fn();
+            let mut flat_diff_fn = diff_fn.initialize_flat_diff_fn(start.clone()).unwrap();
             let flat_diff_fn = &mut *flat_diff_fn;
 
             let data = ::rsp2_minimize::acgsd(
