@@ -20,6 +20,15 @@ const DEFAULT_AIREBO_LJ_SIGMA:    f64 = 3.0; // (cutoff, x3.4 A)
 const DEFAULT_AIREBO_LJ_ENABLED:      bool = true;
 const DEFAULT_AIREBO_TORSION_ENABLED: bool = false;
 
+/// Trait alias for a function producing flat potential and gradient,
+/// for compatibility with `rsp2_minimize`.
+pub trait FlatDiffFn: FnMut(&[f64]) -> FailResult<(f64, Vec<f64>)> {}
+
+impl<F> FlatDiffFn for F where F: FnMut(&[f64]) -> FailResult<(f64, Vec<f64>)> {}
+
+// Type aliases for the trait object types, to work around #23856
+pub type DynFlatDiffFn<'a> = FlatDiffFn<Output=FailResult<(f64, Vec<f64>)>> + 'a;
+
 /// This is what gets passed around by very high level code to represent a
 /// potential function in very high-level code. Basically:
 ///
@@ -51,21 +60,17 @@ pub trait PotentialBuilder<Meta = Element>
     // infecting function signatures all over the module (see commit 6c36bddbb08d21),
     // and there is little to be gained because PotentialBuilders are rarely created.
     + 'static
+    // ...sigh.  Use impl_dyn_clone_detail! to satisfy this.
+    + DynCloneDetail<Meta>
 {
     /// Sometimes called as a last-minute hint to control threading
     /// within the potential based on the current circumstances.
+    /// Use `true` to recommend the creation of threads, and `false` to discourage it.
     ///
-    /// Implementations that do not care may simply call `box_clone()`.
+    /// The default implementation just ignores the call.
     #[cfg_attr(feature = "nightly", must_use = "this is not an in-place mutation!")]
-    fn threaded(&self, _threaded: bool) -> Box<PotentialBuilder<Meta>>;
-
-    /// "Clone" the trait object.
-    fn box_clone(&self) -> Box<PotentialBuilder<Meta>>;
-
-    /// dumb dumb dumb stupid implementation detail.
-    ///
-    /// A default implementation cannot be provided. Just return `self`.
-    fn _as_ref_dyn(&self) -> &PotentialBuilder<Meta>;
+    fn threaded(&self, _threaded: bool) -> Box<PotentialBuilder<Meta>>
+    { self.box_clone() }
 
     /// Create the DiffFn.  This does potentially expensive initialization, maybe calling out
     /// to external C APIs and etc.
@@ -107,17 +112,36 @@ pub trait PotentialBuilder<Meta = Element>
     /// This is provided because otherwise, you end up needing to write stuff
     /// like `pot.initialize_diff_fn(structure.clone()).compute(&structure)`, which
     /// is both confusing and awkward.
-    fn one_off<'r>(&'r self) -> OneOff<'r, Meta>
+    fn one_off(&self) -> OneOff<Meta>
     where Meta: Clone,
     { OneOff(self._as_ref_dyn()) }
 }
 
-/// A simple implementation of `box_clone` that most implementors of `PotentialBuilder`
-/// can use as long as they implement `Clone`.
-pub fn simple_box_clone<P, Meta>(pot: &P) -> Box<PotentialBuilder<Meta>>
-where
-    P: PotentialBuilder<Meta> + Clone,
-{ Box::new(pot.clone()) }
+//-------------------------------------
+
+/// Dumb implementation detail of PotentialBuilder.
+///
+/// It makes it possible to clone or borrow the PotentialBuilder trait object.
+///
+/// It needs to be implemented manually for each PotentialBuilder.
+/// There's a macro for this.
+pub trait DynCloneDetail<Meta> {
+    /// "Clone" the trait object.
+    fn box_clone(&self) -> Box<PotentialBuilder<Meta>>;
+
+    /// "Borrow" the trait object.
+    fn _as_ref_dyn(&self) -> &PotentialBuilder<Meta>;
+}
+
+#[macro_export]
+macro_rules! impl_dyn_clone_detail {
+    (impl[$($bnd:tt)*] DynCloneDetail<$Meta:ty> for $Type:ty { ... }) => {
+        impl<$($bnd)*> DynCloneDetail<$Meta> for $Type {
+            fn box_clone(&self) -> Box<PotentialBuilder<$Meta>> { Box::new(self.clone()) }
+            fn _as_ref_dyn(&self) -> &PotentialBuilder<$Meta> { self }
+        }
+    };
+}
 
 impl<M> Clone for Box<PotentialBuilder<M>>
 where M: 'static, // FIXME why is this necessary? PotentialBuilder doesn't borrow from M...
@@ -125,14 +149,7 @@ where M: 'static, // FIXME why is this necessary? PotentialBuilder doesn't borro
     fn clone(&self) -> Self { self.box_clone() }
 }
 
-/// Trait alias for a function producing flat potential and gradient,
-/// for compatibility with `rsp2_minimize`.
-pub trait FlatDiffFn: FnMut(&[f64]) -> FailResult<(f64, Vec<f64>)> {}
-
-impl<F> FlatDiffFn for F where F: FnMut(&[f64]) -> FailResult<(f64, Vec<f64>)> {}
-
-// Type aliases for the trait object types, to work around #23856
-pub type DynFlatDiffFn<'a> = FlatDiffFn<Output=FailResult<(f64, Vec<f64>)>> + 'a;
+//-------------------------------------
 
 /// This is `FnMut(ElementStructure) -> FailResult<(f64, Vec<V3>)>` with convenience methods.
 ///
@@ -163,6 +180,8 @@ pub trait DiffFn<Meta> {
     }
 }
 
+//-------------------------------------
+
 /// See `PotentialBuilder::one_off` for more information.
 pub struct OneOff<'a, M: 'a>(&'a PotentialBuilder<M>);
 impl<'a, M: Clone + 'static> DiffFn<M> for OneOff<'a, M> {
@@ -171,6 +190,9 @@ impl<'a, M: Clone + 'static> DiffFn<M> for OneOff<'a, M> {
     }
 }
 
+//-------------------------------------
+
+/// High-level logic
 impl PotentialBuilder {
     pub(crate) fn from_config(
         threading: &cfg::Threading,
@@ -192,6 +214,8 @@ impl PotentialBuilder {
         }
     }
 }
+
+//-------------------------------------
 
 /// All usage of the public API presented by `rsp2_lammps_wrap` is encapsulated here.
 mod lammps {
@@ -274,14 +298,13 @@ mod lammps {
         fn threaded(&self, threaded: bool) -> Box<PotentialBuilder<P::Meta>>
         { Box::new(<Builder<_>>::threaded(self, threaded)) }
 
-        fn box_clone(&self) -> Box<PotentialBuilder<P::Meta>>
-        { simple_box_clone(self) }
-
-        fn _as_ref_dyn(&self) -> &PotentialBuilder<P::Meta>
-        { self }
-
         fn initialize_diff_fn(&self, structure: Structure<P::Meta>) -> FailResult<Box<DiffFn<P::Meta>>>
         { self.diff_fn(structure) }
+    }
+
+    impl_dyn_clone_detail!{
+        impl[M: Clone, P: Clone + LammpsPotential<Meta=M> + Send + Sync + 'static]
+        DynCloneDetail<M> for Builder<P> { ... }
     }
 
     pub use self::airebo::Airebo;
@@ -546,7 +569,9 @@ mod lammps {
     }
 }
 
-// Dummy potentials for testing purposes
+//-------------------------------------
+
+/// Dummy potentials for testing purposes
 pub mod test {
     use super::*;
     use ::rsp2_structure::{Coords, CoordsKind};
@@ -556,15 +581,6 @@ pub mod test {
     pub struct Zero;
 
     impl<Meta: Clone> PotentialBuilder<Meta> for Zero {
-        fn threaded(&self, _threaded: bool) -> Box<PotentialBuilder<Meta>>
-        { self.box_clone() }
-
-        fn box_clone<'a>(&self) -> Box<PotentialBuilder<Meta>>
-        { simple_box_clone(self) }
-
-        fn _as_ref_dyn<'a>(&self) -> &PotentialBuilder<Meta>
-        { self }
-
         fn initialize_diff_fn<'a>(&self, _: Structure<Meta>) -> FailResult<Box<DiffFn<Meta>>>
         {
             struct Diff;
@@ -577,9 +593,11 @@ pub mod test {
         }
     }
 
-    /// A test Potential that creates a chain along the Z axis.
-    #[derive(Debug, Clone)]
-    pub struct Chainify;
+    impl_dyn_clone_detail!{
+        impl[M: Clone] DynCloneDetail<M> for Zero { ... }
+    }
+
+    // ---------------
 
     /// A test DiffFn that moves atoms to fixed positions.
     #[derive(Debug, Clone)]
@@ -587,45 +605,19 @@ pub mod test {
         target: Coords,
     }
 
+    impl ConvergeTowards {
+        pub fn new(coords: Coords) -> Self
+        { ConvergeTowards { target: coords.clone() } }
+    }
+
+    /// ConvergeTowards can also serve as its own PotentialBuilder.
     impl<Meta: Clone> PotentialBuilder<Meta> for ConvergeTowards {
-        fn threaded(&self, _threaded: bool) -> Box<PotentialBuilder<Meta>>
-        { self.box_clone() }
-
-        fn box_clone(&self) -> Box<PotentialBuilder<Meta>>
-        { simple_box_clone(self) }
-
-        fn _as_ref_dyn(&self) -> &PotentialBuilder<Meta>
-        { self }
-
         fn initialize_diff_fn(&self, _: Structure<Meta>) -> FailResult<Box<DiffFn<Meta>>>
         { Ok(Box::new(self.clone()) as Box<_>) }
     }
 
-    impl<Meta: Clone> PotentialBuilder<Meta> for Chainify {
-        fn threaded(&self, _threaded: bool) -> Box<PotentialBuilder<Meta>>
-        { self.box_clone() }
-
-        fn box_clone(&self) -> Box<PotentialBuilder<Meta>>
-        { simple_box_clone(self) }
-
-        fn _as_ref_dyn(&self) -> & (PotentialBuilder<Meta>)
-        { self }
-
-        fn initialize_diff_fn(&self, structure: Structure<Meta>) -> FailResult<Box<DiffFn<Meta>>>
-        {
-            let na = structure.num_atoms();
-            let fracs = (0..na).map(|i| {
-                V3([i as f64 / na as f64, 0.5, 0.5])
-            }).collect();
-            let coords = CoordsKind::Fracs(fracs);
-            let target = Coords::new(structure.lattice().clone(), coords);
-            Ok(Box::new(ConvergeTowards::new(target)) as Box<_>)
-        }
-    }
-
-    impl ConvergeTowards {
-        pub fn new(coords: Coords) -> Self
-        { ConvergeTowards { target: coords.clone() } }
+    impl_dyn_clone_detail!{
+        impl[Meta: Clone] DynCloneDetail<Meta> for ConvergeTowards { ... }
     }
 
     impl<M> DiffFn<M> for ConvergeTowards {
@@ -694,6 +686,31 @@ pub mod test {
         }
     }
 
+    // ---------------
+
+    /// A test Potential that creates a chain along the first lattice vector.
+    #[derive(Debug, Clone)]
+    pub struct Chainify;
+
+    impl<Meta: Clone> PotentialBuilder<Meta> for Chainify {
+        fn initialize_diff_fn(&self, structure: Structure<Meta>) -> FailResult<Box<DiffFn<Meta>>>
+        {
+            let na = structure.num_atoms();
+            let fracs = (0..na).map(|i| {
+                V3([i as f64 / na as f64, 0.5, 0.5])
+            }).collect();
+            let coords = CoordsKind::Fracs(fracs);
+            let target = Coords::new(structure.lattice().clone(), coords);
+            Ok(Box::new(ConvergeTowards::new(target)) as Box<_>)
+        }
+    }
+
+    impl_dyn_clone_detail!{
+        impl[Meta: Clone] DynCloneDetail<Meta> for Chainify { ... }
+    }
+
+    // ---------------
+
     #[cfg(test)]
     #[deny(unused)]
     mod tests {
@@ -731,7 +748,6 @@ pub mod test {
                 [-0.9, 0.2, 0.8],
                 [ 0.4, 1.1, 7.8],
             ];
-            //let expected_carts = CoordsKind::Fracs(expected_fracs.clone().envee()).to_carts(&lattice);
 
             let meta = vec![(); start_coords.len()];
             let target = Coords::new(lattice.clone(), target_coords.clone());
@@ -764,7 +780,7 @@ pub mod test {
                 |p| FailOk(flat_diff_fn(p)?.0),
             ).unwrap());
             let final_carts = data.position.nest::<V3>().to_vec();
-            let final_fracs = final_carts.iter().map(|v| v / &lattice).collect::<Vec<_>>();
+            let final_fracs = CoordsKind::Carts(final_carts).into_fracs(&lattice);
             assert_close!(final_fracs.unvee(), expected_fracs);
         }
     }
