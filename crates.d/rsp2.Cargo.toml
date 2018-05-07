@@ -24,6 +24,10 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 !!slice-of-array
 !!ansi-term
 !!itertools
+!!failure
+!!path-abs
+!!serde
+!!serde-derive
 
 [features]
 !!NIGHTLY-FEATURE-LINE

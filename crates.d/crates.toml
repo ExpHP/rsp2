@@ -48,6 +48,7 @@ rsp2-tasks-config = "src/tasks/config"
 rsp2-array-types = "src/util/array-types"
 rsp2-shims = "src/util/shims"
 rsp2-linalg = "src/linalg"
+rsp2-integration-test = "src/util/integration-test"
 #!!INSERTION POINT FOR NEW CRATES!!#
 
 #--------------------------------------------
@@ -84,7 +85,7 @@ rsp2-kets = { version = "0.3.6", git = "https://github.com/ExpHP/rsp2-kets", fea
 lammps-sys = { tag = "v0.3.0", git = "https://github.com/ExpHP/lammps-sys" }
 rayon = "0.8"
 vasp-poscar = "0.1.1"
-path_abs = { rev = "72c767cfabe27", git = "https://github.com/vitiral/path_abs" }
+path_abs = "0.4.1"
 enum-map = "0.2.24"
 frunk = "0.2.0"
 shlex = "0.1.1"

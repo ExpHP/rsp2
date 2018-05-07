@@ -53,6 +53,7 @@ rsp2-tasks-config = { path = "src/tasks/config" }
 rsp2-array-types = { path = "src/util/array-types" }
 rsp2-shims = { path = "src/util/shims" }
 rsp2-linalg = { path = "src/linalg" }
+rsp2-integration-test = { path = "src/util/integration-test" }
 
 # Deps of examples/ and tests/.
 # Some of these could be dev-dependencies, however currently
@@ -68,10 +69,14 @@ rsp2-kets = { version = "0.3.6", git = "https://github.com/ExpHP/rsp2-kets", fea
 slice-of-array = "0.2"
 ansi_term = "0.10"
 itertools = "0.7"
+failure = "0.1"
+path_abs = "0.4.1"
+serde = "1"
+serde_derive = "1"
 
 [features]
-nightly = ["beta", "rsp2-array-types/nightly", "rsp2-array-utils/nightly", "rsp2-assert-close/nightly", "rsp2-clap/nightly", "rsp2-fs-util/nightly", "rsp2-lammps-wrap/nightly", "rsp2-linalg/nightly", "rsp2-minimize/nightly", "rsp2-phonopy-io/nightly", "rsp2-shims/nightly", "rsp2-slice-math/nightly", "rsp2-structure-gen/nightly", "rsp2-structure-io/nightly", "rsp2-structure/nightly", "rsp2-tasks-config/nightly", "rsp2-tasks/nightly", "rsp2-util-macros/nightly"]
-beta = ["rsp2-array-types/beta", "rsp2-array-utils/beta", "rsp2-assert-close/beta", "rsp2-clap/beta", "rsp2-fs-util/beta", "rsp2-lammps-wrap/beta", "rsp2-linalg/beta", "rsp2-minimize/beta", "rsp2-phonopy-io/beta", "rsp2-shims/beta", "rsp2-slice-math/beta", "rsp2-structure-gen/beta", "rsp2-structure-io/beta", "rsp2-structure/beta", "rsp2-tasks-config/beta", "rsp2-tasks/beta", "rsp2-util-macros/beta"]
+nightly = ["beta", "rsp2-array-types/nightly", "rsp2-array-utils/nightly", "rsp2-assert-close/nightly", "rsp2-clap/nightly", "rsp2-fs-util/nightly", "rsp2-integration-test/nightly", "rsp2-lammps-wrap/nightly", "rsp2-linalg/nightly", "rsp2-minimize/nightly", "rsp2-phonopy-io/nightly", "rsp2-shims/nightly", "rsp2-slice-math/nightly", "rsp2-structure-gen/nightly", "rsp2-structure-io/nightly", "rsp2-structure/nightly", "rsp2-tasks-config/nightly", "rsp2-tasks/nightly", "rsp2-util-macros/nightly"]
+beta = ["rsp2-array-types/beta", "rsp2-array-utils/beta", "rsp2-assert-close/beta", "rsp2-clap/beta", "rsp2-fs-util/beta", "rsp2-integration-test/beta", "rsp2-lammps-wrap/beta", "rsp2-linalg/beta", "rsp2-minimize/beta", "rsp2-phonopy-io/beta", "rsp2-shims/beta", "rsp2-slice-math/beta", "rsp2-structure-gen/beta", "rsp2-structure-io/beta", "rsp2-structure/beta", "rsp2-tasks-config/beta", "rsp2-tasks/beta", "rsp2-util-macros/beta"]
 
 # This is NOT a workspace anymore.
 # I don't have time to debug the RLS.

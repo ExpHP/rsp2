@@ -1,4 +1,4 @@
-use super::bonds::Bonds;
+use super::bonds::CartBonds;
 use ::rsp2_array_types::{V3, dot};
 
 /// Constants used for calculation of the Kolmogorov-Crespi potential.
