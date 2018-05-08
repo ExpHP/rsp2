@@ -9,8 +9,21 @@ use ::rsp2_array_types::{V3, M33, M44, M4, V4, mat};
 //    primitive cell.  A supercell does not have its own spacegroup
 //    independent of the primitive cell; that would allow a supercell
 //    to have different physics!
+//
+//  * I am not currently aware of any good integer-based representation
+//    of space group operators that can be applied to supercell
+//    fractional coords.  I mean, *obviously* you can do *something
+//    something coefficient matrix something something similarity
+//    transform,* but you get all these rational numbers and it's
+//    all full of barf.
+//
+//    For now, you should convert fractional operators into cartesian
+//    before using them on a supercell. (this conversion requires the
+//    primitive lattice!).
 
-/// A point group operation on a primitive cell.
+/// A point group operation **on a primitive cell**.
+///
+/// Before applying it to supercells, you should convert it into cartesian.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct FracRot {
     /// This is the transpose of what one would
@@ -21,9 +34,11 @@ pub struct FracRot {
     t: M33<i32>,
 }
 
-/// The translation part of a spacegroup operation on a primitive cell.
+/// The translation part of a spacegroup operation **on a primitive cell**.
 ///
 /// This always has coordinates that are multiples of `1/12`.
+///
+/// Before applying it to supercells, you should convert it into cartesian.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct FracTrans (
     /// This is the vector times 12.
@@ -87,12 +102,16 @@ impl FracRot {
     }
 
     /// Get the transpose of the cartesian rotation matrix.
-    pub fn cart_t(&self, lattice: &Lattice) -> M33
-    { &(lattice.inverse_matrix() * &self.float_t()) * lattice.matrix() }
+    ///
+    /// This conversion requires the **primitive lattice.**
+    pub fn cart_t(&self, prim_lattice: &Lattice) -> M33
+    { &(prim_lattice.inverse_matrix() * &self.float_t()) * prim_lattice.matrix() }
 
     /// Get the cartesian rotation matrix.
-    pub fn cart(&self, lattice: &Lattice) -> M33
-    { self.cart_t(lattice).t() }
+    ///
+    /// This conversion requires the **primitive lattice.**
+    pub fn cart(&self, prim_lattice: &Lattice) -> M33
+    { self.cart_t(prim_lattice).t() }
 
     // transposed float matrix
     pub(crate) fn float_t(&self) -> M33
@@ -122,8 +141,14 @@ impl FracTrans {
     pub fn from_floats(xs: &V3) -> Result<FracTrans, ::IntPrecisionError>
     { xs.try_map(|x| ::util::Tol(1e-4).unfloat(x * 12.0)).map(FracTrans) }
 
-    pub fn cart(&self, lattice: &Lattice) -> V3
-    { self.float() * lattice }
+    /// Get the cartesian translation vector.
+    ///
+    /// This conversion requires the **primitive lattice.**
+    /// This is obvious if you think about it, considering that this type
+    /// is not capable of representing any translation shorter than 1/12th
+    /// of a lattice vector.
+    pub fn cart(&self, prim_lattice: &Lattice) -> V3
+    { self.float() * prim_lattice }
 
     fn float(&self) -> V3
     { self.0.map(|x| f64::from(x) / 12f64) }

@@ -646,9 +646,10 @@ impl TrialDir {
         let space_group = phonopy.symmetry(&prim_structure)?;
 
         let space_group_deperms: Vec<_> = {
-            ::rsp2_structure::find_perm::of_spacegroup(
+            ::rsp2_structure::find_perm::of_spacegroup_for_general(
                 &superstructure,
                 &space_group,
+                prim_structure.lattice(),
                 1e-1, // FIXME should be slightly larger than configured tol,
                       //       but I forgot where that is stored.
             )?.into_iter().map(|p| p.inverted()).collect()

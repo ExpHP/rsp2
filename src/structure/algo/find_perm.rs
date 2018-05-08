@@ -19,7 +19,7 @@ pub fn dumb_symmetry_test(
 {Ok({
     let lattice = structure.lattice();
     let from_fracs = structure.to_fracs();
-    let perms = of_spacegroup(structure, ops, tol)?;
+    let perms = of_spacegroup_for_primitive(structure, ops, tol)?;
 
     for (op, perm) in izip!(ops, perms) {
         dumb_validate_equivalent(
@@ -69,40 +69,89 @@ fn dumb_validate_equivalent(
     }
 }
 
-// NOTE: Takes CoordStructure as a speedbump to prevent accidental use
+// NOTE: Takes Coords as a speedbump to prevent accidental use
 //       with inappropriate metadata.
 /// Compute permutations for all operators in a spacegroup.
-pub fn of_spacegroup(
-    prim_structure: &Coords,
+pub fn of_spacegroup_for_general(
+    // NOTE: This really does require data from both the primitive and supercell.
+    //       Justifications are in the `with_meta` variant.
+
+    // Arbitrary superstructure (the thing we want to permute)
+    coords: &Coords,
+    // Spacegroup operators for the primitive structure.
+    prim_ops: &[FracOp],
+    // The lattice that the fractional operators operate on.
+    prim_lattice: &Lattice,
+    tol: f64,
+) -> Result<Vec<Perm>, PositionMatchError>
+{
+    let dummy_meta = vec![(); coords.num_atoms()];
+    of_spacegroup_for_general_with_meta(coords, &dummy_meta, prim_ops, prim_lattice, tol)
+}
+
+// NOTE: Takes Coords as a speedbump to prevent accidental use
+//       with inappropriate metadata.
+/// Compute permutations for all operators in a spacegroup.
+pub fn of_spacegroup_for_primitive(
+    prim_coords: &Coords,
     ops: &[FracOp],
     tol: f64,
 ) -> Result<Vec<Perm>, PositionMatchError>
 {
-    let dummy_meta = vec![(); prim_structure.num_atoms()];
-    of_spacegroup_with_meta(prim_structure, &dummy_meta, ops, tol)
+    let dummy_meta = vec![(); prim_coords.num_atoms()];
+    of_spacegroup_for_primitive_with_meta(prim_coords, &dummy_meta, ops, tol)
 }
 
-// NOTE: This version uses the metadata to group the atoms and potentially
-//       elide even more comparisons. Is it effective? No idea! But adding it
-//       came at zero extra cost for `M = ()`, so I figured it's worth trying out.
-pub fn of_spacegroup_with_meta<M: Ord>(
-    prim_structure: &Coords,
+// NOTE: These versions use the metadata to group the atoms and potentially
+//       elide even more comparisons. Is it effective? No idea! But it comes at
+//       zero extra cost for `M = ()` and hasn't been hurting anyone, so I
+//       figured I'll leave it in.
+
+pub fn of_spacegroup_for_general_with_meta<M: Ord>(
+    // NOTE: This really does require data from both the primitive and supercell.
+    //       Justifications follow.
+
+    // Arbitrary superstructure (the thing we want to permute)
+    coords: &Coords,
     metadata: &[M],
-    ops: &[FracOp],
+
+    // Integer-based spacegroup operators for the primitive structure,
+    // because we need a form of the operators that is hashable
+    // for the GroupTree composition trick.
+    prim_ops: &[FracOp],
+
+    // The lattice that the fractional operators are in units of,
+    // so that we can recover cartesian forms of the operators.
+    // (which will be safe to apply to the superstructure)
+    prim_lattice: &Lattice,
+
     tol: f64,
 ) -> Result<Vec<Perm>, PositionMatchError>
 {Ok({
-    let lattice = prim_structure.lattice();
-    let from_fracs = prim_structure.to_fracs();
+    let from_fracs = coords.to_fracs();
 
+    // Find relations between the group operators and
+    // identify a small number of base cases ("generators").
     let tree = GroupTree::from_all_members(
-        ops.to_vec(),
+        prim_ops.to_vec(),
         |a, b| a.then(b),
     );
 
     tree.try_compute_homomorphism(
-        |op| Ok::<_, PositionMatchError>({
-            let to_fracs = op.transform_prim(&from_fracs);
+        // Generators: Do a (very expensive!) brute force search.
+        |prim_op| Ok::<_, PositionMatchError>({
+            // convert fractional operator from primitive to supercell units
+            let (lattice, frac_rot_t, frac_trans) = {
+                let cart_rot_t = prim_op.to_rot().cart_t(prim_lattice);
+                let cart_trans = prim_op.to_trans().cart(prim_lattice);
+
+                let lattice = coords.lattice();
+                let frac_rot_t = &(lattice.matrix() * &cart_rot_t) * lattice.inverse_matrix();
+                let frac_trans = cart_trans / lattice;
+                (lattice, frac_rot_t, frac_trans)
+            };
+
+            let to_fracs = from_fracs.iter().map(|v| v * &frac_rot_t + frac_trans).collect::<Vec<_>>();
             let perm = brute_force_with_sort_trick(lattice, metadata, &from_fracs, &to_fracs[..], tol)?;
             dumb_validate_equivalent(
                 lattice,
@@ -112,6 +161,7 @@ pub fn of_spacegroup_with_meta<M: Ord>(
             );
             perm
         }),
+        // Other operators: Quickly compose the results from other operators.
         |a, b| Ok({
             // Flip the order, because the permutations we seek
             //  actually come from the opposite group.
@@ -124,22 +174,16 @@ pub fn of_spacegroup_with_meta<M: Ord>(
     )?
 })}
 
-// NOTE: Takes CoordStructure as a speedbump to prevent accidental use
-//       with inappropriate metadata.
-#[allow(unused)]
-pub(crate) fn of_rotation(
-    structure: &Coords,
-    rotation: &FracRot,
+pub fn of_spacegroup_for_primitive_with_meta<M: Ord>(
+    prim_structure: &Coords,
+    metadata: &[M],
+    ops: &[FracOp],
     tol: f64,
-) -> Result<Perm, PositionMatchError>
+) -> Result<Vec<Perm>, PositionMatchError>
 {
-    let dummy_meta = vec![(); structure.num_atoms()];
-    of_rotation_with_meta(structure, &dummy_meta, rotation, tol)
+    of_spacegroup_for_general_with_meta(prim_structure, metadata, ops, prim_structure.lattice(), tol)
 }
 
-// NOTE: This version uses the metadata to group the atoms and potentially
-//       elide even more comparisons. Is it effective? No idea! But adding it
-//       came at zero extra cost for `M = ()`, so I figured it's worth trying out.
 #[allow(unused)]
 pub(crate) fn of_rotation_with_meta<M: Ord>(
     structure: &Coords,
@@ -166,6 +210,9 @@ pub(crate) fn brute_force_with_sort_trick<M: Ord>(
     use ::ordered_float::NotNaN;
     use ::CoordsKind::Fracs;
 
+    info!("FROM: {:?}", from_fracs);
+    info!("  TO: {:?}", to_fracs);
+
     // Sort both sides by some measure which is likely to produce a small
     // maximum value of (sorted_rotated_index - sorted_original_index).
     // This reduces an O(n^2) search down to ~O(n).
@@ -179,7 +226,8 @@ pub(crate) fn brute_force_with_sort_trick<M: Ord>(
             *v -= v.map(f64::round);
         }
 
-        let data_to_sort = Fracs(fracs.clone())
+        let data_to_sort = {
+            Fracs(fracs.clone())
                 // NOTE: It's possible that computing distances in fractional space can be
                 //       even more effective than in cartesian space.  See this comment
                 //       and the conversation leading up to it:
@@ -196,7 +244,8 @@ pub(crate) fn brute_force_with_sort_trick<M: Ord>(
                         NotNaN::new(x.norm()).unwrap(),
                     )
                 })
-                .collect::<Vec<_>>();
+                .collect::<Vec<_>>()
+        };
         let perm = Perm::argsort(&data_to_sort);
         (perm.clone(), fracs.permuted_by(&perm))
     };
