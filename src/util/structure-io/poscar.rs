@@ -65,7 +65,7 @@ where R: BufRead,
     let poscar = Poscar::from_reader(f).compat()?;
     let RawPoscar {
         scale, lattice_vectors, positions,
-        group_symbols, group_counts,
+        group_symbols, group_counts, comment,
         ..
     } = poscar.raw();
 
@@ -78,16 +78,31 @@ where R: BufRead,
         ::vasp_poscar::Coords::Frac(p) => CoordsKind::Fracs(p.envee()),
     };
 
-    let group_symbols = group_symbols.expect("symbols are required").into_iter()
-        .map(|sym| match Element::from_symbol(&sym) {
-            None => bail!("Unknown element: '{}'", sym),
-            Some(e) => Ok(e),
-        })
-        .collect::<FailResult<Vec<Element>>>()?;
+    let group_elems = {
+        // we need symbols, but prior to VASP 5 they were not even part of
+        // the format, so some programs don't write them where they belong.
+        // Sometimes they are used as the title comment (by phonopy, ASE...).
+        let group_symbols = group_symbols.unwrap_or_else(|| {
+            let symbols = comment.split_whitespace().map(|s| s.to_string()).collect::<Vec<_>>();
+            assert_eq!(
+                symbols.len(), group_counts.len(),
+                "Symbols must be given either in the standard location or the POSCAR comment.",
+            );
+            // pray for the best.  If they're not symbols, it is at least unlikely
+            // that the next step will erroneously "succeed"
+            symbols
+        });
+        group_symbols.into_iter()
+            .map(|sym| match Element::from_symbol(&sym) {
+                None => bail!("Unknown element: '{}'", sym),
+                Some(e) => Ok(e),
+            })
+            .collect::<FailResult<Vec<Element>>>()?
+    };
 
     // FIXME use Poscar method once available
-    let elements = izip!(group_counts, group_symbols)
-        .flat_map(|(c, sym)| ::std::iter::repeat(sym).take(c))
+    let elements = izip!(group_counts, group_elems)
+        .flat_map(|(c, elem)| ::std::iter::repeat(elem).take(c))
         .collect::<Vec<_>>();
 
     assert_eq!(elements.len(), coords.len());

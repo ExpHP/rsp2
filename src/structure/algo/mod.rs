@@ -5,7 +5,7 @@ pub(crate) mod supercell;
 // untested/incomplete code
 #[allow(unused)] pub(crate) mod rotations;
 #[allow(unused)] pub(crate) mod reduction;
-pub(crate) mod find_perm;
+pub mod find_perm;
 
 // these are tested but not yet part of public APIs
 #[cfg_attr(not(test), allow(unused))]

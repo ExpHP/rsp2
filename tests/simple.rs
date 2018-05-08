@@ -27,6 +27,9 @@ fn simple_test() {
             let read = |path: &Path| Ok::<_, Error>(::serde_json::from_reader(FileRead::read(path)?)?);
             let actual: filetypes::RamanJson = read(&dir.join("out/raman.json"))?;
             let expected: filetypes::RamanJson = read("tests/resources/simple-out/raman.json".as_ref())?;
+
+            // This is obviously overly-strict and will easily get triggered by e.g. updates
+            // to phonopy. The point is just to call attention to unexpected changes in results.
             assert_eq!(actual, expected);
             Ok(())
         })

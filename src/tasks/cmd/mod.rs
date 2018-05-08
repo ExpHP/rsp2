@@ -22,7 +22,7 @@ use ::phonopy::{DirWithBands, DirWithDisps, DirWithForces};
 use ::util::{tup2};
 use ::util::ext_traits::{OptionResultExt, PathNiceExt};
 use ::math::basis::Basis3;
-use ::math::bonds::FracBonds;
+use ::math::bonds::{FracBonds, FracBond};
 
 use ::path_abs::{PathArc, PathFile, PathDir};
 use ::rsp2_structure::consts::CARBON;
@@ -32,7 +32,7 @@ use ::slice_of_array::prelude::*;
 use ::rsp2_array_utils::arr_from_fn;
 use ::rsp2_array_types::{V3, Unvee};
 use ::rsp2_structure::{Coords, ElementStructure};
-use ::rsp2_structure::{Lattice};
+use ::rsp2_structure::{Lattice, Perm};
 use ::rsp2_structure::supercell;
 use ::rsp2_structure::Permute;
 use ::phonopy::Builder as PhonopyBuilder;
@@ -618,6 +618,7 @@ impl TrialDir {
 //=================================================================
 
 impl TrialDir {
+    // FIXME refactor once it's working, this is way too long
     pub(crate) fn run_dynmat_test(
         self,
         settings: &Settings,
@@ -638,11 +639,80 @@ impl TrialDir {
 
         // Make a supercell, and determine how our ordering of the supercell differs from
         // phonopy.
-        let (superstructure, sc_token, displacements) = self._dynmat_test__supercell_and_displacements(settings, &prim_structure, disp_dir)?;
+        let (superstructure, sc, displacements, perm_from_phonopy) = {
+            self._dynmat_test__supercell_and_displacements(settings, &prim_structure, disp_dir)?
+        };
 
-        let _ = superstructure;
-        let _ = sc_token;
-        let _ = displacements;
+        let space_group = phonopy.symmetry(&prim_structure)?;
+
+        let space_group_deperms: Vec<_> = {
+            ::rsp2_structure::find_perm::of_spacegroup(
+                &superstructure,
+                &space_group,
+                1e-1, // FIXME should be slightly larger than configured tol,
+                      //       but I forgot where that is stored.
+            )?.into_iter().map(|p| p.inverted()).collect()
+        };
+
+        // FIXME
+        const CUTOFF: f64 = 13.0;
+        let frac_bonds = FracBonds::from_brute_force_very_dumb(&prim_structure, CUTOFF * (1.001))?;
+        let original_force_sets = {
+            let carts = superstructure.to_carts();
+
+            let mut force_sets = ::math::dynmat::ForceSets::default();
+
+            for (disp_prim, disp_cart_vector) in displacements {
+                // displace an atom
+                let disp_cell = ::math::dynmat::DISPLACED_CELL; // HACK
+                let disp_super = sc.atom_from_cell(disp_prim, disp_cell);
+                let disp_final_cart = carts[disp_super] + disp_cart_vector;
+                let disp_lattice_point = sc.lattice_point_from_cell(disp_cell);
+
+                // collect forces of atoms affected by this displacement
+                // NOTE: it seems to me that filtering the bond list on every displacement adds an
+                //       unnecessary quadratic dependence of performance on structure size; but unless
+                //       we have hundreds of thousands of displacements I doubt it will be a huge deal.
+                for FracBond { from: bond_from, to: affected_prim, image_diff } in &frac_bonds {
+                    if bond_from != disp_prim {
+                        continue
+                    }
+                    let affected_lattice_point = disp_lattice_point + image_diff;
+                    let affected_super = sc.atom_from_lattice_point(affected_prim, affected_lattice_point);
+                    let affected_cart = carts[affected_super];
+
+                    // FIXME other potentials
+                    let output = ::math::crespi::crespi_z(affected_cart - disp_final_cart);
+
+                    // FIXME proper insertion API
+                    force_sets.atom_displaced.push(disp_super);
+                    force_sets.atom_affected.push(affected_super);
+                    force_sets.cart_force.push(-output.grad_rij);
+                    force_sets.cart_displacement.push(disp_cart_vector);
+                }
+            }
+            force_sets
+        };
+
+        let force_sets = {
+            ::math::dynmat::ForceSets::concat_from({
+                ::util::zip_eq(&space_group, &space_group_deperms)
+                    .map(|(oper, deperm): (&::rsp2_structure::FracOp, _)| {
+                        let cart_rot = oper.to_rot().cart(prim_structure.lattice());
+                        original_force_sets.derive_from_symmetry(&sc, &cart_rot, deperm)
+                    })
+            })
+        };
+
+
+        let force_constants = force_sets.solve_force_constants(&sc)?;
+        {
+            let dense = force_constants.to_dense_matrix(superstructure.num_atoms());
+            let perm_to_phonopy = perm_from_phonopy.inverted().with_inner(&Perm::eye(3));
+            let dense = dense.into_iter().map(|row| row.permuted_by(&perm_to_phonopy)).collect::<Vec<_>>();
+            let dense = dense.permuted_by(&perm_to_phonopy);
+            println!("{:?}", dense); // FINALLY: THE MOMENT OF TRUTH
+        }
         let _ = cli;
 
         unimplemented!();
@@ -670,7 +740,12 @@ impl TrialDir {
         settings: &Settings,
         prim_structure: &ElementStructure,
         disp_dir: DirWithDisps<P>,
-    ) -> FailResult<(ElementStructure, ::rsp2_structure::supercell::SupercellToken, Vec<(usize, V3)>)> {
+    ) -> FailResult<(
+        ElementStructure,
+        ::rsp2_structure::supercell::SupercellToken,
+        Vec<(usize, V3)>, // displacements with primitive site indices
+        Perm, // from phonopy supercell to our supercell
+    )> {
         let sc_dims = settings.phonons.supercell.dim_for_unitcell(prim_structure.lattice());
 
         let (our_superstructure, sc_token) = supercell::diagonal(sc_dims).build(prim_structure.clone());
@@ -707,12 +782,18 @@ impl TrialDir {
         );
         let _ = phonopy_superstructure;
 
+        let inv_perm_from_phonopy = perm_from_phonopy.inverted();
         let displacements = {
+            let primitive_atoms = sc_token.atom_primitive_atoms();
             disp_dir.displacements().iter()
-                .map(|_| unimplemented!("FIXME get correct indices via perm"))
+                .map(|&(phonopy_idx, disp)| {
+                    let our_super_idx = inv_perm_from_phonopy[phonopy_idx];
+                    let our_prim_idx = primitive_atoms[our_super_idx as usize];
+                    (our_prim_idx as usize, disp)
+                })
                 .collect::<Vec<_>>()
         };
-        Ok((our_superstructure, sc_token, displacements))
+        Ok((our_superstructure, sc_token, displacements, perm_from_phonopy))
     }
 }
 

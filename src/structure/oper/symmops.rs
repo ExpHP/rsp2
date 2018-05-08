@@ -1,4 +1,5 @@
 use ::std::rc::Rc;
+use ::Lattice;
 
 use ::rsp2_array_types::{V3, M33, M44, M4, V4, mat};
 
@@ -85,6 +86,14 @@ impl FracRot {
         FracRot { t: mat.t() }
     }
 
+    /// Get the transpose of the cartesian rotation matrix.
+    pub fn cart_t(&self, lattice: &Lattice) -> M33
+    { &(lattice.inverse_matrix() * &self.float_t()) * lattice.matrix() }
+
+    /// Get the cartesian rotation matrix.
+    pub fn cart(&self, lattice: &Lattice) -> M33
+    { self.cart_t(lattice).t() }
+
     // transposed float matrix
     pub(crate) fn float_t(&self) -> M33
     { self.t.map(Into::into) }
@@ -112,6 +121,9 @@ impl FracTrans {
 
     pub fn from_floats(xs: &V3) -> Result<FracTrans, ::IntPrecisionError>
     { xs.try_map(|x| ::util::Tol(1e-4).unfloat(x * 12.0)).map(FracTrans) }
+
+    pub fn cart(&self, lattice: &Lattice) -> V3
+    { self.float() * lattice }
 
     fn float(&self) -> V3
     { self.0.map(|x| f64::from(x) / 12f64) }
@@ -189,7 +201,7 @@ impl FracRot {
 
 impl<'a> From<&'a [[i32; 3]; 3]> for FracRot {
     fn from(m: &'a [[i32; 3]; 3]) -> Self
-    { FracRot::new(&mat::from_array(*m))}
+    { FracRot::new(&mat::from_array(*m)) }
 }
 
 impl FracTrans {
@@ -210,7 +222,7 @@ impl FracOp {
 #[deny(unused)]
 mod tests {
     use super::*;
-    use ::rsp2_array_types::Envee;
+    use ::rsp2_array_types::{mat, Unvee, Envee};
 
     #[test]
     fn rot_transform()
@@ -287,5 +299,33 @@ mod tests {
         );
 
         assert_eq!(op.then(&op), square);
+    }
+
+    #[test]
+    fn symmop_to_cart()
+    {
+        // graphene lattice
+        let half_r3 = 0.5 * f64::sqrt(3.0);
+        let lattice = Lattice::new(&(2.4 * &mat::from_array([
+            [ 1.0,     0.0, 0.0],
+            [-0.5, half_r3, 0.0],
+            [ 0.0,     0.0, 1.0],
+        ])));
+        // threefold rotation
+        let op = FracRot::from(&[
+            [-1, 1, 0],
+            [-1, 0, 0],
+            [ 0, 0, 1],
+        ]);
+        assert_close!(op.cart(&lattice).unvee(), [
+            [    -0.5, half_r3, 0.0],
+            [-half_r3,    -0.5, 0.0],
+            [     0.0,     0.0, 1.0],
+        ]);
+        assert_close!(op.cart_t(&lattice).unvee(), [
+            [   -0.5, -half_r3, 0.0],
+            [half_r3,     -0.5, 0.0],
+            [    0.0,      0.0, 1.0],
+        ]);
     }
 }

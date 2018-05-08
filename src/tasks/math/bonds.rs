@@ -113,15 +113,15 @@ impl FracBonds {
         // in the centermost unit cell.
         let sc_builder = sufficiently_large_centered_supercell(structure.lattice(), range)?;
         let (superstructure, sc_info) = sc_builder.build(structure.clone());
-        let centermost_cell = sc_info.signed_cell_index(sc_info.center_cell_index());
+        let centermost_cell = sc_info.lattice_point_from_cell(sc_info.center_cell());
 
         let mut from = vec![];
         let mut to = vec![];
         let mut image_diff = vec![];
 
         let carts = superstructure.to_carts();
-        let cells = sc_info.signed_cell_indices();
-        let sites = sc_info.primitive_site_indices();
+        let cells = sc_info.atom_lattice_points();
+        let sites = sc_info.atom_primitive_atoms();
 
         for (&cell_from, &site_from, &cart_from) in izip!(&cells, &sites, &carts) {
             if cell_from != centermost_cell {

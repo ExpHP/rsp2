@@ -1,3 +1,5 @@
+#![cfg_attr(feature = "nightly", euclidean_division)]
+
 extern crate rsp2_array_utils;
 extern crate rsp2_array_types;
 #[macro_use] extern crate rsp2_assert_close;
@@ -57,6 +59,8 @@ pub mod supercell {
         BigDisplacement,
     };
 }
+
+pub use ::algo::find_perm;
 
 mod core;
 mod algo;

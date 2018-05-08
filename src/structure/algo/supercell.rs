@@ -120,7 +120,7 @@ where F: FnMut(&M, [u32; 3]) -> M2,
     let num_sc = (sc.periods[0] * sc.periods[1] * sc.periods[2]) as usize;
     let num_supercell_atoms = num_sc * coords.len();
 
-    let sc_carts = image_sc_lattice_vecs(sc.periods, sc.offset, &lattice);
+    let sc_carts = image_lattice_vecs(sc.periods, sc.offset, &lattice);
     let mut new_carts = Vec::with_capacity(num_supercell_atoms);
     for atom_cart in coords.into_carts(&lattice) {
         let old_len = new_carts.len();
@@ -128,11 +128,11 @@ where F: FnMut(&M, [u32; 3]) -> M2,
         ::util::translate_mut_n3_3(&mut new_carts[old_len..], &atom_cart);
     }
 
-    let sc_idx = image_cell_indices(sc.periods);
+    let sc_idx = image_cells(sc.periods);
     let mut new_meta = Vec::with_capacity(num_supercell_atoms);
     for m in meta {
-        for idx in &sc_idx {
-            new_meta.push(make_meta(&m, idx.0));
+        for &idx in &sc_idx {
+            new_meta.push(make_meta(&m, idx));
         }
     }
 
@@ -149,11 +149,34 @@ where F: FnMut(&M, [u32; 3]) -> M2,
 
 /// Contains enough information to deconstruct a supercell produced by this library.
 ///
-/// The order of the atoms in the supercell is unspecified and may change; you should
-/// not assume that the images are grouped by unit cell or by primitive site.
-/// Instead, please refer to the methods `cell_indices` and `primitive_site_indices`.
+/// **The order of the atoms in the supercell is unspecified** and may change with
+/// the needs of rsp2. You must use the methods on this type if you need to convert
+/// between index representations, or to work in the subgroup of cell images.
+///
+/// It provides a variety of methods for converting between various forms of indices,
+/// summarized below along with the terms that frequently appear in method names:
+///
+/// * **`primitive_atom: usize`** -
+///   index of a site in the original structure. `0 <= primitive_atom < num_primitive_atoms`.
+///
+/// * **`atom: usize`** -
+///   index of a site in the superstructure. `0 <= atom < num_supercell_atoms`.
+///
+/// * **`cell: [u32; 3]`** -
+///   the index of an image of the primitive structure. `0 <= cell[k] < periods[k]`.
+///   Like site indices, these are considered to be unique identifiers, and are expected to
+///   be in bounds. **The vector difference of two cells is a meaningless quantity.**
+///
+/// * **`lattice_point: V3<i32>`** -
+///   a more mathematically-oriented form of `cell`. It is the integer coordinates of
+///   the lattice vector that were added to a primitive site to produce a given supercell
+///   site. In method outputs, this will be in the range
+///   `0 <= lattice_point[k] - offset[k] < periods[k]`.  In method inputs, this will
+///   generally be allowed to be any arbitrary integer vector.
 pub struct SupercellToken {
+    // Precomputed diagonal of the Hermite Normal Form of `integer_lattice`.
     periods: [u32; 3],
+    // defines the range of `lattice_point`s
     offset: V3<i32>,
     num_primitive_atoms: usize,
     // supercell in units of primitive cell vectors.  Elements are integral
@@ -186,6 +209,9 @@ impl SupercellToken {
         self.num_cells() * self.num_primitive_atoms()
     }
 
+    // !!! This function affects the supercell convention !!! (SUPERCELL-CONV)
+    // When modifying it, you must modify all functions that have this label.
+    //
     /// Takes data for each atom of the primitive cell and expands it to the
     /// size of the supercell.
     #[inline]
@@ -221,6 +247,9 @@ impl SupercellToken {
             |mut metas| metas.next().unwrap())
     }
 
+    // !!! This function affects the supercell convention !!! (SUPERCELL-CONV)
+    // When modifying it, you must modify all functions that have this label.
+    //
     /// Recover a primitive cell by averaging positions from a supercell.
     ///
     /// `fold_meta` is called on the images of each primitive atom.
@@ -257,7 +286,7 @@ impl SupercellToken {
 
         let out_carts = {
             let neg_offsets = {
-                let mut vs = image_sc_lattice_vecs(periods, offset, &primitive_lattice);
+                let mut vs = image_lattice_vecs(periods, offset, &primitive_lattice);
                 for v in &mut vs {
                     *v *= -1.0;
                 }
@@ -322,6 +351,16 @@ impl SupercellToken {
         }))
     }
 
+    fn check_cell(&self, cell: [u32; 3]) {
+        for k in 0..3 {
+            assert!(
+                cell[k] < self.periods[k],
+                "cell index {:?} out of bounds (periods: {:?})",
+                cell, self.periods,
+            )
+        }
+    }
+
     /// Get the cell index of the centermost cell.
     ///
     /// Ties on even-dimensioned axes are broken towards zero.
@@ -329,18 +368,51 @@ impl SupercellToken {
     /// If you need this, then you've probably written some dumb
     /// algorithm that only works with odd-dimensioned supercells
     /// that are at least 3x3x3 large. You should fix that.
-    pub fn center_cell_index(&self) -> V3<u32> {
-        V3(self.periods).map(|x| x / 2)
+    pub fn center_cell(&self) -> [u32; 3] {
+        V3(self.periods).map(|x| x / 2).0
     }
 
-    /// Convert an unsigned cell index to signed.
-    pub fn signed_cell_index(&self, v: V3<u32>) -> V3<i32> {
-        v.map(|x| x as i32) + self.offset
+    /// **Note:** The cell must be in bounds.
+    pub fn lattice_point_from_cell(&self, cell: [u32; 3]) -> V3<i32> {
+        self.check_cell(cell);
+        self.lattice_point_from_cell_unchecked(cell)
     }
 
-    /// Convert a signed cell index to unsigned.
-    pub fn unsigned_cell_index(&self, v: V3<i32>) -> V3<u32> {
-        (v - self.offset).map(|x| x as u32)
+    pub fn lattice_point_from_cell_unchecked(&self, cell: [u32; 3]) -> V3<i32> {
+        V3(cell).map(|x| x as i32) + self.offset
+    }
+
+    /// **Note:** The lattice point is wrapped into the supercell.
+    pub fn cell_from_lattice_point(&self, v: V3<i32>) -> [u32; 3] {
+        let diff = v - self.offset;
+        let cell = V3::from_fn(|k| mod_euc(diff[k], self.periods[k] as i32) as u32);
+        cell.0
+    }
+
+    /// **Note:** The cell must be in bounds.
+    pub fn atom_from_cell(&self, prim: usize, cell: [u32; 3]) -> usize {
+        assert!(prim < self.num_primitive_atoms);
+        self.check_cell(cell);
+        self.atom_from_cell_unchecked(prim, cell)
+    }
+
+    /// **Note:** The lattice point is wrapped into the supercell.
+    pub fn atom_from_lattice_point(&self, prim: usize, lattice_point: V3<i32>) -> usize {
+        let cell = self.cell_from_lattice_point(lattice_point);
+        self.atom_from_cell_unchecked(prim, cell)
+    }
+
+    // !!! This function affects the supercell convention !!! (SUPERCELL-CONV)
+    // When modifying it, you must modify all functions that have this label.
+    pub fn atom_from_cell_unchecked(&self, prim: usize, cell: [u32; 3]) -> usize {
+        use ::rsp2_array_types::dot;
+        let stride_c = 1;
+        let stride_b = stride_c * self.periods[2] as usize;
+        let stride_a = stride_b * self.periods[1] as usize;
+        let stride_prim = stride_a * self.periods[0] as usize;
+        let strides = V3([stride_a, stride_b, stride_c]);
+
+        prim * stride_prim + dot(&strides, &V3(cell).map(|x| x as usize))
     }
 
     /// Defines which image of the primitive cell each atom in the supercell belongs to.
@@ -349,11 +421,8 @@ impl SupercellToken {
     /// lattice vector used to produce it. It is guaranteed that the output will contain
     /// `self.num_cells()` unique values, and that each one will appear exactly
     /// `self.num_primitive_atoms()` times.
-    ///
-    /// This function is constant for any given supercell; it merely exists to define the
-    /// conventions for ordering used by the library.
-    pub fn cell_indices(&self) -> Vec<V3<u32>> {
-        image_cell_indices(self.periods).iter().cloned()
+    pub fn atom_cells(&self) -> Vec<[u32; 3]> {
+        image_cells(self.periods).iter().cloned()
             .cycle().take(self.num_supercell_atoms())
             .collect()
     }
@@ -363,34 +432,28 @@ impl SupercellToken {
     /// This is like `cell_indices`, but gives the indices as signed integer offsets.
     /// The `offset` from building the supercell affects this, so that e.g. centered supercells
     /// have a signed index of `[0, 0, 0]` assigned to atoms in the centermost unit cell.
-    ///
-    /// This function is constant for any given supercell; it merely exists to define the
-    /// conventions for ordering used by the library.
-    pub fn signed_cell_indices(&self) -> Vec<V3<i32>> {
-        image_signed_cell_indices(self.periods, self.offset).iter().cloned()
+    pub fn atom_lattice_points(&self) -> Vec<V3<i32>> {
+        image_lattice_points(self.periods, self.offset).iter().cloned()
             .cycle().take(self.num_supercell_atoms())
             .collect()
     }
 
-    /// Defines which atom in the primitive cell that each supercell atom is an image of.
-    ///
-    /// This function is constant for any given supercell; it merely exists to define the
-    /// conventions for ordering used by the library.
-    pub fn primitive_site_indices(&self) -> Vec<usize> {
+    /// Defines the primitive site corresponding to each supercell site.
+    pub fn atom_primitive_atoms(&self) -> Vec<usize> {
         self.replicate(&(0..self.num_primitive_atoms).collect::<Vec<_>>())
     }
 
     // !!! This function affects the supercell convention !!! (SUPERCELL-CONV)
     // When modifying it, you must modify all functions that have this label.
     //
-    /// Get a depermutation representing translation by a unit cell lattice point.
+    /// Get a depermutation representing translation by a primitive cell lattice point.
     ///
     /// Please see `conventions.md` for an explanation of depermutations.
-    pub fn lattice_point_translation_deperm(&self, index: V3<i32>) -> Perm {
+    pub fn lattice_point_translation_deperm(&self, lattice_point: V3<i32>) -> Perm {
         // Depermutations that permute the cells along each axis independently.
         // (expressed in the quotient spaces of images along those axes)
         let axis_deperms: [_; 3] = arr_from_fn(|k| {
-            Perm::eye(self.periods[k]).shift_signed(index[k])
+            Perm::eye(self.periods[k]).shift_signed(lattice_point[k])
         });
 
         // Construct the overall deperm as an outer product of deperms.
@@ -403,32 +466,44 @@ impl SupercellToken {
     }
 }
 
+#[cfg(feature = "nightly")]
+#[inline(always)]
+fn mod_euc(a: i32, b: i32) -> i32 { i32::mod_euc(a, b) }
+
+#[cfg(not(feature = "nightly"))]
+fn mod_euc(a: i32, b: i32) -> i32 {
+    match a % b {
+        r if r < 0 => r + i32::abs(b),
+        r => r,
+    }
+}
+
 //--------------------------------
 // functions prefixed with 'image' describe the quotient space of unit cell images.
 // (which is of size 'periods.iter().product()')
 
 // !!! This function affects the supercell convention !!! (SUPERCELL-CONV)
 // When modifying it, you must modify all functions that have this label.
-fn image_cell_indices(periods: [u32; 3]) -> Vec<V3<u32>> {
+fn image_cells(periods: [u32; 3]) -> Vec<[u32; 3]> {
     let mut out = Vec::with_capacity(periods.iter().product::<u32>() as usize);
     for ia in 0..periods[0] {
         for ib in 0..periods[1] {
             for ic in 0..periods[2] {
-                out.push(V3([ia, ib, ic]));
+                out.push([ia, ib, ic]);
             }
         }
     }
     out
 }
 
-fn image_signed_cell_indices(periods: [u32; 3], offset: V3<i32>) -> Vec<V3<i32>> {
-    image_cell_indices(periods).into_iter()
-        .map(|idx| idx.map(|x| x as i32) + offset)
+fn image_lattice_points(periods: [u32; 3], offset: V3<i32>) -> Vec<V3<i32>> {
+    image_cells(periods).into_iter()
+        .map(|idx| V3(idx).map(|x| x as i32) + offset)
         .collect()
 }
 
-fn image_sc_lattice_vecs(periods: [u32; 3], offset: V3<i32>, lattice: &Lattice) -> Vec<V3> {
-    image_signed_cell_indices(periods, offset).into_iter()
+fn image_lattice_vecs(periods: [u32; 3], offset: V3<i32>, lattice: &Lattice) -> Vec<V3> {
+    image_lattice_points(periods, offset).into_iter()
         .map(|idx| idx.map(|x| x as f64) * lattice)
         .collect()
 }
@@ -439,6 +514,8 @@ mod tests {
     use ::{Permute, Perm};
     use ::{Coords, CoordsKind, Structure, Lattice};
     use ::rsp2_array_types::{V3, Envee};
+
+    use ::rand::Rng;
 
     #[test]
     fn diagonal_supercell_smoke_test() {
@@ -529,15 +606,21 @@ mod tests {
     #[test]
     fn cell_index_conversions() {
         let sc_token = ::supercell::diagonal([2, 5, 3]).into_sc_token(7);
-        let signed = sc_token.signed_cell_indices();
-        let unsigned = sc_token.cell_indices();
+        let lattice_points = sc_token.atom_lattice_points();
+        let cells = sc_token.atom_cells();
         ::itertools::assert_equal(
-            signed.iter().cloned(),
-            unsigned.iter().map(|&v| sc_token.signed_cell_index(v)),
+            lattice_points.iter().cloned(),
+            cells.iter().map(|&v| sc_token.lattice_point_from_cell(v)),
         );
         ::itertools::assert_equal(
-            unsigned.iter().cloned(),
-            signed.iter().map(|&v| sc_token.unsigned_cell_index(v)),
+            cells.iter().cloned(),
+            lattice_points.iter().map(|&v| sc_token.cell_from_lattice_point(v)),
+        );
+        // lattice points are automatically wrapped
+        let offset = V3([-6, 35, 9]); // a supercell lattice point
+        ::itertools::assert_equal(
+            cells.iter().cloned(),
+            lattice_points.iter().map(|&v| sc_token.cell_from_lattice_point(v + offset)),
         );
     }
 
@@ -601,6 +684,53 @@ mod tests {
                 canonicalized_coords(translated),
                 canonicalized_coords(depermuted),
             );
+        }
+    }
+
+
+    #[test]
+    fn conversion_methods_are_consistent() {
+        let mut rng = ::rand::thread_rng();
+        for trial in 0..10 {
+            let num_prim = rng.gen_range(1, 9 + 1);
+            let lattice = Lattice::eye();
+            let coords = Coords::new(lattice, CoordsKind::Carts(vec![V3::zero(); num_prim]));
+            let dims = match trial {
+                0|2 => [1, 1, 1],
+                _ => V3::from_fn(|_| rng.gen_range(1, 6 + 1)).0,
+            };
+            let center = match trial {
+                0|1 => V3::zero(),
+                _ => V3::from_fn(|_| rng.gen_range(-10, 10 + 1)),
+            };
+            let (_, sc_token) = ::supercell::diagonal(dims).center(center).build(coords);
+
+            let lattice_points = sc_token.atom_lattice_points();
+            let cells = sc_token.atom_cells();
+            let prims = sc_token.atom_primitive_atoms();
+
+            // a lattice point in the supercell lattice, to test wrapping
+            let test_offset = {
+                let signs = V3::from_fn(|_| rng.gen_range(0, 2) - 1);
+                let multiples = V3::from_fn(|_| rng.gen_range(1, 5));
+                V3::from_fn(|k| sc_token.periods[k] as i32 * multiples[k] * signs[k])
+            };
+
+            assert_eq!(sc_token.num_supercell_atoms(), lattice_points.len());
+            for atom in 0..lattice_points.len() {
+                assert_eq!(
+                    atom,
+                    sc_token.atom_from_cell(prims[atom], cells[atom]),
+                );
+                assert_eq!(
+                    atom,
+                    sc_token.atom_from_lattice_point(prims[atom], lattice_points[atom]),
+                );
+                assert_eq!(
+                    atom,
+                    sc_token.atom_from_lattice_point(prims[atom], lattice_points[atom] + test_offset),
+                );
+            }
         }
     }
 }

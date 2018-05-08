@@ -82,7 +82,7 @@ impl Lattice {
     pub fn matrix(&self) -> &M33
     { &self.matrix }
 
-    /// Inverse of the matrix where lattice vectors are rows.
+    /// Get the (precomputed) inverse of the matrix where lattice vectors are rows.
     #[inline]
     pub fn inverse_matrix(&self) -> &M33
     { &self.inverse }

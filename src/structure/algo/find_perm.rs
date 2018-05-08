@@ -72,7 +72,7 @@ fn dumb_validate_equivalent(
 // NOTE: Takes CoordStructure as a speedbump to prevent accidental use
 //       with inappropriate metadata.
 /// Compute permutations for all operators in a spacegroup.
-pub(crate) fn of_spacegroup(
+pub fn of_spacegroup(
     prim_structure: &Coords,
     ops: &[FracOp],
     tol: f64,
@@ -85,7 +85,7 @@ pub(crate) fn of_spacegroup(
 // NOTE: This version uses the metadata to group the atoms and potentially
 //       elide even more comparisons. Is it effective? No idea! But adding it
 //       came at zero extra cost for `M = ()`, so I figured it's worth trying out.
-pub(crate) fn of_spacegroup_with_meta<M: Ord>(
+pub fn of_spacegroup_with_meta<M: Ord>(
     prim_structure: &Coords,
     metadata: &[M],
     ops: &[FracOp],

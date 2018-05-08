@@ -9,48 +9,66 @@ use ::slice_of_array::prelude::*;
 
 #[derive(Debug, Clone, Default)]
 pub struct ForceSets {
-    atom_displaced: Vec<u32>,
-    atom_affected: Vec<u32>,
-    cart_force: Vec<V3>,
-    cart_displacement: Vec<V3>,
+    // These are both indices in the supercell.
+    //
+    // Invariant: the displaced atom always has an index where `cell = DISPLACED_CELL`.
+    //
+    // (technically we *could* store primitive sites in `atom_displaced`...
+    //  but I feel that storing supercell sites is safer, because it forces us
+    //  to be wary of the fact that rotations might move `atom_displaced` to a
+    //  different cell. (which is a fact we must account for in `atom_affected`))
+    //
+    // FIXME shouldn't need to be pub(crate)
+    pub(crate) atom_displaced: Vec<usize>,
+    pub(crate) atom_affected: Vec<usize>,
+    pub(crate) cart_force: Vec<V3>,
+    pub(crate) cart_displacement: Vec<V3>,
 }
 
+// Displaced atoms are always in this cell.
+// (HACK: shouldn't need to be pub(crate))
+pub(crate) const DISPLACED_CELL: [u32; 3] = [0, 0, 0];
+
 impl ForceSets {
-    // `deperm` should describe the symmop as a depermutation
+    // `super_deperm` should describe the symmop as a depermutation of the supercell.
     //
     // see conventions.md for info about depermutations.
-    fn derive_from_symmetry(
+    // FIXME shouldn't be pub(crate)
+    pub(crate) fn derive_from_symmetry(
         &self,
-        sc_token: &SupercellToken,
+        sc: &SupercellToken,
         cart_rot: &M33,
-        deperm: &Perm,
+        super_deperm: &Perm,
     ) -> Self {
-        panic!(
-            "FIXME using centered cells to avoid worrying about PBC is dumb. \
-            The bond graph / cutoff search can already do this for us.  \
-            All we need to do is to add V3<i32> image diffs to the bond graph and forces.\
-            "
-        );
+        assert_eq!(super_deperm.len(), sc.num_supercell_atoms());
+
+        let primitive_atoms = sc.atom_primitive_atoms();
+        let lattice_points = sc.atom_lattice_points();
+        let expected_lattice_point = sc.lattice_point_from_cell(DISPLACED_CELL);
+
         let (atom_displaced, atom_affected) = {
-            let cells = sc_token.signed_cell_indices();
-            ::util::zip_eq(&self.atom_displaced, &self.atom_displaced)
+            ::util::zip_eq(&self.atom_displaced, &self.atom_affected)
                 .map(|(&displaced, &affected)| {
-                    // rotate the atoms to a new index
-                    let mut displaced = deperm[displaced];
-                    let mut affected = deperm[affected];
+                    assert_eq!(expected_lattice_point, lattice_points[displaced as usize]);
 
-                    // make sure 'displaced' is in the center cell
-                    let cell = cells[displaced as usize];
-                    if cell != V3([0, 0, 0]) {
-                        // FIXME I imagine this has the potential to be very slow,
-                        //       maybe we should make an intermediate data structure
-                        //       with all the lattice point deperms
-                        let inv_deperm = sc_token.lattice_point_translation_deperm(-cell);
-                        affected = inv_deperm[affected];
-                        displaced = inv_deperm[displaced];
-                    }
-                    assert_eq!(cells[displaced as usize], V3([0, 0, 0]));
+                    // Rotate the atoms to a new index.
+                    let displaced = super_deperm[displaced];
+                    let affected = super_deperm[affected];
 
+                    // 'displaced' might have been moved to a new cell.
+                    // Translate the atoms to move it back.
+                    let correction = expected_lattice_point - lattice_points[displaced as usize];
+                    let translate_atom = |old_super| {
+                        let old_super = old_super as usize;
+                        sc.atom_from_lattice_point(
+                            primitive_atoms[old_super],
+                            lattice_points[old_super] + correction,
+                        )
+                    };
+                    let displaced = translate_atom(displaced);
+                    let affected = translate_atom(affected);
+
+                    assert_eq!(expected_lattice_point, lattice_points[displaced as usize]);
                     (displaced, affected)
                 }).unzip()
         };
@@ -63,7 +81,8 @@ impl ForceSets {
         ForceSets { atom_displaced, atom_affected, cart_force, cart_displacement }
     }
 
-    fn concat_from<Ss>(iter: Ss) -> Self
+    // FIXME shouldn't be pub(crate)
+    pub(crate) fn concat_from<Ss>(iter: Ss) -> Self
     where Ss: IntoIterator<Item=ForceSets>,
     {
         iter.into_iter().fold(Self::default(), |mut a, b| {
@@ -75,7 +94,8 @@ impl ForceSets {
         })
     }
 
-    fn solve_force_constants(&self, sc_token: &SupercellToken) -> FailResult<ForceConstants>
+    // FIXME shouldn't be pub(crate)
+    pub(crate) fn solve_force_constants(&self, sc_token: &SupercellToken) -> FailResult<ForceConstants>
     {
         use ::util::zip_eq as z;
         let ForceSets {
@@ -131,4 +151,21 @@ pub struct ForceConstants {
     cart_matrix: Vec<M33>,
 }
 
+
+impl ForceConstants {
+    /// For debugging purposes only...
+    #[allow(unused)]
+    pub(crate) fn to_dense_matrix(&self, num_supercell_atoms: usize) -> Vec<Vec<f64>> {
+        let n_basis = num_supercell_atoms * 3;
+        let mut out = vec![vec![0.0f64; n_basis]; n_basis];
+        for ((&row_atom, &col_atom), matrix) in ::util::zip_eq(::util::zip_eq(&self.row_atom, &self.col_atom), &self.cart_matrix) {
+            let col_start = col_atom * 3;
+            let col_end   = (col_atom + 1) * 3;
+            for row_k in 0..3 {
+                out[row_atom * 3 + row_k][col_start..col_end].copy_from_slice(&matrix[row_k].0);
+            }
+        }
+        out
+    }
+}
 

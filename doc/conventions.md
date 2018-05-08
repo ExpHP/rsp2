@@ -103,6 +103,17 @@ Both of these permutations can be used to create a structure where the each labe
 
 The advantage of using `deperm` is that it composes properly; because the coords were left untouched, all previously-computed perms and deperms are still valid descriptions of their corresponding operators.
 
+#### Depermutations describe how indices transform
+
+* Suppose for visualization purposes that you have a unit cell of some 2D structure printed out on paper.
+* Put a transparency sheet over it and draw a circle around one of the atoms.
+* Apply a symmetry operator `op` to the sheet, rotating it.
+* Which atom is circled now?
+
+In practice, this problem shows up when you store atom indices in a data structure, and try to generate new ones by applying symmetry operations to the structure. (having a local variable `atom_index` is like circling an atom, and depermuting a structure is like rotating a transparency sheet)
+
+The answer is actually straightforward: `new_index == deperm[old_index]`.  To see this, picture what would happen if you were to label each atom by its index in `coords`, and then apply a depermutation to those labels.
+
 ## Footnotes
 
 [^1]: I am ignoring issues of floating point precision here.  In reality, `equiv` must use a tolerance, and thus fails to be an equivalence relation in the strictest mathematical sense as it is not transitive.

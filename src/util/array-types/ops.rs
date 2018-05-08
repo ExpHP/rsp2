@@ -191,7 +191,63 @@ gen_each!{
 }
 
 // ---------------------------------------------------------------------------
-// TODO: vector-scalar ops
+// matrix-scalar ops
+
+// scalar `op` matrix
+gen_each!{
+    @{Mn_n}
+    @{Vn}
+    // NOTE: the orphan rules prevent us from impl-ing these ops "for X" so
+    //       we must generate a separate impl for each Semiring type rather than
+    //       being generic over X: Semiring
+    @{semiring}
+    impl_v_scalar_ops!(
+        {$Mr:ident $r:tt}
+        {$Vc:ident}
+        {$X:ty}
+    ) => {
+        // scalar * matrix
+        impl<'a> Mul<&'a $Mr<$Vc<$X>>> for $X {
+            type Output = $Mr<$Vc<$X>>;
+
+            #[inline(always)]
+            fn mul(self, matrix: &'a $Mr<$Vc<$X>>) -> Self::Output
+            { matrix * self }
+        }
+    }
+}
+
+// matrix `op` scalar
+gen_each!{
+    @{Mn_n}
+    @{Vn}
+    impl_m_scalar_ops!(
+        {$Mr:ident $r:tt}
+        {$Vc:ident}
+    ) => {
+        // matrix * scalar
+        impl<'a, X: Semiring> Mul<X> for &'a $Mr<$Vc<X>>
+        where X: PrimitiveSemiring,
+        {
+            type Output = $Mr<$Vc<X>>;
+
+            #[inline]
+            fn mul(self, scalar: X) -> Self::Output
+            { mat::from_fn(|r, c| self.0[r][c] * scalar) }
+        }
+
+        // matrix / scalar
+        impl<'a, X: Field> Div<X> for &'a $Mr<$Vc<X>>
+        where X: PrimitiveFloat,
+        {
+            type Output = $Mr<$Vc<X>>;
+
+            #[inline]
+            fn div(self, scalar: X) -> Self::Output
+            { mat::from_fn(|r, c| self.0[r][c] / scalar) }
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // assign ops (general)

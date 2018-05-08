@@ -1,4 +1,3 @@
-use super::bonds::CartBonds;
 use ::rsp2_array_types::{V3, dot};
 
 /// Constants used for calculation of the Kolmogorov-Crespi potential.
@@ -9,17 +8,17 @@ mod consts {
     /// Distance scaling factor for the repulsive potential. Units are inverse Angstroms.
     pub const LAMBDA: f64 = 3.629_f64;
 
-    /// Multiplicative factor for the attractive potential. Units are meV.
-    pub const A: f64 = 10.238_f64;
+    /// Multiplicative factor for the attractive potential. Units are eV.
+    pub const A: f64 = 10.238e-3;
 
     /// "Convenience scaling factor" Units are Angstroms.
-    pub const Z_0: f64 = 3.34_f64;
+    pub const Z_0: f64 = 3.34;
 
-    /// Offset constant used in repulsive potential. Units are meV.
-    pub const C: f64 = 3.030_f64;
+    /// Offset constant used in repulsive potential. Units are eV.
+    pub const C: f64 = 3.030e-3;
 
-    /// Multiplicative constants used in repulsive potential. Contains C_0, C_2, C_4. Units are meV.
-    pub const C2N: [f64; 3] = [15.71, 12.29, 4.933];
+    /// Multiplicative constants used in repulsive potential. Contains C_0, C_2, C_4. Units are eV.
+    pub const C2N: [f64; 3] = [15.71e-3, 12.29e-3, 4.933e-3];
 
     /// Distance at which the Kolmogorov-Crespi potential starts to switch to zero.
     /// Units are Angstroms.
@@ -37,7 +36,7 @@ mod consts {
 fn crespi_switching_func(distance: f64) -> (f64, f64)
 {
     debug_assert!(distance >= consts::CUTOFF_BEGIN);
-    debug_assert!(distance <= (consts::CUTOFF_BEGIN + consts::CUTOFF_TRANSITION_DIST));
+    debug_assert!(distance <= consts::CUTOFF_BEGIN + consts::CUTOFF_TRANSITION_DIST);
 
     // The switching function S(t) is the Hermite basis function h_00
     // which transitions from 1 -> 0 as t goes from 0 -> 1
@@ -53,7 +52,7 @@ fn crespi_switching_func(distance: f64) -> (f64, f64)
 /// The attractive part of the potential.
 fn crespi_attractive(dist_sq: f64, r: V3) -> (f64, V3)
 {
-    debug_assert!(dist_sq == r.sqnorm());
+    debug_assert_eq!(dist_sq, r.sqnorm());
 
     use self::consts::{Z_0, A};
     let z0_div_r_sq = (Z_0 * Z_0) / dist_sq;
@@ -79,7 +78,7 @@ fn crespi_scaling(dist: f64) -> (f64, f64)
 /// the distance vector r, and one unit normal vector n
 fn rho_squared(dist_sq: f64, r: V3, n: V3) -> (f64, V3, V3)
 {
-    debug_assert!(dist_sq == r.sqnorm());
+    debug_assert_eq!(dist_sq, r.sqnorm());
     debug_assert_close!(1.0, n.sqnorm());
 
     let nr_dot = dot(&r, &n);
@@ -131,7 +130,7 @@ fn crespi_f(dist_sq: f64, r: V3, n: V3) -> (f64, V3, V3)
 /// The repulsive part of the potential.
 fn crespi_repulsive(dist_sq: f64, r: V3, normal_i: V3, normal_j: V3) -> (f64, V3, V3, V3)
 {
-    debug_assert!(dist_sq == r.sqnorm());
+    debug_assert_eq!(dist_sq, r.sqnorm());
     debug_assert_close!(1.0, normal_i.sqnorm());
     debug_assert_close!(1.0, normal_j.sqnorm());
 
@@ -147,11 +146,30 @@ fn crespi_repulsive(dist_sq: f64, r: V3, normal_i: V3, normal_j: V3) -> (f64, V3
     (value, grad_r, grad_ni, grad_nj)
 }
 
+#[derive(Debug, Clone)]
+pub struct Output {
+    pub value: f64,
+    pub grad_rij: V3,
+    pub grad_ni: V3,
+    pub grad_nj: V3,
+}
+
+impl Output {
+    fn zero() -> Self {
+        Output {
+            value: 0.0,
+            grad_rij: V3::zero(),
+            grad_ni: V3::zero(),
+            grad_nj: V3::zero(),
+        }
+    }
+}
+
 /// Calculate the Kolmogorov-Crespi potential given the delta vector between two carbon atoms r_ij
 /// as well as the unit normal vectors for each atom, n_i and n_j. Returns the potential as well
 /// as the gradient of the potential with respect to r_ij, n_i, and n_j
-fn crespi_potential(r_ij: &V3, normal_i: &V3, normal_j: &V3) -> (f64, V3, V3, V3)
-{
+#[inline(never)] // ensure visible in profiling output
+pub fn crespi(r_ij: V3, normal_i: V3, normal_j: V3) -> Output {
     use self::consts::{CUTOFF_BEGIN, CUTOFF_END};
     debug_assert_close!(1.0, normal_i.sqnorm());
     debug_assert_close!(1.0, normal_j.sqnorm());
@@ -160,7 +178,7 @@ fn crespi_potential(r_ij: &V3, normal_i: &V3, normal_j: &V3) -> (f64, V3, V3, V3
     let dist_sq = r_ij.sqnorm();
     if dist_sq > CUTOFF_END * CUTOFF_END {
         // we're too far away, the potential and gradients are always zero
-        return (0.0, V3::zero(), V3::zero(), V3::zero());
+        return Output::zero();
     }
 
     let dist = dist_sq.sqrt();
@@ -172,12 +190,12 @@ fn crespi_potential(r_ij: &V3, normal_i: &V3, normal_j: &V3) -> (f64, V3, V3, V3
     };
 
     // first get the attractive part of the potential
-    let (v_attractive, d_attractive_dr) = crespi_attractive(dist_sq, *r_ij);
+    let (v_attractive, d_attractive_dr) = crespi_attractive(dist_sq, r_ij);
 
     // then the repulsive
-    let (v_rep, d_rep_dr, d_rep_dni, d_rep_dnj) = crespi_repulsive(dist_sq, *r_ij, *normal_i, *normal_j);
+    let (v_rep, d_rep_dr, d_rep_dni, d_rep_dnj) = crespi_repulsive(dist_sq, r_ij, normal_i, normal_j);
 
-    // as well as it's scaling term
+    // as well as its scaling term
     let (v_scale, d_scale_ddist) = crespi_scaling(dist);
 
     let value = v_scale * v_rep + v_attractive;
@@ -187,11 +205,16 @@ fn crespi_potential(r_ij: &V3, normal_i: &V3, normal_j: &V3) -> (f64, V3, V3, V3
     let grad_nj = v_scale * d_rep_dnj;
 
     // lastly, take into account the cutoff function and its derivative
-    (
-        cutoff * value,
-        cutoff * grad_r + d_cutoff_ddist * (r_ij / dist) * value,
-        cutoff * grad_ni,
-        cutoff * grad_nj
-    )
+    Output {
+        value: cutoff * value,
+        grad_rij: cutoff * grad_r + d_cutoff_ddist * (r_ij / dist) * value,
+        grad_ni: cutoff * grad_ni,
+        grad_nj: cutoff * grad_nj,
+    }
 }
 
+/// Computes crespi assuming normals are all +Z.
+pub fn crespi_z(r_ij: V3) -> Output {
+    let z_hat = V3([0.0, 0.0, 1.0]);
+    crespi(r_ij, z_hat, z_hat)
+}

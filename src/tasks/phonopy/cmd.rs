@@ -189,11 +189,10 @@ phonopy \
     })}
 
     // FIXME: Should return a new DirWithSymmetry type.
-    #[allow(unused)]
     pub fn symmetry(
         &self,
         structure: &ElementStructure,
-    ) -> FailResult<(Vec<FracOp>)>
+    ) -> FailResult<Vec<FracOp>>
     {
         self.finalize_config(structure)
             ._symmetry(structure)
@@ -202,7 +201,7 @@ phonopy \
     fn _symmetry(
         &self,
         structure: &ElementStructure,
-    ) -> FailResult<(Vec<FracOp>)>
+    ) -> FailResult<Vec<FracOp>>
     {Ok({
         let tmp = TempDir::new("rsp2")?;
         let tmp = tmp.path();
