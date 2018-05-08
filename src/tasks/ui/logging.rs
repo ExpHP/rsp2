@@ -95,12 +95,13 @@ pub fn init_global_logger() -> FailResult<SetGlobalLogfile>
     use self::Verbosity as V;
 
     let verbosity = V::from_env()?;
+    let log_mod_setting = ::env::log_mod()?;
 
     let start = time::Instant::now();
     let mut fern = ::fern::Dispatch::new();
     fern =
         fern.format(move |out, message, record| {
-            let message = fmt_log_message_lines(message, record, start.elapsed());
+            let message = fmt_log_message_lines(message, record, start.elapsed(), log_mod_setting);
 
             out.finish(format_args!("{}", message))
         })
@@ -170,6 +171,7 @@ fn fmt_log_message_lines(
     message: &fmt::Arguments,
     record: &LogRecord,
     elapsed: time::Duration,
+    log_mod_setting: bool,
 ) -> String {
     // (yes, I know, we're ruining the entire point of fmt::Arguments by printing
     //  it to a String, boo hoo.  We want to inspect its contents.)
@@ -179,19 +181,26 @@ fn fmt_log_message_lines(
     // Break into lines, format the first, and pad the rest.
     let first = lines.next().unwrap_or("");
     let mut out = vec![format!(
-        "[{:>4}.{:03}s][{}]{} {}",
+        "[{:>4}.{:03}s]{}{} {}",
         elapsed.as_secs(),
         elapsed.subsec_nanos() / 1_000_000,
-        record.target(),
+        match log_mod_setting {
+            true => format!("[{}]", record.target()),
+            false => format!(""),
+        },
         ColorizedLevel(record.level()),
         first,
     )];
 
     let len_secs = format!("{:4}", elapsed.as_secs()).len();
-    let len_target = record.target().len();
+    let len_target = match log_mod_setting {
+        true => record.target().len() + 2,
+        false => 0,
+    };
     out.extend(lines.map(|line| {
         format!(
-            "\n {:len_secs$} {:3}   {:len_target$}  {:6}| {}",
+            // [############.####s][############][####]
+            "\n {:len_secs$} {:3}  {:len_target$} {:5}| {}",
             "", "", "", "", line,
             len_secs=len_secs,
             len_target=len_target,

@@ -16,6 +16,7 @@ fn wrap_result_main<F>(main: F)
         for cause in e.causes() {
             error!("{}", cause);
         }
+        error!("{}", e.backtrace());
         ::std::process::exit(1);
     });
 }

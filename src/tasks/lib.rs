@@ -122,6 +122,7 @@ mod stderr {
 mod env {
     use super::*;
     use ::std::env;
+    use ::util::ext_traits::OptionResultExt;
 
     fn var(key: &str) -> FailResult<Option<String>>
     { match ::std::env::var(key) {
@@ -130,15 +131,33 @@ mod env {
         Err(env::VarError::NotUnicode(s)) => bail!("env var not unicode: {}={:?}", key, s),
     }}
 
+    fn nonempty_var(key: &str) -> FailResult<Option<String>>
+    { match var(key) {
+        Ok(Some(ref s)) if s == "" => Ok(None),
+        r => r,
+    }}
+
     /// Verbosity, as a signed integer env var.
     ///
     /// This is an env var for ease of implementation, so that the fern logger
     /// can be started eagerly rather than waiting until after we parse arguments.
     pub fn verbosity() -> FailResult<i32>
     {Ok({
-        var("RSP2_VERBOSITY")?
+        nonempty_var("RSP2_VERBOSITY")?
             .unwrap_or_else(|| "0".into())
             .parse::<i32>()?
+    })}
+
+    /// Show module names in log output.
+    pub fn log_mod() -> FailResult<bool>
+    {Ok({
+        nonempty_var("RSP2_LOG_MOD")?
+            .map(|s| match &s[..] {
+                "1" => Ok(true),
+                "0" => Ok(false),
+                _ => bail!("Invalid setting for RSP2_LOG_MOD: {:?}", s),
+            }).fold_ok()?
+            .unwrap_or(false)
     })}
 }
 
