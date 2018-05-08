@@ -131,12 +131,6 @@ macro_rules! impl_dirlike_boilerplate {
             /// case it is not possible to detect errors.
             pub fn close(self) -> IoResult<()> { self.temp_dir_close() }
 
-            /// Convert into a PathBuf, disabling this object's destructor.
-            ///
-            /// To retain the ability to call the other methods on this type,
-            /// see the `keep()` method.
-            pub fn into_path(self) -> PathBuf { self.temp_dir_into_path() }
-
             /// Move the directory to the given path, which must not exist.
             ///
             /// Currently, there is no recourse if the operation fails;
@@ -146,7 +140,7 @@ macro_rules! impl_dirlike_boilerplate {
             -> FailResult<$Type<PathBuf>>
             {Ok({
                 // (use something that supports cross-filesystem moves)
-                mv(self.path(), path.as_path())?;
+                ::rsp2_fs_util::mv(self.path(), path.as_path())?;
 
                 self.map_dir(|old| {
                     // forget the TempDir

@@ -98,13 +98,12 @@ impl<'p, P: AsPath + ?Sized> AsPath for &'p P
 /// to catch IO errors (which would be ignored on drop).
 ///
 /// This is really just an implementation detail, and you should not
-/// worry about it. All types that implement this expose it through
-/// the `close()` and `into_path()` inherent methods, so you do not
-/// need to import it.
+/// worry about it. All types that implement this expose `close()`
+/// and `relocate()` inherent methods that you should use instead.
 pub trait HasTempDir: AsPath {
-    /// Provides `close()` in generic contexts
+    /// Provides `TempDir::close` in generic contexts
     fn temp_dir_close(self) -> IoResult<()>;
-    /// Provides `into_path()` in generic contexts
+    /// Provides `TempDir::into_path` in generic contexts
     fn temp_dir_into_path(self) -> PathBuf;
 }
 
