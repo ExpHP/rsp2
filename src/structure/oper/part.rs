@@ -1,4 +1,5 @@
 use ::oper::Permute;
+use ::std::iter::FusedIterator;
 
 /// Type of "a thing that has been partitioned."
 ///
@@ -51,9 +52,6 @@ pub struct Part<L> {
 #[fail(display = "Tried to construct an invalid partition.")]
 pub struct InvalidPartitionError(::failure::Backtrace);
 
-pub type Keys<'a, L> = Box<VeclikeIterator<Item=&'a L> + 'a>;
-pub type Indices<'a> = Box<VeclikeIterator<Item=&'a [usize]> + 'a>;
-
 impl<L> Part<L> {
     /// Create a partition that decomposes a vector entirely.
     ///
@@ -70,14 +68,14 @@ impl<L> Part<L> {
     /// Iterate over the keys for each region.
     ///
     /// Item type is `&L`;
-    pub fn region_keys(&self) -> Keys<'_, L>
-    { Box::new(self.part.iter().map(|(label, _)| label)) }
+    pub fn region_keys(&self) -> impl VeclikeIterator<Item=&L>
+    { self.part.iter().map(|(label, _)| label) }
 
     /// Iterate over the index vectors for each region.
     ///
     /// Item type is `&[usize]`;
-    pub fn region_indices(&self) -> Indices<'_>
-    { Box::new(self.part.iter().map(|(_, idx)| &idx[..])) }
+    pub fn region_indices(&self) -> impl VeclikeIterator<Item=&[usize]>
+    { self.part.iter().map(|(_, idx)| &idx[..]) }
 
     /// # Safety
     ///
@@ -149,10 +147,10 @@ impl<L> IntoIterator for Part<L> {
 /// (once existential types are supported on traits).
 pub type Unlabeled<'a, T> = Box<VeclikeIterator<Item=T> + 'a>;
 
-pub trait VeclikeIterator: ExactSizeIterator + DoubleEndedIterator {}
+pub trait VeclikeIterator: ExactSizeIterator + DoubleEndedIterator + FusedIterator {}
 
 impl<T> VeclikeIterator for T
-where T: ExactSizeIterator + DoubleEndedIterator {}
+where T: ExactSizeIterator + DoubleEndedIterator + FusedIterator {}
 
 /// Trait for applying a `Part` to a `Vec` (or similar type), breaking it into pieces.
 ///
