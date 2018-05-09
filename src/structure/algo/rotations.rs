@@ -143,9 +143,9 @@ lazy_static!{
         //         until I can find and verify Le Page's proof.
         const MAX: i32 = 5;
         let mut indices = Vec::with_capacity((2 * MAX + 1).pow(3) as usize);
-        for i in -MAX..MAX + 1 {
-            for j in -MAX..MAX + 1 {
-                for k in -MAX..MAX + 1 {
+        for i in -MAX..=MAX {
+            for j in -MAX..=MAX {
+                for k in -MAX..=MAX {
                     indices.push(V3([i, j, k]));
                 }
             }

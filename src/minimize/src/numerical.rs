@@ -28,7 +28,7 @@ impl Default for DerivativeKind {
 //    binoms.push(1.0); // binom coeffs of order zero
 //
 //    // beyond order zero
-//    for order in 1..n+1 {
+//    for order in 1..=n {
 //        // There is a well-known relation between the binoms of order n and those of order n - 1
 //        // (see Pascal's triangle)
 //        binoms.push(1.0);

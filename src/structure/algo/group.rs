@@ -48,7 +48,7 @@ impl<G> GroupTree<G>
         // be used on spacegroups, which are not terribly large.
         let mut decomps = vec![None; members.len()];
         for a in 0..members.len() {
-            for b in 0..a + 1 {
+            for b in 0..=a {
                 let c = indices[&compose(&members[a], &members[b])];
                 if c > a {
                     decomps[c] = Some((a, b));
