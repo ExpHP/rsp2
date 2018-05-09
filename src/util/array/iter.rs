@@ -63,6 +63,8 @@ impl<A: IsArray> DoubleEndedIterator for MoveIter<A> {
     }
 }
 
+impl<A: IsArray> ::std::iter::FusedIterator for MoveIter<A> { }
+
 macro_rules! impl_iter_move {
     ($n:expr) => {
         impl<T> ArrayMoveIterExt for [T; $n] {
