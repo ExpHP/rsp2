@@ -1,32 +1,3 @@
-/// For deriving Save and Load through
-#[macro_export]
-macro_rules! derive_filetype_wrapper {
-    (impl$par:tt [$($Trait:ty),+] for $Ty:ty as $Wrap:ident $bnd:tt)
-    => {
-        $(
-            derive_filetype_wrapper!{
-                @one($Wrap, $Trait) impl$par _ for $Ty $bnd
-            }
-        )+
-    };
-
-    (@one($Wrap:ident, Load) impl[$($par:tt)*] _ for $Ty:ty [where $($bnd:tt)*])
-    => {
-        impl<$($par)*> Load for $Ty where $($bnd)* {
-            fn load<P: ::AsPath>(path: P) -> ::FailResult<Self>
-            { Load::load().map(|$Wrap(x)| x) }
-        }
-    };
-
-    (@one($Wrap:ident, Save) impl[$($par:tt)*] _ for $Ty:ty [where $($bnd:tt)*])
-    => {
-        impl<$($par)*> Save for $Ty where $($bnd)* {
-            fn save<P: ::AsPath>(&self, path: P) -> ::FailResult<Self>
-            { $Wrap::wrap_ref(self).save(path) }
-        }
-    };
-}
-
 /// Macro to use when implementing `alternate::{Fn, FnMut, FnOnce}`.
 ///
 /// This macro will automatically generate the impls for the traits
@@ -136,7 +107,7 @@ macro_rules! impl_dirlike_boilerplate {
             /// Currently, there is no recourse if the operation fails;
             /// the directory is simply lost. In the future, this may take
             /// '&mut self' and poison the object once the move has succeeded.
-            pub fn relocate<Q: AsPath>(self, path: Q)
+            pub fn relocate(self, path: impl AsPath)
             -> FailResult<$Type<PathBuf>>
             {Ok({
                 // (use something that supports cross-filesystem moves)

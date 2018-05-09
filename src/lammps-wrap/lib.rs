@@ -137,11 +137,10 @@ impl<T> MaybeDirty<T> {
     //
     // To clarify: If there is no last clean value, then ALL projections
     // are considered dirty by definition.
-    pub fn is_projection_dirty<K: ?Sized, F>(&self, mut f: F) -> bool
-    where
-        K: PartialEq,
-        F: FnMut(&T) -> &K,
-    {
+    pub fn is_projection_dirty<K: ?Sized + PartialEq>(
+        &self,
+        mut f: impl FnMut(&T) -> &K,
+    ) -> bool {
         match (&self.clean, &self.dirty) {
             (Some(clean), Some(dirty)) => f(clean) != f(dirty),
             (None, Some(_)) => true,
@@ -155,11 +154,10 @@ impl<T> MaybeDirty<T> {
     // returns owned data instead of borrowed. One might think that this
     // method could therefore be used to implement the other; but it can't,
     // because the lifetime in F's return type would be overconstrained.
-    pub fn is_function_dirty<K, F>(&self, mut f: F) -> bool
-    where
-        K: PartialEq,
-        F: FnMut(&T) -> K,
-    {
+    pub fn is_function_dirty<K: PartialEq>(
+        &self,
+        mut f: impl FnMut(&T) -> K,
+    ) -> bool {
         match (&self.clean, &self.dirty) {
             (Some(clean), Some(dirty)) => f(clean) != f(dirty),
             (None, Some(_)) => true,
@@ -187,7 +185,7 @@ impl Builder {
         threaded: true,
     }}
 
-    pub fn append_log<P: AsRef<Path>>(&mut self, path: P) -> &mut Self
+    pub fn append_log(&mut self, path: impl AsRef<Path>) -> &mut Self
     { self.append_log = Some(path.as_ref().to_owned()); self }
 
     pub fn threaded(&mut self, value: bool) -> &mut Self
@@ -327,8 +325,7 @@ pub enum PairCommand {
 }
 
 impl PairCommand {
-    pub fn pair_style<S>(name: S) -> Self
-    where S: ToString,
+    pub fn pair_style(name: impl ToString) -> Self
     { PairCommand::PairStyle(Arg::from(name), vec![]) }
 
     pub fn pair_coeff<I, J>(i: I, j: J) -> Self
@@ -336,8 +333,7 @@ impl PairCommand {
     { PairCommand::PairCoeff(i.into(), j.into(), vec![]) }
 
     /// Append an argument
-    pub fn arg<A>(mut self, arg: A) -> Self
-    where A: ToString,
+    pub fn arg(mut self, arg: impl ToString) -> Self
     {
         match &mut self {
             PairCommand::PairCoeff(_, _, v) => v,

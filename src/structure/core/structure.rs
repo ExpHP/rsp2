@@ -78,8 +78,7 @@ impl Coords {
 
 /// # Construction
 impl<M> Structure<M> {
-    pub fn new<Ms>(lattice: Lattice, coords: CoordsKind, meta: Ms) -> Self
-    where Ms: IntoIterator<Item=M>,
+    pub fn new(lattice: Lattice, coords: CoordsKind, meta: impl IntoIterator<Item=M>) -> Self
     {
         let meta: Vec<_> = meta.into_iter().collect();
         assert_eq!(coords.len(), meta.len());
@@ -87,8 +86,7 @@ impl<M> Structure<M> {
         Self { coords, meta }
     }
 
-    pub fn from_coords<Ms>(coords: Coords, meta: Ms) -> Self
-    where Ms: IntoIterator<Item=M>,
+    pub fn from_coords(coords: Coords, meta: impl IntoIterator<Item=M>) -> Self
     {
         let meta: Vec<_> = meta.into_iter().collect();
         assert_eq!(coords.num_atoms(), meta.len());
@@ -444,9 +442,10 @@ impl<M> Structure<M> {
     // FIXME bad idea for stable interface, but good enough for now
     pub fn metadata(&self) -> &[M] { &self.meta }
 
-    pub fn try_map_metadata_into<M2, E, F>(self, f: F) -> Result<Structure<M2>, E>
-    where F: FnMut(M) -> Result<M2, E>,
-    {
+    pub fn try_map_metadata_into<M2, E>(
+        self,
+        f: impl FnMut(M) -> Result<M2, E>,
+    ) -> Result<Structure<M2>, E> {
         Ok({
             let Structure { coords, meta } = self;
             let meta = meta.into_iter().map(f).collect::<Result<_, E>>()?;
@@ -454,9 +453,10 @@ impl<M> Structure<M> {
         })
     }
 
-    pub fn map_metadata_into<M2, F>(self, f: F) -> Structure<M2>
-    where F: FnMut(M) -> M2,
-    {
+    pub fn map_metadata_into<M2>(
+        self,
+        f: impl FnMut(M) -> M2,
+    ) -> Structure<M2> {
         let Structure { coords, meta } = self;
         let meta = meta.into_iter().map(f).collect();
         Structure { coords, meta }
@@ -465,17 +465,17 @@ impl<M> Structure<M> {
     // This variant can be useful when using the by-value variant
     // would require the user to clone() first, needlessly
     // cloning the old metadata.
-    pub fn map_metadata_to<M2, F>(&self, f: F) -> Structure<M2>
-    where F: FnMut(&M) -> M2,
-    {
+    pub fn map_metadata_to<M2>(
+        &self,
+        f: impl FnMut(&M) -> M2,
+    ) -> Structure<M2> {
         let coords = self.coords.clone();
         let meta = self.meta.iter().map(f).collect();
         Structure { coords, meta }
     }
 
     /// Store new metadata in-place.
-    pub fn set_metadata<Ms>(&mut self, meta: Ms)
-    where Ms: IntoIterator<Item=M>,
+    pub fn set_metadata(&mut self, meta: impl IntoIterator<Item=M>)
     {
         let old = self.meta.len();
         self.meta.clear();

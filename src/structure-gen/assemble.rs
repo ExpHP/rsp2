@@ -9,7 +9,7 @@ use ::std::io::Read;
 
 use ::rsp2_array_types::{M22, M33, V2, V3, mat, inv, Unvee};
 
-pub fn load_layers_yaml<R: Read>(mut file: R) -> FailResult<Assemble>
+pub fn load_layers_yaml(mut file: impl Read) -> FailResult<Assemble>
 { _load_layers_yaml(&mut file) }
 
 // Monomorphized to ensure YAML parsing code is generated in this crate
@@ -20,7 +20,7 @@ fn _load_layers_yaml(file: &mut Read) -> FailResult<Assemble>
 }
 
 // FIXME this really doesn't belong here, but it's the easiest reuse of code
-pub fn layer_sc_info_from_layers_yaml<R: Read>(mut file: R) -> FailResult<Vec<(M33<i32>, [u32; 3], usize)>>
+pub fn layer_sc_info_from_layers_yaml(mut file: impl Read) -> FailResult<Vec<(M33<i32>, [u32; 3], usize)>>
 { _layer_sc_info_from_layers_yaml(&mut file) }
 
 // Monomorphized to ensure YAML parsing code is generated in this crate

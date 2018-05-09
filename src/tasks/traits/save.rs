@@ -5,11 +5,11 @@ use ::traits::IsNewtype;
 use ::path_abs::{FileRead, FileWrite};
 
 pub trait Load: Sized {
-    fn load<P>(path: P) -> FailResult<Self> where P: AsPath;
+    fn load(path: impl AsPath) -> FailResult<Self>;
 }
 
 pub trait Save {
-    fn save<P>(&self, path: P) -> FailResult<()> where P: AsPath;
+    fn save(&self, path: impl AsPath) -> FailResult<()>;
 }
 
 /// Utility adapter for `Load`/`Save` that serializes as JSON.
@@ -25,7 +25,7 @@ pub struct Yaml<T: ?Sized>(pub T);
 unsafe impl<T: ?Sized> IsNewtype<T> for Yaml<T> { }
 
 impl<T> Load for Json<T> where T: for<'de> ::serde::Deserialize<'de> {
-    fn load<P: AsPath>(path: P) -> FailResult<Json<T>>
+    fn load(path: impl AsPath) -> FailResult<Json<T>>
     {Ok(::serde_json::from_reader(FileRead::read(path.as_path())?)?).map(Json)}
 }
 
@@ -36,11 +36,11 @@ impl<T> Load for Json<T> where T: for<'de> ::serde::Deserialize<'de> {
 // }
 
 impl<T> Save for Json<T> where T: ::serde::Serialize {
-    fn save<P: AsPath>(&self, path: P) -> FailResult<()>
+    fn save(&self, path: impl AsPath) -> FailResult<()>
     {Ok(::serde_json::to_writer(FileWrite::create(path.as_path())?, &self.0)?)}
 }
 
 impl<T> Save for Yaml<T> where T: ::serde::Serialize {
-    fn save<P: AsPath>(&self, path: P) -> FailResult<()>
+    fn save(&self, path: impl AsPath) -> FailResult<()>
     {Ok(::serde_yaml::to_writer(FileWrite::create(path.as_path())?, &self.0)?)}
 }

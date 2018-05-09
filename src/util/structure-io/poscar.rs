@@ -11,12 +11,11 @@ use ::rsp2_array_types::{Envee, Unvee};
 use ::vasp_poscar::{Poscar, RawPoscar, ScaleLine};
 
 /// Writes a POSCAR to an open file.
-pub fn dump<W>(
-    mut w: W,
+pub fn dump(
+    mut w: impl Write,
     title: &str,
     structure: &ElementStructure,
 ) -> FailResult<()>
-where W: Write
 {
     // FIXME replace with e.g. Poscar::set_site_symbols when available
     let mut group_counts = vec![];
@@ -49,8 +48,7 @@ where W: Write
 /// Reads a POSCAR from an open file.
 ///
 /// This forcibly reads to EOF because it must construct a BufReader.
-pub fn load<R>(mut f: R) -> FailResult<ElementStructure>
-where R: Read,
+pub fn load(mut f: impl Read) -> FailResult<ElementStructure>
 {
     let out = load_txt(::std::io::BufReader::new(&mut f))?;
     f.read_to_end(&mut vec![])?;
@@ -58,8 +56,7 @@ where R: Read,
 }
 
 /// Reads a POSCAR from an open file.
-pub fn load_txt<R>(f: R) -> FailResult<ElementStructure>
-where R: BufRead,
+pub fn load_txt(f: impl BufRead) -> FailResult<ElementStructure>
 {
     use vasp_poscar::failure::ResultExt;
     let poscar = Poscar::from_reader(f).compat()?;

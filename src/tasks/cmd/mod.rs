@@ -254,9 +254,9 @@ fn write_eigen_info_for_humans(
         .into_iter().map(writeln).collect()
 }
 
-fn write_eigen_info_for_machines<W: Write>(
+fn write_eigen_info_for_machines(
     analysis: &GammaSystemAnalysis,
-    mut file: W,
+    mut file: impl Write,
 ) -> FailResult<()>
 {
     analysis.make_columns(ev_analyses::ColumnsMode::ForMachines)
@@ -352,8 +352,8 @@ fn do_force_sets_at_disps<P: AsPath + Send + Sync>(
     force_sets
 })}
 
-fn read_eigensystem<P: AsPath>(
-    bands_dir: &DirWithBands<P>,
+fn read_eigensystem(
+    bands_dir: &DirWithBands<impl AsPath>,
     q: &V3,
 ) -> FailResult<(Vec<f64>, Basis3)>
 {Ok({
@@ -735,11 +735,11 @@ impl TrialDir {
     })}
 
     #[allow(non_snake_case)]
-    fn _dynmat_test__supercell_and_displacements<P: AsPath>(
+    fn _dynmat_test__supercell_and_displacements(
         &self,
         settings: &Settings,
         prim_structure: &ElementStructure,
-        disp_dir: DirWithDisps<P>,
+        disp_dir: DirWithDisps<impl AsPath>,
     ) -> FailResult<(
         ElementStructure,
         ::rsp2_structure::supercell::SupercellToken,

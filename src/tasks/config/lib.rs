@@ -29,7 +29,7 @@ pub use ::rsp2_minimize::acgsd::Settings as Acgsd;
 /// Provides an alternative to serde_yaml::from_reader where all of the
 /// expensive codegen has already been performed in this crate.
 pub trait YamlRead: for <'de> ::serde::Deserialize<'de> {
-    fn from_reader<R: Read>(mut r: R) -> Result<Self, ::serde_yaml::Error>
+    fn from_reader(mut r: impl Read) -> Result<Self, ::serde_yaml::Error>
     { YamlRead::from_dyn_reader(&mut r) }
 
     fn from_dyn_reader(r: &mut Read) -> Result<Self, ::serde_yaml::Error> {

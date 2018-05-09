@@ -11,7 +11,7 @@ use ::std::io::Read;
 use ::std::mem::size_of;
 
 
-pub fn read_eigenvector_npy<R: Read>(mut r: R) -> FailResult<Vec<Basis>> {
+pub fn read_eigenvector_npy(mut r: impl Read) -> FailResult<Vec<Basis>> {
     let bytes = {
         let mut bytes = vec![];
         r.read_to_end(&mut bytes)?;
@@ -22,7 +22,7 @@ pub fn read_eigenvector_npy<R: Read>(mut r: R) -> FailResult<Vec<Basis>> {
         .or_else(|e| bail!("{:?}", e)) // generic, not displayable...
 }
 
-pub fn read_eigenvalue_npy<R: Read>(mut r: R) -> FailResult<Vec<Vec<f64>>> {
+pub fn read_eigenvalue_npy(mut r: impl Read) -> FailResult<Vec<Vec<f64>>> {
     let bytes = {
         let mut bytes = vec![];
         r.read_to_end(&mut bytes)?;

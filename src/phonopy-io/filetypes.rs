@@ -58,7 +58,7 @@ pub mod disp_yaml {
         structure
     }
 
-    pub fn read<R: Read>(mut r: R) -> FailResult<DispYaml>
+    pub fn read(mut r: impl Read) -> FailResult<DispYaml>
     { _read(&mut r) }
 
     // Monomorphic to ensure that all the yaml parsing code is generated inside this crate
@@ -96,7 +96,7 @@ pub type Conf = HashMap<String, String>;
 pub mod conf {
     use super::*;
 
-    pub fn read<R: BufRead>(file: R) -> FailResult<Conf>
+    pub fn read(file: impl BufRead) -> FailResult<Conf>
     {Ok({
         // NOTE: This was just thrown together based on what I assume
         //       the format of phonopy's `conf` files is.
@@ -127,7 +127,7 @@ pub mod conf {
         out
     })}
 
-    pub fn write<W: Write>(mut w: W, conf: &Conf) -> FailResult<()>
+    pub fn write(mut w: impl Write, conf: &Conf) -> FailResult<()>
     {Ok({
         for (key, val) in conf {
             ensure!(key.bytes().all(|c| c != b'='), "'=' in conf key");
@@ -158,7 +158,7 @@ pub mod symmetry_yaml {
     }
 
     // NOTE: this is currently entirely unvalidated.
-    pub fn read<R: Read>(mut r: R) -> FailResult<SymmetryYaml>
+    pub fn read(mut r: impl Read) -> FailResult<SymmetryYaml>
     { _read(&mut r) }
 
     // Monomorphic to ensure that all the yaml parsing code is generated inside this crate
@@ -171,13 +171,12 @@ pub mod force_sets {
     // Adapted from code by Colin Daniels.
 
     /// Write a FORCE_SETS file.
-    pub fn write<W, Vs>(
-        mut w: W,
+    pub fn write<Vs>(
+        mut w: impl Write,
         displacements: &[(usize, V3)],
         force_sets: Vs,
     ) -> FailResult<()>
     where
-        W: Write,
         Vs: IntoIterator,
         <Vs as IntoIterator>::IntoIter: ExactSizeIterator,
         <Vs as IntoIterator>::Item: AsRef<[V3]>,

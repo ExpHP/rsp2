@@ -14,7 +14,7 @@ pub trait AsPath {
     fn to_path_buf(&self) -> PathBuf
     { self.as_path().to_path_buf() }
 
-    fn join<Q: AsPath>(&self, path: Q) -> PathBuf
+    fn join(&self, path: impl AsPath) -> PathBuf
     where Self: Sized, // generic functions are not object-safe
     { self.as_path().join(path.as_path()) }
 

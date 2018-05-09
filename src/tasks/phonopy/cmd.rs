@@ -70,7 +70,7 @@ impl Builder {
     pub fn symmetry_tolerance(mut self, x: f64) -> Self
     { self.symprec = Some(x); self }
 
-    pub fn conf<K: AsRef<str>, V: AsRef<str>>(mut self, key: K, value: V) -> Self
+    pub fn conf(mut self, key: impl AsRef<str>, value: impl AsRef<str>) -> Self
     { self.conf.0.insert(key.as_ref().to_owned(), value.as_ref().to_owned()); self }
 
     /// Extend with configuration lines from a phonopy .conf file.
@@ -78,7 +78,7 @@ impl Builder {
     ///  value from the file will take precedence.
     // FIXME: FailResult<Self>... oh, THAT's why the general recommendation is for &mut Self
     #[allow(unused)]
-    pub fn conf_from_file<R: BufRead>(self, file: R) -> FailResult<Self>
+    pub fn conf_from_file(self, file: impl BufRead) -> FailResult<Self>
     {Ok({
         let mut me = self;
         for (key, value) in ::rsp2_phonopy_io::conf::read(file)? {
@@ -708,9 +708,9 @@ fn check_status(status: ::std::process::ExitStatus) -> Result<(), PhonopyFailed>
 // The use case is where this may be used on many identical source files
 // for the same destination, possibly concurrently, in order to cache the
 // file for further reuse.
-pub fn cache_link<P: AsRef<Path>, Q: AsRef<Path>>(src: P, dest: Q) -> FailResult<()>
+pub fn cache_link(src: impl AsPath, dest: impl AsPath) -> FailResult<()>
 {
-    let (src, dest) = (src.as_ref(), dest.as_ref());
+    let (src, dest) = (src.as_path(), dest.as_path());
     hard_link(src, dest)
         .map(|_| ())
         .or_else(|_| Ok({
@@ -728,9 +728,9 @@ pub fn cache_link<P: AsRef<Path>, Q: AsRef<Path>>(src: P, dest: Q) -> FailResult
 }
 
 // Like `cache_link` except it fails if the destination exists.
-pub fn copy_or_link<P: AsRef<Path>, Q: AsRef<Path>>(src: P, dest: Q) -> FailResult<()>
+pub fn copy_or_link(src: impl AsPath, dest: impl AsPath) -> FailResult<()>
 {
-    let (src, dest) = (src.as_ref(), dest.as_ref());
+    let (src, dest) = (src.as_path(), dest.as_path());
     hard_link(src, dest)
         .map(|_| ())
         .or_else(|_| Ok({

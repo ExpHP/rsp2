@@ -1,7 +1,11 @@
 use ::std::fmt::Write;
 use ::std::fmt;
 
-fn fmt_bins<W: Write>(mut w: W, width: usize, bins: &[u64]) -> Result<(), fmt::Error> {
+fn fmt_bins(
+    mut w: impl Write,
+    width: usize,
+    bins: &[u64],
+) -> Result<(), fmt::Error> {
     let alphabet: Vec<char> = "0123456789abcdefghijklmnopqrstuvwxyz".chars().collect();
 
     let sparse: Vec<(usize, u64)> = bins.iter().cloned()
@@ -42,7 +46,7 @@ pub struct Bins<T> {
     bins: Vec<u64>,
 }
 
-impl<T:PartialOrd> Bins<T> {
+impl<T: PartialOrd> Bins<T> {
     pub fn new(mut divs: Vec<T>) -> Bins<T>
     {
         assert!(divs.len() >= 2);

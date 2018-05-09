@@ -10,14 +10,12 @@ use ::rsp2_array_types::V3;
 /// You can freely call this multiple times on the same file
 /// to write an animation, since XYZ animations are simply
 /// concatenated XYZ files.
-pub fn dump<W>(w: W, title: &str, structure: &ElementStructure) -> FailResult<()>
-where W: Write,
+pub fn dump(w: impl Write, title: &str, structure: &ElementStructure) -> FailResult<()>
 {
     _dump(w, title, &structure.to_carts(), structure.metadata())
 }
 
-fn _dump<W>(mut w: W, title: &str, carts: &[V3], types: &[Element]) -> FailResult<()>
-where W: Write,
+fn _dump(mut w: impl Write, title: &str, carts: &[V3], types: &[Element]) -> FailResult<()>
 {
     assert!(!title.contains("\n"));
     assert!(!title.contains("\r"));

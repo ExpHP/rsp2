@@ -55,14 +55,11 @@ struct Tree<V> {
     edges: Vec<(V, V)>,
 }
 
-fn random_tree<V, Vs, F>(
-    vertices: Vs,
-    mut out_edges: F,
+fn random_tree<V>(
+    vertices: impl IntoIterator<Item=V>,
+    mut out_edges: impl FnMut(V) -> Vec<V>,
 ) -> Tree<V>
-where
-    V: Clone + Hash + Eq,
-    Vs: IntoIterator<Item=V>,
-    F: FnMut(V) -> Vec<V>,
+where V: Clone + Hash + Eq,
 {
     use ::rand::Rng;
 
@@ -103,15 +100,12 @@ where
     Tree { root, edges }
 }
 
-pub fn integrate_grid_random<M, E, F, G>(
+pub fn integrate_grid_random<M, E>(
     (n_x, n_y): (usize, usize),
-    compute_meta: F,
-    mut integrate: G,
+    compute_meta: impl Fn(Point) -> Result<M, E> + Sync,
+    mut integrate: impl FnMut((Point, &M), (Point, &M)) -> Result<f64, E>,
 ) -> Result<Vec<f64>, E>
-where
-    F: Fn(Point) -> Result<M, E> + Sync,
-    M: Send, E: Send,
-    G: FnMut((Point, &M), (Point, &M)) -> Result<f64, E>,
+where M: Send, E: Send,
 {Ok({
     use ::rayon::prelude::*;
 

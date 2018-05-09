@@ -28,10 +28,11 @@ impl<G> GroupTree<G>
     /// arguments of the closure are flipped from the typical mathematical
     /// convention. `compose(a, b)` should perform *`a` followed by `b`*,
     /// (i.e. "`b` of `a`").
-    pub fn from_all_members<GFn>(members: Vec<G>, mut compose: GFn) -> Self
-    where
-        G: Hash + Eq + Clone,
-        GFn: FnMut(&G, &G) -> G,
+    pub fn from_all_members(
+        members: Vec<G>,
+        mut compose: impl FnMut(&G, &G) -> G,
+    ) -> Self
+    where G: Hash + Eq + Clone,
     {
         // we cannot construct the identity without any generators
         assert!(members.len() > 0, "empty groups do not exist!");
@@ -65,14 +66,11 @@ impl<G> GroupTree<G>
     /// compute, while `HFn` should be comparatively cheaper.
     ///
     /// `compose(a, b)` should compute `b of a`.
-    pub fn compute_homomorphism<H, F, HFn>(
+    pub fn compute_homomorphism<H>(
         &self,
-        mut compute: F,
-        mut compose: HFn,
+        mut compute: impl FnMut(&G) -> H,
+        mut compose: impl FnMut(&H, &H) -> H,
     ) -> Vec<H>
-    where
-        F: FnMut(&G) -> H,
-        HFn: FnMut(&H, &H) -> H,
     {
         self.try_compute_homomorphism(
             |g| Ok::<_, ()>(compute(g)),
@@ -81,14 +79,11 @@ impl<G> GroupTree<G>
     }
 
     /// `compute_homomorphism` for fallible functions.
-    pub fn try_compute_homomorphism<E, H, F, HFn>(
+    pub fn try_compute_homomorphism<E, H>(
         &self,
-        mut compute: F,
-        mut compose: HFn,
+        mut compute: impl FnMut(&G) -> StdResult<H, E>,
+        mut compose: impl FnMut(&H, &H) -> StdResult<H, E>,
     ) -> StdResult<Vec<H>, E>
-    where
-        F: FnMut(&G) -> StdResult<H, E>,
-        HFn: FnMut(&H, &H) -> StdResult<H, E>,
     {Ok({
         let mut out = Vec::with_capacity(self.members.len());
 
@@ -109,10 +104,11 @@ impl<G> GroupTree<G>
 ///
 /// The order of the output is arbitrary, but consistent for
 /// inputs that are related by a group isomorphism.
-pub fn generate_finite_group<G, GFn>(generators: &[G], mut g_fn: GFn) -> Vec<G>
-where
-    G: Hash + Eq + Clone,
-    GFn: FnMut(&G, &G) -> G,
+pub fn generate_finite_group<G>(
+    generators: &[G],
+    mut g_fn: impl FnMut(&G, &G) -> G,
+) -> Vec<G>
+where G: Hash + Eq + Clone,
 {
     use ::std::collections::{HashSet, VecDeque};
     assert!(generators.len() > 0, "empty groups do not exist!");

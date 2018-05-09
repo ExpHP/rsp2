@@ -34,7 +34,7 @@ impl Basis3 {
 }
 
 impl Ket3 {
-    pub fn from_ket<K: AsKetRef>(ket: K) -> Self
+    pub fn from_ket(ket: impl AsKetRef) -> Self
     { Ket3 {
         real: ket.as_ket_ref().real().nest().to_vec(),
         imag: ket.as_ket_ref().imag().nest().to_vec(),

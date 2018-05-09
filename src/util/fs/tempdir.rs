@@ -18,7 +18,7 @@ impl TempDir {
         ActualTempDir::new(prefix).map(Self::from)
     }
 
-    pub fn new_in<P: AsRef<Path>>(tmpdir: P, prefix: &str) -> IoResult<TempDir> {
+    pub fn new_in(tmpdir: impl AsRef<Path>, prefix: &str) -> IoResult<TempDir> {
         ActualTempDir::new_in(tmpdir, prefix).map(Self::from)
     }
 
@@ -89,7 +89,7 @@ impl Drop for TempDir {
     }
 }
 
-fn non_empty_env<S: AsRef<OsStr>>(key: S) -> Option<OsString> {
+fn non_empty_env(key: impl AsRef<OsStr>) -> Option<OsString> {
     match ::std::env::var_os(key) {
         None => None,
         Some(s) => match s.is_empty() {

@@ -59,7 +59,7 @@ pub type DirChecker = Box<Fn(&PathDir) -> Result<()>>;
 
 impl CliTest {
     #[cfg_attr(feature = "nightly", must_use)]
-    pub fn cargo_binary<S: AsRef<OsStr>>(name: S) -> Self {
+    pub fn cargo_binary(name: impl AsRef<OsStr>) -> Self {
         let manifest_dir = PathDir::current_dir().unwrap();
 
         let test = CliTest {
@@ -80,7 +80,7 @@ impl CliTest {
     }
 
     #[cfg_attr(feature = "nightly", must_use)]
-    pub fn arg<S: AsRef<OsStr>>(mut self, arg: S) -> Self {
+    pub fn arg(mut self, arg: impl AsRef<OsStr>) -> Self {
         self.inner.as_mut().unwrap().cmd.push(arg.as_ref().into());
         self
     }

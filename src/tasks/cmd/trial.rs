@@ -125,10 +125,10 @@ impl TrialDir {
         panic!("gee, that's an awful lot of log files you have there");
     }
 
-    pub fn create_file<P: AsPath>(&self, path: P) -> FailResult<FileWrite>
+    pub fn create_file(&self, path: impl AsPath) -> FailResult<FileWrite>
     { Ok(FileWrite::create(self.join(path))?) }
 
-    pub fn read_file<P: AsPath>(&self, path: P) -> FailResult<FileRead>
+    pub fn read_file(&self, path: impl AsPath) -> FailResult<FileRead>
     { Ok(PathFile::new(self.join(path))?.read()?) }
 
     pub fn read_settings<T>(&self) -> FailResult<T>
