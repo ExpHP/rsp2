@@ -94,49 +94,24 @@ impl Perm {
     /// Compose with the permutation that shifts elements forward.
     ///
     /// To construct the shift permutation itself, use `Perm::eye(n).shift_right(amt)`.
-    #[cfg(feature = "beta")]
-    #[cfg_attr(feature = "nightly", must_use = "not an in-place operation")]
     pub fn shift_right(mut self, amt: u32) -> Self
     {
-        self.0.shift_right(amt as usize);
+        let n = self.0.len();
+        self.0.rotate_right(amt as usize % n);
         self
     }
 
     /// Compose with the permutation that shifts elements backward.
     ///
     /// To construct the shift permutation itself, use `Perm::eye(n).shift_left(amt)`.
-    #[cfg(feature = "beta")]
-    #[cfg_attr(feature = "nightly", must_use = "not an in-place operation")]
     pub fn shift_left(mut self, amt: u32) -> Self
     {
-        self.0.shift_left(amt as usize);
+        let n = self.0.len();
+        self.0.rotate_left(amt as usize % n);
         self
     }
 
-    /// Compose with the permutation that shifts elements forward.
-    #[cfg(not(feature = "beta"))]
-    #[cfg_attr(feature = "nightly", must_use = "not an in-place operation")]
-    pub fn shift_right(self, n: u32) -> Self
-    {
-        let len = self.len() as u32;
-        self.shift_left(len - (n % len))
-    }
-
-    /// Compose with the permutation that shifts elements forward.
-    #[cfg(not(feature = "beta"))]
-    #[cfg_attr(feature = "nightly", must_use = "not an in-place operation")]
-    pub fn shift_left(self, n: u32) -> Self
-    {
-        // FIXME FIXME kill this
-        let n = n % self.len() as u32;
-        let (old_a, old_b) = self.0.split_at(n as usize);
-        let mut new = old_b.to_vec();
-        new.extend(old_a);
-        unsafe { Perm::from_vec_unchecked(new) }
-    }
-
     /// Compose with the permutation that shifts elements forward by a signed offset.
-    #[cfg_attr(feature = "nightly", must_use = "not an in-place operation")]
     pub fn shift_signed(self, n: i32) -> Self
     {
         if n < 0 {
