@@ -190,8 +190,10 @@ pub struct Potential {
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum PotentialKind {
+    #[serde(rename = "rebo")] Rebo,
     #[serde(rename = "airebo")] Airebo(PotentialAirebo),
     #[serde(rename = "kc-z")] KolmogorovCrespiZ(PotentialKolmogorovCrespiZ),
+    #[serde(rename = "kc-z-new")] KolmogorovCrespiZNew(PotentialKolmogorovCrespiZNew),
     /// V = 0
     #[serde(rename = "test-func-zero")] TestZero,
     /// Arranges atoms into a chain along the first lattice vector.
@@ -218,7 +220,18 @@ pub struct PotentialKolmogorovCrespiZ {
     /// Cutoff radius (Angstrom?)
     pub cutoff: Option<f64>,
     /// Separations larger than this are regarded as vacuum and do not interact. (Angstrom)
-    pub max_layer_sep: Option<f64>
+    pub max_layer_sep: Option<f64>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub struct PotentialKolmogorovCrespiZNew {
+    // NOTE: defaults are not here because they are defined in rsp2_tasks,
+    //       which depends on this crate
+    /// Cutoff radius (Angstrom?)
+    #[serde(rename = "cutoff")]
+    pub cutoff_begin: Option<f64>,
 }
 
 #[derive(Serialize, Deserialize)]

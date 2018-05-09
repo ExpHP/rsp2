@@ -1,7 +1,7 @@
 use ::rsp2_array_types::{V3, dot};
 
 /// Constants used for calculation of the Kolmogorov-Crespi potential.
-mod consts {
+pub mod consts {
     /// Transverse distance scaling factor. Units are Angstroms.
     pub const DELTA: f64 = 0.578_f64;
 
@@ -19,33 +19,21 @@ mod consts {
 
     /// Multiplicative constants used in repulsive potential. Contains C_0, C_2, C_4. Units are eV.
     pub const C2N: [f64; 3] = [15.71e-3, 12.29e-3, 4.933e-3];
-
-    /// Distance at which the Kolmogorov-Crespi potential starts to switch to zero.
-    /// Units are Angstroms.
-    pub const CUTOFF_BEGIN: f64 = 11.0_f64;
-
-    /// How far it takes for the Kolmogorov-Crespi to switch to zero after the cutoff distance.
-    /// Units are Angstroms.
-    pub const CUTOFF_TRANSITION_DIST: f64 = 2.0_f64;
-
-    /// Distance after which the Kolmogorov-Crespi potential is always zero.
-    pub const CUTOFF_END: f64 = CUTOFF_BEGIN + CUTOFF_TRANSITION_DIST;
 }
 
-/// The switching function which takes the potential to zero as the distance passes CUTOFF_BEGIN
-fn crespi_switching_func(distance: f64) -> (f64, f64)
+/// The switching function which takes the potential to zero as the distance passes cutoff_begin
+fn crespi_switching_func(params: &Params, distance: f64) -> (f64, f64)
 {
-    debug_assert!(distance >= consts::CUTOFF_BEGIN);
-    debug_assert!(distance <= consts::CUTOFF_BEGIN + consts::CUTOFF_TRANSITION_DIST);
+    let t = (distance - params.cutoff_begin) / params.cutoff_transition_dist;
 
     // The switching function S(t) is the Hermite basis function h_00
     // which transitions from 1 -> 0 as t goes from 0 -> 1
-    let t = (distance - consts::CUTOFF_BEGIN) / consts::CUTOFF_TRANSITION_DIST;
+    debug_assert!(0.0 <= t && t <= 1.0, "{}", t);
     (
         // S(t)
         (1.0 + 2.0 * t) * (t - 1.0) * (t - 1.0),
         // d/dt S(t) * dt/dr
-        (6.0 * t * (t - 1.0)) / consts::CUTOFF_TRANSITION_DIST
+        (6.0 * t * (t - 1.0)) / params.cutoff_transition_dist
     )
 }
 
@@ -165,56 +153,88 @@ impl Output {
     }
 }
 
-/// Calculate the Kolmogorov-Crespi potential given the delta vector between two carbon atoms r_ij
-/// as well as the unit normal vectors for each atom, n_i and n_j. Returns the potential as well
-/// as the gradient of the potential with respect to r_ij, n_i, and n_j
-#[inline(never)] // ensure visible in profiling output
-pub fn crespi(r_ij: V3, normal_i: V3, normal_j: V3) -> Output {
-    use self::consts::{CUTOFF_BEGIN, CUTOFF_END};
-    debug_assert_close!(1.0, normal_i.sqnorm());
-    debug_assert_close!(1.0, normal_j.sqnorm());
+pub struct Params {
+    /// Distance at which the Kolmogorov-Crespi potential starts to switch to zero.
+    /// Units are Angstroms.
+    pub cutoff_begin: f64,
+    /// How far it takes for the Kolmogorov-Crespi to switch to zero after the cutoff distance.
+    /// Units are Angstroms.
+    pub cutoff_transition_dist: f64,
+}
 
-    // first check if we are too far away to care
-    let dist_sq = r_ij.sqnorm();
-    if dist_sq > CUTOFF_END * CUTOFF_END {
-        // we're too far away, the potential and gradients are always zero
-        return Output::zero();
-    }
-
-    let dist = dist_sq.sqrt();
-    // calculate the value of the multiplicative cutoff parameter as well as its derivative
-    // w/r/t distance if we are within the region where the potential switches to zero
-    let (cutoff, d_cutoff_ddist) = match dist < CUTOFF_BEGIN {
-        true  => (1.0, 0.0),
-        false => crespi_switching_func(dist)
-    };
-
-    // first get the attractive part of the potential
-    let (v_attractive, d_attractive_dr) = crespi_attractive(dist_sq, r_ij);
-
-    // then the repulsive
-    let (v_rep, d_rep_dr, d_rep_dni, d_rep_dnj) = crespi_repulsive(dist_sq, r_ij, normal_i, normal_j);
-
-    // as well as its scaling term
-    let (v_scale, d_scale_ddist) = crespi_scaling(dist);
-
-    let value = v_scale * v_rep + v_attractive;
-    // chain rule, etc, etc, etc
-    let grad_r = d_scale_ddist * (r_ij / dist) * v_rep + v_scale * d_rep_dr + d_attractive_dr;
-    let grad_ni = v_scale * d_rep_dni;
-    let grad_nj = v_scale * d_rep_dnj;
-
-    // lastly, take into account the cutoff function and its derivative
-    Output {
-        value: cutoff * value,
-        grad_rij: cutoff * grad_r + d_cutoff_ddist * (r_ij / dist) * value,
-        grad_ni: cutoff * grad_ni,
-        grad_nj: cutoff * grad_nj,
+impl Default for Params {
+    fn default() -> Params {
+        Params {
+            cutoff_begin: 11.0,
+            cutoff_transition_dist: 2.0,
+        }
     }
 }
 
-/// Computes crespi assuming normals are all +Z.
-pub fn crespi_z(r_ij: V3) -> Output {
-    let z_hat = V3([0.0, 0.0, 1.0]);
-    crespi(r_ij, z_hat, z_hat)
+impl Params {
+    /// Distance after which the Kolmogorov-Crespi potential is always zero.
+    pub fn cutoff_end(&self) -> f64 {
+        debug_assert!(self.cutoff_transition_dist >= 0.0);
+        self.cutoff_begin + self.cutoff_transition_dist
+    }
+}
+
+impl Params {
+    /// Calculate the Kolmogorov-Crespi potential given the delta vector between two carbon atoms r_ij
+    /// as well as the unit normal vectors for each atom, n_i and n_j. Returns the potential as well
+    /// as the gradient of the potential with respect to r_ij, n_i, and n_j
+    #[inline(never)] // ensure visible in profiling output
+    pub fn crespi(&self, r_ij: V3, normal_i: V3, normal_j: V3) -> Output {
+        // NOTE: These are debug-only in the hope of optimizing branch prediction
+        //       for the cutoff check
+        debug_assert_close!(1.0, normal_i.sqnorm());
+        debug_assert_close!(1.0, normal_j.sqnorm());
+        debug_assert!(self.cutoff_begin >= 0.0);
+        debug_assert!(self.cutoff_transition_dist >= 0.0);
+
+        // first check if we are too far away to care
+        let dist_sq = r_ij.sqnorm();
+        let cutoff_end = self.cutoff_begin + self.cutoff_transition_dist;
+        if dist_sq > cutoff_end * cutoff_end {
+            // we're too far away, the potential and gradients are always zero
+            return Output::zero();
+        }
+
+        let dist = dist_sq.sqrt();
+        // calculate the value of the multiplicative cutoff parameter as well as its derivative
+        // w/r/t distance if we are within the region where the potential switches to zero
+        let (cutoff, d_cutoff_ddist) = match dist < self.cutoff_begin {
+            true  => (1.0, 0.0),
+            false => crespi_switching_func(self, dist)
+        };
+
+        // first get the attractive part of the potential
+        let (v_attractive, d_attractive_dr) = crespi_attractive(dist_sq, r_ij);
+
+        // then the repulsive
+        let (v_rep, d_rep_dr, d_rep_dni, d_rep_dnj) = crespi_repulsive(dist_sq, r_ij, normal_i, normal_j);
+
+        // as well as its scaling term
+        let (v_scale, d_scale_ddist) = crespi_scaling(dist);
+
+        let value = v_scale * v_rep + v_attractive;
+        // chain rule, etc, etc, etc
+        let grad_r = d_scale_ddist * (r_ij / dist) * v_rep + v_scale * d_rep_dr + d_attractive_dr;
+        let grad_ni = v_scale * d_rep_dni;
+        let grad_nj = v_scale * d_rep_dnj;
+
+        // lastly, take into account the cutoff function and its derivative
+        Output {
+            value: cutoff * value,
+            grad_rij: cutoff * grad_r + d_cutoff_ddist * (r_ij / dist) * value,
+            grad_ni: cutoff * grad_ni,
+            grad_nj: cutoff * grad_nj,
+        }
+    }
+
+    /// Computes crespi assuming normals are all +Z.
+    pub fn crespi_z(&self, r_ij: V3) -> Output {
+        let z_hat = V3([0.0, 0.0, 1.0]);
+        self.crespi(r_ij, z_hat, z_hat)
+    }
 }

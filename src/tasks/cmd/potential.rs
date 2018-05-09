@@ -63,6 +63,9 @@ pub trait PotentialBuilder<Meta = Element>
     // ...sigh.  Use impl_dyn_clone_detail! to satisfy this.
     + DynCloneDetail<Meta>
 {
+    // NOTE: when adding methods like "threaded", make sure to override the
+    //       default implementations in generic impls!!!
+    //       (e.g. Box<PotentialBuilder<M>>, Sum<A, B>, ...)
     /// Sometimes called as a last-minute hint to control threading
     /// within the potential based on the current circumstances.
     /// Use `true` to recommend the creation of threads, and `false` to discourage it.
@@ -137,7 +140,9 @@ pub trait DynCloneDetail<Meta> {
 macro_rules! impl_dyn_clone_detail {
     (impl[$($bnd:tt)*] DynCloneDetail<$Meta:ty> for $Type:ty { ... }) => {
         impl<$($bnd)*> DynCloneDetail<$Meta> for $Type {
-            fn box_clone(&self) -> Box<PotentialBuilder<$Meta>> { Box::new(self.clone()) }
+            fn box_clone(&self) -> Box<PotentialBuilder<$Meta>> {
+                Box::new(<$Type as Clone>::clone(self))
+            }
             fn _as_ref_dyn(&self) -> &PotentialBuilder<$Meta> { self }
         }
     };
@@ -147,6 +152,29 @@ impl<M> Clone for Box<PotentialBuilder<M>>
 where M: 'static, // FIXME why is this necessary? PotentialBuilder doesn't borrow from M...
 {
     fn clone(&self) -> Self { self.box_clone() }
+}
+
+// necessary for combinators like Sum to be possible
+impl<Meta> PotentialBuilder<Meta> for Box<PotentialBuilder<Meta>>
+where Meta: Clone + 'static,
+{
+    fn threaded(&self, threaded: bool) -> Box<PotentialBuilder<Meta>>
+    { (**self).threaded(threaded) }
+
+    fn initialize_diff_fn(&self, structure: Structure<Meta>) -> FailResult<Box<DiffFn<Meta>>>
+    { (**self).initialize_diff_fn(structure) }
+
+    fn initialize_flat_diff_fn(&self, structure: Structure<Meta>) -> FailResult<Box<DynFlatDiffFn<'static>>>
+    where Meta: Clone + 'static
+    { (**self).initialize_flat_diff_fn(structure) }
+
+    fn one_off(&self) -> OneOff<'_, Meta>
+    where Meta: Clone,
+    { (**self).one_off() }
+}
+
+impl_dyn_clone_detail!{
+    impl[Meta: Clone + 'static] DynCloneDetail<Meta> for Box<PotentialBuilder<Meta>> { ... }
 }
 
 //-------------------------------------
@@ -180,6 +208,25 @@ pub trait DiffFn<Meta> {
     }
 }
 
+// necessary for combinators like sum
+impl<'d, Meta> DiffFn<Meta> for Box<DiffFn<Meta> + 'd> {
+    /// Compute the value and gradient.
+    fn compute(&mut self, structure: &Structure<Meta>) -> FailResult<(f64, Vec<V3>)>
+    { (**self).compute(structure) }
+
+    /// Convenience method to compute the potential.
+    fn compute_value(&mut self, structure: &Structure<Meta>) -> FailResult<f64>
+    { (**self).compute_value(structure) }
+
+    /// Convenience method to compute the gradient.
+    fn compute_grad(&mut self, structure: &Structure<Meta>) -> FailResult<Vec<V3>>
+    { (**self).compute_grad(structure) }
+
+    /// Convenience method to compute the force.
+    fn compute_force(&mut self, structure: &Structure<Meta>) -> FailResult<Vec<V3>>
+    { (**self).compute_force(structure) }
+}
+
 //-------------------------------------
 
 /// See `PotentialBuilder::one_off` for more information.
@@ -199,6 +246,14 @@ impl PotentialBuilder {
         config: &cfg::PotentialKind,
     ) -> Box<PotentialBuilder> {
         match config {
+            cfg::PotentialKind::Rebo => {
+                let rebo = cfg::PotentialKind::Airebo(cfg::PotentialAirebo {
+                    lj_sigma: Some(0.0),
+                    lj_enabled: Some(false),
+                    torsion_enabled: Some(false),
+                });
+                PotentialBuilder::from_config(threading, &rebo)
+            }
             cfg::PotentialKind::Airebo(cfg) => {
                 let lammps_pot = self::lammps::Airebo::from(cfg);
                 let pot = self::lammps::Builder::new(threading, lammps_pot);
@@ -209,9 +264,123 @@ impl PotentialBuilder {
                 let pot = self::lammps::Builder::new(threading, lammps_pot);
                 Box::new(pot)
             },
+            cfg::PotentialKind::KolmogorovCrespiZNew(cfg) => {
+                let rebo = PotentialBuilder::from_config(threading, &cfg::PotentialKind::Rebo);
+                let kc_z = self::homestyle::KolmogorovCrespiZ(cfg.clone());
+                let pot = self::helper::Sum(rebo, kc_z);
+                Box::new(pot)
+            },
             cfg::PotentialKind::TestZero => Box::new(self::test::Zero),
             cfg::PotentialKind::TestChainify => Box::new(self::test::Chainify),
         }
+    }
+}
+
+//-------------------------------------
+
+mod helper {
+    use super::*;
+
+    /// A sum of two PotentialBuilders or DiffFns.
+    #[derive(Debug, Clone)]
+    pub struct Sum<A, B>(pub A, pub B);
+
+    impl<M, A, B> PotentialBuilder<M> for Sum<A, B>
+    where
+        M: Clone + 'static,
+        A: Clone + PotentialBuilder<M>,
+        B: Clone + PotentialBuilder<M>,
+    {
+        fn threaded(&self, threaded: bool) -> Box<PotentialBuilder<M>>
+        { Box::new(Sum(self.0.threaded(threaded), self.1.threaded(threaded))) }
+
+        fn initialize_diff_fn(&self, structure: Structure<M>) -> FailResult<Box<DiffFn<M>>>
+        {
+            let a_diff_fn = self.0.initialize_diff_fn(structure.clone())?;
+            let b_diff_fn = self.1.initialize_diff_fn(structure.clone())?;
+            Ok(Box::new(Sum(a_diff_fn, b_diff_fn)))
+        }
+    }
+
+    impl_dyn_clone_detail!{
+        impl[
+            M: Clone + 'static,
+            A: Clone + PotentialBuilder<M>,
+            B: Clone + PotentialBuilder<M>,
+        ] DynCloneDetail<M> for Sum<A, B> { ... }
+    }
+
+    impl<M, A, B> DiffFn<M> for Sum<A, B>
+    where
+        A: DiffFn<M>,
+        B: DiffFn<M>,
+    {
+        fn compute(&mut self, structure: &Structure<M>) -> FailResult<(f64, Vec<V3>)> {
+            let (a_value, a_grad) = self.0.compute(structure)?;
+            let (b_value, b_grad) = self.1.compute(structure)?;
+            let value = a_value + b_value;
+
+            let mut grad = a_grad;
+            for (out_vec, b_vec) in ::util::zip_eq(&mut grad, b_grad) {
+                *out_vec += b_vec;
+            }
+            Ok((value, grad))
+        }
+    }
+}
+
+//-------------------------------------
+
+/// PotentialBuilder implementations for potentials implemented within rsp2.
+mod homestyle {
+    use super::*;
+    use ::math::bonds::{FracBonds, CartBond};
+
+    /// Rust implementation of Kolmogorov-Crespi Z.
+    ///
+    /// NOTE: This has the limitation that the set of pairs within interaction range
+    ///       must not change after the construction of the DiffFn.
+    #[derive(Debug, Clone)]
+    pub struct KolmogorovCrespiZ(pub(super) cfg::PotentialKolmogorovCrespiZNew);
+
+    impl PotentialBuilder<Element> for KolmogorovCrespiZ {
+        fn initialize_diff_fn(&self, structure: Structure<Element>) -> FailResult<Box<DiffFn<Element>>>
+        {
+            struct Diff {
+                params: ::math::crespi::Params,
+                bonds: FracBonds,
+            }
+            impl DiffFn<Element> for Diff {
+                fn compute(&mut self, structure: &Structure<Element>) -> FailResult<(f64, Vec<V3>)> {
+                    let bonds = self.bonds.to_cart_bonds(structure);
+
+                    let mut value = 0.0;
+                    let mut grad = vec![V3::zero(); structure.num_atoms()];
+                    for CartBond { from: _, to, cart_vector } in &bonds {
+                        let ::math::crespi::Output {
+                            value: part_value,
+                            grad_rij: part_grad, ..
+                        } = self.params.crespi_z(*cart_vector);
+
+                        value += part_value;
+                        grad[to] += part_grad;
+                    }
+                    Ok((value, grad))
+                }
+            }
+
+            let cfg::PotentialKolmogorovCrespiZNew { cutoff_begin } = self.0;
+            let mut params = ::math::crespi::Params::default();
+            if let Some(cutoff_begin) = cutoff_begin {
+                params.cutoff_begin = cutoff_begin;
+            }
+            let bonds = FracBonds::from_brute_force_very_dumb(&structure, params.cutoff_end() * 1.001)?;
+            Ok(Box::new(Diff { params, bonds }))
+        }
+    }
+
+    impl_dyn_clone_detail!{
+        impl[] DynCloneDetail<Element> for KolmogorovCrespiZ { ... }
     }
 }
 

@@ -655,8 +655,8 @@ impl TrialDir {
         };
 
         // FIXME
-        const CUTOFF: f64 = 13.0;
-        let frac_bonds = FracBonds::from_brute_force_very_dumb(&prim_structure, CUTOFF * (1.001))?;
+        let kc_z = ::math::crespi::Params::default();
+        let frac_bonds = FracBonds::from_brute_force_very_dumb(&prim_structure, kc_z.cutoff_end() * (1.001))?;
         let original_force_sets = {
             let carts = superstructure.to_carts();
 
@@ -682,7 +682,7 @@ impl TrialDir {
                     let affected_cart = carts[affected_super];
 
                     // FIXME other potentials
-                    let output = ::math::crespi::crespi_z(affected_cart - disp_final_cart);
+                    let output = ::math::crespi::Params::default().crespi_z(affected_cart - disp_final_cart);
 
                     // FIXME proper insertion API
                     force_sets.atom_displaced.push(disp_super);
