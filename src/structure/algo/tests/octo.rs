@@ -232,8 +232,9 @@ mod tests {
         let gs = gdata.members.clone();
         let hs = hdata.members.clone();
         assert_eq!(gs.len(), hs.len());
-        let h_by_g: HashMap<_,_> =
-            izip!(gs.clone(), hs.clone()).collect();
+        let h_by_g: HashMap<_,_> = {
+            izip!(gs.clone(), hs.clone()).collect()
+        };
 
         for a in 0..gs.len() {
             for b in 0..gs.len() {
@@ -325,7 +326,8 @@ mod tests {
                 for c in &data.members[..] {
                     assert_eq!(
                         data.compose(a, &data.compose(b, c)),
-                        data.compose(&data.compose(a, b), c));
+                        data.compose(&data.compose(a, b), c),
+                    );
                 }
             }
         }
@@ -339,15 +341,19 @@ mod tests {
             // test latin square principle
             assert_eq!(
                 gs.len(),
-                gs.iter().map(|b| f(a, b)).collect::<HashSet<_>>().len());
+                gs.iter().map(|b| f(a, b)).collect::<HashSet<_>>().len(),
+            );
             assert_eq!(
                 gs.len(),
-                gs.iter().map(|b| f(b, a)).collect::<HashSet<_>>().len());
+                gs.iter().map(|b| f(b, a)).collect::<HashSet<_>>().len(),
+            );
 
             // test that left-inverse equals right-inverse.
-            let right_inv = gs.iter().map(|b| (b, f(a, b)))
-                .find(|(_, c)| c == &data.eye)
-                .map(|(b, _)| b).unwrap();
+            let right_inv = {
+                gs.iter().map(|b| (b, f(a, b)))
+                    .find(|(_, c)| c == &data.eye)
+                    .map(|(b, _)| b).unwrap()
+            };
 
             assert_eq!(f(&right_inv, a), data.eye);
         }
@@ -392,7 +398,8 @@ mod tests {
             for b in &data.members[..] {
                 assert_eq!(
                     data.action(&x, &data.compose(a, b)),
-                    data.action(&data.action(&x, a), b));
+                    data.action(&data.action(&x, a), b),
+                );
             }
         }
     }
@@ -526,7 +533,8 @@ mod tests {
         for (rot, perm) in izip!(&ROTATION_DATA.members, &perms) {
             assert_eq!(
                 rot.transform_prim(&INIT_X),
-                INIT_X.clone().permuted_by(&perm));
+                INIT_X.clone().permuted_by(&perm),
+            );
         }
     }
 }

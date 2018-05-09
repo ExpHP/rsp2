@@ -275,9 +275,10 @@ mod unsafe_impls {
         {
             use ::std::ptr;
 
-            assert_eq!(self.len(), perm.0.len(),
-                "Incorrect permutation length: {} vs {}",
-                self.len(), perm.0.len());
+            assert_eq!(
+                self.len(), perm.0.len(),
+                "Incorrect permutation length",
+            );
 
             let mut out = Vec::with_capacity(self.len());
 
@@ -459,5 +460,4 @@ mod tests {
             }
         }
     }
-
 }

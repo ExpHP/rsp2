@@ -211,11 +211,11 @@ pub mod golden {
                 use ::serde_json::to_value;
                 assert_eq!(
                     to_value(Simple(Iterations(5))).unwrap(),
-                    json!({"iterations": 5})
+                    json!({"iterations": 5}),
                 );
                 assert_eq!(
                     to_value(Logical(All(vec![Simple(Iterations(5))]))).unwrap(),
-                    json!({"all": [{"iterations": 5}]})
+                    json!({"all": [{"iterations": 5}]}),
                 );
             }
         }

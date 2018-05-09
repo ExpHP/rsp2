@@ -288,7 +288,7 @@ mod tests {
                 (LetterKind::Vowel, vec!['a', 'e']),
                 // specified order is "the order within the original vec"
                 (LetterKind::Consonant, vec!['b', 'c', 'd', 'f']),
-            ]
+            ],
         );
     }
 

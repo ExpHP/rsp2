@@ -345,7 +345,8 @@ mod tests {
                 }
                 assert!(
                     (ayes - 1.0).abs() < 1e-6 && nays < 1e-6,
-                    "{:?} {:?}", expect_index, unfolded);
+                    "{:?} {:?}", expect_index, unfolded,
+                );
             }
         };
 

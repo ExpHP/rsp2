@@ -679,7 +679,8 @@ impl fmt::Display for DisplayProb {
         //       because it should not be used on sums where cancellation may occur.
         assert!(
             0.0 <= self.0 && self.0 < 1.0 + 1e-5,
-            "bad probability: {}", self.0);
+            "bad probability: {}", self.0,
+        );
 
         if self.0 >= 1.0 {
             write!(f, "{:>7}", 1.0)
