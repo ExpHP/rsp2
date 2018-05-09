@@ -198,13 +198,13 @@ impl PotentialBuilder {
         threading: &cfg::Threading,
         config: &cfg::PotentialKind,
     ) -> Box<PotentialBuilder> {
-        match *config {
-            cfg::PotentialKind::Airebo(ref cfg) => {
+        match config {
+            cfg::PotentialKind::Airebo(cfg) => {
                 let lammps_pot = self::lammps::Airebo::from(cfg);
                 let pot = self::lammps::Builder::new(threading, lammps_pot);
                 Box::new(pot)
             },
-            cfg::PotentialKind::KolmogorovCrespiZ(ref cfg) => {
+            cfg::PotentialKind::KolmogorovCrespiZ(cfg) => {
                 let lammps_pot = self::lammps::KolmogorovCrespiZ::from(cfg);
                 let pot = self::lammps::Builder::new(threading, lammps_pot);
                 Box::new(pot)

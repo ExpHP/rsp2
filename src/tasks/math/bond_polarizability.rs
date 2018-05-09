@@ -159,8 +159,8 @@ impl RamanTensor {
             sum
         };
 
-        let value = match *light_polarization {
-            LightPolarization::Polarized { ref incident, ref scattered } => {
+        let value = match light_polarization {
+            LightPolarization::Polarized { incident, scattered } => {
                 let sum = dot(incident, &(tensor * scattered));
                 sum * sum
             },
@@ -197,9 +197,9 @@ fn raman_tensor(
         let rhat: V3 = bond_vector / distance;
 
         let pc = match &pol_constants[bond_type] {
-            &Some(ref pc) => pc,
+            Some(pc) => pc,
             // ignore bonds which have no corresponding polarization constants
-            &None => continue,
+            None => continue,
         };
 
         // check if bond is actually valid (via length)

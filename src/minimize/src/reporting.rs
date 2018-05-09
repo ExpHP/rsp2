@@ -33,7 +33,7 @@ fn argmax<T, I>(iter: I) -> Option<usize>
 where
     T: Ord, I: IntoIterator<Item=T>,
     T: Clone, // FIXME HACK
-{ iter.into_iter().enumerate().max_by_key(|&(_, ref v)| v.clone()).map(|(i,_)| i) }
+{ iter.into_iter().enumerate().max_by_key(|(_, v)| v.clone()).map(|(i,_)| i) }
 
 pub struct Bins<T> {
     check_min: Option<T>,
@@ -75,8 +75,8 @@ where T: PartialOrd
     where I: IntoIterator<Item=T>
     {
         'outer: for x in it {
-            if let Some(ref min) = self.check_min { assert!(min <= &x); }
-            if let Some(ref max) = self.check_max { assert!(&x <= max); }
+            if let Some(min) = &self.check_min { assert!(min <= &x); }
+            if let Some(max) = &self.check_max { assert!(&x <= max); }
             for (i, div) in self.divs.iter().enumerate() {
                 if &x < div {
                     self.bins[i] += 1;

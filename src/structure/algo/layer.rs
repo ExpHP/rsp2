@@ -58,9 +58,9 @@ impl Layers {
     }}
 
     pub fn by_atom(&self) -> Vec<usize>
-    { match *self {
-        Layers::PerUnitCell(ref layers) => layers.by_atom(),
-        Layers::NoDistinctLayers { ref sorted_indices } => vec![0; sorted_indices.len()],
+    { match self {
+        Layers::PerUnitCell(layers) => layers.by_atom(),
+        Layers::NoDistinctLayers { sorted_indices } => vec![0; sorted_indices.len()],
         Layers::NoAtoms => vec![],
     }}
 }

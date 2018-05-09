@@ -99,11 +99,11 @@ impl ForceSets {
     {
         use ::util::zip_eq as z;
         let ForceSets {
-            ref atom_displaced,
-            ref atom_affected,
-            ref cart_force,
-            ref cart_displacement,
-        } = *self;
+            atom_displaced,
+            atom_affected,
+            cart_force,
+            cart_displacement,
+        } = self;
 
         let mut map = HashMap::new();
 
@@ -112,7 +112,7 @@ impl ForceSets {
             .for_each(|(((&displaced, &affected), force), displacement)| {
                 let key = (displaced, affected);
                 let entry = map.entry(key).or_insert((vec![], vec![]));
-                let &mut (ref mut fs, ref mut us) = entry;
+                let (fs, us) = entry;
                 fs.push(*force);
                 us.push(*displacement);
             });

@@ -191,16 +191,16 @@ impl Coords {
 impl Coords {
     pub fn carts_mut(&mut self) -> &mut [V3] {
         self.ensure_only_carts(); // 'only' because user modifications will invalidate fracs
-        match self.coords {
+        match &mut self.coords {
             CoordsKind::Fracs(_) => unreachable!(),
-            CoordsKind::Carts(ref mut c) => c,
+            CoordsKind::Carts(c) => c,
         }
     }
 
     pub fn fracs_mut(&mut self) -> &mut [V3] {
         self.ensure_only_fracs(); // 'only' because user modifications will invalidate carts
-        match self.coords {
-            CoordsKind::Fracs(ref mut c) => c,
+        match &mut self.coords {
+            CoordsKind::Fracs(c) => c,
             CoordsKind::Carts(_) => unreachable!(),
         }
     }

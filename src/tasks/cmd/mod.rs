@@ -96,7 +96,7 @@ impl TrialDir {
         eva: &GammaSystemAnalysis,
     ) -> FailResult<()>
     {Ok({
-        if let (&Some(ref frequency), &Some(ref raman)) = (&eva.ev_frequencies, &eva.ev_raman_tensors) {
+        if let (Some(frequency), Some(raman)) = (&eva.ev_frequencies, &eva.ev_raman_tensors) {
             #[derive(Serialize)]
             #[serde(rename_all = "kebab-case")]
             struct Output {
@@ -112,7 +112,7 @@ impl TrialDir {
             })?;
         }
 
-        if let (&Some(ref sc_mats), &Some(ref unfold_probs)) = (&eva.layer_sc_mats, &eva.unfold_probs) {
+        if let (Some(sc_mats), Some(unfold_probs)) = (&eva.layer_sc_mats, &eva.unfold_probs) {
             #[derive(Serialize)]
             #[serde(rename_all = "kebab-case")]
             struct Output {

@@ -243,9 +243,9 @@ fn do_eigenvector_chase(
     bad_evecs: &[(String, &[V3])],
 ) -> FailResult<ElementStructure>
 {Ok({
-    match *chase_settings {
+    match chase_settings {
         cfg::EigenvectorChase::OneByOne => {
-            for &(ref name, evec) in bad_evecs {
+            for (name, evec) in bad_evecs {
                 let (alpha, new_structure) = do_minimize_along_evec(pot, potential_settings, structure, &evec[..])?;
                 info!("Optimized along {}, a = {:e}", name, alpha);
 
@@ -253,7 +253,7 @@ fn do_eigenvector_chase(
             }
             structure
         },
-        cfg::EigenvectorChase::Acgsd(ref cg_settings) => {
+        cfg::EigenvectorChase::Acgsd(cg_settings) => {
             let evecs: Vec<_> = bad_evecs.iter().map(|&(_, ev)| ev).collect();
             do_cg_along_evecs(
                 pot,
@@ -509,7 +509,7 @@ pub(crate) fn optimize_layer_parameters(
         //
         // exact specs: set the value
         // range specs: start with reasonable defaults ('guess' in config)
-        for &((_, ref spec), ref setter) in &optimizables {
+        for ((_, spec), setter) in &optimizables {
             match *spec {
                 ScaleRange::Exact(value) |
                 ScaleRange::Range { range: _, guess: Some(value) } => {
@@ -534,7 +534,7 @@ pub(crate) fn optimize_layer_parameters(
         // relaxed may be set to different, better values, which may in turn
         // cause different values to be chosen for the earlier parameters.
         for _ in 0..repeat_count {
-            for &((ref name, ref spec), ref setter) in &optimizables {
+            for ((name, spec), setter) in &optimizables {
                 trace!("Optimizing {}", name);
 
                 let best = match *spec {

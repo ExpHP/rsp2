@@ -53,9 +53,9 @@ where V: AsRef<[V3]>,
     { self.as_slice().1.len() }
 
     pub(crate) fn as_slice(&self) -> (Tag, &[V3])
-    { match *self {
-        CoordsKind::Carts(ref c) => (Tag::Cart, c.as_ref()),
-        CoordsKind::Fracs(ref c) => (Tag::Frac, c.as_ref()),
+    { match self {
+        CoordsKind::Carts(c) => (Tag::Cart, c.as_ref()),
+        CoordsKind::Fracs(c) => (Tag::Frac, c.as_ref()),
     }}
 }
 
@@ -63,9 +63,9 @@ where V: AsRef<[V3]>,
 impl CoordsKind<Vec<V3>>
 {
     pub(crate) fn as_mut_vec(&mut self) -> (Tag, &mut Vec<V3>)
-    { match *self {
-        CoordsKind::Carts(ref mut c) => (Tag::Cart, c),
-        CoordsKind::Fracs(ref mut c) => (Tag::Frac, c),
+    { match self {
+        CoordsKind::Carts(c) => (Tag::Cart, c),
+        CoordsKind::Fracs(c) => (Tag::Frac, c),
     }}
 
     pub(crate) fn into_vec(self) -> (Tag, Vec<V3>)
@@ -87,15 +87,15 @@ impl<V> CoordsKind<V>
 where V: AsRef<[V3]>,
 {
     pub(crate) fn as_carts_opt(&self) -> Option<&[V3]>
-    { match *self {
-        CoordsKind::Carts(ref x) => Some(x.as_ref()),
+    { match self {
+        CoordsKind::Carts(x) => Some(x.as_ref()),
         CoordsKind::Fracs(_) => None,
     }}
 
     pub(crate) fn as_fracs_opt(&self) -> Option<&[V3]>
-    { match *self {
+    { match self {
         CoordsKind::Carts(_) => None,
-        CoordsKind::Fracs(ref x) => Some(x.as_ref()),
+        CoordsKind::Fracs(x) => Some(x.as_ref()),
     }}
 }
 
@@ -126,15 +126,15 @@ impl<V> CoordsKind<V>
 where V: AsRef<[V3]>,
 {
     pub fn to_carts(&self, lattice: &Lattice) -> Vec<V3>
-    { match *self {
-        CoordsKind::Carts(ref c) => c.as_ref().to_vec(),
-        CoordsKind::Fracs(ref c) => dot_n3_33(c.as_ref(), lattice.matrix()),
+    { match self {
+        CoordsKind::Carts(c) => c.as_ref().to_vec(),
+        CoordsKind::Fracs(c) => dot_n3_33(c.as_ref(), lattice.matrix()),
     }}
 
     pub fn to_fracs(&self, lattice: &Lattice) -> Vec<V3>
-    { match *self {
-        CoordsKind::Carts(ref c) => dot_n3_33(c.as_ref(), lattice.inverse_matrix()),
-        CoordsKind::Fracs(ref c) => c.as_ref().to_vec(),
+    { match self {
+        CoordsKind::Carts(c) => dot_n3_33(c.as_ref(), lattice.inverse_matrix()),
+        CoordsKind::Fracs(c) => c.as_ref().to_vec(),
     }}
 
     #[allow(unused)]

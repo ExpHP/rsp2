@@ -25,7 +25,7 @@ pub struct Lattice {
 impl PartialEq<Lattice> for Lattice {
     fn eq(&self, other: &Lattice) -> bool {
         // deconstruct to get errors when new fields are added
-        let Lattice { ref matrix, inverse: _ } = *self;
+        let Lattice { matrix, inverse: _ } = self;
         matrix == &other.matrix
     }
 }

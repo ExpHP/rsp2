@@ -63,14 +63,14 @@ enum Action<P> {
 impl<P: Clone> Rpn<P> {
     pub fn from_cereal(cereal: &Cereal<P>) -> Self {
         fn append_actions<Q: Clone>(out: &mut Vec<Action<Q>>, cereal: &Cereal<Q>) {
-            match *cereal {
-                Cereal::Simple(ref x) => {
+            match cereal {
+                Cereal::Simple(x) => {
                     out.push(Action::Predicate(x.clone()));
                 },
-                Cereal::Logical(LogicalExpression::Any(ref xs)) => {
+                Cereal::Logical(LogicalExpression::Any(xs)) => {
                     append_fold(out, &xs, Action::Constant(false), Action::Or);
                 },
-                Cereal::Logical(LogicalExpression::All(ref xs)) =>  {
+                Cereal::Logical(LogicalExpression::All(xs)) =>  {
                     append_fold(out, &xs, Action::Constant(true), Action::And);
                 },
             }

@@ -88,7 +88,7 @@ pub struct CheckCloseError<T = f64> {
 }
 impl<T: fmt::Debug> fmt::Display for CheckCloseError<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let (ref left, ref right) = self.values;
+        let (left, right) = &self.values;
         write!(f, "failed at:
   left: {:?}
  right: {:?}

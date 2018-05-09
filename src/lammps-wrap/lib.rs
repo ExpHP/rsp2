@@ -143,10 +143,10 @@ impl<T> MaybeDirty<T> {
         F: FnMut(&T) -> &K,
     {
         match (&self.clean, &self.dirty) {
-            (&Some(ref clean), &Some(ref dirty)) => f(clean) != f(dirty),
-            (&None, &Some(_)) => true,
-            (&Some(_), &None) => false,
-            (&None, &None) => unreachable!(),
+            (Some(clean), Some(dirty)) => f(clean) != f(dirty),
+            (None, Some(_)) => true,
+            (Some(_), None) => false,
+            (None, None) => unreachable!(),
         }
     }
 
@@ -161,10 +161,10 @@ impl<T> MaybeDirty<T> {
         F: FnMut(&T) -> K,
     {
         match (&self.clean, &self.dirty) {
-            (&Some(ref clean), &Some(ref dirty)) => f(clean) != f(dirty),
-            (&None, &Some(_)) => true,
-            (&Some(_), &None) => false,
-            (&None, &None) => unreachable!(),
+            (Some(clean), Some(dirty)) => f(clean) != f(dirty),
+            (None, Some(_)) => true,
+            (Some(_), None) => false,
+            (None, None) => unreachable!(),
         }
     }
 }
@@ -339,9 +339,9 @@ impl PairCommand {
     pub fn arg<A>(mut self, arg: A) -> Self
     where A: ToString,
     {
-        match self {
-            PairCommand::PairCoeff(_, _, ref mut v) => v,
-            PairCommand::PairStyle(_, ref mut v) => v,
+        match &mut self {
+            PairCommand::PairCoeff(_, _, v) => v,
+            PairCommand::PairStyle(_, v) => v,
         }.push(Arg::from(arg));
         self
     }
@@ -429,11 +429,11 @@ impl fmt::Display for PairCommand {
             JoinDisplay { items, sep: " " }
         }
 
-        match *self {
-            PairCommand::PairStyle(ref name, ref args) => {
+        match self {
+            PairCommand::PairStyle(name, args) => {
                 write!(f, "pair_style {} {}", name, ws_join(args))?;
             },
-            PairCommand::PairCoeff(ref i, ref j, ref args) => {
+            PairCommand::PairCoeff(i, j, args) => {
                 write!(f, "pair_coeff {} {} {}", i, j, ws_join(args))?;
             },
         }
@@ -497,7 +497,7 @@ impl<P: Potential> Lammps<P>
             "-log", "none", // logs opened from CLI are truncated, but we want to append
         ])?;
 
-        if let Some(ref log_file) = builder.append_log
+        if let Some(log_file) = &builder.append_log
         {
             // Append a header to the log file as a feeble attempt to help delimit individual
             // runs (even though it will still get messy for parallel runs).
@@ -549,7 +549,7 @@ impl<P: Potential> Lammps<P>
         ])?;
 
         {
-            let InitInfo { ref masses, ref pair_commands } = *init_info;
+            let InitInfo { masses, pair_commands } = init_info;
 
             lmp.command(&format!("create_box {} sim", masses.len()))?;
             for (i, mass) in (1..).zip(masses) {

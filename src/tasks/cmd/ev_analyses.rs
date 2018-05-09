@@ -65,10 +65,10 @@ pub mod gamma_system_analysis {
         pub fn compute(&self) -> FailResult<GammaSystemAnalysis>
         {Ok({
             let Input {
-                ref atom_coords, ref atom_layers, ref atom_elements, ref atom_masses,
-                ref layer_sc_mats, ref ev_frequencies, ref ev_eigenvectors, ref bonds,
-                ref ev_classifications,
-            } = *self;
+                atom_coords, atom_layers, atom_elements, atom_masses,
+                layer_sc_mats, ev_frequencies, ev_eigenvectors, bonds,
+                ev_classifications,
+            } = self;
 
             // since our inputs are all uniquely typed, we can let HList
             // take care of finding all the right function arguments.
@@ -158,8 +158,8 @@ macro_rules! wrap_maybe_compute {
                 let hlist_pat![$($arg),*] = list;
                 $(
                     let $arg = match $arg {
-                        &Some(ref x) => x,
-                        &None => return Ok(None),
+                        Some(x) => x,
+                        None => return Ok(None),
                     };
                 )*
                 Ok(Some(compute($($arg),*)?))
@@ -184,8 +184,8 @@ pub mod ev_acousticness {
     {
         let hlist_pat![ev_eigenvectors] = list;
         let ev_eigenvectors = match ev_eigenvectors {
-            &Some(ref x) => x,
-            &None => return Ok(None),
+            Some(x) => x,
+            None => return Ok(None),
         };
         Ok(Some(compute(ev_eigenvectors)?))
     }
@@ -236,7 +236,7 @@ wrap_maybe_compute! {
 
 impl UnfoldProbs {
     fn layer_ev_gamma_probs(&self) -> Vec<Vec<f64>> {
-        let UnfoldProbs { ref layer_unfolders, ref layer_ev_q_probs } = *self;
+        let UnfoldProbs { layer_unfolders, layer_ev_q_probs } = self;
 
         zip_eq(layer_unfolders, layer_ev_q_probs)
             .map(|(unfolder, ev_q_probs)| {
@@ -369,7 +369,7 @@ impl GammaSystemAnalysis {
         let fix2 = |c, title: &str, data: &_| fixed_prob_column(c, Precision(2), title, data);
         let dp = display_prob_column;
 
-        if let Some(ref data) = self.ev_classifications {
+        if let Some(data) = &self.ev_classifications {
             columns.push(Columns {
                 header: "(C)".to_string(),
                 entries: data.0.iter().map(|&kind| {
@@ -381,18 +381,18 @@ impl GammaSystemAnalysis {
             })
         }
 
-        if let Some(ref data) = self.ev_frequencies {
+        if let Some(data) = &self.ev_frequencies {
             columns.push(aligned_dot_column("Frequency(cm-1)", &data.0));
         };
 
-        if let Some(ref data) = self.ev_acousticness {
+        if let Some(data) = &self.ev_acousticness {
             columns.push(match mode {
                 ColumnsMode::ForHumans => dp(Colorful, "Acoust.", &data.0),
                 ColumnsMode::ForMachines => fix2(Colorless, "Acou", &data.0),
             })
         };
 
-        if let Some(EvRamanTensors(ref tensors)) = self.ev_raman_tensors {
+        if let Some(EvRamanTensors(tensors)) = &self.ev_raman_tensors {
             let raman_column = |name: &str, data: &[f64]| {
                 // NOTE: raman_intensities are currently missing some scale factors
                 //       so they are just normalized for now.
@@ -428,14 +428,14 @@ impl GammaSystemAnalysis {
             ));
         };
 
-        if let Some(ref data) = self.ev_layer_acousticness {
+        if let Some(data) = &self.ev_layer_acousticness {
             columns.push(match mode {
                 ColumnsMode::ForHumans => dp(Colorful, "Layer", &data.0),
                 ColumnsMode::ForMachines => fix2(Colorless, "Lay.", &data.0),
             })
         };
 
-        if let Some(ref data) = self.ev_polarization {
+        if let Some(data) = &self.ev_polarization {
             let data = |k| data.0.iter().map(|v| v[k]).collect_vec();
             let name = |k| "XYZ".chars().nth(k).unwrap().to_string();
 
@@ -461,7 +461,7 @@ impl GammaSystemAnalysis {
             });
         }
 
-        if let Some(ref obj) = self.unfold_probs {
+        if let Some(obj) = &self.unfold_probs {
             let data = obj.layer_ev_gamma_probs();
             for (n, probs) in data.iter().enumerate() {
                 columns.push(match mode {
@@ -488,13 +488,13 @@ impl GammaSystemAnalysis {
 impl GammaSystemAnalysis {
     pub fn make_summary(&self, settings: &Settings) -> YamlValue {
         let GammaSystemAnalysis {
-            ref ev_acousticness, ref ev_polarization,
-            ref ev_frequencies, ref unfold_probs,
-            ref ev_layer_acousticness,
+            ev_acousticness, ev_polarization,
+            ev_frequencies, unfold_probs,
+            ev_layer_acousticness,
             ev_raman_tensors: _,
             ev_classifications: _,
             layer_sc_mats: _,
-        } = *self;
+        } = self;
 
         // This is where the newtypes start to get in the way;
         // turn as many things as we can into Option<Vec<T>> (indexed by ket)

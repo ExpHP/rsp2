@@ -346,7 +346,7 @@ mod tests {
 
             // test that left-inverse equals right-inverse.
             let right_inv = gs.iter().map(|b| (b, f(a, b)))
-                .find(|&(_, ref c)| c == &data.eye)
+                .find(|(_, c)| c == &data.eye)
                 .map(|(b, _)| b).unwrap();
 
             assert_eq!(f(&right_inv, a), data.eye);

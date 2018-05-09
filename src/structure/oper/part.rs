@@ -60,7 +60,7 @@ impl<L> Part<L> {
     /// Every integer from 0 to the total length must appear once.
     pub fn new(part: Parted<L, Vec<usize>>) -> Result<Self, InvalidPartitionError>
     {Ok({
-        let index_limit = part.iter().map(|&(_, ref v)| v.len()).sum();
+        let index_limit = part.iter().map(|(_, v)| v.len()).sum();
         if !Self::validate_part(&part, index_limit) {
             return Err(InvalidPartitionError(::failure::Backtrace::new()))
         }
@@ -71,13 +71,13 @@ impl<L> Part<L> {
     ///
     /// Item type is `&L`;
     pub fn region_keys(&self) -> Keys<L>
-    { Box::new(self.part.iter().map(|&(ref label, _)| label)) }
+    { Box::new(self.part.iter().map(|(label, _)| label)) }
 
     /// Iterate over the index vectors for each region.
     ///
     /// Item type is `&[usize]`;
     pub fn region_indices(&self) -> Indices
-    { Box::new(self.part.iter().map(|&(_, ref idx)| &idx[..])) }
+    { Box::new(self.part.iter().map(|(_, idx)| &idx[..])) }
 
     /// # Safety
     ///
@@ -114,7 +114,7 @@ impl<L> Part<L> {
         use ::std::mem;
 
         let mut temp = vec![None; self.index_limit];
-        for &(ref label, ref indices) in &self.part {
+        for (label, indices) in &self.part {
             for &i in indices {
                 temp[i] = Some(label);
             }
@@ -129,7 +129,7 @@ impl<L> Part<L> {
 
     fn validate_part(part: &Parted<L, Vec<usize>>, index_limit: usize) -> bool
     {
-        let slices: Vec<_> = part.iter().map(|&(_, ref v)| &v[..]).collect();
+        let slices: Vec<_> = part.iter().map(|(_, v)| &v[..]).collect();
         let mut xs = slices.concat();
         xs.sort();
         xs.into_iter().eq(0..index_limit)

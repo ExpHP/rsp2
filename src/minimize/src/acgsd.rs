@@ -90,9 +90,9 @@ pub mod settings {
 
     impl Linesearch {
         pub fn validate(&self) {
-            match *self {
-                Linesearch::Acgsd(ref settings) => settings.validate(),
-                Linesearch::Hager(ref settings) => settings.validate(),
+            match self {
+                Linesearch::Acgsd(settings) => settings.validate(),
+                Linesearch::Hager(settings) => settings.validate(),
             }
         }
     }
@@ -660,11 +660,11 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
         let direction = 'use_dir: loop { break {
 
             // Consider the direction  'beta * dx - g'
-            if let &Some(Last{
+            if let Some(Last{
                 ls_failed: false,
-                direction: ref last_direction,
-                d_gradient: ref last_d_gradient,
-                d_position: ref last_d_position,
+                direction: last_direction,
+                d_gradient: last_d_gradient,
+                d_position: last_d_position,
                 ..
             }) = &last
             {
@@ -757,8 +757,8 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
                 saved.alpha
                 .min(settings.alpha_guess_max.unwrap_or(::std::f64::INFINITY));
 
-            match settings.linesearch {
-                settings::Linesearch::Acgsd(ref settings) => {
+            match &settings.linesearch {
+                settings::Linesearch::Acgsd(settings) => {
                     match ::linesearch::linesearch(
                         settings,
                         guess_alpha,
@@ -769,7 +769,7 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
                         Err(Right(e)) => Err(e)?,
                     }
                 },
-                settings::Linesearch::Hager(ref settings) => {
+                settings::Linesearch::Hager(settings) => {
                     ::hager_ls::linesearch(
                         settings,
                         guess_alpha,

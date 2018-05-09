@@ -37,7 +37,7 @@ where
             (pos, grad)
         })},
 
-        |(_, &(ref pos1, ref grad1)), (_, &(ref pos2, ref grad2))| {Ok({
+        |(_, (pos1, grad1)), (_, (pos2, grad2))| {Ok({
             // trapezoid
             let V(grad) = 0.5 * (v(grad1) + v(grad2));
             let V(d_pos) = v(pos2) - v(pos1);

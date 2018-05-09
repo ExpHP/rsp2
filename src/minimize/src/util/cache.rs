@@ -13,19 +13,19 @@ where K: PartialEq,
 
     pub(crate) fn get(&self, key: &K) -> Option<&V> {
         self.0.as_ref()
-            .and_then(|&(ref k, ref v)| if k == key { Some(v) } else { None })
+            .and_then(|(k, v)| if k == key { Some(v) } else { None })
     }
     // pub(crate) fn get_mut(&mut self, key: &K) -> Option<&mut V>;
 
     /// Consumes self to look up a value.
     pub(crate) fn get_consume(self, key: &K) -> Option<V> {
-        self.0.and_then(|(k,v)| if &k == key { Some(v) } else { None })
+        self.0.and_then(|(k, v)| if &k == key { Some(v) } else { None })
     }
     // pub(crate) fn assert_get(&self, key: &K) -> &V;
     // pub(crate) fn assert_get_mut(&mut self, key: &K) -> &mut V;
 
     pub(crate) fn as_option(&self) -> Option<(&K, &V)> {
-        self.0.as_ref().map(|&(ref a, ref b)| (a,b))
+        self.0.as_ref().map(|(a, b)| (a, b))
     }
     // pub(crate) fn as_option_mut(&mut self) -> Option<(&mut V, &mut K)>;
     pub(crate) fn into_option(self) -> Option<(K, V)> { self.0 }
@@ -54,7 +54,7 @@ where
     pub(crate) fn new(projection: F) -> Self { MinCacheBy { best: LastCache::new(), projection } }
     pub(crate) fn put(&mut self, key: K, value: V) {
         let objective = (&mut self.projection)(&key, &value);
-        if let Some((_, &(ref m, _))) = self.best.as_option() {
+        if let Some((_, (m, _))) = self.best.as_option() {
             if m < &objective { return; }
         }
         self.best.put(key, (objective, value))
