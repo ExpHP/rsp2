@@ -25,8 +25,8 @@ where W: Write,
 
     writeln!(&mut w, "{}", carts.len())?;
     writeln!(&mut w, "{}", title)?;
-    for (c, typ) in carts.iter().zip(types) {
-        writeln!(&mut w, " {:>2} {} {} {}", typ.symbol(), c[0], c[1], c[2])?;
+    for (V3([x, y, z]), typ) in carts.iter().zip(types) {
+        writeln!(&mut w, " {:>2} {} {} {}", typ.symbol(), x, y, z)?;
     }
 
     Ok(())

@@ -120,7 +120,7 @@ impl ScMatrix {
         // (NOTE: this condition is necessary, but not sufficient)
         // (NOTE: this is obviously not considered to be an invariant of this type,
         //        due to public members and Deserialize)
-        assert_eq!(matrix.det().abs() as u32, periods[0] * periods[1] * periods[2]);
+        assert_eq!(matrix.det().abs() as u32, periods.iter().product::<u32>());
         ScMatrix { matrix: *matrix, periods: *periods }
     }
 }

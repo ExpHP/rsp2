@@ -116,12 +116,8 @@ where F: FnMut(&M, [u32; 3]) -> M2,
     // works for general supercell matrices
     let sc = builder.into_sc_token(coords.len());
 
-    // number of offsets along each lattice vector.
-    let num_sc = (sc.periods[0] * sc.periods[1] * sc.periods[2]) as usize;
-    let num_supercell_atoms = num_sc * coords.len();
-
     let sc_carts = image_lattice_vecs(sc.periods, sc.offset, &lattice);
-    let mut new_carts = Vec::with_capacity(num_supercell_atoms);
+    let mut new_carts = Vec::with_capacity(sc.num_supercell_atoms());
     for atom_cart in coords.into_carts(&lattice) {
         let old_len = new_carts.len();
         new_carts.extend_from_slice(&sc_carts);
@@ -129,7 +125,7 @@ where F: FnMut(&M, [u32; 3]) -> M2,
     }
 
     let sc_idx = image_cells(sc.periods);
-    let mut new_meta = Vec::with_capacity(num_supercell_atoms);
+    let mut new_meta = Vec::with_capacity(sc.num_supercell_atoms());
     for m in meta {
         for &idx in &sc_idx {
             new_meta.push(make_meta(&m, idx));
@@ -196,7 +192,7 @@ impl SupercellToken {
     /// The number of images taken of the unit cell contained in the supercell.
     #[inline]
     pub fn num_cells(&self) -> usize {
-        (self.periods[0] * self.periods[1] * self.periods[2]) as usize
+        self.periods.iter().product::<u32>() as _
     }
 
     #[inline]
@@ -406,10 +402,11 @@ impl SupercellToken {
     // When modifying it, you must modify all functions that have this label.
     pub fn atom_from_cell_unchecked(&self, prim: usize, cell: [u32; 3]) -> usize {
         use ::rsp2_array_types::dot;
+        let [len_a, len_b, len_c] = self.periods;
         let stride_c = 1;
-        let stride_b = stride_c * self.periods[2] as usize;
-        let stride_a = stride_b * self.periods[1] as usize;
-        let stride_prim = stride_a * self.periods[0] as usize;
+        let stride_b = stride_c * len_c as usize;
+        let stride_a = stride_b * len_b as usize;
+        let stride_prim = stride_a * len_a as usize;
         let strides = V3([stride_a, stride_b, stride_c]);
 
         prim * stride_prim + dot(&strides, &V3(cell).map(|x| x as usize))
@@ -486,9 +483,10 @@ fn mod_euc(a: i32, b: i32) -> i32 {
 // When modifying it, you must modify all functions that have this label.
 fn image_cells(periods: [u32; 3]) -> Vec<[u32; 3]> {
     let mut out = Vec::with_capacity(periods.iter().product::<u32>() as usize);
-    for ia in 0..periods[0] {
-        for ib in 0..periods[1] {
-            for ic in 0..periods[2] {
+    let [na, nb, nc] = periods;
+    for ia in 0..na {
+        for ib in 0..nb {
+            for ic in 0..nc {
                 out.push([ia, ib, ic]);
             }
         }

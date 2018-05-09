@@ -19,7 +19,6 @@ use ::rsp2_tasks_config::{self as cfg, Settings, NormalizationMode, SupercellSpe
 use ::traits::{AsPath};
 use ::phonopy::{DirWithBands, DirWithDisps, DirWithForces};
 
-use ::util::{tup2};
 use ::util::ext_traits::{OptionResultExt, PathNiceExt};
 use ::math::basis::Basis3;
 use ::math::bonds::{FracBonds, FracBond};
@@ -476,9 +475,9 @@ impl TrialDir {
             settings.normalization.normalize(ev)
         };
 
-        let (xmin, xmax) = tup2(settings.xlim);
-        let (ymin, ymax) = tup2(settings.ylim);
-        let (w, h) = tup2(settings.dim);
+        let [xmin, xmax] = settings.xlim;
+        let [ymin, ymax] = settings.ylim;
+        let [w, h] = settings.dim;
         let data = {
             ::cmd::integrate_2d::integrate_two_eigenvectors(
                 (w, h),

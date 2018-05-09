@@ -16,7 +16,6 @@
 
 use ::FailResult;
 use ::{IoResult};
-use ::As3;
 
 use super::{MissingFileError, PhonopyFailed};
 use super::{Conf, DispYaml, SymmetryYaml, QPositions, Args};
@@ -88,10 +87,10 @@ impl Builder {
         me
     })}
 
-    pub fn supercell_dim<V: As3<u32>>(self, dim: V) -> Self
+    pub fn supercell_dim(self, dim: [u32; 3]) -> Self
     {
         self.conf("DIM", {
-            let (a, b, c) = dim.as_3();
+            let [a, b, c] = dim;
             format!("{} {} {}", a, b, c)
         })
     }

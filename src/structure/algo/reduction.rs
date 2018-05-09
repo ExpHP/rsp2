@@ -162,14 +162,8 @@ mod state {
         pub fn lattice_matrix(&self) -> &M33 { &self.lattice }
         pub fn unimodular_matrix(&self) -> &M33<i32> { &self.unimodular.0 }
         pub fn fuzz(&self) -> Fuzz { self.fuzz }
-        pub fn abc(&self) -> &[f64; 3] { &self.abc }
-        pub fn xyz(&self) -> &[f64; 3] { &self.xyz }
-        pub fn a(&self) -> f64 { self.abc()[0] }
-        pub fn b(&self) -> f64 { self.abc()[1] }
-        pub fn c(&self) -> f64 { self.abc()[2] }
-        pub fn x(&self) -> f64 { self.xyz()[0] }
-        pub fn y(&self) -> f64 { self.xyz()[1] }
-        pub fn z(&self) -> f64 { self.xyz()[2] }
+        pub fn abc(&self) -> [f64; 3] { self.abc }
+        pub fn xyz(&self) -> [f64; 3] { self.xyz }
 
         pub fn change_basis<F>(&mut self, f: F)
         where F: FnOnce(&mut UnimodularState)
@@ -310,8 +304,8 @@ pub fn algorithm_b(lattice: &Lattice) -> LatticeReduction
 
         // B2-B4.
         // I wouldn't bother trying to refactor these.
-        let (a, b, _c) = tup3(state.abc());
-        let (x, y, z) = tup3(state.xyz());
+        let [a, b, _c] = state.abc();
+        let [x, y, z] = state.xyz();
 
         // B2
         let do_it = fuzz.gt(x.abs(), b)
@@ -416,7 +410,7 @@ pub mod conditions {
     fn primary(state: &State) -> bool
     {
         let fuzz = state.fuzz();
-        let ((a, b, c), (x, y, z)) = (tup3(state.abc()), tup3(state.xyz()));
+        let ([a, b, c], [x, y, z]) = (state.abc(), state.xyz());
 
         true
         && fuzz.le(a, b)
@@ -434,7 +428,8 @@ pub mod conditions {
             0 => false,
             1 => true,
             2 => {
-                let xyzab = state.x() + state.y() + state.z() + state.a() + state.b();
+                let ([a, b, _], [x, y, z]) = (state.abc(), state.xyz());
+                let xyzab = x + y + z + a + b;
                 state.fuzz().ge(xyzab, 0.0)
             }
             _ => unreachable!(),
@@ -444,7 +439,7 @@ pub mod conditions {
     // cctbx/uctbx/reduction_base.py
     fn buerger(state: &State) -> bool
     {
-        let ((a, b, c), (x, y, z)) = (tup3(state.abc()), tup3(state.xyz()));
+        let ([a, b, c], [x, y, z]) = (state.abc(), state.xyz());
         let fuzz = state.fuzz();
 
         main(state)
@@ -455,7 +450,7 @@ pub mod conditions {
     // cctbx/uctbx/reduction_base.py
     fn niggli(state: &State) -> bool
     {
-        let ((a, b, c), (d, e, f)) = (tup3(state.abc()), tup3(state.xyz()));
+        let ([a, b, c], [d, e, f]) = (state.abc(), state.xyz());
         let fuzz = state.fuzz();
 
         buerger(state)
@@ -479,8 +474,8 @@ mod tests {
     fn lattice_from_params(lengths: &[f64; 3], angles: &[f64; 3]) -> [[f64; 3]; 3]
     {
         // from pymatgen
-        let (a, b, c) = tup3(lengths);
-        let (alpha, beta, gamma) = tup3(angles);
+        let &[a, b, c] = lengths;
+        let &[alpha, beta, gamma] = angles;
         let numer = alpha.cos() * beta.cos() - gamma.cos();
         let denom = alpha.sin() * beta.sin();
         // Sometimes rounding errors result in values slightly > 1.
@@ -519,8 +514,3 @@ mod tests {
     }
 }
 
-
-//--------------------
-
-fn tup3<T:Copy>(x: &[T; 3]) -> (T, T, T)
-{ (x[0], x[1], x[2]) }

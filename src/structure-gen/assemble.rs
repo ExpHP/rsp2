@@ -7,7 +7,7 @@ use ::{FailResult, FailOk};
 use ::rsp2_structure::{CoordsKind, Lattice, Coords};
 use ::std::io::Read;
 
-use ::rsp2_array_types::{M22, M33, V2, V3, mat, inv};
+use ::rsp2_array_types::{M22, M33, V2, V3, mat, inv, Unvee};
 
 pub fn load_layers_yaml<R: Read>(mut file: R) -> FailResult<Assemble>
 { _load_layers_yaml(&mut file) }
@@ -311,32 +311,36 @@ fn layer_sc_info_from_cereal(cereal: cereal::Root) -> FailResult<Vec<(M33<i32>, 
 })}
 
 fn m22_to_m33(mat: &M22) -> M33
-{mat::from_array([
-    [mat[0][0], mat[0][1], 0.0],
-    [mat[1][0], mat[1][1], 0.0],
-    [0.0, 0.0, 1.0],
-])}
+{
+    let [[m00, m01], [m10, m11]] = mat.unvee();
+    mat::from_array([
+        [m00, m01, 0.0],
+        [m10, m11, 0.0],
+        [0.0, 0.0, 1.0],
+    ])
+}
 
 fn m33_to_m22(mat: &M33) -> M22
 {
-    assert_eq!(mat[0][2], 0.0);
-    assert_eq!(mat[1][2], 0.0);
-    assert_eq!(mat[2][0], 0.0);
-    assert_eq!(mat[2][1], 0.0);
-    assert_eq!(mat[2][2], 1.0);
+    let [[m00, m01, m02], [m10, m11, m12], [m20, m21, m22]] = mat.unvee();
+    assert_eq!(m02, 0.0);
+    assert_eq!(m12, 0.0);
+    assert_eq!(m20, 0.0);
+    assert_eq!(m21, 0.0);
+    assert_eq!(m22, 1.0);
     mat::from_array([
-        [mat[0][0], mat[0][1]],
-        [mat[1][0], mat[1][1]],
+        [m00, m01],
+        [m10, m11],
     ])
 }
 
 fn v2_to_v3(xs: &[V2]) -> Vec<V3>
-{ xs.iter().map(|v| V3([v[0], v[1], 0.0])).collect() }
+{ xs.unvee().iter().map(|&[x, y]| V3([x, y, 0.0])).collect() }
 
 fn v3_to_v2(xs: &[V3]) -> Vec<V2>
-{ xs.iter().map(|v| {
-    assert_eq!(v[2], 0.0);
-    V2([v[0], v[1]])
+{ xs.unvee().iter().map(|&[x, y, z]| {
+    assert_eq!(z, 0.0);
+    V2([x, y])
 }).collect() }
 
 // fn zip_eq<As, Bs>(a: As, b: Bs) -> ::std::iter::Zip<As::IntoIter, Bs::IntoIter>

@@ -137,11 +137,6 @@ mod lockfile {
 
 //--------------------------------------------------------
 
-#[allow(unused)] pub(crate) fn tup2<T:Copy>(arr: [T; 2]) -> (T, T) { (arr[0], arr[1]) }
-#[allow(unused)] pub(crate) fn tup3<T:Copy>(arr: [T; 3]) -> (T, T, T) { (arr[0], arr[1], arr[2]) }
-
-//--------------------------------------------------------
-
 pub mod ext_traits {
     use ::path_abs::PathDir;
     use ::std::result::Result as StdResult;

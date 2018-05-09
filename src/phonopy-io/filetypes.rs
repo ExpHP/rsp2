@@ -191,13 +191,13 @@ pub mod force_sets {
         writeln!(w, "{}", displacements.len())?;
         writeln!(w, "")?;
 
-        for (&(atom, disp), force) in displacements.iter().zip(force_sets) {
+        for (&(atom, V3([dx, dy, dz])), force) in displacements.iter().zip(force_sets) {
             writeln!(w, "{}", atom + 1)?; // NOTE: phonopy indexes atoms from 1
-            writeln!(w, "{:e} {:e} {:e}", disp[0], disp[1], disp[2])?;
+            writeln!(w, "{:e} {:e} {:e}", dx, dy, dz)?;
 
             assert_eq!(force.as_ref().len(), n_atom);
-            for row in force.as_ref() {
-                writeln!(w, "{:e} {:e} {:e}", row[0], row[1], row[2])?;
+            for V3([fx, fy, fz]) in force.as_ref() {
+                writeln!(w, "{:e} {:e} {:e}", fx, fy, fz)?;
             }
 
             // blank line for easier reading

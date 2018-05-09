@@ -348,7 +348,8 @@ where T: PrimitiveRing,
     type Output = T;
 
     fn det(&self) -> T {
-        self[0][0] * self[1][1] - self[0][1] * self[1][0]
+        let [[a, b], [c, d]] = self.unvee();
+        a * d - b * c
     }
 }
 
@@ -358,10 +359,11 @@ where T: PrimitiveRing,
     type Output = T;
 
     fn det(&self) -> T {
-        let destructure = |v: &V3<_>| { (v[0], v[1], v[2]) };
-        let (a0, a1, a2) = destructure(&self[0]);
-        let (b0, b1, b2) = destructure(&self[1]);
-        let (c0, c1, c2) = destructure(&self[2]);
+        let [
+            [a0, a1, a2],
+            [b0, b1, b2],
+            [c0, c1, c2],
+        ] = self.unvee();
 
         T::zero()
         + a0 * b1 * c2
@@ -386,10 +388,9 @@ impl<T: Field> Inv for M22<T>
 where T: PrimitiveFloat,
 {
     fn inv(&self) -> Self {
+        let [[a, b], [c, d]] = self.0.unvee();
         let rdet = T::one() / self.det();
-        [ [ self[1][1] * rdet, -self[0][1] * rdet]
-        , [-self[1][0] * rdet,  self[0][0] * rdet]
-        ].into_matrix()
+        &[[d, -b], [-c, a]].into_matrix() * rdet
     }
 }
 
