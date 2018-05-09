@@ -63,7 +63,7 @@ impl<T:PartialOrd> Bins<T> {
         bins
     }
 
-    pub fn display(&self) -> Display { Display(&self.bins) }
+    pub fn display(&self) -> Display<'_> { Display(&self.bins) }
 
     pub fn as_counts(&self) -> &[u64] { &self.bins }
 }

@@ -425,7 +425,7 @@ impl fmt::Display for Arg {
 impl fmt::Display for PairCommand {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result
     {Ok({
-        fn ws_join(items: &[Arg]) -> JoinDisplay<Arg> {
+        fn ws_join(items: &[Arg]) -> JoinDisplay<'_, Arg> {
             JoinDisplay { items, sep: " " }
         }
 

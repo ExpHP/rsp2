@@ -70,13 +70,13 @@ impl<L> Part<L> {
     /// Iterate over the keys for each region.
     ///
     /// Item type is `&L`;
-    pub fn region_keys(&self) -> Keys<L>
+    pub fn region_keys(&self) -> Keys<'_, L>
     { Box::new(self.part.iter().map(|(label, _)| label)) }
 
     /// Iterate over the index vectors for each region.
     ///
     /// Item type is `&[usize]`;
-    pub fn region_indices(&self) -> Indices
+    pub fn region_indices(&self) -> Indices<'_>
     { Box::new(self.part.iter().map(|(_, idx)| &idx[..])) }
 
     /// # Safety
@@ -189,7 +189,7 @@ pub trait Partition<'iter>: Sized + 'iter {
 }
 
 impl<'iter, T: 'iter> Partition<'iter> for Vec<T> {
-    fn into_unlabeled_partitions<L>(self, part: &'iter Part<L>) -> Unlabeled<Self>
+    fn into_unlabeled_partitions<L>(self, part: &'iter Part<L>) -> Unlabeled<'iter, Self>
     {
         // permute all data for the first group to the very end,
         // with the second group before it, and etc.

@@ -112,7 +112,7 @@ pub trait PotentialBuilder<Meta = Element>
     /// This is provided because otherwise, you end up needing to write stuff
     /// like `pot.initialize_diff_fn(structure.clone()).compute(&structure)`, which
     /// is both confusing and awkward.
-    fn one_off(&self) -> OneOff<Meta>
+    fn one_off(&self) -> OneOff<'_, Meta>
     where Meta: Clone,
     { OneOff(self._as_ref_dyn()) }
 }
