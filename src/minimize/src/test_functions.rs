@@ -43,10 +43,10 @@ pub mod one_dee {
         fn derivative(&self) -> Self::Derivative { self.1.derivative().scale_y(self.0) }
     }
 
-    #[allow(dead_code)]
     /// A simple polynomial in one term
     #[derive(Debug, Clone)]
     pub struct Polynomial(Vec<f64>);
+    #[allow(dead_code)]
     impl Polynomial {
         pub fn from_coeffs(coeffs: &[f64]) -> Polynomial { Polynomial(coeffs.to_owned()) }
 
