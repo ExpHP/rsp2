@@ -50,7 +50,6 @@ rsp2-shims          = "src/util/shims"
 rsp2-linalg         = "src/linalg"
 rsp2-integration-test = "src/util/integration-test"
 rsp2-soa-ops        = "src/util/soa-ops"
-rsp2-sparse-matrix = "src/util/sparse"
 #!!INSERTION POINT FOR NEW CRATES!!#
 
 #--------------------------------------------
