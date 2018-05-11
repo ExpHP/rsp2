@@ -96,3 +96,4 @@ indoc = "0.2.3"
 lapacke = "0.1.4"
 lapack-src = { version = "0.1.4", features = ["netlib"] }
 ndarray = "0.11.2"
+rustc-test = "0.3.0"

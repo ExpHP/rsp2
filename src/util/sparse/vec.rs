@@ -1,12 +1,4 @@
 
-
-
-
-use num_traits::Zero;
-
-#[cfg(test)]
-use test::Bencher;
-
 use iter::IntoSparseIterator;
 use iter::SparseIterator;
 use iter::{ShapedSparseIterator, SortedSparseIterator, UniqueSparseIterator};
@@ -16,6 +8,9 @@ use traits::Abs;
 use traits::DenseIndex;
 use traits::GenericRange;
 use traits::Shape;
+
+use num_traits::Zero;
+use rsp2_soa_ops::{Perm, Permute};
 
 /// A `Vec` stored in a sparse format (without zeros).
 #[derive(Clone, Debug)]
@@ -47,7 +42,7 @@ impl<T> SparseVec<T> {
     ///
     /// Positions must be unique, in order, and strictly less than `dim`, or the function
     ///  will panic. Also panics if the length of `pos` and `val` do not match.`
-    pub fn from_parts(dim: usize, val: Vec<T>, pos: Vec<usize>) -> Self {
+    pub fn from_parts_strictly_sorted(dim: usize, val: Vec<T>, pos: Vec<usize>) -> Self {
         assert_eq!(pos.len(), val.len());
         assert!(
             pos.windows(2).all(|win| win[0] < win[1]),
@@ -58,6 +53,25 @@ impl<T> SparseVec<T> {
             "element index exceeds dimension"
         );
         unsafe { SparseVec::from_parts_unchecked(dim, val, pos) }
+    }
+
+    /// Construct a `SparseVec` from its components.
+    ///
+    /// The arguments are as follows:
+    ///
+    ///  * `dim`: The length of the dense Vec which the `SparseVec` represents.
+    ///  * `val`: The explicitly stored values.
+    ///  * `pos`: A vector parallel to `val` containing the positions of each value.
+    ///
+    /// # Panics
+    ///
+    /// Positions must be unique, and strictly less than `dim`, or the function
+    /// will panic. Also panics if the length of `pos` and `val` do not match.`
+    pub fn from_parts_unique(dim: usize, val: Vec<T>, pos: Vec<usize>) -> Self {
+        let perm = Perm::argsort(&pos);
+        let val = val.permuted_by(&perm);
+        let pos = pos.permuted_by(&perm);
+        Self::from_parts_strictly_sorted(dim, val, pos)
     }
 
     /// Construct a `SparseVec` from its components.
@@ -473,7 +487,7 @@ fn test_dense_index_ops() {
     // test function for {get,set,remove}_{explicit,dense}
 
     // an implicit zero, an explicit nonzero, an explicit zero
-    let sparse = SparseVec::from_parts(3, vec![2i32, 0], vec![1, 2]);
+    let sparse = SparseVec::from_parts_strictly_sorted(3, vec![2i32, 0], vec![1, 2]);
     assert_eq!(sparse.nnz(), 2);
     assert_eq!(sparse.get_dense(0), 0);
     assert_eq!(sparse.get_dense(1), 2);
@@ -484,7 +498,7 @@ fn test_dense_index_ops() {
     assert_eq!(sparse.get_explicit(2), Some(&0));
 
     // two implicit zeros, two explicit nonzeros, an explicit zero
-    let mut sparse = SparseVec::from_parts(5, vec![8i32, 9, 0], vec![2, 3, 4]);
+    let mut sparse = SparseVec::from_parts_strictly_sorted(5, vec![8i32, 9, 0], vec![2, 3, 4]);
     assert_eq!(sparse.set_explicit(0, 1), None); // implicit -> explicit
     assert_eq!(sparse.set_explicit(1, 0), None); // implicit -> explicit zero
     assert_eq!(sparse.set_explicit(2, 1), Some(8)); // explicit -> explicit
@@ -492,11 +506,11 @@ fn test_dense_index_ops() {
     assert_eq!(sparse.set_explicit(4, 1), Some(0)); // test on existing explicit zero
     assert_eq!(
         sparse,
-        SparseVec::from_parts(5, vec![1, 0, 1, 0, 1], vec![0, 1, 2, 3, 4])
+        SparseVec::from_parts_strictly_sorted(5, vec![1, 0, 1, 0, 1], vec![0, 1, 2, 3, 4])
     );
 
     // two implicit zeros, two explicit nonzeros, an explicit zero
-    let mut sparse = SparseVec::from_parts(5, vec![8i32, 9, 0], vec![2, 3, 4]);
+    let mut sparse = SparseVec::from_parts_strictly_sorted(5, vec![8i32, 9, 0], vec![2, 3, 4]);
     sparse.set_dense(0, 1); // implicit -> explicit
     sparse.set_dense(1, 0); // implicit -> implicit
     sparse.set_dense(2, 1); // explicit -> explicit
@@ -504,14 +518,14 @@ fn test_dense_index_ops() {
     sparse.set_dense(4, 1); // test on existing explicit zero
     assert_eq!(
         sparse,
-        SparseVec::from_parts(5, vec![1, 1, 1], vec![0, 2, 4])
+        SparseVec::from_parts_strictly_sorted(5, vec![1, 1, 1], vec![0, 2, 4])
     );
 
     // two implicit zeros, two explicit nonzeros, an explicit zero
-    let mut sparse = SparseVec::from_parts(5, vec![8i32, 9, 0], vec![2, 3, 4]);
+    let mut sparse = SparseVec::from_parts_strictly_sorted(5, vec![8i32, 9, 0], vec![2, 3, 4]);
     assert_eq!(sparse.remove_explicit(1), None); // something implicit
     assert_eq!(sparse.remove_explicit(2), Some(8)); // something explicit
-    assert_eq!(sparse, SparseVec::from_parts(5, vec![9, 0], vec![3, 4]));
+    assert_eq!(sparse, SparseVec::from_parts_strictly_sorted(5, vec![9, 0], vec![3, 4]));
 }
 
 #[test]
@@ -608,22 +622,38 @@ impl<'a, T> SortedSparseIterator for SparseIter<'a, T> {}
 
 //----------------------------------------------------------
 
+/// Transforms the `SparseVec` in such a way that the dense representation is effectively
+/// permuted by `perm`.
+impl<T> Permute for SparseVec<T> {
+    fn permuted_by(self, perm: &Perm) -> Self {
+        let SparseVec { dim, val, pos } = self;
+        assert_eq!(dim, perm.len());
+
+        // indices transform by the inverse perm.
+        let perm_inv = perm.inverted();
+        let pos = pos.into_iter().map(|i| perm_inv[i] as usize).collect::<Vec<_>>();
+        Self::from_parts_unique(dim, val, pos)
+    }
+}
+
+//----------------------------------------------------------
+
 #[test]
 fn test_vec_into_from_dense() {
     // something with zeros at endpoints
-    let s = SparseVec::from_parts(10, vec![7f32, 4., 5.], vec![3, 6, 7]);
+    let s = SparseVec::from_parts_strictly_sorted(10, vec![7f32, 4., 5.], vec![3, 6, 7]);
     let d = vec![0., 0., 0., 7., 0., 0., 4., 5., 0., 0.];
     assert_eq!(s.clone().into_dense(), d.clone());
     assert_eq!(SparseVec::from_dense(d), s);
 
     // something with occupied endpoints
-    let s = SparseVec::from_parts(10, vec![7f32, 4.], vec![0, 9]);
+    let s = SparseVec::from_parts_strictly_sorted(10, vec![7f32, 4.], vec![0, 9]);
     let d = vec![7., 0., 0., 0., 0., 0., 0., 0., 0., 4.];
     assert_eq!(s.clone().into_dense(), d.clone());
     assert_eq!(SparseVec::from_dense(d), s);
 
     // explicit zeros are lost on a round-trip conversion to dense and back
-    let s1 = SparseVec::from_parts(5, vec![0.], vec![3]);
+    let s1 = SparseVec::from_parts_strictly_sorted(5, vec![0.], vec![3]);
     let d1 = s1.clone().into_dense();
     let s2 = SparseVec::from_dense(d1.clone());
     let d2 = s2.clone().into_dense();
@@ -635,25 +665,25 @@ fn test_vec_into_from_dense() {
 #[test]
 #[should_panic(expected = "exceeds dimension")]
 fn test_bad_vec1() {
-    SparseVec::from_parts(12, vec![3., 7.], vec![2, 12]);
+    SparseVec::from_parts_strictly_sorted(12, vec![3., 7.], vec![2, 12]);
 }
 
 #[test]
 #[should_panic(expected = "duplicate")]
 fn test_bad_vec2() {
-    SparseVec::from_parts(12, vec![3., 1., 2., 7.], vec![2, 3, 3, 4]);
+    SparseVec::from_parts_strictly_sorted(12, vec![3., 1., 2., 7.], vec![2, 3, 3, 4]);
 }
 
 #[test]
 #[should_panic(expected = "sorted")]
 fn test_bad_vec3() {
-    SparseVec::from_parts(12, vec![3., 1., 2., 7.], vec![2, 7, 3, 4]);
+    SparseVec::from_parts_strictly_sorted(12, vec![3., 1., 2., 7.], vec![2, 7, 3, 4]);
 }
 
 #[test]
 #[should_panic(expected = "assertion failed")]
 fn test_bad_vec4() {
-    SparseVec::from_parts(12, vec![3., 1., 2.], vec![2, 7, 3, 4]);
+    SparseVec::from_parts_strictly_sorted(12, vec![3., 1., 2.], vec![2, 7, 3, 4]);
 }
 
 #[test]
@@ -692,6 +722,32 @@ fn test_reshape() {
     sparse.reshape(1);
     assert_eq!(sparse.clone().into_dense(), vec![0]);
 }
+
+#[test]
+fn test_permute() {
+    {
+        let mut dense = vec![0u32, 1, 6, 0, 2, 3, 0, 0, 7];
+        let mut sparse = SparseVec::from_dense(dense.clone());
+        assert_eq!(sparse.dim(), 9);
+        assert_eq!(sparse.nnz(), 5);
+
+        // do a permutation that would sort the dense array
+        let perm = Perm::argsort(&dense);
+        dense = dense.permuted_by(&perm);
+        sparse = sparse.permuted_by(&perm);
+
+        assert_eq!(sparse.dim(), 9);
+        assert_eq!(sparse.nnz(), 5);
+        assert_eq!(sparse.into_dense(), dense);
+    }
+
+    {
+        let mut sparse = SparseVec::<f64>::from_dense(vec![]);
+        sparse = sparse.permuted_by(&Perm::eye(0));
+        assert_eq!(sparse.into_dense(), vec![]);
+    }
+}
+
 //
 //// Checking that into_dense() is faster than densify.
 //#[bench]

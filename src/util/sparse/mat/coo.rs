@@ -3,6 +3,8 @@
 use std::ops::Add;
 use mat::{CscMat, CsrMat};
 
+use ::rsp2_soa_ops::{Perm};
+
 /// A sparse format which simply stores triplets of `(row, column, value)`.
 ///
 /// The COO format is a suitable format for the initial construction of sparse
@@ -47,15 +49,13 @@ impl<T> CooMat<T> {
     /// Sort the elements by row, then column.
     #[inline]
     pub fn sort_row_major(&mut self) {
-        self.vec
-            .sort_by(|&((r1, c1), _), &((r2, c2), _)| (r1, c1).cmp(&(r2, c2)))
+        self.vec.sort_by_key(|&((r, c), _)| (r, c))
     }
 
     /// Sort the elements by column, then row.
     #[inline]
     pub fn sort_column_major(&mut self) {
-        self.vec
-            .sort_by(|&((r1, c1), _), &((r2, c2), _)| (c1, r1).cmp(&(c2, r2)))
+        self.vec.sort_by_key(|&((r, c), _)| (c, r))
     }
 
     /// Sums sequential elements at the same position.
@@ -109,6 +109,31 @@ impl<T> CooMat<T> {
             dim: dim,
             vec: check_positions!(dim, it.into_iter()).collect(),
         }
+    }
+
+    /// Modifies the indices in such a way as to effectively permute the rows of the dense matrix.
+    #[cfg_attr(feature = "nightly", must_use = "not an in-place operation!")]
+    pub fn permute_rows(mut self, perm: &Perm) -> Self {
+        assert_eq!(self.dim.0, perm.len());
+
+        let perm_inv = perm.inverted();
+        for ((row, _), _) in &mut self.vec {
+            *row = perm_inv[*row] as usize;
+        }
+        self
+    }
+
+    /// Modifies the indices in such a way as to effectively permute the columns of the dense
+    /// matrix.
+    #[cfg_attr(feature = "nightly", must_use = "not an in-place operation!")]
+    pub fn permute_columns(mut self, perm: &Perm) -> Self {
+        assert_eq!(self.dim.1, perm.len());
+
+        let perm_inv = perm.inverted();
+        for ((_, col), _) in &mut self.vec {
+            *col = perm_inv[*col] as usize;
+        }
+        self
     }
 }
 

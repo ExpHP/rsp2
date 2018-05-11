@@ -14,6 +14,8 @@
 #[macro_use]
 extern crate rsp2_assert_close;
 
+extern crate rsp2_soa_ops;
+
 extern crate rustc_test as test;
 extern crate num_traits;
 

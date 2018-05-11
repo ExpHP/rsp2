@@ -9,6 +9,10 @@ path = "lib.rs"
 
 [dependencies]
 !!rsp2-soa-ops
+!!rsp2-assert-close
+
+!!num-traits
+!!rustc-test
 
 [features]
 !!NIGHTLY-FEATURE-LINE

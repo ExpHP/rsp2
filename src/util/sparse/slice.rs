@@ -334,7 +334,7 @@ mod tests {
     fn test_dense_index_ops() {
         // put an implicit zero, an explicit nonzero, and an explicit zero
         //  in the first three elements starting from index 7
-        let sparse = SparseVec::from_parts(16, vec![2i32, 0], vec![8, 9]);
+        let sparse = SparseVec::from_parts_strictly_sorted(16, vec![2i32, 0], vec![8, 9]);
         let sparse = sparse.slice(7..10);
         assert_eq!(sparse.nnz(), 2);
         assert_eq!(sparse.get_dense(0), 0);

@@ -192,7 +192,7 @@ sparse_sparse_impls!(SparseSparseSub, SelfSub, sparse_union, do_sub);
 /// # Examples
 ///
 /// ```
-/// use sparse::{SparseVec,SparseSparseMath,IntoSparseIterator};
+/// use rsp2_sparse_matrix::{SparseVec,SparseSparseMath,IntoSparseIterator};
 ///
 /// let a = SparseVec::from_dense(vec![0i64, 0, 1, 2]).into_sparse_iter();
 /// let b = SparseVec::from_dense(vec![0i64, 4, 3, 0]).into_sparse_iter();
@@ -380,7 +380,7 @@ sparse_dense_impls!(SparseDenseMul, SelfMul, |x, y| x * y);
 /// # Examples
 ///
 /// ```
-/// use sparse::{SparseVec,SparseDenseMath,IntoSparseIterator};
+/// use rsp2_sparse_matrix::{SparseVec,SparseDenseMath,IntoSparseIterator};
 ///
 /// // let a = SparseVec::from_dense(vec![0i64, 0, 1, 2]).into_sparse_iter();
 /// // let b = vec![0i64, 4, 3, 0];

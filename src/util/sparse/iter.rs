@@ -9,44 +9,6 @@ use vec::SparseVec;
 
 //----------------------------------------------------------
 
-// FIXME lolwat why is this here
-macro_rules! sparse_intersection {
-    ($a:expr) => {
-        $a.into_sparse_iter()
-    };
-    ($a:expr, $b:expr) => {
-        $a.into_sparse_iter()
-            .sparse_intersection($b.into_sparse_iter())
-    };
-    ($a:expr, $b:expr, $c:expr) => {
-        $a.into_sparse_iter()
-            .sparse_intersection($b.into_sparse_iter())
-            .sparse_intersection($c.into_sparse_iter())
-            .map(|(usize, ((x, y), z))| (usize, (x, y, z)))
-    };
-    ($a:expr, $b:expr, $c:expr, $d:expr) => {
-        $a.into_sparse_iter()
-            .sparse_intersection($b.into_sparse_iter())
-            .sparse_intersection($c.into_sparse_iter())
-            .sparse_intersection($d.into_sparse_iter())
-            .map(|(usize, (((w, x), y), z))| (usize, (w, x, y, z)))
-    };
-    ($a:expr,) => {
-        sparse_intersection!($a)
-    };
-    ($a:expr, $b:expr,) => {
-        sparse_intersection!($a, $b)
-    };
-    ($a:expr, $b:expr, $c:expr,) => {
-        sparse_intersection!($a, $b, $c)
-    };
-    ($a:expr, $b:expr, $c:expr, $d:expr,) => {
-        sparse_intersection!($a, $b, $c, $d)
-    };
-}
-
-//----------------------------------------------------------
-
 /// An iterator which generalizes 1D "sparse" storage types.
 ///
 /// A `SparseIterator` is an iterator whose items are of the form `(pos, value)`, where `pos` is an
@@ -82,7 +44,7 @@ pub trait SparseIterator: Iterator<Item = (usize, <Self as SparseIterator>::Valu
     /// # Examples
     ///
     /// ```
-    /// use sparse::{SparseVec,SparseIterator};
+    /// use rsp2_sparse_matrix::{SparseVec,SparseIterator};
     ///
     /// let a = SparseVec::from_dense(vec![0,3,0,0,4]);
     /// let mut it = a.sparse_iter().sparse_map(|&x| 2 * x);
@@ -108,7 +70,7 @@ pub trait SparseIterator: Iterator<Item = (usize, <Self as SparseIterator>::Valu
     /// # Examples
     ///
     /// ```
-    /// use sparse::{SparseVec,SparseIterator};
+    /// use rsp2_sparse_matrix::{SparseVec,SparseIterator};
     ///
     /// let a = SparseVec::from_dense(vec![0,3,0,0,4]);
     /// let mut it = a.sparse_iter().sparse_filter(|&x| *x > 3);
@@ -136,7 +98,7 @@ pub trait SparseIterator: Iterator<Item = (usize, <Self as SparseIterator>::Valu
     /// # Examples
     ///
     /// ```
-    /// use sparse::{SparseVec,SparseIterator};
+    /// use rsp2_sparse_matrix::{SparseVec,SparseIterator};
     ///
     /// let a = SparseVec::from_dense(vec![0,3,0,0,4]);
     /// let mut it = a.sparse_iter().sparse_filter_map(|&x| if x > 3 {Some(2 * x)} else {None});
@@ -162,7 +124,7 @@ pub trait SparseIterator: Iterator<Item = (usize, <Self as SparseIterator>::Valu
     /// # Examples
     ///
     /// ```
-    /// use sparse::{SparseVec,SparseIterator,IntoSparseIterator};
+    /// use rsp2_sparse_matrix::{SparseVec,SparseIterator,IntoSparseIterator};
     ///
     /// let a = SparseVec::from_dense(vec![0i64, 0, 1, 2]);
     /// let b = SparseVec::from_dense(vec![0i64, 4, 3, 0]);
@@ -193,8 +155,8 @@ pub trait SparseIterator: Iterator<Item = (usize, <Self as SparseIterator>::Valu
     /// # Examples
     ///
     /// ```
-    /// use sparse::{SparseVec,SparseIterator,IntoSparseIterator};
-    /// use sparse::UnionValue::*;
+    /// use rsp2_sparse_matrix::{SparseVec,SparseIterator,IntoSparseIterator};
+    /// use rsp2_sparse_matrix::UnionValue::*;
     ///
     /// let a = SparseVec::from_dense(vec![0i64, 0, 1, 2]);
     /// let b = SparseVec::from_dense(vec![0i64, 4, 3, 0]);
@@ -239,6 +201,7 @@ pub trait SparseIterator: Iterator<Item = (usize, <Self as SparseIterator>::Valu
     /// Call this method on a sparse iterator to declare that it meets the contract
     /// of `SortedSparseIterator`, for use in functions that require the trait.
     /// This is useful for e.g. garden-variety iterators wrapped in a `SparseWrapper`.
+    ///
     /// It is a logical error to call `declare_sorted` on an iterator whose indices
     /// are not actually sorted.
     #[inline]
@@ -254,6 +217,7 @@ pub trait SparseIterator: Iterator<Item = (usize, <Self as SparseIterator>::Valu
     /// Call this method on a sparse iterator to declare that it meets the contract
     /// of `UniqueSparseIterator`, for use in functions that require the trait.
     /// This is useful for e.g. garden-variety iterators wrapped in a `SparseWrapper`.
+    ///
     /// It is a logical error to call `declare_unique` on an iterator whose indices
     /// are not actually unique.
     #[inline]
@@ -463,25 +427,13 @@ impl<I: SparseIterator> Iterator for DeclareSorted<I> {
 }
 impl<I: SparseIterator> Iterator for DeclareUnique<I> {
     type Item = I::Item;
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        self.iter.next()
-    }
-    #[inline]
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.iter.size_hint()
-    }
+    #[inline] fn next(&mut self) -> Option<Self::Item> { self.iter.next() }
+    #[inline] fn size_hint(&self) -> (usize, Option<usize>) { self.iter.size_hint() }
 }
 
-impl<I: SparseIterator> SparseIterator for Shaped<I> {
-    type Value = I::Value;
-}
-impl<I: SparseIterator> SparseIterator for DeclareSorted<I> {
-    type Value = I::Value;
-}
-impl<I: SparseIterator> SparseIterator for DeclareUnique<I> {
-    type Value = I::Value;
-}
+impl<I: SparseIterator> SparseIterator for Shaped<I> { type Value = I::Value; }
+impl<I: SparseIterator> SparseIterator for DeclareSorted<I> { type Value = I::Value; }
+impl<I: SparseIterator> SparseIterator for DeclareUnique<I> { type Value = I::Value; }
 
 // Trait checklist:
 // [O] ExactSizeIterator
@@ -491,22 +443,13 @@ impl<I: SparseIterator> SparseIterator for DeclareUnique<I> {
 // [O] SortedSparseIterator
 
 impl<I: SparseIterator + ExactSizeIterator> ExactSizeIterator for Shaped<I> {
-    #[inline]
-    fn len(&self) -> usize {
-        self.iter.len()
-    }
+    #[inline] fn len(&self) -> usize { self.iter.len() }
 }
 impl<I: SparseIterator + ExactSizeIterator> ExactSizeIterator for DeclareSorted<I> {
-    #[inline]
-    fn len(&self) -> usize {
-        self.iter.len()
-    }
+    #[inline] fn len(&self) -> usize { self.iter.len() }
 }
 impl<I: SparseIterator + ExactSizeIterator> ExactSizeIterator for DeclareUnique<I> {
-    #[inline]
-    fn len(&self) -> usize {
-        self.iter.len()
-    }
+    #[inline] fn len(&self) -> usize { self.iter.len() }
 }
 
 impl<I: SparseIterator + DoubleEndedIterator> DoubleEndedIterator for Shaped<I> {
@@ -530,22 +473,13 @@ impl<I: SparseIterator + DoubleEndedIterator> DoubleEndedIterator for DeclareUni
 }
 
 impl<I: SparseIterator> Shape for Shaped<I> {
-    #[inline]
-    fn dim(&self) -> usize {
-        self.dim
-    }
+    #[inline] fn dim(&self) -> usize { self.dim }
 }
 impl<I: Shape> Shape for DeclareSorted<I> {
-    #[inline]
-    fn dim(&self) -> usize {
-        self.iter.dim()
-    }
+    #[inline] fn dim(&self) -> usize { self.iter.dim() }
 }
 impl<I: Shape> Shape for DeclareUnique<I> {
-    #[inline]
-    fn dim(&self) -> usize {
-        self.iter.dim()
-    }
+    #[inline] fn dim(&self) -> usize { self.iter.dim() }
 }
 
 impl<I: SparseIterator> ShapedSparseIterator for Shaped<I> {}
@@ -600,17 +534,17 @@ fn test_as_shaped() {
     }
 
     // dim = 0
-    let s = SparseVec::<i32>::from_parts(0, vec![], vec![]);
+    let s = SparseVec::<i32>::from_parts_strictly_sorted(0, vec![], vec![]);
     let myiter = MyIter::new(s.clone());
     test(s, myiter);
 
     // nnz = 0
-    let s = SparseVec::<i32>::from_parts(10, vec![], vec![]);
+    let s = SparseVec::<i32>::from_parts_strictly_sorted(10, vec![], vec![]);
     let myiter = MyIter::new(s.clone());
     test(s, myiter);
 
     // forward
-    let s = SparseVec::from_parts(10, vec![7i32, 4], vec![3, 6]);
+    let s = SparseVec::from_parts_strictly_sorted(10, vec![7i32, 4], vec![3, 6]);
     let myiter = MyIter::new(s.clone());
     test(s.clone(), myiter);
 
@@ -667,10 +601,7 @@ where
     T: 'a + Clone,
     I: SparseIterator<Value = &'a T> + ExactSizeIterator,
 {
-    #[inline]
-    fn len(&self) -> usize {
-        self.it.len()
-    }
+    #[inline] fn len(&self) -> usize { self.it.len() }
 }
 
 impl<'a, I, T> DoubleEndedIterator for SparseCloned<I>
@@ -688,35 +619,29 @@ impl<I> Shape for SparseCloned<I>
 where
     I: Shape,
 {
-    #[inline]
-    fn dim(&self) -> usize {
-        self.it.dim()
-    }
+    #[inline] fn dim(&self) -> usize { self.it.dim() }
 }
 
 impl<'a, I, T> ShapedSparseIterator for SparseCloned<I>
 where
     T: 'a + Clone,
     I: ShapedSparseIterator<Value = &'a T>,
-{
-}
+{}
 impl<'a, I, T> UniqueSparseIterator for SparseCloned<I>
 where
     T: 'a + Clone,
     I: UniqueSparseIterator<Value = &'a T>,
-{
-}
+{}
 impl<'a, I, T> SortedSparseIterator for SparseCloned<I>
 where
     T: 'a + Clone,
     I: SortedSparseIterator<Value = &'a T>,
-{
-}
+{}
 
 #[test]
 fn test_sparse_cloned() {
     // dim = 0
-    let s = SparseVec::<i32>::from_parts(0, vec![], vec![]);
+    let s = SparseVec::<i32>::from_parts_strictly_sorted(0, vec![], vec![]);
     let mut iter = s.sparse_iter().sparse_cloned();
     assert_eq!(iter.dim(), 0);
     assert_eq!(iter.len(), 0);
@@ -724,7 +649,7 @@ fn test_sparse_cloned() {
     assert_eq!(iter.next(), None);
 
     // nnz = 0
-    let s = SparseVec::<i32>::from_parts(10, vec![], vec![]);
+    let s = SparseVec::<i32>::from_parts_strictly_sorted(10, vec![], vec![]);
     let mut iter = s.sparse_iter().sparse_cloned();
     assert_eq!(iter.dim(), 10);
     assert_eq!(iter.len(), 0);
@@ -732,7 +657,7 @@ fn test_sparse_cloned() {
     assert_eq!(iter.next(), None);
 
     // forward
-    let s = SparseVec::from_parts(10, vec![7i32, 4], vec![3, 6]);
+    let s = SparseVec::from_parts_strictly_sorted(10, vec![7i32, 4], vec![3, 6]);
     let mut iter = s.sparse_iter().sparse_cloned();
     assert_eq!(iter.dim(), 10);
     assert_eq!(iter.len(), 2);
@@ -827,7 +752,7 @@ where
 #[test]
 fn test_densify_traits() {
     // ExactSizeIterator
-    let s = SparseVec::from_parts(5, vec![1f32, 2.], vec![1, 3]);
+    let s = SparseVec::from_parts_strictly_sorted(5, vec![1f32, 2.], vec![1, 3]);
     assert_eq!(s.into_sparse_iter().densify().len(), 5);
 }
 
@@ -936,15 +861,13 @@ impl<A, B> SortedSparseIterator for SparseUnion<A, B>
 where
     A: SortedSparseIterator + UniqueSparseIterator,
     B: SortedSparseIterator + UniqueSparseIterator,
-{
-}
+{}
 
 impl<A, B> UniqueSparseIterator for SparseUnion<A, B>
 where
     A: SortedSparseIterator + UniqueSparseIterator,
     B: SortedSparseIterator + UniqueSparseIterator,
-{
-}
+{}
 
 //----------------------------------------------------------
 
@@ -1036,15 +959,13 @@ impl<A, B> SortedSparseIterator for SparseIntersection<A, B>
 where
     A: SortedSparseIterator + UniqueSparseIterator,
     B: SortedSparseIterator + UniqueSparseIterator,
-{
-}
+{}
 
 impl<A, B> UniqueSparseIterator for SparseIntersection<A, B>
 where
     A: SortedSparseIterator + UniqueSparseIterator,
     B: SortedSparseIterator + UniqueSparseIterator,
-{
-}
+{}
 
 //----------------------------------------------------------
 
@@ -1180,16 +1101,12 @@ where
 impl<B, I: SparseIterator + ExactSizeIterator, F> ExactSizeIterator for SparseMap<I, F>
 where
     F: FnMut(I::Value) -> B,
-{
-}
+{}
 
 // NOTE: No ExactSizeIterator for the filtering adaptors; size impossible to know.
 
 impl<I: Shape, F> Shape for SparseMap<I, F> {
-    #[inline]
-    fn dim(&self) -> usize {
-        self.iter.dim()
-    }
+    #[inline] fn dim(&self) -> usize { self.iter.dim() }
 }
 impl<B, I: SparseIterator, F> SparseIterator for SparseMap<I, F>
 where
@@ -1200,24 +1117,18 @@ where
 impl<B, I: ShapedSparseIterator, F> ShapedSparseIterator for SparseMap<I, F>
 where
     F: FnMut(I::Value) -> B,
-{
-}
+{}
 impl<B, I: UniqueSparseIterator, F> UniqueSparseIterator for SparseMap<I, F>
 where
     F: FnMut(I::Value) -> B,
-{
-}
+{}
 impl<B, I: SortedSparseIterator, F> SortedSparseIterator for SparseMap<I, F>
 where
     F: FnMut(I::Value) -> B,
-{
-}
+{}
 
 impl<I: Shape, P> Shape for SparseFilter<I, P> {
-    #[inline]
-    fn dim(&self) -> usize {
-        self.iter.dim()
-    }
+    #[inline] fn dim(&self) -> usize { self.iter.dim() }
 }
 impl<I: SparseIterator, P> SparseIterator for SparseFilter<I, P>
 where
@@ -1228,24 +1139,18 @@ where
 impl<I: ShapedSparseIterator, P> ShapedSparseIterator for SparseFilter<I, P>
 where
     P: FnMut(&I::Value) -> bool,
-{
-}
+{}
 impl<I: UniqueSparseIterator, P> UniqueSparseIterator for SparseFilter<I, P>
 where
     P: FnMut(&I::Value) -> bool,
-{
-}
+{}
 impl<I: SortedSparseIterator, P> SortedSparseIterator for SparseFilter<I, P>
 where
     P: FnMut(&I::Value) -> bool,
-{
-}
+{}
 
 impl<I: Shape, F> Shape for SparseFilterMap<I, F> {
-    #[inline]
-    fn dim(&self) -> usize {
-        self.iter.dim()
-    }
+    #[inline] fn dim(&self) -> usize { self.iter.dim() }
 }
 impl<B, I: SparseIterator, F> SparseIterator for SparseFilterMap<I, F>
 where
@@ -1256,18 +1161,15 @@ where
 impl<B, I: ShapedSparseIterator, F> ShapedSparseIterator for SparseFilterMap<I, F>
 where
     F: FnMut(I::Value) -> Option<B>,
-{
-}
+{}
 impl<B, I: UniqueSparseIterator, F> UniqueSparseIterator for SparseFilterMap<I, F>
 where
     F: FnMut(I::Value) -> Option<B>,
-{
-}
+{}
 impl<B, I: SortedSparseIterator, F> SortedSparseIterator for SparseFilterMap<I, F>
 where
     F: FnMut(I::Value) -> Option<B>,
-{
-}
+{}
 
 #[test]
 fn test_sparse_map() {
@@ -1276,7 +1178,7 @@ fn test_sparse_map() {
     }
 
     // dim = 0
-    let s = SparseVec::<i32>::from_parts(0, vec![], vec![]);
+    let s = SparseVec::<i32>::from_parts_strictly_sorted(0, vec![], vec![]);
     let mut iter = s.clone().into_sparse_iter().sparse_map(f);
     assert_eq!(iter.dim(), 0);
     assert_eq!(iter.len(), 0);
@@ -1284,7 +1186,7 @@ fn test_sparse_map() {
     assert_eq!(iter.next(), None);
 
     // nnz = 0
-    let s = SparseVec::<i32>::from_parts(10, vec![], vec![]);
+    let s = SparseVec::<i32>::from_parts_strictly_sorted(10, vec![], vec![]);
     let mut iter = s.clone().into_sparse_iter().sparse_map(f);
     assert_eq!(iter.dim(), 10);
     assert_eq!(iter.len(), 0);
@@ -1292,7 +1194,7 @@ fn test_sparse_map() {
     assert_eq!(iter.next(), None);
 
     // forward
-    let s = SparseVec::from_parts(10, vec![7i32, -4, 5], vec![3, 6, 7]);
+    let s = SparseVec::from_parts_strictly_sorted(10, vec![7i32, -4, 5], vec![3, 6, 7]);
     let mut iter = s.clone().into_sparse_iter().sparse_map(f);
     assert_eq!(iter.dim(), 10);
     assert_eq!(iter.len(), 3);
@@ -1318,21 +1220,21 @@ fn test_sparse_filter() {
     }
 
     // dim = 0
-    let s = SparseVec::<i32>::from_parts(0, vec![], vec![]);
+    let s = SparseVec::<i32>::from_parts_strictly_sorted(0, vec![], vec![]);
     let mut iter = s.clone().into_sparse_iter().sparse_filter(f);
     assert_eq!(iter.dim(), 0);
     assert_eq!(iter.next(), None);
     assert_eq!(iter.next(), None);
 
     // nnz = 0
-    let s = SparseVec::<i32>::from_parts(10, vec![], vec![]);
+    let s = SparseVec::<i32>::from_parts_strictly_sorted(10, vec![], vec![]);
     let mut iter = s.clone().into_sparse_iter().sparse_filter(f);
     assert_eq!(iter.dim(), 10);
     assert_eq!(iter.next(), None);
     assert_eq!(iter.next(), None);
 
     // forward
-    let s = SparseVec::from_parts(10, vec![7i32, -4, 5], vec![3, 6, 7]);
+    let s = SparseVec::from_parts_strictly_sorted(10, vec![7i32, -4, 5], vec![3, 6, 7]);
     let mut iter = s.clone().into_sparse_iter().sparse_filter(f);
     assert_eq!(iter.dim(), 10);
     assert_eq!(iter.next(), Some((3, 7)));
@@ -1359,21 +1261,21 @@ fn test_sparse_filter_map() {
     }
 
     // dim = 0
-    let s = SparseVec::<i32>::from_parts(0, vec![], vec![]);
+    let s = SparseVec::<i32>::from_parts_strictly_sorted(0, vec![], vec![]);
     let mut iter = s.clone().into_sparse_iter().sparse_filter_map(f);
     assert_eq!(iter.dim(), 0);
     assert_eq!(iter.next(), None);
     assert_eq!(iter.next(), None);
 
     // nnz = 0
-    let s = SparseVec::<i32>::from_parts(10, vec![], vec![]);
+    let s = SparseVec::<i32>::from_parts_strictly_sorted(10, vec![], vec![]);
     let mut iter = s.clone().into_sparse_iter().sparse_filter_map(f);
     assert_eq!(iter.dim(), 10);
     assert_eq!(iter.next(), None);
     assert_eq!(iter.next(), None);
 
     // forward
-    let s = SparseVec::from_parts(10, vec![7i32, -4, 5], vec![3, 6, 7]);
+    let s = SparseVec::from_parts_strictly_sorted(10, vec![7i32, -4, 5], vec![3, 6, 7]);
     let mut iter = s.clone().into_sparse_iter().sparse_filter_map(f);
     assert_eq!(iter.dim(), 10);
     assert_eq!(iter.next(), Some((3, 14)));
@@ -1394,28 +1296,34 @@ fn test_sparse_filter_map() {
 #[test]
 fn test_densify() {
     // dim = 0
-    let s = SparseVec::<f32>::from_parts(0, vec![], vec![]);
+    let s = SparseVec::<f32>::from_parts_strictly_sorted(0, vec![], vec![]);
     let d = vec![];
     assert_eq!(s.into_sparse_iter().densify().collect::<Vec<_>>(), d);
 
     // nnz = 0
-    let s = SparseVec::<f32>::from_parts(10, vec![], vec![]);
+    let s = SparseVec::<f32>::from_parts_strictly_sorted(10, vec![], vec![]);
     let d = vec![0.; 10];
     assert_eq!(s.into_sparse_iter().densify().collect::<Vec<_>>(), d);
 
     // something with zeros at endpoints
-    let s = SparseVec::from_parts(10, vec![7f32, 4., 5.], vec![3, 6, 7]);
+    let s = SparseVec::from_parts_strictly_sorted(10, vec![7f32, 4., 5.], vec![3, 6, 7]);
     let d = vec![0., 0., 0., 7., 0., 0., 4., 5., 0., 0.];
     assert_eq!(s.into_sparse_iter().densify().collect::<Vec<_>>(), d);
 
     // something with occupied endpoints
-    let s = SparseVec::from_parts(10, vec![7f32, 4.], vec![0, 9]);
+    let s = SparseVec::from_parts_strictly_sorted(10, vec![7f32, 4.], vec![0, 9]);
     let d = vec![7., 0., 0., 0., 0., 0., 0., 0., 0., 4.];
     assert_eq!(s.into_sparse_iter().densify().collect::<Vec<_>>(), d);
 }
 
 #[test]
 fn test_sparse_intersection() {
+    macro_rules! sparse_intersection {
+        ($a:expr, $b:expr) => {
+            $a.into_sparse_iter().sparse_intersection($b)
+        };
+    }
+
     // sparse_intersection with an empty vec
     let a = SparseVec::<f32>::from_dense(vec![]);
     let b = SparseVec::<f32>::from_dense(vec![0f32, 1.]);
