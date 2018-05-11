@@ -10,6 +10,17 @@
 /// See the examples module in the source for example usage.
 macro_rules! cartesian {
     (
+        //
+        // FIXME: remove macro name from invocation syntax.
+        //        The purpose of it was because earlier versions of rust
+        //        rejected duplicate macros with the same name.
+        //        In recent versions, new definitions simply replace old ones,
+        //        and so you may see sloppy code where the same name is reused.
+        //
+        //        (the macro name also serves to allow nesting of invocations;
+        //         but the monolithic design of the macro makes the ability to
+        //         nest rather pointless)
+        //
         $([$($groups:tt)*])*
         $mac:ident!($($mac_match:tt)*)
         => {$($mac_body:tt)*}$(;)*

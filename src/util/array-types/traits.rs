@@ -88,10 +88,11 @@ gen_each!{
 /// By using these traits instead of generating separate impls for
 /// every element type, we can improve compilation time through
 /// lazier codegen.
-///
-/// Some of these traits are 'unsafe' even though they cannot be
-/// named by the consumer.  This is for the benefit of the mantainer
-/// of this crate.
+//
+// FIXME ummmmm... in hindsight, the compile time claim seems dubious.
+//       I wrote that months ago, and I'm not sure what I was thinking then.
+//       Does this cause repeated compilation of the same code in
+//       downstream crates? :/
 pub(crate) mod internal {
     use ::std::ops::{Add, Sub, Mul, Div, Neg};
 
@@ -115,23 +116,17 @@ pub(crate) mod internal {
         RefDiv[Sized + for<'a> Div<&'a Self, Output=Self>];
     }
 
-    /// # Safety
-    ///
-    /// Unsafe code in this crate may make a variety of assumptions
-    /// about the semantics of functionality made available through
-    /// this trait (for instance, with respect to panic behavior).
-    /// Adding a new impl will require review of such code.
-    pub unsafe trait PrimitiveSemiring
+    pub trait PrimitiveSemiring
         : Sized + Copy + Clone + Default
         + PartialEq + PartialOrd
         + SelfAdd + RefAdd
         + SelfMul + RefMul
+        + ::num_traits::Zero
+        + ::num_traits::One
         + ::std::iter::Sum
         + ::std::iter::Product
     {
         fn from_uint(u: u8) -> Self;
-        #[inline(always)] fn zero() -> Self { Self::from_uint(0) }
-        #[inline(always)] fn one() -> Self { Self::from_uint(1) }
         #[inline(always)] fn two() -> Self { Self::from_uint(2) }
     }
 
@@ -139,19 +134,13 @@ pub(crate) mod internal {
         @{semiring}
         impl_primitive_semiring!({$T:ty})
         => {
-            unsafe impl PrimitiveSemiring for $T {
+            impl PrimitiveSemiring for $T {
                 #[inline(always)] fn from_uint(u: u8) -> $T { u as $T }
             }
         };
     }
 
-    /// # Safety
-    ///
-    /// Unsafe code in this crate may make a variety of assumptions
-    /// about the semantics of functionality made available through
-    /// this trait (for instance, with respect to panic behavior).
-    /// Adding a new impl will require review of such code.
-    pub unsafe trait PrimitiveRing
+    pub trait PrimitiveRing
         : PrimitiveSemiring
         + SelfSub + RefSub + SelfNeg
     {
@@ -162,19 +151,13 @@ pub(crate) mod internal {
         @{ring}
         impl_primitive_ring!({$T:ty})
         => {
-            unsafe impl PrimitiveRing for $T {
+            impl PrimitiveRing for $T {
                 #[inline(always)] fn from_int(i: i8) -> $T { i as $T }
             }
         };
     }
 
-    /// # Safety
-    ///
-    /// Unsafe code in this crate may make a variety of assumptions
-    /// about the semantics of functionality made available through
-    /// this trait (for instance, with respect to panic behavior).
-    /// Adding a new impl will require review of such code.
-    pub unsafe trait PrimitiveFloat
+    pub trait PrimitiveFloat
         : PrimitiveRing
         + SelfDiv + RefDiv
     {
@@ -191,7 +174,7 @@ pub(crate) mod internal {
         @{float}
         impl_primitive_float!({$T:ty})
         => {
-            unsafe impl PrimitiveFloat for $T {
+            impl PrimitiveFloat for $T {
                 #[inline(always)] fn sqrt(self) -> $T { self.sqrt() }
                 #[inline(always)] fn min(self, b: Self) -> $T { self.min(b) }
                 #[inline(always)] fn max(self, b: Self) -> $T { self.max(b) }

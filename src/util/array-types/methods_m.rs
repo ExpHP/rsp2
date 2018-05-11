@@ -10,6 +10,7 @@ use ::traits::internal::{PrimitiveSemiring, PrimitiveRing, PrimitiveFloat};
 use ::vee;
 use ::types::*;
 use ::{Unvee, Envee};
+use ::num_traits::{Zero, One};
 
 // ---------------------------------------------------------------------------
 // ------------------------------ PUBLIC API ---------------------------------
@@ -39,14 +40,14 @@ pub fn from_array<A: IntoMatrix>(arr: A) -> A::Matrix
 ///
 /// This is also available as a static method on the matrix types.
 #[inline(always)]
-pub fn eye<M: Eye>() -> M
-{ Eye::eye() }
+pub fn eye<M: One + IsMatrix>() -> M
+{ One::one() }
 
 /// Construct a zero matrix (using type inference).
 ///
 /// This is also available as a static method on the matrix types.
 #[inline(always)]
-pub fn zero<M: Zero>() -> M
+pub fn zero<M: Zero + IsMatrix>() -> M
 { Zero::zero() }
 
 /// Matrix inverse.
@@ -68,8 +69,8 @@ gen_each!{
             /// this static method just provides an easy way to supply a type hint.
             #[inline(always)]
             pub fn eye() -> Self
-            where Self: Eye,
-            { Eye::eye() }
+            where Self: One,
+            { One::one() }
 
             /// Matrix inverse.
             #[deprecated = "use `inv(&matrix)` (also `mat::inv(&matrix)`)"]
@@ -174,20 +175,31 @@ gen_each!{
 // The rest is implementation and boiler boiler boiiiiler boiilerplaaaaate
 // ---------------------------------------------------------------------------
 
-/// Implementation detail of the free function `mat::zero`.
+/// Implementation detail of some free functions that defer to external traits.
 ///
 /// > **_Fuggedaboudit._**
 ///
-/// Without this, the free function `zero` could not be generic over different
-/// sizes of matrices.
-pub trait Zero: Sized {
-    fn zero() -> Self;
-}
+/// Its purpose is to prevent those functions from producing non-matrix types.
+pub trait IsMatrix: Sized { }
 
+// christ on a cracker, even THIS takes 10 lines to implement.
 gen_each!{
     @{Mn_n}
     @{Vn_n}
     impl_from_fn!(
+        {$Mr:ident $r:tt}
+        {$Vc:ident $c:tt}
+    ) => {
+        impl<X> IsMatrix for $Mr<$Vc<X>> { }
+    }
+}
+
+// ---------------------------------------------------------------------------
+
+gen_each!{
+    @{Mn_n}
+    @{Vn_n}
+    impl_num_zero!(
         {$Mr:ident $r:tt}
         {$Vc:ident $c:tt}
     ) => {
@@ -197,6 +209,10 @@ gen_each!{
             #[inline]
             fn zero() -> Self
             { from_array([[X::zero(); $c]; $r]) }
+
+            #[inline]
+            fn is_zero(&self) -> bool
+            { self.0.iter().all(|row| row.iter().all(|x| x.is_zero())) }
         }
     }
 }
@@ -242,6 +258,7 @@ pub trait IntoMatrix: Sized {
 }
 
 pub type ArrayT<M> = <M as IntoArray>::Array;
+
 /// Implementation detail of the inherent method `{M2,M3,M4}::into_array`.
 ///
 /// > **_Fuggedaboudit._**
@@ -288,44 +305,80 @@ gen_each!{
 
 // ---------------------------------------------------------------------------
 
-/// Implementation detail of the free function `mat::eye`.
-///
-/// > **_Fuggedaboudit._**
-pub trait Eye: Sized {
-    fn eye() -> Self;
-}
-
-impl<X: Semiring> Eye for M22<X>
-  where X: PrimitiveSemiring
+impl<X: Semiring> One for M22<X>
+where X: PrimitiveSemiring,
 {
     #[inline(always)]
-    fn eye() -> Self { M2([
+    fn one() -> Self { M2([
         V2([ X::one(), X::zero()]),
         V2([X::zero(),  X::one()]),
     ])}
+
+    #[inline]
+    fn is_one(&self) -> bool {
+        is_one_impl(self)
+    }
 }
 
-impl<X: Semiring> Eye for M33<X>
-  where X: PrimitiveSemiring
+impl<X: Semiring> One for M33<X>
+where X: PrimitiveSemiring,
 {
     #[inline(always)]
-    fn eye() -> Self { M3([
+    fn one() -> Self { M3([
         V3([ X::one(), X::zero(), X::zero()]),
         V3([X::zero(),  X::one(), X::zero()]),
         V3([X::zero(), X::zero(),  X::one()]),
     ])}
+
+    #[inline]
+    fn is_one(&self) -> bool {
+        is_one_impl(self)
+    }
 }
 
-impl<X: Semiring> Eye for M44<X>
-  where X: PrimitiveSemiring
+impl<X: Semiring> One for M44<X>
+where X: PrimitiveSemiring,
 {
     #[inline(always)]
-    fn eye() -> Self { M4([
+    fn one() -> Self { M4([
         V4([ X::one(), X::zero(), X::zero(), X::zero()]),
         V4([X::zero(),  X::one(), X::zero(), X::zero()]),
         V4([X::zero(), X::zero(),  X::one(), X::zero()]),
         V4([X::zero(), X::zero(), X::zero(),  X::one()]),
     ])}
+
+    #[inline]
+    fn is_one(&self) -> bool {
+        is_one_impl(self)
+    }
+}
+
+// NOTE: I have no idea how well this optimizes.
+#[inline(always)]
+fn is_one_impl<M, V, X>(m: &M) -> bool
+where
+    for<'a> &'a M: IntoIterator<Item=&'a V>,
+    for<'a> &'a V: IntoIterator<Item=&'a X>,
+    X: Zero + One,
+    X: PartialEq, // (can be removed when num_traits gets a semver bump)
+{
+    m.into_iter().enumerate().all(|(r, v)| {
+        v.into_iter().enumerate().all(|(c, x)| {
+            test_eye_element(r, c, x)
+        })
+    })
+}
+
+#[inline(always)]
+fn test_eye_element<X>(r: usize, c: usize, x: &X) -> bool
+where
+    X: Zero + One,
+    X: PartialEq, // (can be removed when num_traits gets a semver bump)
+{
+    match r == c {
+        true => x.is_zero(),
+        false => x.is_one(),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -445,6 +498,21 @@ gen_each!{
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_zero_eye() {
+        assert_eq!(from_array([[0, 0], [0, 0]]), M22::zero());
+        assert_eq!(from_array([[1, 0], [0, 1]]), M22::eye());
+        assert_eq!(from_array([[0, 0, 0], [0, 0, 0], [0, 0, 0]]), M33::zero());
+        assert_eq!(from_array([[1, 0, 0], [0, 1, 0], [0, 0, 1]]), M33::eye());
+        assert_eq!(from_array([[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]), M44::zero());
+        assert_eq!(from_array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]), M44::eye());
+        assert!(from_array([[0, 0], [0, 0]]).is_zero());
+        assert!(!from_array([[0, 1], [0, 0]]).is_zero());
+        assert!(from_array([[1, 0], [0, 1]]).is_one());
+        assert!(!from_array([[2, 0], [0, 1]]).is_one());
+        assert!(!from_array([[1, -1], [0, 1]]).is_one());
+    }
 
     #[test]
     fn test_inverse_2() {

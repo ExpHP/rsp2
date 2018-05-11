@@ -13,6 +13,7 @@ path = "lib.rs"
 !!serde
 !!serde-derive
 !!slice-of-array
+!!num-traits
 
 # FIXME make this dev-dependencies once rust-lang-nursery/rls#169 is fixed
 !!rsp2-assert-close

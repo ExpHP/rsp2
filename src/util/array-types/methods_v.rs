@@ -4,6 +4,8 @@ use ::traits::internal::{PrimitiveSemiring, PrimitiveRing, PrimitiveFloat};
 
 use super::types::*;
 
+use ::num_traits::Zero;
+
 // ---------------------------------------------------------------------------
 // ------------------------------ PUBLIC API ---------------------------------
 
@@ -20,7 +22,7 @@ where F: FnMut(usize) -> B,
 /// Get a zero vector. (using type inference)
 #[inline(always)]
 pub fn zero<V: Zero>() -> V
-where V: Zero,
+where V: Zero + IsV,
 { Zero::zero() }
 
 gen_each!{
@@ -167,19 +169,9 @@ gen_each!{
 // The rest is implementation and boiler boiler boiiiiler boiilerplaaaaate
 // ---------------------------------------------------------------------------
 
-/// Implementation detail of the free function `vee::zero`.
-///
-/// > **_Fuggedaboudit._**
-///
-/// Without this, the free function `zero` could not be generic over different
-/// sizes of V.
-pub trait Zero: Sized {
-    fn zero() -> Self;
-}
-
 gen_each!{
     @{Vn_n}
-    impl_from_fn!(
+    impl_num_zero!(
         {$Vn:ident $n:tt}
     ) => {
         impl<X: Semiring> Zero for $Vn<X>
@@ -188,6 +180,10 @@ gen_each!{
             #[inline]
             fn zero() -> Self
             { $Vn([X::zero(); $n]) }
+
+            #[inline]
+            fn is_zero(&self) -> bool
+            { self.iter().all(Zero::is_zero) }
         }
     }
 }

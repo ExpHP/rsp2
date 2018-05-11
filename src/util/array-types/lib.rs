@@ -5,9 +5,12 @@ extern crate rsp2_array_utils;
 extern crate rsp2_assert_close;
 
 extern crate serde;
-#[macro_use] extern crate serde_derive;
+#[macro_use]
+extern crate serde_derive;
 extern crate slice_of_array;
-#[cfg(test)] extern crate rand;
+#[cfg(test)]
+extern crate rand;
+extern crate num_traits;
 
 #[macro_use] mod macros;
 
