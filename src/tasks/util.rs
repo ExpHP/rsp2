@@ -21,6 +21,23 @@ impl fmt::Display for AtomicCounter {
 
 //--------------------------------------------------------
 
+macro_rules! zip_eq {
+    ($a:expr $(,)*) => {
+        $a.into_iter().map(|a| (a,))
+    };
+    ($a:expr, $b:expr $(,)*) => {
+        ::util::zip_eq($a, $b)
+    };
+    ($a:expr, $b:expr, $c:expr $(,)*) => {
+        ::util::zip_eq(::util::zip_eq($a, $b), $c)
+            .map(|((a, b), c)| (a, b, c))
+    };
+    ($a:expr, $b:expr, $c:expr, $d:expr $(,)*) => {
+        ::util::zip_eq(::util::zip_eq(::util::zip_eq($a, $b), $c), $d)
+            .map(|(((a, b), c), d)| (a, b, c, d))
+    };
+}
+
 pub(crate) fn zip_eq<As, Bs>(a: As, b: Bs) -> ::std::iter::Zip<As::IntoIter, Bs::IntoIter>
 where
     As: IntoIterator, As::IntoIter: ExactSizeIterator,

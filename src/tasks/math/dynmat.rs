@@ -2,9 +2,10 @@
 
 use ::FailResult;
 use ::rsp2_array_types::{V3, M33, M3};
-use ::rsp2_soa_ops::{Perm};
+use ::rsp2_soa_ops::{Perm, Permute};
 use ::rsp2_structure::supercell::SupercellToken;
 use ::std::collections::HashMap;
+
 use ::slice_of_array::prelude::*;
 
 #[derive(Debug, Clone, Default)]
@@ -17,12 +18,10 @@ pub struct ForceSets {
     //  but I feel that storing supercell sites is safer, because it forces us
     //  to be wary of the fact that rotations might move `atom_displaced` to a
     //  different cell. (which is a fact we must account for in `atom_affected`))
-    //
-    // FIXME shouldn't need to be pub(crate)
-    pub(crate) atom_displaced: Vec<usize>,
-    pub(crate) atom_affected: Vec<usize>,
-    pub(crate) cart_force: Vec<V3>,
-    pub(crate) cart_displacement: Vec<V3>,
+    atom_displaced: Vec<usize>,
+    atom_affected: Vec<usize>,
+    cart_force: Vec<V3>,
+    cart_displacement: Vec<V3>,
 }
 
 // Displaced atoms are always in this cell.
@@ -194,11 +193,114 @@ impl ForceSets {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct ForceConstants {
     row_atom: Vec<usize>,
     col_atom: Vec<usize>,
     // this might be awkward to work with...
     cart_matrix: Vec<M33>,
+}
+
+impl ForceConstants {
+    pub(crate) fn symmetrize_by_transpose(mut self) -> Self {
+        let t = self.clone().transpose();
+        self.extend(t);
+        for m in &mut self.cart_matrix {
+            *m *= 0.5;
+        }
+        self
+    }
+
+    /// Transpose as if it were a 3N by 3N matrix.
+    pub(crate) fn transpose(self) -> Self {
+        let ForceConstants { row_atom, col_atom, cart_matrix } = self;
+        let cart_matrix = cart_matrix.into_iter().map(|m| m.t()).collect();
+        ForceConstants {
+            row_atom: col_atom,
+            col_atom: row_atom,
+            cart_matrix,
+        }
+    }
+
+    pub(crate) fn extend(&mut self, other: Self) {
+        self.row_atom.extend(other.row_atom);
+        self.col_atom.extend(other.col_atom);
+        self.cart_matrix.extend(other.cart_matrix);
+    }
+
+    /// Ensure that at most a single item per atom pair exists by summing duplicates.
+    pub(crate) fn canonicalize(self) -> Self {
+        let ForceConstants { row_atom, col_atom, cart_matrix } = self;
+        // sort row major
+        let perm = {
+            let sort_data = zip_eq!(&row_atom, &col_atom).collect::<Vec<_>>();
+            Perm::argsort(&sort_data)
+        };
+        let row_atom = row_atom.permuted_by(&perm);
+        let col_atom = col_atom.permuted_by(&perm);
+        let cart_matrix = cart_matrix.permuted_by(&perm);
+
+        // reduce
+        let iter = zip_eq!(zip_eq!(row_atom, col_atom), cart_matrix);
+        let iter = IntoReducedIter::new(iter, ::std::ops::Add::add);
+        let (pos, cart_matrix): (Vec<_>, _) = iter.unzip();
+        let (row_atom, col_atom) = pos.into_iter().unzip();
+
+        ForceConstants { row_atom, col_atom, cart_matrix }
+    }
+}
+
+use self::reduce_items::IntoReducedIter;
+mod reduce_items {
+    // from an old project
+
+    /// Iterator adapter that sums consecutive consecutive Ts with the same key pair.
+    #[must_use = "iterator adaptors are lazy and do nothing unless consumed"]
+    pub struct IntoReducedIter<K, T, F> {
+        iter: ::std::iter::Peekable<::std::vec::IntoIter<(K, T)>>,
+        function: F,
+    }
+
+    impl<K: Eq, T, F> IntoReducedIter<K, T, F>
+    where
+        F: FnMut(T, T) -> T,
+    {
+        #[inline]
+        pub fn new(iter: impl IntoIterator<Item=(K, T)>, function: F) -> Self {
+            IntoReducedIter {
+                iter: iter.into_iter().collect::<Vec<_>>().into_iter().peekable(),
+                function,
+            }
+        }
+    }
+
+    impl<K: Eq, T, F> Iterator for IntoReducedIter<K, T, F>
+    where
+        K: Copy, // greatly simplifies a borrowck issue
+        F: FnMut(T, T) -> T,
+    {
+        type Item = (K, T);
+        #[inline]
+        fn next(&mut self) -> Option<Self::Item> {
+            self.iter.next().and_then(|(pos, mut val)| {
+                while let Some(&(next_pos, _)) = self.iter.peek() {
+                    if next_pos == pos {
+                        val = (self.function)(val, self.iter.next().unwrap().1);
+                    } else {
+                        break;
+                    }
+                }
+                Some((pos, val))
+            })
+        }
+
+        #[inline]
+        fn size_hint(&self) -> (usize, Option<usize>) {
+            // any number of elements may be reduced together
+            let (lo, hi) = self.iter.size_hint();
+            (::std::cmp::min(lo, 1), hi)
+        }
+    }
 }
 
 

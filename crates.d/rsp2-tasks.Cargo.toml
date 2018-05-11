@@ -25,6 +25,7 @@ path = "lib.rs"
 !!rsp2-clap
 !!rsp2-assert-close
 !!rsp2-linalg
+!!rsp2-sparse-matrix
 
 !!clap
 !!slice-of-array

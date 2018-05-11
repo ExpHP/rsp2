@@ -79,8 +79,9 @@ macro_rules! throw {
 }
 
 #[macro_use]
-mod traits;
 mod util;
+#[macro_use]
+mod traits;
 mod cmd;
 mod phonopy;
 mod math;
