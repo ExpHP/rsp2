@@ -14,7 +14,11 @@ path = "lib.rs"
 
 [dependencies]
 rsp2-soa-ops = { path = "../soa-ops" }
+rsp2-assert-close = { path = "../assert-close" }
+
+num-traits = "0.2.3"
+rustc-test = "0.3.0"
 
 [features]
-nightly = ["beta", "rsp2-soa-ops/nightly"]
-beta = ["rsp2-soa-ops/beta"]
+nightly = ["beta", "rsp2-assert-close/nightly", "rsp2-soa-ops/nightly"]
+beta = ["rsp2-assert-close/beta", "rsp2-soa-ops/beta"]
