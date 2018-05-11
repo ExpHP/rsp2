@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="utf-8"?>
+<v_sim>
+  <resources version="3.0">
+    <!-- Define a new shade by giving colours to points ; label (val [name|#rgb|#rrggbb|...], ...) -->
+
+    <!-- The radius of the element and its shape, a real > 0. & [Sphere Cube Elipsoid Point] -->
+    <entry name="atomic_radius_shape" id="Si">     1.175 Cube</entry>
+    <entry name="atomic_radius_shape" id="Al">     1.430 Cube</entry>
+    <entry name="atomic_radius_shape" id="Ag">     1.430 Cube</entry>
+    <entry name="atomic_radius_shape" id="Au">     1.437 Cube</entry>
+    <entry name="atomic_radius_shape" id="Ge">     1.225 Cube</entry>
+    <entry name="atomic_radius_shape" id="O">     1.350 Cube</entry>
+    <entry name="atomic_radius_shape" id="C">     0.300 Cube</entry>
+    <entry name="atomic_radius_shape" id="Cd">     1.490 Cube</entry>
+    <entry name="atomic_radius_shape" id="Pd">     1.375 Cube</entry>
+    <entry name="atomic_radius_shape" id="Te">     1.430 Cube</entry>
+    <entry name="atomic_radius_shape" id="Co">     1.250 Cube</entry>
+    <entry name="atomic_radius_shape" id="Fe">     1.240 Cube</entry>
+    <entry name="atomic_radius_shape" id="Cu">     1.250 Cube</entry>
+    <entry name="atomic_radius_shape" id="H">     0.500 Cube</entry>
+    <entry name="atomic_radius_shape" id="Ni">     1.243 Cube</entry>
+    <entry name="atomic_radius_shape" id="Pt">     1.385 Cube</entry>
+    <entry name="atomic_radius_shape" id="B">     0.300 Cube</entry>
+    <entry name="atomic_radius_shape" id="N">     0.300 Cube</entry>
+    <entry name="atomic_radius_shape" id="F">     0.300 Cube</entry>
+
+    <!-- Global or element resource for rendering spin module -->
+    <entry name="spin_resources" id="spin_global_color_cone">0.000000 0.000000</entry>
+    <entry name="spin_resources" id="spin_global_color_wheel">0.000000</entry>
+    <entry name="spin_resources" id="spin_global_hiding_mode">never</entry>
+    <entry name="spin_resources" id="spin_global_atomic">0</entry>
+    <entry name="spin_resources" id="spin_global_modulus">0</entry>
+
+    <!-- Apply colourisation only if in range. -->
+    <entry name="colorization_restrictInRange">0</entry>
+
+    <!-- Line width for drawing of paths ; float (positive) -->
+    <entry name="path_lineWidth">3.000000</entry>
+
+    <!-- Choose the scale to draw the legend for coloured maps ; float (positive) -->
+    <entry name="map_legendScale">1.000000</entry>
+    <!-- Choose the legend position ; two floats (between 0 and 1) -->
+    <entry name="map_legendPosition">0.000000 0.000000</entry>
+
+    <!-- Control if the axes are drawn ; boolean (0 or 1) -->
+    <entry name="axes_are_on">1</entry>
+    <!-- Define the color of the axes ; three floating point values (0. <= v <= 1.) -->
+    <entry name="axes_color">1.000 1.000 1.000</entry>
+    <!-- Define the width of the lines of the axes ; one floating point values (1. <= v <= 10.) -->
+    <entry name="axes_line_width">   3</entry>
+    <!-- Dot scheme detail for the lines of the axes ; 0 < integer < 2^16 -->
+    <entry name="axes_line_stipple">65535</entry>
+    <!-- Position of the representation of the axes ; two floating point values (0. <= v <= 1.) -->
+    <entry name="axes_position">1.000 1.000</entry>
+
+    <!-- Control if a box is drawn around the rendering area ; boolean (0 or 1) -->
+    <entry name="box_is_on">1</entry>
+    <!-- Define the color of the box ; three floating point values (0. <= v <= 1.) -->
+    <entry name="box_color">1.000 1.000 1.000</entry>
+    <!-- Define the width of the lines of the box ; one integer (1. <= v <= 10.) -->
+    <entry name="box_line_width">   2</entry>
+    <!-- Dot scheme detail for the lines of the box (main and expanded) ; 0 < 2 integers < 2^16 -->
+    <entry name="box_line_stipple">65535 65280</entry>
+
+    <!-- Print the box lengths ; boolean (0 or 1) -->
+    <entry name="box_show_lengths">0</entry>
+    <!-- Position of the legend area for the box ; two floating point values (0. <= v <= 1.) -->
+    <entry name="box_legend_position">0.500 0.000</entry>
+
+    <!-- Control if the legend is drawn ; boolean (0 or 1) -->
+    <entry name="legend_is_on">1</entry>
+
+    <!-- This value is the width for all pairs drawn ; "ele1" "ele2" 0 < integer < 10 -->
+    <entry name="pairWire_width">2</entry>
+    <!-- Widths detail for each drawn link ; "ele1" "ele2" 0 < integer < 10 -->
+    <!-- Dot scheme detail for each drawn link ; "ele1" "ele2" 0 < integer < 2^16 -->
+    <!-- For each given pair, if positive, use a shade to colourise pairs depending on length ; "ele1" "ele2" -1 or a positive shade id -->
+
+    <!-- It chooses the colors of the cylinders according differents criterion ; 0 <= integer < 2 -->
+    <entry name="cylinder_colorType">0</entry>
+    <!-- This value is the default radius of the pairs drawn as cylinders ; 0 < real < 10 -->
+    <entry name="pairCylinder_radius">0.150000</entry>
+    <!-- This value is the radius for specific pairs drawn as cylinders ; element1 elemen2 0 < real < 10 -->
+
+    <!-- Ask the opengl engine to draw pairs between elements ; boolean 0 or 1 -->
+    <entry name="pairs_are_on">0</entry>
+    <!-- Favorite method used to render files ; chain ('Wire pairs', 'Cylinder pairs') -->
+    <entry name="pairs_favoriteMethod">Wire pairs</entry>
+    <!-- Draw a link between [ele1] [ele2] [0. <= dmin] [0. <= dmax] -->
+    <!--                     [0. <= RGB <= 1.]x3 [bool: drawn] [bool: printLength] [string: method] -->
+    <entry name="pair_link" id="Au Ni  0.000 0.000">1.000 0.600 0.200  1  0  Wire pairs</entry>
+    <entry name="pair_link" id="Ni Ni  0.000 4.100">0.750 0.400 0.200  1  0  Wire pairs</entry>
+    <entry name="pair_link" id="Si Si  2.200 2.500">0.750 0.400 0.200  1  0  Wire pairs</entry>
+    <entry name="pair_link" id="Au Au  0.000 4.100">1.000 0.600 0.200  1  0  Wire pairs</entry>
+
+    <!-- Choose if the interior is drawn in color inverse ; a boolean (0 or 1) -->
+    <entry name="isosurfaces_drawIntra">0</entry>
+
+    <!-- Set the background of the background ; four floating point values (0. <= v <= 1.) -->
+    <entry name="backgroundColor_color">0.000 0.000 0.000 1.000</entry>
+
+    <!-- Control if the fog is used ; boolean (0 or 1) -->
+    <entry name="fog_is_on">1</entry>
+    <!-- Control if the fog uses a specific color ; boolean (0 or 1) -->
+    <entry name="fog_color_is_specific">0</entry>
+    <!-- Define the color of the fog ; four floating point values (0. <= v <= 1.) -->
+    <entry name="fog_specific_color">0.000 0.000 0.000 0.000</entry>
+    <!-- Define the position of the fog ; two floating point values (0. <= v <= 1.) -->
+    <entry name="fog_start_end">0.600 0.850</entry>
+
+    <!-- Give the factor for the highlight radius ; one float (> 1.) -->
+    <entry name="highlight_radiusFactor">1.250000</entry>
+
+    <!-- Describe the arrow to be drawn ; four floats (tail lg. tail rd. head lg. head rd., negative values means auto) -->
+    <entry name="nodeDisplacement_arrow">4.000000 0.200000 0.500000 0.300000</entry>
+    <!-- Choose the factor to draw arrows in geometry differences ; float (negative means auto) -->
+    <entry name="nodeDisplacement_factor">-1.000000</entry>
+    <!-- Choose the minimum value for drawn arrows in geometry differences ; float (ratio threshold if between -1 and 0) -->
+    <entry name="nodeDisplacement_minThreshold">-0.100000</entry>
+    <!-- Choose the minimum value for labels in geometry differences ; float (ratio threshold if between -1 and 0) -->
+    <entry name="nodeDisplacement_lblThreshold">-0.900000</entry>
+
+    <!-- Control if scales are drawn ; boolean (0 or 1) -->
+    <entry name="scales_are_on">0</entry>
+    <!-- Define the color RGBA of all scales ; four floating point values (0. <= v <= 1.) -->
+    <entry name="scales_color">0.000 0.000 0.000 1.000</entry>
+    <!-- Define the width of the lines of all scales ; one floating point value (1. <= v <= 10.) -->
+    <entry name="scales_line_width">   1</entry>
+    <!-- Define the stipple pattern of the lines of all scales ; one integer value (0 <= v <= 65535) -->
+    <entry name="scales_line_stipple">65535</entry>
+    <!-- Define the position, the direction, the length and the legend of a scale ; position[3] direction[3] length legend -->
+    <entry name="scale_definition">0 0 0  1 0 0  5  [auto]</entry>
+
+    <!-- Control if the forces are drawn when available ; boolean (0 or 1) -->
+    <entry name="forces_are_on">0</entry>
+    <!-- Scaling factor (or automatic) for the force rendering ; float (-1 for auto or a positive value) -->
+    <entry name="forces_scale">-1.000000</entry>
+
+    <!-- 2 real values (degrees) for user orientation with respect to sample -->
+    <entry name="opengl_theta_phi_omega">   62.500   -69.200     0.000</entry>
+    <!-- 2 real values for image position with respect to [0.0, 1.0]x[0.0, 1.0] window -->
+    <entry name="opengl_xs_ys">    0.500     0.500</entry>
+    <!-- gross factor (must be real > 0.0) -->
+    <entry name="opengl_gross">    1.000</entry>
+    <!-- reduced perspective distance (must be real > 1.0) -->
+    <entry name="opengl_d_red">  100.000</entry>
+
+    <!-- Codes the main color in RedGreenBlueAlpha formatand the light effects on material, nine floats between 0. and 1. -->
+    <entry name="element_color" id="Si">0.000 1.000 0.200 1.000   0.20 0.54 0.69 0.50 0.20</entry>
+    <entry name="element_color" id="Al">0.600 0.600 1.000 1.000   0.25 0.80 0.50 0.70 0.00</entry>
+    <entry name="element_color" id="Ag">1.000 1.000 1.000 1.000   0.20 0.60 0.50 1.00 0.00</entry>
+    <entry name="element_color" id="Au">1.000 0.750 0.040 1.000   0.54 0.54 0.16 0.52 0.00</entry>
+    <entry name="element_color" id="Ge">0.000 1.000 0.800 1.000   0.20 0.54 0.69 0.50 0.20</entry>
+    <entry name="element_color" id="O">1.000 0.200 0.200 1.000   0.60 0.60 0.00 0.00 0.00</entry>
+    <entry name="element_color" id="C">1.000 0.750 0.040 1.000   0.20 0.54 0.69 0.50 0.20</entry>
+    <entry name="element_color" id="Cd">0.000 0.800 1.000 1.000   0.50 0.00 0.12 0.50 0.20</entry>
+    <entry name="element_color" id="Pd">1.000 1.000 0.800 1.000   0.50 0.00 0.12 0.50 0.20</entry>
+    <entry name="element_color" id="Te">0.900 0.400 0.100 1.000   0.20 0.54 0.69 0.50 0.20</entry>
+    <entry name="element_color" id="Co">1.000 0.500 0.800 1.000   0.50 0.00 0.12 0.50 0.20</entry>
+    <entry name="element_color" id="Fe">1.000 0.500 0.000 1.000   0.50 0.00 0.12 0.50 0.20</entry>
+    <entry name="element_color" id="Cu">1.000 0.560 0.340 1.000   0.20 0.70 0.10 0.24 0.15</entry>
+    <entry name="element_color" id="H">1.000 1.000 1.000 1.000   0.60 0.60 0.00 0.00 0.00</entry>
+    <entry name="element_color" id="Ni">1.000 0.300 0.300 1.000   0.50 0.00 0.12 0.50 0.20</entry>
+    <entry name="element_color" id="Pt">1.000 0.800 0.800 1.000   0.50 0.00 0.12 0.50 0.20</entry>
+    <entry name="element_color" id="B">0.000 0.800 1.000 1.000   0.25 0.25 0.25 0.25 0.25</entry>
+    <entry name="element_color" id="N">0.000 1.000 0.200 1.000   0.25 0.25 0.25 0.25 0.25</entry>
+    <entry name="element_color" id="F">1.000 0.300 0.300 1.000   0.25 0.25 0.25 0.25 0.25</entry>
+    <!-- Define some properties ; rendered (0 or 1) masked(0 or 1). -->
+    <entry name="element_properties" id="Si">1 1</entry>
+    <entry name="element_properties" id="Al">1 1</entry>
+    <entry name="element_properties" id="Ag">1 1</entry>
+    <entry name="element_properties" id="Au">1 1</entry>
+    <entry name="element_properties" id="Ge">1 1</entry>
+    <entry name="element_properties" id="O">1 1</entry>
+    <entry name="element_properties" id="C">1 1</entry>
+    <entry name="element_properties" id="Cd">1 1</entry>
+    <entry name="element_properties" id="Pd">1 1</entry>
+    <entry name="element_properties" id="Te">1 1</entry>
+    <entry name="element_properties" id="Co">1 1</entry>
+    <entry name="element_properties" id="Fe">1 1</entry>
+    <entry name="element_properties" id="Cu">1 1</entry>
+    <entry name="element_properties" id="H">1 1</entry>
+    <entry name="element_properties" id="Ni">1 1</entry>
+    <entry name="element_properties" id="Pt">1 1</entry>
+    <entry name="element_properties" id="B">1 1</entry>
+    <entry name="element_properties" id="N">1 1</entry>
+    <entry name="element_properties" id="F">1 1</entry>
+
+  </resources>    <planes>
+  </planes>    <pick data-mode="never" data-infos="-1">
+  </pick></v_sim>
