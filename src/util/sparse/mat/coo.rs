@@ -8,12 +8,15 @@ use ::rsp2_soa_ops::{Perm};
 /// A sparse format which simply stores triplets of `(row, column, value)`.
 ///
 /// The COO format is a suitable format for the initial construction of sparse
-///  matrices.  However, it is a poor format for most other operations, and
-///  should be converted to a different type of matrix as soon as possible.
+/// matrices.  However, it is a poor format for most other operations, and
+/// should be converted to a different type of matrix as soon as possible.
 ///
 /// COO matrices are allowed to store multiple elements at the same coordinates,
 /// with the "true" value at that position being the sum of the values.  This is
 /// in line with its intended use-case as a format for sparse matrix construction.
+///
+/// Equality testing between two COO matrices is "dumb" and expects the coordinates
+/// to match exactly, duplicates and all.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CooMat<T> {
     dim: (usize, usize),
@@ -40,10 +43,8 @@ impl<T> CooMat<T> {
     /// Create a zero matrix.
     #[inline]
     pub fn new(dim: (usize, usize)) -> CooMat<T> {
-        CooMat {
-            dim: dim,
-            vec: vec![],
-        }
+        let vec = vec![];
+        CooMat { dim, vec }
     }
 
     /// Sort the elements by row, then column.
@@ -56,6 +57,19 @@ impl<T> CooMat<T> {
     #[inline]
     pub fn sort_column_major(&mut self) {
         self.vec.sort_by_key(|&((r, c), _)| (c, r))
+    }
+
+    /// Transpose the matrix, consuming it.
+    #[cfg_attr(feature = "nightly", must_use = "not an in-place operation!")]
+    #[inline]
+    pub fn transpose(self) -> Self {
+        let CooMat { dim: (nr, nc), mut vec } = self;
+
+        for (pos, _) in &mut vec {
+            *pos = (pos.1, pos.0);
+        }
+        let dim = (nc, nr);
+        CooMat { dim, vec }
     }
 
     /// Sums sequential elements at the same position.
@@ -105,10 +119,8 @@ impl<T> CooMat<T> {
     where
         I: IntoIterator<Item = ((usize, usize), T)>,
     {
-        CooMat {
-            dim: dim,
-            vec: check_positions!(dim, it.into_iter()).collect(),
-        }
+        let vec = check_positions!(dim, it.into_iter()).collect();
+        CooMat { dim, vec }
     }
 
     /// Modifies the indices in such a way as to effectively permute the rows of the dense matrix.
@@ -317,5 +329,17 @@ fn test_permute() {
     assert_eq!(
         coo.clone().permute_columns(&Perm::eye(4).shift_right(1)),
         CooMat::<i32>::from_iter((3, 4), vec![((1, 2), 9)]),
+    );
+}
+
+#[test]
+fn test_transpose() {
+    let coo = CooMat::<i32>::from_iter((0, 0), vec![]);
+    assert_eq!(coo.clone().transpose(), coo.clone());
+
+    let coo = CooMat::<i32>::from_iter((3, 4), vec![((1, 0), 9)]);
+    assert_eq!(
+        coo.clone().transpose(),
+        CooMat::<i32>::from_iter((4, 3), vec![((0, 1), 9)]),
     );
 }

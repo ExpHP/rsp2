@@ -80,11 +80,9 @@ macro_rules! sparse_sparse_impls {
                 A: Sized,
                 B: Sized,
             {
-                assert!(
-                    a.dim() == b.dim(),
-                    "Dimension mismatch: {} vs {}",
-                    a.dim(),
-                    b.dim()
+                assert_eq!(
+                    a.dim(), b.dim(),
+                    "Dimension mismatch",
                 );
                 let dim = a.dim();
                 $Result {
@@ -266,11 +264,9 @@ macro_rules! sparse_dense_impls {
                 A: Sized,
                 B: Sized,
             {
-                assert!(
-                    a.dim() == b.dim(),
-                    "Dimension mismatch: {} vs {}",
-                    a.dim(),
-                    b.dim()
+                assert_eq!(
+                    a.dim(), b.dim(),
+                    "Dimension mismatch",
                 );
                 $Result {
                     sparse: a,
