@@ -2,24 +2,13 @@
 !!CRATE-NAME-LINE
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
-description = "Periodic chemical structure type."
+description = "Common interfaces for partitioning and permuting data."
 
 [lib]
 path = "lib.rs"
 
 [dependencies]
-!!rsp2-array-utils
-!!rsp2-array-types
-!!rsp2-assert-close
-!!rsp2-soa-ops
-
 !!failure
-!!slice-of-array
-!!ordered-float
-!!itertools
-!!lazy-static
-!!log
-
 !!rand
 
 [features]

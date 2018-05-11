@@ -17,6 +17,7 @@ extern crate rsp2_structure_gen;
 extern crate rsp2_phonopy_io;
 extern crate rsp2_array_utils;
 extern crate rsp2_array_types;
+extern crate rsp2_soa_ops;
 extern crate rsp2_slice_math;
 extern crate rsp2_fs_util;
 extern crate rsp2_linalg;

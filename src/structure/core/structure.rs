@@ -1,7 +1,6 @@
 use ::{Lattice, CoordsKind, Element};
-use ::oper::{Perm, Permute};
-use ::oper::{Part, Partition};
-use ::oper::part::Unlabeled;
+use ::rsp2_soa_ops::{Perm, Permute};
+use ::rsp2_soa_ops::{Part, Partition, Unlabeled};
 use ::rsp2_array_types::{M33, V3, Unvee};
 
 /// Pairs [`CoordsKind`] together with their [`Lattice`].

@@ -1,6 +1,4 @@
-pub(crate) mod perm;
-pub(crate) use self::perm::{Perm, Permute};
-pub(crate) mod part;
-pub(crate) use self::part::{Part, Partition};
+// FIXME this mod seems redundant now that the 'perm' and 'part' submodules have been moved...
+//       I guess symmops could be moved up one level.
 
 pub(crate) mod symmops;

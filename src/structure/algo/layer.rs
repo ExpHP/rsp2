@@ -1,6 +1,6 @@
 use ::failure::Error;
 use ::{Structure, Lattice};
-use ::{Permute, Perm};
+use ::rsp2_soa_ops::{Permute, Perm};
 
 use ::std::mem;
 use ::itertools::Itertools;
@@ -312,8 +312,15 @@ impl Permute for LayersPerUnitCell {
 #[deny(unused)]
 mod tests {
     use super::*;
-    use ::{Permute, Perm};
+    use ::rsp2_soa_ops::{Permute, Perm};
     use ::rsp2_array_types::Envee;
+
+    fn shuffle<T: Clone>(xs: &[T]) -> (Vec<T>, Perm)
+    {
+        let xs = xs.to_vec();
+        let perm = Perm::random(xs.len() as u32);
+        (xs.permuted_by(&perm), perm)
+    }
 
     #[test]
     fn layer_separation_eq_one() {
@@ -337,7 +344,6 @@ mod tests {
             }),
         );
     }
-
 
     #[test]
     fn find_layers_impl() {
@@ -408,7 +414,7 @@ mod tests {
         );
 
         // put them out of order
-        let (fracs, perm) = ::oper::perm::shuffle(&fracs);
+        let (fracs, perm) = shuffle(&fracs);
 
         check(
             (&fracs, &lattice, &V3([0, 1, 0]), cart_tol),

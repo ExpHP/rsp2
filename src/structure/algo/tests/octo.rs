@@ -23,7 +23,8 @@
 //!   *G*<sup>op</sup>, where the operations compose in reverse.
 //!   See https://github.com/ExpHP/rsp2/issues/1#issuecomment-340279243
 
-use ::{Perm, FracRot};
+use ::FracRot;
+use ::rsp2_soa_ops::{Perm};
 
 use ::rsp2_array_types::{V3, vee, Envee};
 
@@ -208,7 +209,7 @@ lazy_static! {
 mod tests {
     use super::*;
     use ::algo::group::generate_finite_group;
-    use ::Permute;
+    use ::rsp2_soa_ops::Permute;
 
     use ::std::fmt::Debug;
     use ::std::hash::Hash;

@@ -9,8 +9,9 @@ use ::math::bands::{GammaUnfolder, ScMatrix};
 use ::itertools::Itertools;
 use ::rsp2_tasks_config::Settings;
 
+use ::rsp2_structure::{Coords, Element};
 #[allow(unused)] // compiler bug
-use ::rsp2_structure::{Coords, Part, Partition, Element};
+use ::rsp2_soa_ops::{Part, Partition};
 
 use ::std::fmt;
 use ::serde_yaml::Value as YamlValue;

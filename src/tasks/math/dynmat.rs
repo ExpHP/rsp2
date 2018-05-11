@@ -2,7 +2,7 @@
 
 use ::FailResult;
 use ::rsp2_array_types::{V3, M33, M3};
-use ::rsp2_structure::{Perm};
+use ::rsp2_soa_ops::{Perm};
 use ::rsp2_structure::supercell::SupercellToken;
 use ::std::collections::HashMap;
 use ::slice_of_array::prelude::*;

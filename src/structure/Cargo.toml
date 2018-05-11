@@ -16,6 +16,7 @@ path = "lib.rs"
 rsp2-array-utils = { path = "../util/array" }
 rsp2-array-types = { path = "../util/array-types" }
 rsp2-assert-close = { path = "../util/assert-close" }
+rsp2-soa-ops = { path = "../util/soa-ops" }
 
 failure = "0.1"
 slice-of-array = "0.2"
@@ -27,5 +28,5 @@ log = "0.3"
 rand = "0.3"
 
 [features]
-nightly = ["beta", "rsp2-array-types/nightly", "rsp2-array-utils/nightly", "rsp2-assert-close/nightly"]
-beta = ["rsp2-array-types/beta", "rsp2-array-utils/beta", "rsp2-assert-close/beta"]
+nightly = ["beta", "rsp2-array-types/nightly", "rsp2-array-utils/nightly", "rsp2-assert-close/nightly", "rsp2-soa-ops/nightly"]
+beta = ["rsp2-array-types/beta", "rsp2-array-utils/beta", "rsp2-assert-close/beta", "rsp2-soa-ops/beta"]

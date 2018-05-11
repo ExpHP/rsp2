@@ -7,9 +7,6 @@ use ::IntPrecisionError;
 
 use ::rsp2_array_types::{V3, M33, M3};
 
-#[cfg(test)] use ::std::rc::Rc;
-#[cfg(test)] use ::std::cell::RefCell;
-
 pub(crate) fn translate_mut_n3_3(coords: &mut [V3], t: &V3)
 {
     for row in coords {
@@ -62,39 +59,4 @@ impl Tol {
 
     pub(crate) fn unfloat_m33(&self, m: &M33) -> Result<M33<i32>, IntPrecisionError>
     { ::rsp2_array_utils::try_map_arr(m.0, |v| self.unfloat_v3(&v)).map(M3) }
-}
-
-pub(crate) fn zip_eq<As, Bs>(a: As, b: Bs) -> ::std::iter::Zip<As::IntoIter, Bs::IntoIter>
-where
-    As: IntoIterator, As::IntoIter: ExactSizeIterator,
-    Bs: IntoIterator, Bs::IntoIter: ExactSizeIterator,
-{
-    let (a, b) = (a.into_iter(), b.into_iter());
-    assert_eq!(a.len(), b.len());
-    a.zip(b)
-}
-
-#[cfg(test)]
-pub(crate) struct DropPusher<T: Copy>(pub Rc<RefCell<Vec<T>>>, pub T);
-
-#[cfg(test)]
-impl<T: Copy + 'static> DropPusher<T> {
-    /// Create a shared vector, and a `new` function which constructs
-    /// `DropPushers` tied to that vector.
-    pub fn new_trial() -> (Rc<RefCell<Vec<T>>>, Box<Fn(T) -> DropPusher<T>>)
-    {
-        let history = Rc::new(RefCell::new(vec![]));
-        let new = {
-            let history = history.clone();
-            Box::new(move |x| DropPusher(history.clone(), x))
-        };
-        (history, new)
-    }
-}
-
-#[cfg(test)]
-impl<T: Copy> Drop for DropPusher<T> {
-    fn drop(&mut self) {
-        self.0.borrow_mut().push(self.1);
-    }
 }

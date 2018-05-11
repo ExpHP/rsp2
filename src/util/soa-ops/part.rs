@@ -1,4 +1,4 @@
-use ::oper::Permute;
+use ::{Perm, Permute};
 use ::std::iter::FusedIterator;
 
 /// Type of "a thing that has been partitioned."
@@ -208,8 +208,6 @@ impl<'iter, T: 'iter> Partition<'iter> for Vec<T> {
 /// The `Perm` returned permutes a vector so that all data for the first label
 /// comes last, with all the data for the second label before it, and so on.
 /// Ordering within each label follows the order required by the `Partition` trait.
-///
-/// It also gives a vector of each region's length, starting with the first label.
 pub fn composite_perm_for_part_lifo<L>(part: &Part<L>) -> ::Perm
 {
     let mut sort_keys = vec![::std::usize::MAX; part.index_limit];
@@ -221,7 +219,7 @@ pub fn composite_perm_for_part_lifo<L>(part: &Part<L>) -> ::Perm
         }
     }
     debug_assert!(sort_keys.iter().all(|&x| x != ::std::usize::MAX));
-    ::oper::Perm::argsort(&sort_keys)
+    Perm::argsort(&sort_keys)
 }
 
 impl<'iter, A, B> Partition<'iter> for (A, B)

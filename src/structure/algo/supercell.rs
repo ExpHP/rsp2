@@ -1,8 +1,7 @@
 use ::{Structure, Lattice, CoordsKind, Coords};
-use ::{Perm};
 
+use ::rsp2_soa_ops::{Perm};
 use ::rsp2_array_utils::{arr_from_fn, try_arr_from_fn};
-
 use ::rsp2_array_types::{V3};
 
 
@@ -509,7 +508,7 @@ fn image_lattice_vecs(periods: [u32; 3], offset: V3<i32>, lattice: &Lattice) -> 
 #[cfg(test)]
 #[deny(unused)]
 mod tests {
-    use ::{Permute, Perm};
+    use ::rsp2_soa_ops::{Permute, Perm};
     use ::{Coords, CoordsKind, Structure, Lattice};
     use ::rsp2_array_types::{V3, Envee};
 

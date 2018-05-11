@@ -1,11 +1,11 @@
 use ::{Lattice, Coords};
 use ::{FracRot, FracOp};
 use super::group::GroupTree;
-use ::failure::Backtrace;
 
 use ::rsp2_array_types::V3;
+use ::rsp2_soa_ops::{Perm, Permute};
 
-use ::{Perm, Permute};
+use ::failure::Backtrace;
 
 /// Validate that structure is symmetric under the given operators.
 ///

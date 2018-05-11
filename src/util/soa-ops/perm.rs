@@ -69,7 +69,6 @@ impl Perm {
         self.0.extend(other.0.iter().map(|&i| i + n));
     }
 
-    #[cfg(test)]
     pub fn random(n: u32) -> Perm
     {
         use ::rand::Rng;
@@ -146,7 +145,7 @@ impl Perm {
     { faster.with_outer(self) }
 
     pub fn pow_unsigned(&self, mut exp: u64) -> Perm {
-        // Exponentation by squaring (permutations form a monoid)
+        // Exponentiation by squaring (permutations form a monoid)
 
         // NOTE: there's plenty of room to optimize the number of heap
         //       allocations here
@@ -203,14 +202,6 @@ impl Index<u32> for Perm {
     { &self.0[i as usize] }
 }
 
-#[cfg(test)]
-pub(crate) fn shuffle<T: Clone>(xs: &[T]) -> (Vec<T>, Perm)
-{
-    let xs = xs.to_vec();
-    let perm = Perm::random(xs.len() as u32);
-    (xs.permuted_by(&perm), perm)
-}
-
 /// Trait for applying a permutation operation.
 ///
 /// Note that in rsp2, this actually has two roles that are a bit
@@ -229,7 +220,7 @@ pub(crate) fn shuffle<T: Clone>(xs: &[T]) -> (Vec<T>, Perm)
 ///   `B` likely tries to satisfy the following property:
 ///
 ///   ```ignore
-///   compute_b(structure.permute(perm)) == compute_b(structure).permute(perm)
+///   compute_b(structure.permuted_by(perm)) == compute_b(structure).permuted_by(perm)
 ///   ```
 pub trait Permute: Sized {
     // awkward name, but it makes it makes two things clear
