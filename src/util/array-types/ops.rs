@@ -57,29 +57,33 @@ gen_each!{
 gen_each!{
     @{Mn_n}
     @{Vn}
+    [ [(   ) (   )] [('a,) (&'a)] ]
+    [ [(   ) (   )] [('b,) (&'b)] ]
     impl_v_add_sub!(
         {$Mr:ident $r:tt}
         {$Vc:ident}
+        [ ($($lt_a:tt)*) ($($ref_a:tt)*) ]
+        [ ($($lt_b:tt)*) ($($ref_b:tt)*) ]
     ) => {
         // matrix + matrix
-        impl<'a, 'b, X: Semiring> Add<&'b $Mr<$Vc<X>>> for &'a $Mr<$Vc<X>>
+        impl<$($lt_a)* $($lt_b)* X: Semiring> Add<$($ref_b)* $Mr<$Vc<X>>> for $($ref_a)* $Mr<$Vc<X>>
         where X: PrimitiveSemiring,
         {
             type Output = $Mr<$Vc<X>>;
 
             #[inline]
-            fn add(self, other: &'b $Mr<$Vc<X>>) -> Self::Output
+            fn add(self, other: $($ref_b)* $Mr<$Vc<X>>) -> Self::Output
             { mat::from_fn(|r, c| self[r][c] + other[r][c]) }
         }
 
         // matrix - matrix
-        impl<'a, 'b, X: Ring> Sub<&'b $Mr<$Vc<X>>> for &'a $Mr<$Vc<X>>
+        impl<$($lt_a)* $($lt_b)* X: Ring> Sub<$($ref_b)* $Mr<$Vc<X>>> for $($ref_a)* $Mr<$Vc<X>>
         where X: PrimitiveRing,
         {
             type Output = $Mr<$Vc<X>>;
 
             #[inline]
-            fn sub(self, other: &'b $Mr<$Vc<X>>) -> Self::Output
+            fn sub(self, other: $($ref_b)* $Mr<$Vc<X>>) -> Self::Output
             { mat::from_fn(|r, c| self[r][c] - other[r][c]) }
         }
     }
@@ -111,12 +115,14 @@ gen_each!{
 gen_each!{
     @{Mn_n}
     @{Vn}
+    [ [(   ) (   )] [('a,) (&'a)] ]
     impl_m_unops!(
         {$Mr:ident $r:tt}
         {$Vc:ident}
+        [ ($($lt_a:tt)*) ($($ref_a:tt)*) ]
     ) => {
         // -matrix
-        impl<'a, X: Ring> Neg for &'a $Mr<$Vc<X>>
+        impl<$($lt_a)* X: Ring> Neg for $($ref_a)* $Mr<$Vc<X>>
         where X: PrimitiveRing,
         {
             type Output = $Mr<$Vc<X>>;
@@ -150,7 +156,11 @@ gen_each!{
 
             #[inline(always)]
             fn mul(self, vector: $($ref_a)* $Vn<$X>) -> Self::Output
-            { vector * self }
+            {
+                // NOTE: we know precisely the set of types this is implemented for,
+                //       and they all have commutative Mul impls.
+                vector * self
+            }
         }
     }
 }
@@ -201,18 +211,24 @@ gen_each!{
     //       we must generate a separate impl for each Semiring type rather than
     //       being generic over X: Semiring
     @{semiring}
+    [ [(   ) (   )] [('a,) (&'a)] ]
     impl_v_scalar_ops!(
         {$Mr:ident $r:tt}
         {$Vc:ident}
         {$X:ty}
+        [ ($($lt_a:tt)*) ($($ref_a:tt)*) ]
     ) => {
         // scalar * matrix
-        impl<'a> Mul<&'a $Mr<$Vc<$X>>> for $X {
+        impl<$($lt_a)*> Mul<$($ref_a)* $Mr<$Vc<$X>>> for $X {
             type Output = $Mr<$Vc<$X>>;
 
             #[inline(always)]
-            fn mul(self, matrix: &'a $Mr<$Vc<$X>>) -> Self::Output
-            { matrix * self }
+            fn mul(self, matrix: $($ref_a)* $Mr<$Vc<$X>>) -> Self::Output
+            {
+                // NOTE: we know precisely the set of types this is implemented for,
+                //       and they all have commutative Mul impls.
+                matrix * self
+            }
         }
     }
 }
@@ -221,12 +237,14 @@ gen_each!{
 gen_each!{
     @{Mn_n}
     @{Vn}
+    [ [(   ) (   )] [('a,) (&'a)] ]
     impl_m_scalar_ops!(
         {$Mr:ident $r:tt}
         {$Vc:ident}
+        [ ($($lt_a:tt)*) ($($ref_a:tt)*) ]
     ) => {
         // matrix * scalar
-        impl<'a, X: Semiring> Mul<X> for &'a $Mr<$Vc<X>>
+        impl<$($lt_a)* X: Semiring> Mul<X> for $($ref_a)* $Mr<$Vc<X>>
         where X: PrimitiveSemiring,
         {
             type Output = $Mr<$Vc<X>>;
@@ -237,7 +255,7 @@ gen_each!{
         }
 
         // matrix / scalar
-        impl<'a, X: Field> Div<X> for &'a $Mr<$Vc<X>>
+        impl<$($lt_a)* X: Field> Div<X> for $($ref_a)* $Mr<$Vc<X>>
         where X: PrimitiveFloat,
         {
             type Output = $Mr<$Vc<X>>;
@@ -300,13 +318,19 @@ gen_each!{
 
 // vector * matrix
 gen_each!{
+    [{2} {3} {4}]
+    [{2} {3} {4}]
     [ [(   ) (   )] [('v,) (&'v)] ]
-    [{2} {3} {4}]
-    [{2} {3} {4}]
-    impl_mat_vec_mul!( [ ($($lt_v:tt)*) ($($ref_v:tt)*) ] {$r:tt} {$c:tt} ) => {
+    [ [(   ) (   )] [('m,) (&'m)] ]
+    impl_mat_vec_mul!(
+        {$r:tt}
+        {$c:tt}
+        [ ($($lt_v:tt)*) ($($ref_v:tt)*) ]
+        [ ($($lt_m:tt)*) ($($ref_m:tt)*) ]
+    ) => {
         // matrix * column vector
-        impl<$($lt_v)* 'm, X: Semiring> Mul<$($ref_v)* V![$c, X]> for &'m M![$r, V![$c, X]]
-          where X: PrimitiveSemiring,
+        impl<$($lt_v)* $($lt_m)* X: Semiring> Mul<$($ref_v)* V![$c, X]> for $($ref_m)* M![$r, V![$c, X]]
+        where X: PrimitiveSemiring,
         {
             type Output = V![$r, X];
 
@@ -319,13 +343,13 @@ gen_each!{
         }
 
         // row vector * matrix
-        impl<$($lt_v)* 'm, X: Semiring> Mul<&'m M![$r, V![$c, X]]> for $($ref_v)* V![$r, X]
-          where X: PrimitiveSemiring,
+        impl<$($lt_v)* $($lt_m)* X: Semiring> Mul<$($ref_m)* M![$r, V![$c, X]]> for $($ref_v)* V![$r, X]
+        where X: PrimitiveSemiring,
         {
             type Output = V![$c, X];
 
             #[inline]
-            fn mul(self, other: &'m M![$r, V![$c, X]]) -> Self::Output {
+            fn mul(self, other: $($ref_m)* M![$r, V![$c, X]]) -> Self::Output {
                 let vector = self;
                 let matrix = other;
                 vee::from_fn(|c| (0..$r).map(|i| vector[i] * matrix[i][c]).sum())
@@ -338,15 +362,23 @@ gen_each!{
     [{2} {3} {4}]
     [{2} {3} {4}]
     [{2} {3} {4}]
-    impl_mat_mat_mul!( {$r:tt} {$k:tt} {$c:tt} ) => {
+    [ [(   ) (   )] [('a,) (&'a)] ]
+    [ [(   ) (   )] [('b,) (&'b)] ]
+    impl_mat_mat_mul!(
+        {$r:tt}
+        {$k:tt}
+        {$c:tt}
+        [ ($($lt_a:tt)*) ($($ref_a:tt)*) ]
+        [ ($($lt_b:tt)*) ($($ref_b:tt)*) ]
+    ) => {
         // matrix * matrix
-        impl<'a, 'b, X: Semiring> Mul<&'b M![$k, V![$c, X]]> for &'a M![$r, V![$k, X]]
-          where X: PrimitiveSemiring,
+        impl<$($lt_a)* $($lt_b)* X: Semiring> Mul<$($ref_b)* M![$k, V![$c, X]]> for $($ref_a)* M![$r, V![$k, X]]
+        where X: PrimitiveSemiring,
         {
             type Output = M![$r, V![$c, X]];
 
             #[inline]
-            fn mul(self, other: &'b M![$k, V![$c, X]]) -> Self::Output {
+            fn mul(self, other: $($ref_b)* M![$k, V![$c, X]]) -> Self::Output {
                 mat::from_fn(|r,c| (0..$k).map(|i| self[r][i] * other[i][c]).sum())
             }
         }

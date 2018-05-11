@@ -1,0 +1,14 @@
+[package]
+!!CRATE-NAME-LINE
+version = "0.1.0"
+authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
+description = "Some sparse matrix types.  Scraped together from code I wrote for a Project Euler problem years ago, and adapted to rsp2's needs."
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+!!rsp2-soa-ops
+
+[features]
+!!NIGHTLY-FEATURE-LINE
