@@ -300,3 +300,22 @@ fn test_to_cs() {
     assert_eq!(rows, vec![vec![5, 2], vec![3, 4]]);
     assert_eq!(cols, vec![vec![5, 3], vec![2, 4]]);
 }
+
+#[test]
+fn test_permute() {
+    let coo = CooMat::<i32>::from_iter((0, 0), vec![]);
+    assert_eq!(coo.clone().permute_columns(&Perm::eye(0)), coo.clone());
+    assert_eq!(coo.clone().permute_rows(&Perm::eye(0)), coo.clone());
+
+    let coo = CooMat::<i32>::from_iter((3, 4), vec![((1, 1), 9)]);
+    assert_eq!(
+        coo.clone().permute_rows(&Perm::eye(3).shift_right(1)),
+        CooMat::<i32>::from_iter((3, 4), vec![((2, 1), 9)]),
+    );
+
+    let coo = CooMat::<i32>::from_iter((3, 4), vec![((1, 1), 9)]);
+    assert_eq!(
+        coo.clone().permute_columns(&Perm::eye(4).shift_right(1)),
+        CooMat::<i32>::from_iter((3, 4), vec![((1, 2), 9)]),
+    );
+}
