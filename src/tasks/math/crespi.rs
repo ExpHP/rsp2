@@ -1,12 +1,15 @@
 use ::rsp2_array_types::{V3, dot};
 
 /// Constants used for calculation of the Kolmogorov-Crespi potential.
+///
+/// These match the values used by default by the implementation of kolmogorov/crespi/z in Lammps,
+/// which is scaled to Lammps' rebo's bond length.
 pub mod consts {
     /// Transverse distance scaling factor. Units are Angstroms.
-    pub const DELTA: f64 = 0.578_f64;
+    pub const DELTA: f64 = 0.578;
 
     /// Distance scaling factor for the repulsive potential. Units are inverse Angstroms.
-    pub const LAMBDA: f64 = 3.629_f64;
+    pub const LAMBDA: f64 = 3.629;
 
     /// Multiplicative factor for the attractive potential. Units are eV.
     pub const A: f64 = 10.238e-3;

@@ -274,13 +274,13 @@ fn sufficiently_large_centered_supercell(
     // ...I think.  Better safe than sorry, anyways.
     let distances = match check_plane_distances(&get_scaled_vectors(coeffs)) {
         Ok(distances) => {
-            trace!("bond graph: intermediate supercell: {:?}", coeffs);
+            trace!("bond graph: intermediate supercell: {:?}, r = {}", coeffs, interaction_range);
             distances
         }
         Err(_) => {
             // Pick a larger cell with uniform scaling.
             coeffs = [*coeffs.iter().max().unwrap(); 3];
-            trace!("bond graph: taking uniform intermediate supercell: {:?}", coeffs);
+            trace!("bond graph: taking uniform intermediate supercell: {:?}, r = {}", coeffs, interaction_range);
 
             check_plane_distances(&get_scaled_vectors(coeffs))
                 .expect("(bug) uniform supercell does not satisfy the property!?")

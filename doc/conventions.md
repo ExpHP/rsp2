@@ -103,16 +103,30 @@ Both of these permutations can be used to create a structure where the each labe
 
 The advantage of using `deperm` is that it composes properly; because the coords were left untouched, all previously-computed perms and deperms are still valid descriptions of their corresponding operators.
 
-#### Depermutations describe how indices transform
+#### Indices into permuted data transform by the inverse permutation
 
-* Suppose for visualization purposes that you have a unit cell of some 2D structure printed out on paper.
-* Put a transparency sheet over it and draw a circle around one of the atoms.
-* Apply a symmetry operator `op` to the sheet, rotating it.
-* Which atom is circled now?
+This fact has nothing to do with symmetry operators, and everything to do with the "sequence of indices" representation.  It shows up when working with data in a sparse format.
 
-In practice, this problem shows up when you store atom indices in a data structure, and try to generate new ones by applying symmetry operations to the structure. (having a local variable `atom_index` is like circling an atom, and depermuting a structure is like rotating a transparency sheet)
+FIXME maybe I should also make up a term for the "permutation of a symmetry operator" (e.g. coperm, for "coord perm"), to eliminate confusion with "a permutation (in general)."
 
-The answer is actually straightforward: `new_index == deperm[old_index]`.  To see this, picture what would happen if you were to label each atom by its index in `coords`, and then apply a depermutation to those labels.
+In general:
+
+* If you have an array of data and you permute it by `perm`...
+* ...then indices into that data will transform by `perm.inverted()`.
+
+That is,
+
+```rust
+// assume you have a 'perm', 'old_data', and 'old_index'
+let inv_perm = perm.inverted();
+
+let new_data = old_data.clone().permuted_by(&perm);
+let new_index = inv_perm[old_index];
+
+assert_eq!(new_data[new_index], old_data[old_index]);
+```
+
+Brace yourself; sometimes you may even see the phrase "inverse depermutation" in the code.  It really depends on what data is being permuted.
 
 ## Footnotes
 

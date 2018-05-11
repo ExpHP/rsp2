@@ -654,44 +654,13 @@ impl TrialDir {
             )?.into_iter().map(|p| p.inverted()).collect()
         };
 
-        // FIXME
-        let kc_z = ::math::crespi::Params::default();
-        let frac_bonds = FracBonds::from_brute_force_very_dumb(&prim_structure, kc_z.cutoff_end() * (1.001))?;
         let original_force_sets = {
-            let carts = superstructure.to_carts();
-
-            let mut force_sets = ::math::dynmat::ForceSets::default();
-
-            for (disp_prim, disp_cart_vector) in displacements {
-                // displace an atom
-                let disp_cell = ::math::dynmat::DISPLACED_CELL; // HACK
-                let disp_super = sc.atom_from_cell(disp_prim, disp_cell);
-                let disp_final_cart = carts[disp_super] + disp_cart_vector;
-                let disp_lattice_point = sc.lattice_point_from_cell(disp_cell);
-
-                // collect forces of atoms affected by this displacement
-                // NOTE: it seems to me that filtering the bond list on every displacement adds an
-                //       unnecessary quadratic dependence of performance on structure size; but unless
-                //       we have hundreds of thousands of displacements I doubt it will be a huge deal.
-                for FracBond { from: bond_from, to: affected_prim, image_diff } in &frac_bonds {
-                    if bond_from != disp_prim {
-                        continue
-                    }
-                    let affected_lattice_point = disp_lattice_point + image_diff;
-                    let affected_super = sc.atom_from_lattice_point(affected_prim, affected_lattice_point);
-                    let affected_cart = carts[affected_super];
-
-                    // FIXME other potentials
-                    let output = ::math::crespi::Params::default().crespi_z(affected_cart - disp_final_cart);
-
-                    // FIXME proper insertion API
-                    force_sets.atom_displaced.push(disp_super);
-                    force_sets.atom_affected.push(affected_super);
-                    force_sets.cart_force.push(-output.grad_rij);
-                    force_sets.cart_displacement.push(disp_cart_vector);
-                }
-            }
-            force_sets
+            let mut diff_fn = pot.initialize_diff_fn(superstructure.clone())?;
+            ::math::dynmat::ForceSets::concat_from({
+                displacements.into_iter()
+                    .map(|displacement| diff_fn.compute_force_set(&superstructure, displacement))
+                    .collect::<FailResult<Vec<_>>>()?
+            })
         };
 
         let force_sets = {
@@ -705,10 +674,10 @@ impl TrialDir {
         };
 
 
-        let force_constants = force_sets.solve_force_constants(&sc)?;
+        let perm_to_phonopy = perm_from_phonopy.inverted();
+        let force_constants = force_sets.solve_force_constants(&sc, &perm_to_phonopy, &superstructure.to_carts())?;
         {
             let dense = force_constants.to_dense_matrix(superstructure.num_atoms());
-            let perm_to_phonopy = perm_from_phonopy.inverted().with_inner(&Perm::eye(3));
             let dense = dense.into_iter().map(|row| row.permuted_by(&perm_to_phonopy)).collect::<Vec<_>>();
             let dense = dense.permuted_by(&perm_to_phonopy);
             println!("{:?}", dense); // FINALLY: THE MOMENT OF TRUTH
@@ -758,30 +727,33 @@ impl TrialDir {
         // cmon, big money, big money....
         // if these assertions always succeed, it will save us a
         // good deal of implementation work.
-        let err_msg = "\
-            phonopy's superstructure does not match rsp2's conventions! \
-            Unfortunately, support for this scenario is not yet implemented.\
-        ";
-        assert_close!(
-            abs=1e-10,
-            our_superstructure.lattice(), phonopy_superstructure.lattice(),
-            "{}", err_msg,
-        );
-        let diffs = {
-            ::util::zip_eq(our_superstructure.to_carts(), phonopy_superstructure.to_carts())
-                .map(|(a, b)| (a - b) / our_superstructure.lattice())
-                .map(|v| v.map(|x| x - x.round()))
-                .map(|v| v * our_superstructure.lattice())
-                .collect::<Vec<_>>()
-        };
-        assert_close!(
-            abs=1e-10,
-            vec![[0.0; 3]; diffs.len()],
-            diffs.unvee(),
-            "{}", err_msg,
-        );
+        {
+            let err_msg = "\
+                phonopy's superstructure does not match rsp2's conventions! \
+                Unfortunately, support for this scenario is not yet implemented.\
+            ";
+            assert_close!(
+                abs=1e-10,
+                our_superstructure.lattice(), phonopy_superstructure.lattice(),
+                "{}", err_msg,
+            );
+            let diffs = {
+                ::util::zip_eq(our_superstructure.to_carts(), phonopy_superstructure.to_carts())
+                    .map(|(a, b)| (a - b) / our_superstructure.lattice())
+                    .map(|v| v.map(|x| x - x.round()))
+                    .map(|v| v * our_superstructure.lattice())
+                    .collect::<Vec<_>>()
+            };
+            assert_close!(
+                abs=1e-10,
+                vec![[0.0; 3]; diffs.len()],
+                diffs.unvee(),
+                "{}", err_msg,
+            );
+        }
         let _ = phonopy_superstructure;
 
+        // sparse indices transform by the inverse perm
         let inv_perm_from_phonopy = perm_from_phonopy.inverted();
         let displacements = {
             let primitive_atoms = sc_token.atom_primitive_atoms();

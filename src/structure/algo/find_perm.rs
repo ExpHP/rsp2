@@ -210,9 +210,6 @@ pub(crate) fn brute_force_with_sort_trick<M: Ord>(
     use ::ordered_float::NotNaN;
     use ::CoordsKind::Fracs;
 
-    info!("FROM: {:?}", from_fracs);
-    info!("  TO: {:?}", to_fracs);
-
     // Sort both sides by some measure which is likely to produce a small
     // maximum value of (sorted_rotated_index - sorted_original_index).
     // This reduces an O(n^2) search down to ~O(n).

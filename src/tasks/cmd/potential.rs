@@ -206,6 +206,37 @@ pub trait DiffFn<Meta> {
         for v in &mut force { *v = -*v; }
         Ok(force)
     }
+
+    /// Compute the change in force when displacing an atom, in a sparse representation.
+    ///
+    /// Some potentials may assume that `original` has zero force.
+    ///
+    /// The default implementation works from the dense representation of the forces.
+    fn compute_force_set(&mut self, original: &Structure<Meta>, displacement: (usize, V3)) -> FailResult<::math::dynmat::ForceSets>
+    where Meta: Clone,
+    {
+        let mut structure = original.clone();
+        // FIXME maybe ensure_only_carts() should be exposed.
+        let _ = structure.carts_mut(); // prevent numerical differences from change in representation
+
+        // FIXME this is going to get recomputed frequently unless we change the signature.
+        let original_force = self.compute_force(&structure)?;
+        structure.carts_mut()[displacement.0] += displacement.1;
+        let displaced_force = self.compute_force(&structure)?;
+
+        let diffs = {
+            ::util::zip_eq(original_force, displaced_force).enumerate()
+                // assuming that the potential is deterministic and implements a cutoff radius,
+                // this might actually succeed at filtering out a lot of zero terms.
+//                .filter(|(_, (old, new))| old != new)
+//                .map(|(atom, (old, new))| (atom, new - old))
+
+                // closer approximation of phonopy
+                // FIXME use the above instead
+                .map(|(atom, (old, new))| (atom, new))
+        };
+        Ok(::math::dynmat::ForceSets::from_displacement(displacement, diffs))
+    }
 }
 
 // necessary for combinators like sum
@@ -247,12 +278,9 @@ impl PotentialBuilder {
     ) -> Box<PotentialBuilder> {
         match config {
             cfg::PotentialKind::Rebo => {
-                let rebo = cfg::PotentialKind::Airebo(cfg::PotentialAirebo {
-                    lj_sigma: Some(0.0),
-                    lj_enabled: Some(false),
-                    torsion_enabled: Some(false),
-                });
-                PotentialBuilder::from_config(threading, &rebo)
+                let lammps_pot = self::lammps::Airebo::Rebo;
+                let pot = self::lammps::Builder::new(threading, lammps_pot);
+                Box::new(pot)
             }
             cfg::PotentialKind::Airebo(cfg) => {
                 let lammps_pot = self::lammps::Airebo::from(cfg);
@@ -365,6 +393,7 @@ mod homestyle {
                         value += part_value;
                         grad[to] += part_grad;
                     }
+                    trace!("KCZ: {}", value);
                     Ok((value, grad))
                 }
             }
@@ -480,13 +509,23 @@ mod lammps {
     mod airebo {
         use super::*;
 
-        /// Uses `pair_style airebo`.
+        /// Uses `pair_style airebo` or `pair_style rebo`.
         #[derive(Debug, Clone)]
-        pub struct Airebo {
-            lj_sigma: f64,
-            lj_enabled: bool,
-            torsion_enabled: bool,
+        pub enum Airebo {
+            Airebo {
+                lj_sigma: f64,
+                lj_enabled: bool,
+                torsion_enabled: bool,
+            },
+            /// Uses `pair_style rebo`.
+            ///
+            /// This is NOT equivalent to `pair_style airebo 0 0 0`, because it
+            /// additionally sets one of the C-C interaction parameters to zero.
+            Rebo,
         }
+
+        #[derive(Debug, Clone)]
+        pub struct Rebo;
 
         impl<'a> From<&'a cfg::PotentialAirebo> for Airebo {
             fn from(cfg: &'a cfg::PotentialAirebo) -> Self {
@@ -494,7 +533,7 @@ mod lammps {
                     lj_sigma, lj_enabled, torsion_enabled,
                 } = *cfg;
 
-                Airebo {
+                Airebo::Airebo {
                     lj_sigma: lj_sigma.unwrap_or(DEFAULT_AIREBO_LJ_SIGMA),
                     lj_enabled: lj_enabled.unwrap_or(DEFAULT_AIREBO_LJ_ENABLED),
                     torsion_enabled: torsion_enabled.unwrap_or(DEFAULT_AIREBO_TORSION_ENABLED),
@@ -517,14 +556,20 @@ mod lammps {
                 InitInfo {
                     masses: vec![::common::element_mass(consts::HYDROGEN),
                                  ::common::element_mass(consts::CARBON)],
-                    pair_commands: vec![
-                        PairCommand::pair_style("airebo/omp")
-                            .arg(self.lj_sigma)
-                            .arg(boole(self.lj_enabled))
-                            .arg(boole(self.torsion_enabled))
-                            ,
-                        PairCommand::pair_coeff(.., ..).args(&["CH.airebo", "H", "C"]),
-                    ],
+                    pair_commands: match *self {
+                        Airebo::Airebo { lj_sigma, lj_enabled, torsion_enabled } => vec![
+                            PairCommand::pair_style("airebo/omp")
+                                .arg(lj_sigma)
+                                .arg(boole(lj_enabled))
+                                .arg(boole(torsion_enabled))
+                                ,
+                            PairCommand::pair_coeff(.., ..).args(&["CH.airebo", "H", "C"]),
+                        ],
+                        Airebo::Rebo => vec![
+                            PairCommand::pair_style("rebo/omp"),
+                            PairCommand::pair_coeff(.., ..).args(&["CH.airebo", "H", "C"]),
+                        ],
+                    },
                 }
             }
         }
