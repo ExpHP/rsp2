@@ -376,8 +376,8 @@ where
     X: PartialEq, // (can be removed when num_traits gets a semver bump)
 {
     match r == c {
-        true => x.is_zero(),
-        false => x.is_one(),
+        true => x.is_one(),
+        false => x.is_zero(),
     }
 }
 
