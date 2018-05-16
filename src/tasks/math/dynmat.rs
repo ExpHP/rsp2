@@ -1,15 +1,16 @@
 #![allow(unused)] // FIXME
 
 use ::FailResult;
-use ::rsp2_array_types::{V3, M33, M3};
+use ::rsp2_array_types::{V3, M33, M3, mat};
 use ::rsp2_soa_ops::{Perm, Permute};
 use ::rsp2_structure::supercell::SupercellToken;
 use ::std::collections::HashMap;
 
 use ::slice_of_array::prelude::*;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ForceSets {
+    num_atoms: usize,
     // These are both indices in the supercell.
     //
     // Invariant: the displaced atom always has an index where `cell = DISPLACED_CELL`.
@@ -29,7 +30,18 @@ pub struct ForceSets {
 pub(crate) const DISPLACED_CELL: [u32; 3] = [0, 0, 0];
 
 impl ForceSets {
+    pub fn zero(num_atoms: usize) -> Self {
+        ForceSets {
+            num_atoms,
+            atom_displaced: vec![],
+            atom_affected: vec![],
+            cart_force: vec![],
+            cart_displacement: vec![],
+        }
+    }
+
     pub fn from_displacement(
+        num_atoms: usize,
         // (atom_displaced, cart_displacement)
         displacement: (usize, V3),
         // Item = (atom_affected, cart_force)
@@ -41,7 +53,7 @@ impl ForceSets {
         let count = atom_affected.len();
         let atom_displaced = vec![atom_displaced; count];
         let cart_displacement = vec![cart_displacement; count];
-        ForceSets { atom_affected, atom_displaced, cart_force, cart_displacement }
+        ForceSets { num_atoms, atom_affected, atom_displaced, cart_force, cart_displacement }
     }
 
     // Picture the following:
@@ -107,14 +119,17 @@ impl ForceSets {
         let cart_force = self.cart_force.iter().map(|v| v * &cart_op_t).collect();
         let cart_displacement = self.cart_displacement.iter().map(|v| v * &cart_op_t).collect();
 
-        ForceSets { atom_displaced, atom_affected, cart_force, cart_displacement }
+        let num_atoms = self.num_atoms;
+        ForceSets { num_atoms, atom_displaced, atom_affected, cart_force, cart_displacement }
     }
 
     // FIXME shouldn't be pub(crate)
-    pub(crate) fn concat_from<Ss>(iter: Ss) -> Self
+    pub(crate) fn concat_from<Ss>(iter: Ss) -> Option<Self>
     where Ss: IntoIterator<Item=ForceSets>,
     {
-        iter.into_iter().fold(Self::default(), |mut a, b| {
+        use ::itertools::Itertools;
+        iter.into_iter().fold1(|mut a, b| {
+            assert_eq!(a.num_atoms, b.num_atoms);
             a.atom_affected.extend(b.atom_affected);
             a.atom_displaced.extend(b.atom_displaced);
             a.cart_force.extend(b.cart_force);
@@ -124,18 +139,19 @@ impl ForceSets {
     }
 
     // FIXME shouldn't be pub(crate)
-    pub(crate) fn solve_force_constants(&self, sc_token: &SupercellToken
+    pub(crate) fn solve_force_constants(&self, sc: &SupercellToken
                                         , perm_HACK: &Perm
         , carts_HACK: &[V3]
     ) -> FailResult<ForceConstants>
     {
         use ::util::zip_eq as z;
         let ForceSets {
-            atom_displaced,
-            atom_affected,
-            cart_force,
-            cart_displacement,
-        } = self;
+            num_atoms,
+            ref atom_displaced,
+            ref atom_affected,
+            ref cart_force,
+            ref cart_displacement,
+        } = *self;
 
         let mut map = HashMap::new();
 
@@ -185,22 +201,55 @@ impl ForceSets {
             cart_matrix.push(-&M3(phi.c_order_data().nest::<V3>().to_array()));
         }
 
-        Ok(ForceConstants { row_atom, col_atom, cart_matrix })
+        let fcs = {
+            ForceConstants { num_atoms, row_atom, col_atom, cart_matrix }
+                .add_rows_for_other_cells(sc)
+                //.symmetrize_by_transpose()
+                .impose_perm_and_translational_invariance_a_la_phonopy()
+                .canonicalize()
+        };
+        Ok(fcs)
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct ForceConstants {
-    row_atom: Vec<usize>,
-    col_atom: Vec<usize>,
-    // this might be awkward to work with...
+pub struct ForceConstants { // conceptually ForceConstants<I: Idx>
+    num_atoms: usize,
+    row_atom: Vec<usize>,   // conceptually Vec<I>
+    col_atom: Vec<usize>,   // conceptually Vec<I>
     cart_matrix: Vec<M33>,
 }
 
 impl ForceConstants {
-    pub(crate) fn symmetrize_by_transpose(mut self) -> Self {
+    // take ForceConstants where row_atom is always in DISPLACED_CELL
+    // and generate all the other rows
+    fn add_rows_for_other_cells(mut self, sc: &SupercellToken) -> Self {
+        assert!({
+            let cells = sc.atom_cells();
+            self.row_atom.iter().all(|&row| cells[row] == DISPLACED_CELL)
+        });
+
+        let old_len = self.row_atom.len();
+        for axis in 0..3 {
+            // get deperm that translates data by one cell along this axis
+            let unit = V3::from_fn(|i| (i == axis) as i32);
+            let deperm = sc.lattice_point_translation_deperm(unit);
+
+            let mut permuted_fcs = self.clone();
+
+            // skip 0 because 'self' already has the data for 0 cell translation
+            for _ in 1..sc.periods()[axis] {
+                permuted_fcs = permuted_fcs.permuted_by(&deperm);
+                self.add(permuted_fcs.clone());
+            }
+        }
+        assert_eq!(self.row_atom.len(), old_len * sc.num_cells());
+        self
+    }
+
+    fn symmetrize_by_transpose(mut self) -> Self {
         let t = self.clone().transpose();
-        self.extend(t);
+        self.add(t);
         for m in &mut self.cart_matrix {
             *m *= 0.5;
         }
@@ -208,33 +257,153 @@ impl ForceConstants {
     }
 
     /// Transpose as if it were a 3N by 3N matrix.
-    pub(crate) fn transpose(self) -> Self {
-        let ForceConstants { row_atom, col_atom, cart_matrix } = self;
+    fn transpose(self) -> Self {
+        let ForceConstants { num_atoms, row_atom, col_atom, cart_matrix } = self;
         let cart_matrix = cart_matrix.into_iter().map(|m| m.t()).collect();
         ForceConstants {
+            num_atoms,
             row_atom: col_atom,
             col_atom: row_atom,
             cart_matrix,
         }
     }
 
-    pub(crate) fn extend(&mut self, other: Self) {
+    fn add(&mut self, other: Self) {
+        assert_eq!(self.num_atoms, other.num_atoms);
         self.row_atom.extend(other.row_atom);
         self.col_atom.extend(other.col_atom);
         self.cart_matrix.extend(other.cart_matrix);
     }
 
-    /// Ensure that at most a single item per atom pair exists by summing duplicates.
-    pub(crate) fn canonicalize(self) -> Self {
-        let ForceConstants { row_atom, col_atom, cart_matrix } = self;
-        // sort row major
-        let perm = {
-            let sort_data = zip_eq!(&row_atom, &col_atom).collect::<Vec<_>>();
-            Perm::argsort(&sort_data)
-        };
+//    // this is something done by the C code in Phonopy which purportedly
+//    // imposes translational invariance.
+//    fn impose_translational_invariance_a_la_phonopy(mut self) -> Self {
+//
+//        // first, we need to iterate over each row, which is unnatural for our COO-based
+//        // representation (that's our fault)
+//        fn insertion_index<K: Ord>(data: &[K], value: K) -> usize {
+//            match data.binary_search(&value) {
+//                Ok(i) | Err(i) => i,
+//            }
+//        }
+//
+//        self.sort_data_by(|r, _| r);
+//        let row_ptr = (0..=self.num_atoms).map(|r| insertion_index(&self.row_atom, r)).collect::<Vec<_>>();
+//        for &[row_start, row_end] in row_ptr.windows(2) {
+//            // okay.  Here's where things get interesting.
+//            //
+//            // For each of the 3 diagonal matrix components labeled by `(r_k, r_k)`,
+//            // phonopy's C code sums up all values in that component along the row for atom `r_atom`,
+//            // and subtracts it from `[r_atom][r_atom][r_k][r_k]`.
+//            //
+//            // For each of the 3 off-diagonal components labeled by `(r_k, c_k)` where `c_k > r_k`,
+//            // the code sums up all values in that component along the row for atom `r_atom`,
+//            // and subtracts it from two elements in the `[r_atom][r_atom]` matrix (`[r_k][c_k]`
+//            // and `[c_k][r_k]`).
+//            //
+//            // If you look at the original python code, you'll see that it used to do something
+//            // that first went over each row, then over each column.  ISTM that the "over each column"
+//            // part is why the `[c_k][r_k]` term is modified, and that this is equivalent presuming that
+//            // the
+//            // Notice that there are data dependencies here.
+//            //
+//            //
+//            fn without_diagonal(mut mat: M33) -> M33 {
+//                for k in 0..3 {
+//                    mat[k][k] = 0;
+//                }
+//                mat
+//            }
+//            let start =
+//        }
+//    }
+
+    // this is something done by the C code in Phonopy which purportedly
+    // imposes translational invariance.
+    fn impose_perm_and_translational_invariance_a_la_phonopy(mut self) -> Self {
+        let mut dense = self.to_dense_matrix();
+
+        for i in 0..dense.len() {
+            let rest = &mut dense[i..];
+            let (row_i, rest) = rest.split_first_mut().unwrap();
+
+            /* non diagonal part */
+            for (offset_j, row_j) in rest.iter_mut().enumerate() {
+                let j = offset_j + i + 1;
+                for k in 0..3 {
+                    for l in 0..3 {
+                        let elem_m = &mut row_i[j][k][l];
+                        let elem_n = &mut row_j[i][l][k];
+                        *elem_m += *elem_n;
+                        *elem_m /= 2.0;
+                        *elem_n = *elem_m;
+                    }
+                }
+            }
+
+            /* diagnoal part */
+            let diag = &mut row_i[i];
+            for k in 1..3 {
+                for l in k + 1..3 {
+                    diag[k][l] += diag[l][k];
+                    diag[k][l] /= 2.0;
+                    diag[l][k] = diag[k][l];
+                }
+            }
+        }
+
+        for i in 0..dense.len() {
+            for k in 0..3 {
+                for l in k..3 {
+                    let sum: f64 = (0..dense.len()).map(|j| dense[i][j][k][l]).sum();
+                    dense[i][i][k][l] -= sum;
+                    if k != l {
+                        dense[i][i][l][k] -= sum;
+                    }
+                }
+            }
+        }
+
+        Self::from_dense_matrix(dense)
+    }
+
+    // HACK
+    fn from_dense_matrix(mat: Vec<Vec<[[f64; 3]; 3]>>) -> ForceConstants {
+        let num_atoms = mat.len();
+        let (mut row_atom, mut col_atom, mut cart_matrix) = (vec![], vec![], vec![]);
+        for (r, row) in mat.into_iter().enumerate() {
+            for (c, m) in row.into_iter().enumerate() {
+                let m = mat::from_array(m);
+                if m != M33::zero() {
+                    row_atom.push(r);
+                    col_atom.push(c);
+                    cart_matrix.push(m);
+                }
+            }
+        }
+        ForceConstants { num_atoms, row_atom, col_atom, cart_matrix }
+    }
+
+
+    fn sort_data_by<K, F>(self, mut f: F) -> Self
+    where
+        K: Ord,
+        F: FnMut(usize, usize) -> K,
+    {
+        let ForceConstants { num_atoms, row_atom, col_atom, cart_matrix } = self;
+        let data = zip_eq!(&row_atom, &col_atom).map(|(&r, &c)| f(r, c)).collect::<Vec<_>>();
+        let perm = Perm::argsort(&data);
+
         let row_atom = row_atom.permuted_by(&perm);
         let col_atom = col_atom.permuted_by(&perm);
         let cart_matrix = cart_matrix.permuted_by(&perm);
+        ForceConstants { num_atoms, row_atom, col_atom, cart_matrix }
+    }
+
+    /// Ensure that at most a single item per atom pair exists by summing duplicates.
+    fn canonicalize(self) -> Self {
+        let row_major = self.sort_data_by(|r, c| (r, c));
+        let ForceConstants { num_atoms, row_atom, col_atom, cart_matrix } = row_major;
 
         // reduce
         let iter = zip_eq!(zip_eq!(row_atom, col_atom), cart_matrix);
@@ -242,7 +411,22 @@ impl ForceConstants {
         let (pos, cart_matrix): (Vec<_>, _) = iter.unzip();
         let (row_atom, col_atom) = pos.into_iter().unzip();
 
-        ForceConstants { row_atom, col_atom, cart_matrix }
+        ForceConstants { num_atoms, row_atom, col_atom, cart_matrix }
+    }
+}
+
+// both the rows and columns of ForceConstants are conceptually indexed
+// by the same index type, so the Permute impl permutes both.
+impl Permute for ForceConstants {
+    fn permuted_by(self, perm: &Perm) -> ForceConstants {
+        let ForceConstants { num_atoms, mut row_atom, mut col_atom, cart_matrix } = self;
+        for row in &mut row_atom {
+            *row = perm.permute_index(*row);
+        }
+        for col in &mut col_atom {
+            *col = perm.permute_index(*col);
+        }
+        ForceConstants { num_atoms, row_atom, col_atom, cart_matrix }
     }
 }
 
@@ -299,13 +483,12 @@ mod reduce_items {
     }
 }
 
-
 impl ForceConstants {
     /// For debugging purposes only...
     #[allow(unused)]
-    pub(crate) fn to_dense_matrix(&self, num_supercell_atoms: usize) -> Vec<Vec<[[f64; 3]; 3]>> {
+    pub(crate) fn to_dense_matrix(&self) -> Vec<Vec<[[f64; 3]; 3]>> {
         use ::rsp2_array_types::Unvee;
-        let n_basis = num_supercell_atoms;
+        let n_basis = self.num_atoms;
         let mut out = vec![vec![[[0.0f64; 3]; 3]; n_basis]; n_basis];
         for ((&row_atom, &col_atom), matrix) in ::util::zip_eq(::util::zip_eq(&self.row_atom, &self.col_atom), &self.cart_matrix) {
             //out[row_atom][col_atom] = matrix.unvee();

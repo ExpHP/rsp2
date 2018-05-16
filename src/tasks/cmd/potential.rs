@@ -233,9 +233,13 @@ pub trait DiffFn<Meta> {
 
                 // closer approximation of phonopy
                 // FIXME use the above instead
-                .map(|(atom, (old, new))| (atom, new))
+                .map(|(atom, (_old, new))| (atom, new))
         };
-        Ok(::math::dynmat::ForceSets::from_displacement(displacement, diffs))
+        Ok(::math::dynmat::ForceSets::from_displacement(
+            structure.num_atoms(),
+            displacement,
+            diffs,
+        ))
     }
 }
 

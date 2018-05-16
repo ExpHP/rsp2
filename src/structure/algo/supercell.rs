@@ -188,6 +188,11 @@ pub struct BigDisplacement {
 pub type OwnedMetas<'a,T> = ::std::vec::Drain<'a,T>;
 impl SupercellToken {
 
+    #[inline]
+    pub fn periods(&self) -> [u32; 3] {
+        self.periods
+    }
+
     /// The number of images taken of the unit cell contained in the supercell.
     #[inline]
     pub fn num_cells(&self) -> usize {

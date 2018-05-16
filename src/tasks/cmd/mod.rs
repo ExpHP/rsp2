@@ -659,7 +659,7 @@ impl TrialDir {
                 displacements.into_iter()
                     .map(|displacement| diff_fn.compute_force_set(&superstructure, displacement))
                     .collect::<FailResult<Vec<_>>>()?
-            })
+            }).expect("(BUG) no displacements?")
         };
 
         let force_sets = {
@@ -669,16 +669,14 @@ impl TrialDir {
                         let cart_rot = oper.to_rot().cart(prim_structure.lattice());
                         original_force_sets.derive_from_symmetry(&sc, &cart_rot, deperm)
                     })
-            })
+            }).expect("(BUG) no displacements?")
         };
 
 
         let perm_to_phonopy = perm_from_phonopy.inverted();
         let force_constants = force_sets.solve_force_constants(&sc, &perm_to_phonopy, &superstructure.to_carts())?;
         {
-            let dense = force_constants.to_dense_matrix(superstructure.num_atoms());
-            let dense = dense.into_iter().map(|row| row.permuted_by(&perm_to_phonopy)).collect::<Vec<_>>();
-            let dense = dense.permuted_by(&perm_to_phonopy);
+            let dense = force_constants.permuted_by(&perm_to_phonopy).to_dense_matrix();
             println!("{:?}", dense); // FINALLY: THE MOMENT OF TRUTH
         }
         let _ = cli;
@@ -752,7 +750,6 @@ impl TrialDir {
         }
         let _ = phonopy_superstructure;
 
-        // sparse indices transform by the inverse perm
         let displacements = {
             let primitive_atoms = sc_token.atom_primitive_atoms();
             disp_dir.displacements().iter()
