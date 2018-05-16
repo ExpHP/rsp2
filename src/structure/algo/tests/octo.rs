@@ -40,16 +40,16 @@ lazy_static! {
 
 // ascribes an index to each vertex of the cube whose vertices
 // lie on `{-1, 1}^3`.
-fn index_from_point(point: V3) -> u32
+fn index_from_point(point: V3) -> usize
 {
     assert!(point.iter().all(|x| x.abs() == 1.0));
 
     let bits = point.map(|x| (x as i32 + 1) / 2);
-    vee::dot(&V3([4, 2, 1]), &bits) as u32 // binary encoding
+    vee::dot(&V3([4, 2, 1]), &bits) as usize // binary encoding
 }
 
 // inverse of `index_from_point`
-fn point_from_index(index: u32) -> V3
+fn point_from_index(index: usize) -> V3
 {
     let index = index as i32;
     let c = ((index / 1) % 2) * 2 - 1;

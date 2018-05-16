@@ -1,4 +1,5 @@
 use ::std::ops::Index;
+use ::std::fmt;
 
 /// Represents a reordering operation on atoms.
 ///
@@ -6,57 +7,78 @@ use ::std::ops::Index;
 ///
 /// [`Permute`]: trait.Permute.html
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Perm(Vec<u32>);
+pub struct Perm { // Perm<Src, Dest>
+    inv: PermVec, // PermVec<Dest, Src> or IndexBy<Src, Vec<Dest>>
+}
+
+// This is a Perm stored in the form that's easiest to reason about.
+// (documented in `Perm::from_vec`)
+//
+// It exists solely for clarity of implementation, because implementing
+// `Perm::shift_right` as `inv: self.inv.prefix_shift_left()` says it a lot
+// better than any comment I could write above the inlined method body.
+// Basically, method bodies on Perm describe the relationship between
+// the perm and its inverse, while method bodies on PermVec do the real work.
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct PermVec( // PermVec<Src, Dest>
+    Vec<usize>, // Indexed<Dest, Vec<Src>>
+);
+
+impl fmt::Debug for PermVec {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Debug::fmt(&self.0, f)
+    }
+}
 
 #[derive(Debug, Fail)]
 #[fail(display = "Tried to construct an invalid permutation.")]
 pub struct InvalidPermutationError(::failure::Backtrace);
 
 impl Perm {
-    pub fn eye(n: u32) -> Perm
-    { Perm((0..n).collect()) }
+    pub fn eye(n: usize) -> Perm
+    { Perm { inv: PermVec::eye(n) } }
 
     pub fn len(&self) -> usize
-    { self.0.len() }
+    { self.inv.0.len() }
 
     /// Compute the `Perm` that, when applied to the input slice, would sort it.
     pub fn argsort<T: Ord>(xs: &[T]) -> Perm
-    {
-        let mut perm: Vec<_> = (0..xs.len() as u32).collect();
-        perm.sort_by(|&a, &b| xs[a as usize].cmp(&xs[b as usize]));
-        Perm(perm)
-    }
+    { Perm { inv: PermVec::argsort(xs).inverted() } }
 
-    /// This performs O(n log n) validation on the data
-    /// to verify that it satisfies the invariants of Perm.
-    pub fn from_vec(vec: Vec<u32>) -> Result<Perm, InvalidPermutationError>
-    {Ok({
-        if !Self::validate_perm(&vec) {
-            return Err(InvalidPermutationError(::failure::Backtrace::new()));
-        }
-        Perm(vec)
-    })}
+    /// Construct a perm. Useful for literals in unit tests.
+    ///
+    /// The representation accepted by this is comparable to indexing with an
+    /// integer array in numpy.  If the `k`th element of the permutation vector
+    /// is `value`, then applying the permutation will *pull* the data at index
+    /// `value` into index `k`.
+    ///
+    /// This performs O(n log n) validation on the data to verify that it
+    /// satisfies the invariants of Perm.  It also inverts the perm (an O(n)
+    /// operation).
+    pub fn from_vec(vec: Vec<usize>) -> Result<Perm, InvalidPermutationError>
+    { Ok(Perm { inv: PermVec::from_vec(vec)? }.inverted()) }
 
-    /// This does not check the invariants of Perm.
+    /// Construct a perm from the vector internally used to represent it.
+    ///
+    /// The format taken by this method is actually **the inverse** of the format
+    /// accepted by `from_vec`. If the `k`th element of the permutation vector is
+    /// `value`, then applying the permutation will *push* the data at index `k`
+    /// over to index `value`. This format is generally trickier to think about,
+    /// but is superior to the `from_vec` representation in terms of efficiency.
+    ///
+    /// This performs O(n log n) validation on the data to verify that it
+    /// satisfies the invariants of `Perm`.
+    pub fn from_raw_inv(inv: Vec<usize>) -> Result<Perm, InvalidPermutationError>
+    { Ok(Perm { inv: PermVec::from_vec(inv)? }) }
+
+    /// No-op constructor.  Still performs checking in debug builds.
     ///
     /// # Safety
     ///
-    /// `vec` must contain every element in `(0..vec.len())`,
+    /// `inv` must contain every element in `(0..inv.len())`,
     /// or else the behavior is undefined.
-    pub unsafe fn from_vec_unchecked(vec: Vec<u32>) -> Perm
-    {
-        debug_assert!(Self::validate_perm(&vec));
-        Perm(vec)
-    }
-
-    // Checks invariants required by Perm for unsafe code.
-    #[cfg_attr(feature = "nightly", must_use = "doesn't assert")]
-    fn validate_perm(xs: &[u32]) -> bool
-    {
-        let mut vec = xs.to_vec();
-        vec.sort();
-        vec.into_iter().eq(0..xs.len() as u32)
-    }
+    pub unsafe fn from_raw_inv_unchecked(inv: Vec<usize>) -> Perm
+    { Perm { inv: PermVec(inv).debug_validated() } }
 
     /// Construct a permutation of length |a| + |b|.
     ///
@@ -65,59 +87,78 @@ impl Perm {
     /// the existing elements.
     pub fn append_mut(&mut self, other: &Perm)
     {
-        let n = self.0.len() as u32;
-        self.0.extend(other.0.iter().map(|&i| i + n));
+        // (a direct sum of inverses is the inverse of the direct sum)
+        self.inv.append_mut(&other.inv);
     }
 
-    pub fn random(n: u32) -> Perm
+    pub fn random(n: usize) -> Perm
     {
         use ::rand::Rng;
 
-        let mut perm: Vec<_> = (0..n as u32).collect();
-        ::rand::thread_rng().shuffle(&mut perm);
-        Perm(perm)
+        let mut inv: Vec<_> = (0..n).collect();
+        ::rand::thread_rng().shuffle(&mut inv);
+        Perm { inv: PermVec(inv) }
     }
 
-    pub fn into_vec(self) -> Vec<u32>
-    { self.0 }
+    pub fn into_vec(self) -> Vec<usize>
+    { self.inverted().inv.0 }
+
+    /// No-op destructure
+    pub fn into_raw_inv(self) -> Vec<usize>
+    { self.inv.0 }
 
     #[cfg_attr(feature = "nightly", must_use = "not an in-place operation")]
     pub fn inverted(&self) -> Perm
     {
-        // bah. less code to test...
-        Self::argsort(&self.0)
+        // (the inverse of the inverse is... you know...)
+        Perm { inv: self.inv.inverted() }
     }
 
     // (this might sound niche, but it's not like we can safely expose `&mut [u32]`,
     //  so what's the harm in having a niche method?)
-    /// Compose with the permutation that shifts elements forward.
+    //
+    /// Compose with the permutation that shifts elements forward (performing `self` first)
     ///
     /// To construct the shift permutation itself, use `Perm::eye(n).shift_right(amt)`.
-    pub fn shift_right(mut self, amt: u32) -> Self
-    {
-        let n = self.0.len();
-        self.0.rotate_right(amt as usize % n);
-        self
-    }
+    pub fn shift_right(self, amt: usize) -> Self
+    { Perm { inv: self.inv.prefix_shift_left(amt) } }
 
-    /// Compose with the permutation that shifts elements backward.
+    /// Compose with the permutation that shifts elements backward (performing `self` first)
     ///
     /// To construct the shift permutation itself, use `Perm::eye(n).shift_left(amt)`.
-    pub fn shift_left(mut self, amt: u32) -> Self
-    {
-        let n = self.0.len();
-        self.0.rotate_left(amt as usize % n);
-        self
-    }
+    pub fn shift_left(self, amt: usize) -> Self
+    { Perm { inv: self.inv.prefix_shift_right(amt) } }
 
-    /// Compose with the permutation that shifts elements forward by a signed offset.
-    pub fn shift_signed(self, n: i32) -> Self
+    /// Compose with the permutation that shifts elements to the right by a signed offset.
+    pub fn shift_signed(self, n: isize) -> Self
     {
         if n < 0 {
-            self.shift_left((-n) as u32)
+            assert_ne!(n, ::std::isize::MIN, "(exasperated sigh)");
+            self.shift_left((-n) as usize)
         } else {
-            self.shift_right(n as u32)
+            self.shift_right(n as usize)
         }
+    }
+
+    /// Apply the permutation to an index. O(1).
+    ///
+    /// Calling this on the indices contained in a sparse-format data structure will
+    /// produce the same indices as if the corresponding dense-format data structure
+    /// were permuted.
+    pub fn permute_index(&self, i: usize) -> usize {
+        // F.Y.I. this method is **literally the entire reason** that we store the inverse.
+        self.inv.0[i]
+    }
+
+    /// Apply the inverse permutation to a single index. O(n).
+    ///
+    /// You should more or less *never* have to use this; it is better to compute the
+    /// inverse so you can apply it to many indices.
+    ///
+    /// It currently only exists for compatibility reasons.
+    pub fn backpermute_index(&self, i: usize) -> usize {
+        assert!(i < self.inv.0.len());
+        self.inv.0.iter().position(|&x| x == i).expect("BUG")
     }
 
     /// Construct the outer product of self and `slower`, with `self`
@@ -128,15 +169,8 @@ impl Perm {
     /// block by `self`.
     pub fn with_outer(&self, slower: &Perm) -> Perm
     {
-        assert!((self.len() as u32).checked_mul(slower.len() as u32).is_some());
-
-        let mut perm = Vec::with_capacity(self.len() * slower.len());
-
-        for &block_index in &slower.0 {
-            let offset = self.len() as u32 * block_index;
-            perm.extend(self.0.iter().map(|&x| x + offset));
-        }
-        Perm(perm)
+        // the inverse of the outer product is the outer product of inverses
+        Perm { inv: self.inv.with_outer(&slower.inv) }
     }
 
     /// Construct the outer product of self and `faster`, with `self`
@@ -149,7 +183,7 @@ impl Perm {
 
         // NOTE: there's plenty of room to optimize the number of heap
         //       allocations here
-        let mut acc = Perm::eye(self.len() as u32);
+        let mut acc = Perm::eye(self.len());
         let mut base = self.clone();
         while exp > 0 {
             if (exp & 1) == 1 {
@@ -163,10 +197,128 @@ impl Perm {
 
     pub fn pow_signed(&self, exp: i64) -> Perm {
         if exp < 0 {
+            assert_ne!(exp, ::std::i64::MIN, "(exasperated sigh)");
             self.inverted().pow_unsigned((-exp) as u64)
         } else {
             self.pow_unsigned(exp as u64)
         }
+    }
+}
+
+impl PermVec {
+    fn eye(n: usize) -> PermVec
+    { PermVec((0..n).collect()) }
+
+    fn argsort<T: Ord>(xs: &[T]) -> PermVec
+    {
+        let mut perm: Vec<_> = (0..xs.len()).collect();
+        perm.sort_by(|&a, &b| xs[a].cmp(&xs[b]));
+        PermVec(perm)
+    }
+
+    fn from_vec(vec: Vec<usize>) -> Result<PermVec, InvalidPermutationError>
+    {
+        if !Self::validate_data(&vec) {
+            return Err(InvalidPermutationError(::failure::Backtrace::new()));
+        }
+        Ok(PermVec(vec))
+    }
+
+    // Checks invariants required by Perm for unsafe code.
+    #[cfg_attr(feature = "nightly", must_use = "doesn't assert")]
+    fn validate_data(xs: &[usize]) -> bool {
+        let mut vec = xs.to_vec();
+        vec.sort();
+        vec.into_iter().eq(0..xs.len())
+    }
+
+    fn debug_validated(self) -> PermVec {
+        debug_assert!(PermVec::validate_data(&self.0));
+        self
+    }
+
+    fn append_mut(&mut self, other: &Self)
+    {
+        let offset = self.0.len();
+        self.0.extend(other.0.iter().map(|&i| i + offset));
+        PermVec::validate_data(&self.0);
+    }
+
+    #[cfg_attr(feature = "nightly", must_use = "not an in-place operation")]
+    fn inverted(&self) -> Self
+    {
+        let mut inv = vec![::std::usize::MAX; self.0.len()]; // [Src] -> Dest
+        for (i, &x) in self.0.iter().enumerate() { // i: Dest, x: Src
+            inv[x] = i;
+        }
+        PermVec(inv).debug_validated()
+    }
+
+    // The perm that does `self`, then shifts right.
+    #[allow(unused)]
+    fn postfix_shift_right(mut self, amt: usize) -> PermVec
+    {
+        let n = self.0.len();
+        self.0.rotate_right(amt % n);
+        self.debug_validated()
+    }
+
+    // The perm that does `self`, then shifts left.
+    #[allow(unused)]
+    fn postfix_shift_left(mut self, amt: usize) -> PermVec
+    {
+        let n = self.0.len();
+        self.0.rotate_left(amt % n);
+        self.debug_validated()
+    }
+
+    // The perm that shifts left, then applies `self`
+    fn prefix_shift_left(mut self, amt: usize) -> PermVec {
+        // Add amt to each value.
+        let n = self.0.len();
+        let amt = amt % n;
+        for x in &mut self.0 {
+            *x = (*x + amt) % n;
+        }
+        self.debug_validated()
+    }
+
+    // The perm that shifts right, then applies `self`
+    fn prefix_shift_right(self, amt: usize) -> PermVec {
+        // Subtract amt from each value.
+        // ...or rather, shift left by `(-amt) mod len`
+        //
+        // (technically, this puts it into the range `[1, len]` instead of `[0, len)`
+        //  due to a silly edge case, but that doesn't matter)
+        let len = self.0.len();
+        self.prefix_shift_left(len - amt % len)
+    }
+
+    fn with_outer(&self, slower: &PermVec) -> PermVec
+    {
+        assert!(self.0.len().checked_mul(slower.0.len()).is_some());
+
+        let mut perm = Vec::with_capacity(self.0.len() * slower.0.len());
+
+        for &block_index in &slower.0 {
+            let offset = self.0.len() * block_index;
+            perm.extend(self.0.iter().map(|&x| x + offset));
+        }
+        PermVec(perm).debug_validated()
+    }
+
+    // Perm that applies self then other.
+    fn then(&self, other: &PermVec) -> PermVec
+    {
+        assert_eq!(self.0.len(), other.0.len(), "Incorrect permutation length");
+
+        let mut out = vec![::std::usize::MAX; self.0.len()];
+
+        for (out_i, &self_i) in other.0.iter().enumerate() {
+            out[out_i] = self.0[self_i];
+        }
+
+        PermVec(out).debug_validated()
     }
 }
 
@@ -179,49 +331,80 @@ impl Perm {
     /// More naturally,
     /// `x.permuted_by(a).permuted_by(b) == x.permuted_by(a.then(b))`.
     pub fn then(&self, other: &Perm) -> Perm
-    { self.clone().permuted_by(other) }
+    {
+        // The inverses compose in reverse.
+        Perm { inv: other.inv.then(&self.inv) }
+    }
 
     /// Conventional group operator.
     pub fn of(&self, other: &Perm) -> Perm
     { other.then(self) }
 }
 
+#[deprecated = "legacy bridge, slow.  Get rid of both this and the prior call to `inverted`, \
+and just call permute_index on the original perm instead."]
 impl Index<usize> for Perm {
-    type Output = u32;
+    type Output = usize;
 
     #[inline]
-    fn index(&self, i: usize) -> &u32
-    { &self.0[i] }
+    fn index(&self, i: usize) -> &usize
+    {
+        let x = self.backpermute_index(i);
+        // total hack to get a reference
+        self.inv.0.iter().find(|&&e| e == x).unwrap()
+    }
 }
 
-impl Index<u32> for Perm {
-    type Output = u32;
-
-    #[inline]
-    fn index(&self, i: u32) -> &u32
-    { &self.0[i as usize] }
-}
+// NOTE: As a reminder to myself, I did in fact try introducing newtype indices
+//       at some point. `Perm` became `Perm<Src, Dest>`, an object that would
+//       transform data indexed by `Src` into data indexed by `Dest`.
+//       I found that this model was wildly successful at describing all existing
+//       usage of `Permute` and `Partition`, and even the lowest-level
+//       implementations (e.g. for Vec) worked almost entirely without
+//       modification after abstracting over index type.
+//
+//       ...however, the reason I decided not to keep it was because actually
+//       taking *advantage* of it required pervasive modification to function
+//       signatures all over `rsp2-structure` and `rsp2-tasks`, increasing
+//       coupling between parts of rsp2 in a way that was basically unavoidable.
+//       `fn foo(impl IntoIndexed<I, X>)` and
+//       `fn bar() -> OwnedType<I, X> where (): IndexFamily<I, X>` were no substitute
+//       for what used to be simply `fn foo(Vec<X>)` and `fn bar() -> Vec<X>`.
+//
+//       I believe that abstracting over index type is still useful as a conceptual
+//       tool for reasoning about how to use permutations.  Encoding them into the
+//       type system, however, takes too much effort for too little gain.
 
 /// Trait for applying a permutation operation.
 ///
-/// Note that in rsp2, this actually has two roles that are a bit
-/// conflated together: (this hasn't caused any trouble *yet*)
+/// In rsp2, this has a couple of roles that might *appear* to be conflated
+/// together, but they really aren't.  It might help to envision `Perm` as
+/// being parametrized over two index types; `Perm<Src, Dest>` takes data
+/// indexed by type `Src` and transforms it into data indexed by `Dest`.
 ///
-/// * Permutations of vectors, in general;
-///   To this end, there are helper functions like `append` and `with_inner`
-///   for constructing and composing permutations, and the implementation
-///   of `Permute` uses unsafe code to efficiently and correctly handle
-///   types with `Drop` implementations.
+/// As such, the `Permute` impl may appear to do different things based on
+/// how the data is stored (e.g. dense data that is conceptually indexed
+/// by some index type `I`, versus sparse data that conceptually *contains*
+/// values of type `I`).
 ///
-/// * Permutations of atoms, as a sort of "change of basis operation."
-///   Basically, if you have a function `compute_b(Structure) -> B`
-///   for some `B` that impls `Permute` (and the type `B` isn't used to
-///   represent anything else), then the implementation of `Permute` for
-///   `B` likely tries to satisfy the following property:
+/// # Laws
 ///
+/// All implementations of `Permute` must satisfy the following properties,
+/// which give `Permute::permuted_by` the qualities of a group action.
+/// (whose group operator is, incidentally, also `Permute::permuted_by`!)
+///
+/// * **Identity:**
 ///   ```ignore
-///   compute_b(structure.permuted_by(perm)) == compute_b(structure).permuted_by(perm)
+///   data.permuted_by(Perm::eye(data.len())) == data
 ///   ```
+/// * **Compatibility:**
+///   ```ignore
+///   data.permuted_by(a).permuted_by(b) == data.permuted_by(a.permuted_by(b))
+///   ```
+///
+/// When envisioning `Perm` as generic over `Src` and `Dest` types, it could
+/// perhaps be said that `Perm`s are the morphisms of a category. (brushing
+/// aside issues of mismatched length)
 pub trait Permute: Sized {
     // awkward name, but it makes it makes two things clear
     // beyond a shadow of a doubt:
@@ -236,45 +419,58 @@ pub trait Permute: Sized {
 mod unsafe_impls {
     use super::*;
 
-    impl<T> Permute for Vec<T> {
-        fn permuted_by(mut self, perm: &Perm) -> Vec<T>
-        {
-            use ::std::ptr;
+    pub(super) fn inv_permute_to_new_vec<T>(vec: Vec<T>, inv: &PermVec) -> Vec<T> {
+        let mut out = Vec::with_capacity(vec.len());
+        inv_permute_to_mut_vec(vec, inv, &mut out);
+        out
+    }
 
-            assert_eq!(
-                self.len(), perm.0.len(),
-                "Incorrect permutation length",
-            );
+    pub(super) fn inv_permute_to_mut_vec<T>(mut vec: Vec<T>, inv: &PermVec, out: &mut Vec<T>) {
+        use ::std::ptr;
 
-            let mut out = Vec::with_capacity(self.len());
+        assert_eq!(
+            vec.len(), inv.0.len(),
+            "Incorrect permutation length",
+        );
 
-            //------------------------------------------------
-            // You are now entering a PANIC FREE ZONE
+        out.clear();
 
-            // Make a bunch of uninitialized elements indexable.
-            unsafe { out.set_len(self.len()); }
+        //------------------------------------------------
+        // You are now entering a PANIC FREE ZONE
 
-            for (to, &from) in perm.0.iter().enumerate() {
-                // Note: This `as` cast will succeed because all elements
-                //       of perm are `< perm.0.len()`, which is a `usize`.
-                let tmp = unsafe { ptr::read(&self[from as usize]) };
-                unsafe { ptr::write(&mut out[to], tmp) };
-            }
+        // Make a bunch of uninitialized elements indexable.
+        unsafe { out.set_len(vec.len()); }
 
-            // Don't drop the original items, but do allow the original
-            // vec to fall out of scope so the memory can be freed.
-            unsafe { self.set_len(0); }
-
-            // Thank you for flying with us. You may now PANIC!
-            //------------------------------------------------
-            out
+        // a perm holds indices into the data vec, so the inverse holds indices into `out`.
+        for (vec_i, &out_i) in inv.0.iter().enumerate() {
+            let tmp = unsafe { ptr::read(&vec[vec_i]) };
+            unsafe { ptr::write(&mut out[out_i], tmp) };
         }
+
+        // Don't drop the original items, but do allow the original
+        // vec to fall out of scope so the memory can be freed.
+        unsafe { vec.set_len(0); }
+
+        // Thank you for flying with us. You may now PANIC!
+        //------------------------------------------------
     }
 }
 
+impl<T> Permute for Vec<T> {
+    fn permuted_by(self, perm: &Perm) -> Vec<T>
+    { self::unsafe_impls::inv_permute_to_new_vec(self, &perm.inv) }
+}
+
+// `Permute` doubles as the group operator.
+// (think of it as matrix multiplication in the matrix representation)
+impl Permute for PermVec {
+    fn permuted_by(self, perm: &Perm) -> PermVec
+    { PermVec(self.0.permuted_by(perm)) }
+}
+
 impl Permute for Perm {
-    fn permuted_by(self, perm: &Perm) -> Perm
-    { Perm(self.0.permuted_by(perm)) }
+    fn permuted_by(self, other: &Perm) -> Perm
+    { self.then(other) }
 }
 
 #[cfg(test)]
@@ -290,6 +486,16 @@ mod tests {
 
         assert_eq!(perm.clone().permuted_by(&inv), Perm::eye(20));
         assert_eq!(inv.permuted_by(&perm), Perm::eye(20));
+    }
+
+    #[test]
+    fn inverse_is_argsort()
+    {
+        let perm = Perm::random(20);
+        assert_eq!(
+            Perm::argsort(&perm.clone().into_vec()).into_vec(),
+            perm.inverted().into_vec(),
+        );
     }
 
     #[test]
@@ -316,7 +522,7 @@ mod tests {
         {
             let vec = vec![dp(0), dp(1), dp(2), dp(3), dp(4)];
 
-            let vec2 = vec.permuted_by(&Perm(vec![3, 1, 0, 4, 2]));
+            let vec2 = vec.permuted_by(&Perm::from_vec(vec![3, 1, 0, 4, 2]).unwrap());
             assert_eq!(drop_history.borrow().len(), 0);
 
             drop(vec2);
@@ -328,9 +534,9 @@ mod tests {
     #[test]
     fn associativity()
     {
-        let xy = Perm::from_vec(vec![1,0,2]).unwrap();
-        let zx = Perm::from_vec(vec![2,1,0]).unwrap();
-        let xyzx = Perm::from_vec(vec![2,0,1]).unwrap();
+        let xy = Perm::from_vec(vec![1, 0, 2]).unwrap();
+        let zx = Perm::from_vec(vec![2, 1, 0]).unwrap();
+        let xyzx = Perm::from_vec(vec![2, 0, 1]).unwrap();
         assert_eq!(xy.clone().permuted_by(&zx), xyzx);
         assert_eq!(xy.then(&zx), xyzx);
         assert_eq!(zx.of(&xy), xyzx);
@@ -342,6 +548,33 @@ mod tests {
             vec![0,1,2].permuted_by(&xy).permuted_by(&zx),
             vec![2,0,1],
         );
+
+        for _ in 0..10 {
+            use ::rand::Rng;
+
+            let mut rng = ::rand::thread_rng();
+            let n = rng.gen_range(10, 20);
+            let s = b"abcdefghijklmnopqrstuvwxyz"[..n].to_vec();
+            let a = Perm::random(n);
+            let b = Perm::random(n);
+            let c = Perm::random(n);
+            let bc = b.clone().permuted_by(&c);
+            assert_eq!(
+                a.clone().permuted_by(&b).permuted_by(&c),
+                a.clone().permuted_by(&bc),
+                "compatibility, for Self = Perm (a.k.a. associativity)",
+            );
+            assert_eq!(
+                a.inv.clone().permuted_by(&b).permuted_by(&c),
+                a.inv.clone().permuted_by(&bc),
+                "compatibility, for Self = PermVec",
+            );
+            assert_eq!(
+                s.clone().permuted_by(&b).permuted_by(&c),
+                s.clone().permuted_by(&bc),
+                "compatibility, for Self = Vec",
+            );
+        }
     }
 
     #[test]
@@ -404,6 +637,15 @@ mod tests {
         assert_eq!(
             vec![0, 1, 2, 3, 4, 5].permuted_by(&Perm::eye(6).shift_signed(-8)),
             vec![2, 3, 4, 5, 0, 1],
+        );
+        // potentially dumb edge case
+        assert_eq!(
+            vec![0, 1, 2, 3, 4, 5].permuted_by(&Perm::eye(6).shift_signed(6)),
+            vec![0, 1, 2, 3, 4, 5],
+        );
+        assert_eq!(
+            vec![0, 1, 2, 3, 4, 5].permuted_by(&Perm::eye(6).shift_signed(-6)),
+            vec![0, 1, 2, 3, 4, 5],
         );
     }
 

@@ -318,7 +318,7 @@ mod tests {
     fn shuffle<T: Clone>(xs: &[T]) -> (Vec<T>, Perm)
     {
         let xs = xs.to_vec();
-        let perm = Perm::random(xs.len() as u32);
+        let perm = Perm::random(xs.len());
         (xs.permuted_by(&perm), perm)
     }
 

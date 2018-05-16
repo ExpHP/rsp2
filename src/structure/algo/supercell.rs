@@ -449,13 +449,14 @@ impl SupercellToken {
         // Depermutations that permute the cells along each axis independently.
         // (expressed in the quotient spaces of images along those axes)
         let axis_deperms: [_; 3] = arr_from_fn(|k| {
-            Perm::eye(self.periods[k]).shift_signed(lattice_point[k])
+            Perm::eye(self.periods[k] as usize)
+                .shift_signed(lattice_point[k] as isize)
         });
 
         // Construct the overall deperm as an outer product of deperms.
         // this could be written as a fold, but I wanted to emphasize the order;
         // the innermost perm must correspond to the fastest-varying index.
-        Perm::eye(self.num_primitive_atoms as u32)
+        Perm::eye(self.num_primitive_atoms)
             .with_inner(&axis_deperms[0])
             .with_inner(&axis_deperms[1])
             .with_inner(&axis_deperms[2])

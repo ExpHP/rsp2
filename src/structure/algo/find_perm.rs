@@ -288,8 +288,8 @@ fn brute_force_near_identity(
     assert_eq!(from_fracs.len(), to_fracs.len());
     let n = from_fracs.len();
 
-    const UNSET: u32 = ::std::u32::MAX;
-    assert!(n < UNSET as usize);
+    const UNSET: usize = ::std::usize::MAX;
+    assert!(n < UNSET);
 
     let mut perm = vec![UNSET; from_fracs.len()];
 
@@ -324,7 +324,7 @@ fn brute_force_near_identity(
                 cart.sqnorm()
             };
             if distance2 < tol * tol {
-                perm[to] = from as u32;
+                perm[to] = from;
                 continue 'from;
             }
         }
@@ -348,10 +348,10 @@ mod tests {
 
     use ::rsp2_array_types::Envee;
 
-    fn random_vec<T: Rand>(n: u32) -> Vec<T>
+    fn random_vec<T: Rand>(n: usize) -> Vec<T>
     { (0..n).map(|_| ::rand::random()).collect() }
 
-    fn random_problem(n: u32) -> (Vec<V3>, Perm, Vec<V3>)
+    fn random_problem(n: usize) -> (Vec<V3>, Perm, Vec<V3>)
     {
         let original: Vec<[f64; 3]> = random_vec(n);
         let perm = Perm::random(n);

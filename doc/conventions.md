@@ -11,7 +11,9 @@ Matrices are row-major, the formalism is row-centric (with the exception of cart
 ## Permutations
 ### Permutations as sequences of indices
 
-Although method docs (and this document) may often speak as though permutations _push_ data around, the convention followed by `rsp2` is really such that they __*pull* data into place.__
+#### The intuitive representation
+
+`Perm::from_vec` and `Perm::into_vec` follow a convention that permutations __*pull* data into place.__
 
 This is to say, applying the permutation `[1, 3, 2, 0]` to the sequence `[A, B, C, D]` will produce `[B, D, C, A]`. Basically:
 
@@ -19,11 +21,24 @@ This is to say, applying the permutation `[1, 3, 2, 0]` to the sequence `[A, B, 
 * The value at index 3 (`D`) is _pulled into_ the second spot.
 * ... and etc.
 
-Contrast this with another possible convention, where applying the perm _pushes_ elements to the given locations. (where applying `[1, 3, 2, 0]` to `[A, B, C, D]` would produce `[D, A, C, B]`.
+This representation is generally easy to reason about, because the permutation vector transforms like the data it permutes. However, there's something funny about this format which becomes evident if you were to make it generic over index type:
 
-rsp2's convention matches how numpy works when arrays are indexed by integer arrays.  In this same vein, rsp2's permutation operations can be seen as a special case of a more general operation of "indexing by an array," where e.g. indexing `[A, B, C, D]` by `[1, 1, 1, 3, 1]` would produce `[B, B, B, D, B]`.  Note however that the design of the `Permute` trait deliberately prevents such usage, and that construction of a `Perm` from a sequence like `[1, 1, 1, 3, 1]` is forbidden in order to allow `Permute` impls to be written without `Clone` bounds.
+* Let `IndexVec<I, X>` be a wrapped form of `Vec<X>` which uses type `I` (a newtype around `usize`) for its indices.
+* Let `Perm<Src, Dest>` be an object that transforms data indexed by `Src` into data indexed by `Dest`.  E.g. `IndexVec<Src, X>` into `IndexVec<Dest, X>`.
+* Then you can see that the above "intuitive" representation of `Perm<Src, Dest>` is actually `IndexVec<Dest, Src>`.  That is to say, given a `Dest` index, we can readily recover the `Src` index, but not the other way around.
 
-Most code does not need even need to be aware of this convention thanks to the `Perm` type and `Permute` trait that largely abstract it away.  However, functions that produce permutations through means other than composition are generally expected to do so through `Perm::from_vec`, which requires one to be aware of this convention.
+This explains why rsp2 prefers to actually *store* the permutation in a different format.
+
+#### The actual representation
+
+rsp2 *actually* stores the inverse of the above representation.  If we were to make it generic over index types, one could say that `Perm<Src, Dest>` is stored as `IndexVec<Src, Dest>`.
+
+In this format, a permutation _pushes_ elements to the written locations. For example, applying `[1, 3, 2, 0]` to `[A, B, C, D]` would produce `[D, A, C, B]`, py *pushing* the `A` to position 1, *pushing* the `B` to position 3, and etc.
+
+Both representations are equally efficient at permuting data stored in a dense format.  The advantage of *this* format is that it can also efficiently permute sparse data:
+
+* Let `type SparseVec<I, X> = Vec<(I, X)>` represent a sparse vector of index type `I`.
+* Then you can see how the actual representation of `Perm<Src, Dest>` (which is `IndexVec<Src, Dest>`) can efficiently transform `SparseVec<Src, X>` into `SparseVec<Dest, X>`, while the intuitive representation (which is `IndexVec<Dest, Src>`) would require searching for each index (or depending on the circumstances, precomputing the inverse).
 
 ### Permutations representing symmetry operators
 
@@ -50,6 +65,8 @@ The root of all trouble is the following:
 *These permutations compose in the reverse order compared to the operators they describe.*
 
 Basically, if you have operators `R1` and `R2` and corresponding permutations `P1` and `P2`, then the effect of transforming first by `R1` then by `R2` is equivalent to permuting the coordinates *first* by `P2` and then by `P1`.  Weird, right?  But it makes sense if you think about it. After all, the permutation representation of an operator depends on what order the coords are initially arranged:
+
+(**note:** Here I am showing the intuitive representation of permutations, not the format actually stored by rsp2)
 
 ```
      x coords       ==>  permutation that mirrors along x
@@ -102,31 +119,6 @@ Both of these permutations can be used to create a structure where the each labe
 ```
 
 The advantage of using `deperm` is that it composes properly; because the coords were left untouched, all previously-computed perms and deperms are still valid descriptions of their corresponding operators.
-
-#### Indices into permuted data transform by the inverse permutation
-
-This fact has nothing to do with symmetry operators, and everything to do with the "sequence of indices" representation.  It shows up when working with data in a sparse format.
-
-FIXME maybe I should also make up a term for the "permutation of a symmetry operator" (e.g. coperm, for "coord perm"), to eliminate confusion with "a permutation (in general)."
-
-In general:
-
-* If you have an array of data and you permute it by `perm`...
-* ...then indices into that data will transform by `perm.inverted()`.
-
-That is,
-
-```rust
-// assume you have a 'perm', 'old_data', and 'old_index'
-let inv_perm = perm.inverted();
-
-let new_data = old_data.clone().permuted_by(&perm);
-let new_index = inv_perm[old_index];
-
-assert_eq!(new_data[new_index], old_data[old_index]);
-```
-
-Brace yourself; sometimes you may even see the phrase "inverse depermutation" in the code.  It really depends on what data is being permuted.
 
 ## Footnotes
 
