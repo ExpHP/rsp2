@@ -273,17 +273,13 @@ fn assign_layers_impl_frac_1d(
     Layers::PerUnitCell(LayersPerUnitCell { groups, gaps: layer_seps })
 })}
 
-
-// The indices contained within are mapped by `perm.inverted()`,
-// so that the output of `by_atoms` transforms according to `perm`.
 impl Permute for Layers {
     fn permuted_by(self, perm: &Perm) -> Self {
         match self {
             Layers::NoAtoms => Layers::NoAtoms,
             Layers::NoDistinctLayers { mut sorted_indices } => {
-                let inv_perm = perm.inverted().into_vec();
                 for x in &mut sorted_indices {
-                    *x = inv_perm[*x] as usize;
+                    *x = perm.permute_index(*x);
                 }
                 Layers::NoDistinctLayers { sorted_indices }
             },
@@ -296,12 +292,10 @@ impl Permute for Layers {
 
 impl Permute for LayersPerUnitCell {
     fn permuted_by(self, perm: &Perm) -> Self {
-        let inv_perm = perm.inverted().into_vec();
-
         let LayersPerUnitCell { mut groups, gaps } = self;
         for group in &mut groups {
             for x in group {
-                *x = inv_perm[*x] as usize;
+                *x = perm.permute_index(*x);
             }
         }
         LayersPerUnitCell { groups, gaps }

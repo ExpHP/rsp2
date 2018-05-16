@@ -44,9 +44,20 @@ impl ForceSets {
         ForceSets { atom_affected, atom_displaced, cart_force, cart_displacement }
     }
 
+    // Picture the following:
+    //
+    // * Suppose that our structure were printed out, so that we may lay a transparency
+    //   sheet over it. (also suppose that the structure were 2D, so that the printout could
+    //   faithfully render it without perspective)
+    // * Draw arrows on all atoms representing the present forces, and draw a circle around
+    //   the displaced atom.  This is the input set of data.
+    // * Now apply `cart_rot` to the transparency sheet.
+    //   **This is the output set of data.**
+    //
     // `super_deperm` should describe the symmop as a depermutation of the supercell.
     //
     // see conventions.md for info about depermutations.
+    //
     // FIXME shouldn't be pub(crate)
     // FIXME there is a better strategy which lets us do only one pseudoinversion per unique
     //       displacement vector.  Basically, once all space group operators are accounted
@@ -60,21 +71,6 @@ impl ForceSets {
     ) -> Self {
         assert_eq!(super_deperm.len(), sc.num_supercell_atoms());
 
-        // Picture the following:
-        //
-        // * Suppose that our structure were printed out, so that we may lay a transparency
-        //   sheet over it. (also suppose that the structure were 2D, so that the printout could
-        //   faithfully render it without perspective)
-        // * Draw arrows on all atoms representing the present forces, and draw a circle around
-        //   the displaced atom.  This is the current set of data.
-        // * Now apply `cart_rot` to the transparency sheet.
-        //   This is the new set of data.
-        //
-        // In effect, we depermuted and rotated the forces; but because our representation
-        // is sparse, we need to apply the *inverse* depermutation to the indices.
-        //
-        let super_deperm_inv = super_deperm.inverted();
-
         let primitive_atoms = sc.atom_primitive_atoms();
         let lattice_points = sc.atom_lattice_points();
         let expected_lattice_point = sc.lattice_point_from_cell(DISPLACED_CELL);
@@ -85,8 +81,8 @@ impl ForceSets {
                     assert_eq!(expected_lattice_point, lattice_points[displaced as usize]);
 
                     // Rotate the atoms to a new index.
-                    let displaced = super_deperm_inv[displaced];
-                    let affected = super_deperm_inv[affected];
+                    let displaced = super_deperm.permute_index(displaced);
+                    let affected = super_deperm.permute_index(affected);
 
                     // 'displaced' might have been moved to a new cell.
                     // Translate the atoms to move it back.

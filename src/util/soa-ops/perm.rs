@@ -1,4 +1,3 @@
-use ::std::ops::Index;
 use ::std::fmt;
 
 /// Represents a reordering operation on atoms.
@@ -148,17 +147,6 @@ impl Perm {
     pub fn permute_index(&self, i: usize) -> usize {
         // F.Y.I. this method is **literally the entire reason** that we store the inverse.
         self.inv.0[i]
-    }
-
-    /// Apply the inverse permutation to a single index. O(n).
-    ///
-    /// You should more or less *never* have to use this; it is better to compute the
-    /// inverse so you can apply it to many indices.
-    ///
-    /// It currently only exists for compatibility reasons.
-    pub fn backpermute_index(&self, i: usize) -> usize {
-        assert!(i < self.inv.0.len());
-        self.inv.0.iter().position(|&x| x == i).expect("BUG")
     }
 
     /// Construct the outer product of self and `slower`, with `self`
@@ -339,20 +327,6 @@ impl Perm {
     /// Conventional group operator.
     pub fn of(&self, other: &Perm) -> Perm
     { other.then(self) }
-}
-
-#[deprecated = "legacy bridge, slow.  Get rid of both this and the prior call to `inverted`, \
-and just call permute_index on the original perm instead."]
-impl Index<usize> for Perm {
-    type Output = usize;
-
-    #[inline]
-    fn index(&self, i: usize) -> &usize
-    {
-        let x = self.backpermute_index(i);
-        // total hack to get a reference
-        self.inv.0.iter().find(|&&e| e == x).unwrap()
-    }
 }
 
 // NOTE: As a reminder to myself, I did in fact try introducing newtype indices

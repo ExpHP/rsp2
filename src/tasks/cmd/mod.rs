@@ -753,14 +753,13 @@ impl TrialDir {
         let _ = phonopy_superstructure;
 
         // sparse indices transform by the inverse perm
-        let inv_perm_from_phonopy = perm_from_phonopy.inverted();
         let displacements = {
             let primitive_atoms = sc_token.atom_primitive_atoms();
             disp_dir.displacements().iter()
                 .map(|&(phonopy_idx, disp)| {
-                    let our_super_idx = inv_perm_from_phonopy[phonopy_idx];
-                    let our_prim_idx = primitive_atoms[our_super_idx as usize];
-                    (our_prim_idx as usize, disp)
+                    let our_super_idx = perm_from_phonopy.permute_index(phonopy_idx);
+                    let our_prim_idx = primitive_atoms[our_super_idx];
+                    (our_prim_idx, disp)
                 })
                 .collect::<Vec<_>>()
         };
