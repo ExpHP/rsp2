@@ -21,6 +21,7 @@ extern crate rsp2_soa_ops;
 extern crate rsp2_slice_math;
 extern crate rsp2_fs_util;
 extern crate rsp2_linalg;
+#[macro_use] extern crate rsp2_newtype_indices;
 #[macro_use] extern crate rsp2_util_macros;
 #[macro_use] extern crate rsp2_clap;
 #[macro_use] extern crate rsp2_assert_close;
@@ -70,6 +71,7 @@ macro_rules! _log_once_impl {
 }
 
 macro_rules! warn_once { ($($arg:tt)*) => { _log_once_impl!{warn!($($arg)*)} }; }
+macro_rules! info_once { ($($arg:tt)*) => { _log_once_impl!{info!($($arg)*)} }; }
 
 // FIXME copied from failure 1.0 prerelease; remove once actually released
 macro_rules! throw {

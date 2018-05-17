@@ -12,6 +12,7 @@ use ::rsp2_tasks_config as cfg;
 use ::rsp2_array_types::{V3, Unvee};
 #[allow(unused)] // rustc bug
 use ::slice_of_array::prelude::*;
+use ::std::collections::BTreeMap;
 
 const DEFAULT_KC_Z_CUTOFF: f64 = 14.0; // (Angstrom?)
 const DEFAULT_KC_Z_MAX_LAYER_SEP: f64 = 4.5; // Angstrom
@@ -212,7 +213,7 @@ pub trait DiffFn<Meta> {
     /// Some potentials may assume that `original` has zero force.
     ///
     /// The default implementation works from the dense representation of the forces.
-    fn compute_force_set(&mut self, original: &Structure<Meta>, displacement: (usize, V3)) -> FailResult<::math::dynmat::ForceSets>
+    fn compute_force_set(&mut self, original: &Structure<Meta>, displacement: (usize, V3)) -> FailResult<BTreeMap<usize, V3>>
     where Meta: Clone,
     {
         let mut structure = original.clone();
@@ -235,11 +236,12 @@ pub trait DiffFn<Meta> {
                 // FIXME use the above instead
                 .map(|(atom, (_old, new))| (atom, new))
         };
-        Ok(::math::dynmat::ForceSets::from_displacement(
-            structure.num_atoms(),
-            displacement,
-            diffs,
-        ))
+        Ok(diffs.collect())
+//        Ok(::math::dynmat::ForceSets::from_displacement(
+//            structure.num_atoms(),
+//            displacement,
+//            diffs,
+//        ))
     }
 }
 

@@ -101,6 +101,9 @@ impl FracRot {
         FracRot { t: mat.t() }
     }
 
+    pub fn matrix(&self) -> M33<i32>
+    { self.t.t() }
+
     /// Get the transpose of the cartesian rotation matrix.
     ///
     /// This conversion requires the **primitive lattice.**

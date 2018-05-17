@@ -158,6 +158,7 @@ pub mod ext_traits {
     use ::path_abs::PathDir;
     use ::std::result::Result as StdResult;
     use ::std::path::Path;
+    use ::std::fmt;
 
     extension_trait!{
         <'a> pub ArgMatchesExt<'a> for ::clap::ArgMatches<'a> {
@@ -175,6 +176,16 @@ pub mod ext_traits {
         pub <T, E> OptionResultExt<T, E> for Option<StdResult<T, E>> {
             fn fold_ok(self) -> StdResult<Option<T>, E> {
                 self.map_or(Ok(None), |r| r.map(Some))
+            }
+        }
+    }
+
+    extension_trait! {
+        pub <T: fmt::Debug> OptionExpectNoneExt<T> for Option<T> {
+            fn expect_none(self, msg: &str) {
+                if self.is_some() {
+                    panic!("expect_none on {:?}: {}", self, msg);
+                }
             }
         }
     }

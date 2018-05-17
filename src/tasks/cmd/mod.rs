@@ -29,7 +29,7 @@ use ::rsp2_slice_math::{vnorm};
 
 use ::slice_of_array::prelude::*;
 use ::rsp2_array_utils::arr_from_fn;
-use ::rsp2_array_types::{V3, Unvee};
+use ::rsp2_array_types::{V3, M33, Unvee};
 use ::rsp2_soa_ops::{Perm, Permute};
 use ::rsp2_structure::{Coords, ElementStructure, Lattice};
 use ::rsp2_structure::supercell;
@@ -653,28 +653,44 @@ impl TrialDir {
             )?.into_iter().map(|p| p.inverted()).collect()
         };
 
-        let original_force_sets = {
+        let original_force_sets: Vec<_> = {
             let mut diff_fn = pot.initialize_diff_fn(superstructure.clone())?;
-            ::math::dynmat::ForceSets::concat_from({
-                displacements.into_iter()
-                    .map(|displacement| diff_fn.compute_force_set(&superstructure, displacement))
+//            ::math::dynmat::ForceSets::concat_from({
+                displacements.iter()
+                    .map(|&displacement| diff_fn.compute_force_set(&superstructure, displacement))
                     .collect::<FailResult<Vec<_>>>()?
-            }).expect("(BUG) no displacements?")
+//            }).expect("(BUG) no displacements?")
         };
 
-        let force_sets = {
-            ::math::dynmat::ForceSets::concat_from({
-                ::util::zip_eq(&space_group, &space_group_deperms)
-                    .map(|(oper, deperm): (&::rsp2_structure::FracOp, _)| {
-                        let cart_rot = oper.to_rot().cart(prim_structure.lattice());
-                        original_force_sets.derive_from_symmetry(&sc, &cart_rot, deperm)
-                    })
-            }).expect("(BUG) no displacements?")
+        let cart_rots: Vec<M33> = {
+            space_group.iter()
+                .map(|oper| oper.to_rot().cart(prim_structure.lattice()))
+                .collect()
         };
-
-
         let perm_to_phonopy = perm_from_phonopy.inverted();
-        let force_constants = force_sets.solve_force_constants(&sc, &perm_to_phonopy, &superstructure.to_carts())?;
+
+        let frac_rots = space_group.iter().map(|oper| oper.to_rot().matrix()).collect::<Vec<_>>();
+        let force_constants = ::math::dynmat::ForceSets::like_phonopy(
+            &displacements,
+            &original_force_sets,
+            &frac_rots,
+            &cart_rots,
+            &space_group_deperms,
+            &sc,
+            &perm_to_phonopy,
+        ).unwrap();
+
+//        let force_sets = {
+//            ::math::dynmat::ForceSets::concat_from({
+//                ::util::zip_eq(&space_group, &space_group_deperms)
+//                    .map(|(oper, deperm): (&::rsp2_structure::FracOp, _)| {
+//                        let cart_rot = oper.to_rot().cart(prim_structure.lattice());
+//                        original_force_sets.derive_from_symmetry(&sc, &cart_rot, deperm)
+//                    })
+//            }).expect("(BUG) no displacements?")
+//        };
+
+//        let force_constants = force_sets.solve_force_constants(&sc, &perm_to_phonopy, &superstructure.to_carts())?;
         {
             let dense = force_constants.permuted_by(&perm_to_phonopy).to_dense_matrix();
             println!("{:?}", dense); // FINALLY: THE MOMENT OF TRUTH
