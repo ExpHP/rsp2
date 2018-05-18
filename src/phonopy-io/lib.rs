@@ -12,7 +12,7 @@ extern crate serde_yaml;
 pub use self::filetypes::{conf, Conf};
 pub use self::filetypes::symmetry_yaml::{self, SymmetryYaml};
 pub use self::filetypes::disp_yaml::{self, DispYaml};
-pub use self::filetypes::force_sets;
+pub use self::filetypes::force_sets::{self, ForceSets};
 
 mod filetypes;
 pub mod npy;

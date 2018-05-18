@@ -18,7 +18,7 @@ use ::FailResult;
 use ::{IoResult};
 
 use super::{MissingFileError, PhonopyFailed};
-use super::{Conf, DispYaml, SymmetryYaml, QPositions, Args};
+use super::{Conf, DispYaml, SymmetryYaml, QPositions, Args, ForceSets};
 use ::traits::{AsPath, HasTempDir, Save, Load};
 
 use ::rsp2_structure_io::poscar;
@@ -31,9 +31,12 @@ use ::rsp2_kets::Basis;
 use ::rsp2_fs_util::{open, create, open_text, copy, hard_link};
 use ::rsp2_structure::{ElementStructure, Element};
 use ::rsp2_structure::{FracRot, FracTrans, FracOp};
+use ::rsp2_structure::supercell::{self, SupercellToken};
+use ::rsp2_soa_ops::{Permute, Perm};
+
 use ::rsp2_phonopy_io::npy;
 
-use ::rsp2_array_types::{V3};
+use ::rsp2_array_types::{V3, Unvee};
 
 use ::slice_of_array::prelude::*;
 
@@ -54,6 +57,9 @@ impl Default for Builder {
     }
 }
 
+// filenames invented by rsp2
+//
+// (we don't bother with constants for fixed filenames used by phonopy, like "POSCAR")
 const FNAME_SETTINGS_ARGS: &'static str = "disp.args";
 const FNAME_HELPER_SCRIPT: &'static str = "phonopy";
 const FNAME_CONF_DISPS: &'static str = "disp.conf";
@@ -107,7 +113,6 @@ impl Builder {
 }
 
 impl Builder {
-
     fn finalize_config(&self, structure: &ElementStructure) -> Self
     {
         use ::itertools::Itertools;
@@ -187,11 +192,11 @@ phonopy \
         DirWithDisps::from_existing(dir)?
     })}
 
-    // FIXME: Should return a new DirWithSymmetry type.
+    #[allow(unused)]
     pub fn symmetry(
         &self,
         structure: &ElementStructure,
-    ) -> FailResult<Vec<FracOp>>
+    ) -> FailResult<DirWithSymmetry<TempDir>>
     {
         self.finalize_config(structure)
             ._symmetry(structure)
@@ -200,51 +205,123 @@ phonopy \
     fn _symmetry(
         &self,
         structure: &ElementStructure,
-    ) -> FailResult<Vec<FracOp>>
-    {Ok({
+    ) -> FailResult<DirWithSymmetry<TempDir>>
+    {
         let tmp = TempDir::new("rsp2")?;
-        let tmp = tmp.path();
-        trace!("Entered '{}'...", tmp.display());
-
-        self.conf.save(tmp.join(FNAME_CONF_SYMMETRY))?;
-
-        poscar::dump(create(tmp.join("POSCAR"))?, "blah", &structure)?;
-
-        trace!("Calling phonopy for symmetry...");
-        check_status(Command::new("phonopy")
-            .args(self.args_from_settings().0)
-            .arg(FNAME_CONF_SYMMETRY)
-            .arg("--sym")
-            .current_dir(&tmp)
-            .stdout(create(tmp.join(FNAME_OUT_SYMMETRY))?)
-            .status()?)?;
-
-        trace!("Done calling phonopy");
-
-        // check if input structure was primitive
         {
-            let prim = poscar::load(open(tmp.join("PPOSCAR"))?)?;
+            let tmp = tmp.path();
+            trace!("Entered '{}'...", tmp.display());
 
-            let ratio = structure.lattice().volume() / prim.lattice().volume();
-            let ratio = round_checked(ratio, 1e-4)?;
+            self.conf.save(tmp.join(FNAME_CONF_SYMMETRY))?;
 
-            // sorry, supercells are just not supported... yet.
-            //
-            // (In the future we may be able to instead return an object
-            //  which will allow the spacegroup operators of the primitive
-            //  to be applied in meaningful ways to the superstructure.)
-            ensure!(ratio == 1, "attempted to compute symmetry of a supercell");
+            poscar::dump(create(tmp.join("POSCAR"))?, "cell checked for symmetry", &structure)?;
+
+            trace!("Calling phonopy for symmetry...");
+            check_status(Command::new("phonopy")
+                .args(self.args_from_settings().0)
+                .arg(FNAME_CONF_SYMMETRY)
+                .arg("--sym")
+                .current_dir(&tmp)
+                .stdout(create(tmp.join(FNAME_OUT_SYMMETRY))?)
+                .status()?)?;
+
+            trace!("Done calling phonopy");
+
+            // check if input structure was primitive;
+            // this is a hard requirement due to the integer representation of FracOp.
+            {
+                let prim = poscar::load(open(tmp.join("PPOSCAR"))?)?;
+
+                let ratio = structure.lattice().volume() / prim.lattice().volume();
+                let ratio = round_checked(ratio, 1e-4)?;
+
+                // sorry, supercells are just not supported... yet.
+                //
+                // (In the future we may be able to instead return an object
+                //  which will allow the spacegroup operators of the primitive
+                //  to be applied in meaningful ways to the superstructure.)
+                ensure!(ratio == 1, "attempted to compute symmetry of a supercell");
+            }
         }
+        DirWithSymmetry::from_existing(tmp)
+    }
+}
 
-        let yaml = SymmetryYaml::load(tmp.join(FNAME_OUT_SYMMETRY))?;
-        yaml.space_group_operations.into_iter()
-            .map(|op| Ok({
-                let rotation = FracRot::new(&op.rotation);
-                let translation = FracTrans::from_floats(&op.translation)?;
-                FracOp::new(&rotation, &translation)
-            }))
-            .collect::<FailResult<_>>()?
+/// Represents a directory with the following data:
+/// - `POSCAR`: The input structure
+/// - `PPOSCAR`: Phonopy's "primitive cell", created by `phonopy --sym`
+/// - `symmetry.yaml`: Stdout of `phonopy --sym`
+///
+/// # Note
+///
+/// Currently, the implementation is rather optimistic that files in
+/// the directory have not been tampered with since its creation.
+/// As a result, some circumstances which probably should return `Error`
+/// may instead cause a panic, or may not be detected as early as possible.
+#[derive(Debug, Clone)]
+pub struct DirWithSymmetry<P: AsPath> {
+    pub(crate) dir: P,
+}
+
+impl<P: AsPath> DirWithSymmetry<P> {
+    pub fn from_existing(dir: P) -> FailResult<Self>
+    {Ok({
+        for name in &[
+            "POSCAR",
+            "PPOSCAR",
+            FNAME_OUT_SYMMETRY,
+        ] {
+            let path = dir.as_path().join(name);
+            if !path.exists() {
+                throw!(MissingFileError::new("DirWithSymmetry", &dir, name.to_string()));
+            }
+        }
+        DirWithSymmetry { dir }
     })}
+
+    /// Input structure. (the one you provided while creating this)
+    pub fn structure(&self) -> FailResult<ElementStructure>
+    { Ok(poscar::load(open_text(self.path().join("POSCAR"))?)?) }
+
+    /// Read PPOSCAR.
+    pub fn phonopy_primitive_structure(&self) -> FailResult<ElementStructure>
+    { Ok(poscar::load(open_text(self.path().join("PPOSCAR"))?)?) }
+
+    fn symmetry_yaml(&self) -> FailResult<SymmetryYaml>
+    { Ok(SymmetryYaml::load(self.path().join(FNAME_OUT_SYMMETRY))?) }
+
+    /// Return FracOps in fractional units of the input structure.
+    pub fn frac_ops(&self) -> FailResult<Vec<FracOp>>
+    {
+        let lattice = self.structure()?.lattice().clone();
+        let phonopy_lattice = self.phonopy_primitive_structure()?.lattice().clone();
+
+        self.symmetry_yaml()?
+            .space_group_operations
+            .into_iter()
+            .map(|op| Ok({
+                let rot = FracRot::new(&op.rotation);
+                let trans = FracTrans::from_floats(op.translation)?;
+                let phonopy_op = FracOp::new(&rot, &trans);
+
+                // convert from primitive cell chosen by phonopy to our primitive cell.
+                let rot = FracRot::from_cart(&lattice, &rot.cart(&phonopy_lattice))?;
+                let trans = FracTrans::from_cart(&lattice, trans.cart(&phonopy_lattice))?;
+                let our_op = FracOp::new(&rot, &trans);
+
+                if phonopy_op != our_op {
+                    warn_once!("\
+                            It looks like Phonopy chose a different primitive cell in PPOSCAR than \
+                            the one you wrote.  rsp2 has adjusted the symmetry operators assuming \
+                            that the operators output by phonopy were for the PPOSCAR cell, but \
+                            since this case has never come up for the author, this conversion is \
+                            not well-tested.\
+                        ");
+                }
+                our_op
+            }))
+            .collect()
+    }
 }
 
 /// Represents a directory with the following data:
@@ -300,16 +377,34 @@ impl<P: AsPath> DirWithDisps<P> {
         DirWithDisps { dir, superstructure, displacements }
     })}
 
+    fn primitive_structure(&self) -> FailResult<ElementStructure>
+    { Ok(poscar::load(open_text(self.path().join("POSCAR"))?)?) }
+
+    /// Get the structure from `disp.yaml`.
+    ///
+    /// # Note
+    ///
+    /// This superstructure was generated by phonopy, and the atoms may be in
+    /// a different order than most supercells in rsp2 (those produced with SupercellToken).
     #[allow(unused)]
     pub fn superstructure(&self) -> &ElementStructure
     { &self.superstructure }
+
+    /// Get displacements.  *The atom indices are for phonopy's supercell!*
     pub fn displacements(&self) -> &[(usize, V3)]
     { &self.displacements }
 
-    /// Due to the "StreamingIterator problem" this iterator must return
-    /// clones of the structure... though it seems unlikely that this cost
-    /// is anything to worry about compared to the cost of computing the
-    /// forces on said structure.
+    /// Get structures modified with displacements from `disp.yaml`.
+    ///
+    /// # Note
+    ///
+    /// The base structure will have been produced by phonopy.  The ordering of sites
+    /// may differ from most supercells in rsp2 (those produced with SupercellToken).
+    //
+    // Due to the "StreamingIterator problem" this iterator must return
+    // clones of the structure... though it seems unlikely that this cost
+    // is anything to worry about compared to the cost of computing the
+    // forces on said structure.
     pub fn displaced_structures<'a>(&'a self) -> Box<Iterator<Item=ElementStructure> + 'a>
     { Box::new({
         use ::rsp2_phonopy_io::disp_yaml::apply_displacement;
@@ -377,6 +472,94 @@ impl<P: AsPath> DirWithDisps<P> {
     })}
 }
 
+
+/// Like Gramma used to make.
+pub struct Rsp2StyleDisplacements {
+    /// A supercell following rsp2's conventions (not phonopy's)
+    pub superstructure: ElementStructure,
+    /// Describes the relationship between the input structure and `superstructure`.
+    pub sc: SupercellToken,
+    /// Permutation that rearranges phonopy's superstructure to match `superstructure`.
+    pub perm_from_phonopy: Perm,
+
+    /// Displacements that use indices into the primitive structure.
+    ///
+    /// You are free to just use this field and ignore the rest (which merely come
+    /// for "free" with it). This field should be compatible with superstructures
+    /// of any size, and obviously does not depend on the convention for ordering
+    /// sites in a supercell.
+    pub prim_displacements: Vec<(usize, V3)>,
+}
+
+impl<P: AsPath> DirWithDisps<P> {
+    /// Produce a variety of data describing the displacements in terms of rsp2's conventions
+    /// (whereas most other methods on `DirWithDisps` use phonopy's conventions).
+    ///
+    /// Actually it is not strictly necessary to return the other things.
+    ///
+    pub fn rsp2_style_displacements(&self) -> FailResult<Rsp2StyleDisplacements> {
+        let prim_structure = self.primitive_structure()?;
+        let sc_dims = {
+            let conf = Conf::load(self.path().join(FNAME_CONF_DISPS))?;
+            get_sc_dim(&conf)?.ok_or_else(|| format_err!("DIM is required"))?
+        };
+
+        let (our_superstructure, sc_token) = supercell::diagonal(sc_dims).build(prim_structure);
+        let phonopy_superstructure = self.superstructure();
+
+        // make phonopy match us
+        let perm_from_phonopy = phonopy_superstructure.perm_to_match_coords(&our_superstructure, 1e-10)?;
+        let phonopy_superstructure = phonopy_superstructure.clone().permuted_by(&perm_from_phonopy);
+
+        // cmon, big money, big money....
+        // if these assertions always succeed, it will save us a
+        // good deal of implementation work.
+        {
+            let err_msg = "\
+                phonopy's superstructure does not match rsp2's conventions! \
+                Unfortunately, support for this scenario is not yet implemented.\
+            ";
+            assert_close!(
+                abs=1e-10,
+                our_superstructure.lattice(), phonopy_superstructure.lattice(),
+                "{}", err_msg,
+            );
+            let diffs = {
+                ::util::zip_eq(our_superstructure.to_carts(), phonopy_superstructure.to_carts())
+                    .map(|(a, b)| (a - b) / our_superstructure.lattice())
+                    .map(|v| v.map(|x| x - x.round()))
+                    .map(|v| v * our_superstructure.lattice())
+                    .collect::<Vec<_>>()
+            };
+            assert_close!(
+                abs=1e-10,
+                vec![[0.0; 3]; diffs.len()],
+                diffs.unvee(),
+                "{}", err_msg,
+            );
+        }
+        let _ = phonopy_superstructure;
+
+        let prim_displacements = {
+            let primitive_atoms = sc_token.atom_primitive_atoms();
+            self.displacements().iter()
+                .map(|&(phonopy_idx, disp)| {
+                    let our_super_idx = perm_from_phonopy.permute_index(phonopy_idx);
+                    let our_prim_idx = primitive_atoms[our_super_idx];
+                    (our_prim_idx, disp)
+                })
+                .collect::<Vec<_>>()
+        };
+
+        Ok(Rsp2StyleDisplacements {
+            superstructure: our_superstructure,
+            sc: sc_token,
+            prim_displacements,
+            perm_from_phonopy,
+        })
+    }
+}
+
 /// Represents a directory with the following data:
 /// - `POSCAR`: The input structure
 /// - `FORCE_SETS`: Phonopy file with forces for displacements
@@ -422,6 +605,15 @@ impl<P: AsPath> DirWithForces<P> {
     #[allow(unused)]
     pub fn structure(&self) -> FailResult<ElementStructure>
     { Ok(poscar::load(open_text(self.path().join("POSCAR"))?)?) }
+
+    /// Read FORCE_SETS.
+    ///
+    /// # Note
+    ///
+    /// The displaced atom indices will be zero based; however, they will follow
+    /// phonopy's conventions for ordering the supercell.
+    pub fn force_sets(&self) -> FailResult<ForceSets>
+    { Ok(ForceSets::load(self.path().join("FORCE_SETS"))?) }
 
     /// Enable/disable caching of force constants.
     ///
@@ -634,6 +826,21 @@ impl<P: AsPath> DirWithBands<P> {
 
 //-----------------------------
 
+fn get_sc_dim(conf: &Conf) -> FailResult<Option<[u32; 3]>> {
+    use ::util::ext_traits::OptionResultExt;
+    conf.0.get("DIM")
+        .map(|s| {
+            let words = s.split_whitespace().map(str::parse).collect::<Result<Vec<_>, _>>()?;
+            match &words[..] {
+                &[a, b, c] => Ok([a, b, c]),
+                _ => bail!("DIM does not contain three integers!"),
+            }
+        })
+        .fold_ok()
+}
+
+//-----------------------------
+
 fn band_string(ks: &[V3]) -> String
 { ks.flat().iter().map(|x| x.to_string()).collect::<Vec<_>>().join(" ") }
 
@@ -741,6 +948,12 @@ pub fn copy_or_link(src: impl AsPath, dest: impl AsPath) -> FailResult<()>
 }
 
 //-----------------------------
+
+impl_dirlike_boilerplate!{
+    type: {DirWithSymmetry<_>}
+    member: self.dir
+    other_members: []
+}
 
 impl_dirlike_boilerplate!{
     type: {DirWithDisps<_>}

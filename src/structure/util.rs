@@ -60,3 +60,17 @@ impl Tol {
     pub(crate) fn unfloat_m33(&self, m: &M33) -> Result<M33<i32>, IntPrecisionError>
     { ::rsp2_array_utils::try_map_arr(m.0, |v| self.unfloat_v3(&v)).map(M3) }
 }
+
+#[inline(always)] // hopefully encourage LLVM to do crazy bit math for constant moduli
+#[cfg(feature = "nightly")]
+#[inline(always)]
+pub(crate) fn mod_euc(a: i32, b: i32) -> i32 { i32::mod_euc(a, b) }
+
+#[inline(always)] // hopefully encourage LLVM to do crazy bit math for constant moduli
+#[cfg(not(feature = "nightly"))]
+pub(crate) fn mod_euc(a: i32, b: i32) -> i32 {
+    match a % b {
+        r if r < 0 => r + i32::abs(b),
+        r => r,
+    }
+}

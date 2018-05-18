@@ -1,9 +1,9 @@
 use ::FailResult;
 use ::traits::{Save, Load, AsPath};
 use ::traits::save::Json;
-use ::errors::DisplayPathArc;
+use ::errors::DisplayPathArcNice;
 
-use ::rsp2_phonopy_io::{symmetry_yaml, disp_yaml, conf};
+use ::rsp2_phonopy_io::{symmetry_yaml, disp_yaml, conf, force_sets};
 use ::std::io::BufReader;
 use ::std::io::prelude::*;
 use ::path_abs::{FileRead, FileWrite};
@@ -20,7 +20,7 @@ pub use self::cmd::*;
 pub(crate) struct MissingFileError {
     backtrace: Backtrace,
     ty: &'static str,
-    dir: DisplayPathArc,
+    dir: DisplayPathArcNice,
     filename: String,
 }
 
@@ -34,7 +34,7 @@ pub(crate) struct PhonopyFailed {
 impl MissingFileError {
     fn new(ty: &'static str, dir: &AsPath, filename: String) -> Self {
         let backtrace = Backtrace::new();
-        let dir = DisplayPathArc(dir.as_path().to_owned().into());
+        let dir = DisplayPathArcNice(dir.as_path().to_owned().into());
         MissingFileError { backtrace, ty, dir, filename }
     }
 }
@@ -53,6 +53,14 @@ pub type DispYaml = disp_yaml::DispYaml;
 impl Load for DispYaml {
     fn load(path: impl AsPath) -> FailResult<Self>
     { Ok(disp_yaml::read(open(path.as_path())?)?) }
+}
+
+//--------------------------------------------------------
+
+pub type ForceSets = force_sets::ForceSets;
+impl Load for ForceSets {
+    fn load(path: impl AsPath) -> FailResult<Self>
+    { Ok(force_sets::read(open_text(path.as_path())?)?) }
 }
 
 //--------------------------------------------------------

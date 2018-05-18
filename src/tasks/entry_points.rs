@@ -4,6 +4,7 @@ use ::clap;
 use ::cmd::trial::{TrialDir, NewTrialDirArgs};
 use ::cmd::StructureFileType;
 use ::path_abs::{PathDir, PathFile};
+use ::std::ffi::OsStr;
 use ::ui::logging::init_global_logger;
 use ::ui::cfg_merging::ConfigSources;
 use ::ui::cli_deserialize::CliDeserialize;
@@ -16,7 +17,21 @@ fn wrap_result_main<F>(main: F)
         for cause in e.causes() {
             error!("{}", cause);
         }
-        error!("{}", e.backtrace());
+
+        if ::std::env::var_os("RUST_BACKTRACE") == Some(OsStr::new("1").to_owned()) {
+            error!("{}", e.backtrace());
+        } else {
+            // When the only user is also the only dev, there isn't much point to wrapping
+            // error messages in context.  As a result of this, some error messages are
+            // *particularly* terrible.  (e.g. "cannot parse integer from empty string"
+            // without any indication of which file caused it).
+            //
+            // For now, leave a reminder about RUST_BACKTRACE.
+            error!("\
+                (If you found the above error message to be particularly lacking in \
+                detail, try again with RUST_BACKTRACE=1)\
+            ");
+        }
         ::std::process::exit(1);
     });
 }
@@ -240,19 +255,15 @@ pub fn dynmat_test() {
         let (app, de) = CliDeserialize::augment_clap_app({
             ::clap::App::new("rsp2-dynmat-test")
                 .args(&[
-                    arg!( input=STRUCTURE ""),
+                    arg!( input=PHONOPY_DIR ""),
                 ])
         });
         let matches = app.get_matches();
-        let (dir_args, (filetype, extra_args)) = de.resolve_args(&matches)?;
+        let () = de.resolve_args(&matches)?;
+        let input = PathDir::new(matches.expect_value_of("input"))?;
 
-        let input = PathFile::new(matches.expect_value_of("input"))?;
-        let filetype = OptionalFileType::or_guess(filetype, &input);
+        let _ = logfile; // no trial dir
 
-        let trial = TrialDir::create_new(dir_args)?;
-        logfile.start(PathFile::new(trial.new_logfile_path()?)?)?;
-
-        let settings = trial.read_settings()?;
-        trial.run_dynmat_test(&settings, filetype, &input, extra_args)
+        ::cmd::run_dynmat_test(&input)
     });
 }

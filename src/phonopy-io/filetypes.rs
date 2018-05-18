@@ -168,7 +168,11 @@ pub mod symmetry_yaml {
 
 pub mod force_sets {
     use super::*;
-    // Adapted from code by Colin Daniels.
+
+    pub struct ForceSets {
+        pub displacements: Vec<(usize, V3)>,
+        pub force_sets: Vec<Vec<V3>>,
+    }
 
     /// Write a FORCE_SETS file.
     pub fn write<Vs>(
@@ -204,4 +208,61 @@ pub mod force_sets {
         }
         Ok(())
     }
+
+    /// Read a FORCE_SETS file.
+    pub fn read(w: impl BufRead) -> FailResult<ForceSets> {
+        // Blank lines are ignored.
+        let mut lines = w.lines().filter(|x| match x {
+            Ok(s) => s.trim() != "",
+            _ => true,
+        });
+        let mut next_line = move |expected: &str| -> FailResult<_> {
+            match lines.next() {
+                None => bail!("Expected {}, got EOL", expected),
+                Some(Err(e)) => Err(e)?,
+                Some(Ok(line)) => Ok(line),
+            }
+        };
+
+        let n_atom: usize = next_line("atom count line")?.trim().parse()?;
+        let n_disp: usize = next_line("disp count line")?.trim().parse()?;
+
+        let parse_v3 = |s: &str| -> FailResult<V3> {
+            let v = s.split_whitespace().map(|s| Ok(s.parse()?)).collect::<FailResult<Vec<f64>>>()?;
+            match &v[..] {
+                &[x, y, z] => Ok(V3([x, y, z])),
+                _ => bail!("expected line of 3 floats, got {:?}", s),
+            }
+        };
+
+        let mut displacements = Vec::with_capacity(n_disp);
+        let mut force_sets: Vec<_> = (0..n_disp).map(|_| Vec::with_capacity(n_atom)).collect();
+        for force_set in &mut force_sets {
+            let displaced = next_line("displaced atom line")?.trim().parse::<usize>()? - 1;
+            let displacement = parse_v3(&next_line("displacement vector line")?)?;
+            displacements.push((displaced, displacement));
+            for _ in 0..n_atom {
+                force_set.push(parse_v3(&next_line("force line")?)?);
+            }
+        }
+        Ok(ForceSets { displacements, force_sets })
+    }
+
+    #[test]
+    fn it_can_read_what_it_writes() {
+        let displacements = vec![
+            (0, V3([1.0, 0.0, 0.0])),
+            (2, V3([0.0, 1.0, 0.0])),
+        ];
+        let forces = vec![vec![V3([0.0, 0.2, 0.3]); 4]; 2];
+
+        let mut buf = vec![];
+        write(&mut buf, &displacements, &forces).unwrap();
+        let force_sets = read(::std::io::BufReader::new(&buf[..])).unwrap();
+
+        assert_eq!(displacements, force_sets.displacements);
+        assert_eq!(forces, force_sets.force_sets);
+    }
 }
+
+

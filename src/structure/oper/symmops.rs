@@ -34,9 +34,20 @@ pub struct FracRot {
     t: M33<i32>,
 }
 
+// FIXME: **Where the hell** did I ever get the notion that translations
+//        are always multiples of `1/12`
+
 /// The translation part of a spacegroup operation **on a primitive cell**.
 ///
 /// This always has coordinates that are multiples of `1/12`.
+///
+/// (FIXME: CITATION NEEDED for the fact that at least one primitive cell
+///  satisfies this property for every periodic structure.)
+///
+/// (However, so long as at least one primitive cell of a given structure
+///  satisfies this property, it can easily be shown that they ALL do.
+///  When transforming from any one primitive cell to another, the
+///  translations get multiplied with a unimodular matrix)
 ///
 /// Before applying it to supercells, you should convert it into cartesian.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
@@ -101,18 +112,29 @@ impl FracRot {
         FracRot { t: mat.t() }
     }
 
+    fn from_float_t(float_t: &M33<f64>) -> Result<FracRot, ::IntPrecisionError>
+    { float_t.try_map(|x| ::util::Tol(1e-4).unfloat(x)).map(|t| FracRot { t }) }
+
+    pub fn from_cart(prim_lattice: &Lattice, mat: &M33) -> Result<FracRot, ::IntPrecisionError>
+    { Self::from_cart_t(prim_lattice, &mat.t()) }
+
+    fn from_cart_t(prim_lattice: &Lattice, cart_t: &M33) -> Result<FracRot, ::IntPrecisionError>
+    { Self::from_float_t(&(prim_lattice.matrix() * cart_t * prim_lattice.inverse_matrix())) }
+
     pub fn matrix(&self) -> M33<i32>
     { self.t.t() }
 
     /// Get the transpose of the cartesian rotation matrix.
     ///
-    /// This conversion requires the **primitive lattice.**
+    /// This conversion requires the same primitive lattice that was used to compute this
+    /// symmetry operator.
     pub fn cart_t(&self, prim_lattice: &Lattice) -> M33
-    { &(prim_lattice.inverse_matrix() * &self.float_t()) * prim_lattice.matrix() }
+    { prim_lattice.inverse_matrix() * self.float_t() * prim_lattice.matrix() }
 
-    /// Get the cartesian rotation matrix.
+    /// Recover the cartesian rotation matrix.
     ///
-    /// This conversion requires the **primitive lattice.**
+    /// This conversion requires the same primitive lattice that was used to compute this
+    /// symmetry operator.
     pub fn cart(&self, prim_lattice: &Lattice) -> M33
     { self.cart_t(prim_lattice).t() }
 
@@ -129,7 +151,7 @@ impl FracRot {
     pub fn then(&self, other: &FracRot) -> FracRot
     {
         // (since these are transposes, this is the natural order of application)
-        FracRot { t: &self.t * &other.t }
+        FracRot { t: self.t * other.t }
     }
 
     /// Conventional group operator.
@@ -141,15 +163,19 @@ impl FracTrans {
     pub fn eye() -> Self
     { FracTrans(V3([0, 0, 0])) }
 
-    pub fn from_floats(xs: &V3) -> Result<FracTrans, ::IntPrecisionError>
-    { xs.try_map(|x| ::util::Tol(1e-4).unfloat(x * 12.0)).map(FracTrans) }
+    pub fn from_floats(xs: V3) -> Result<FracTrans, ::IntPrecisionError>
+    { xs.try_map(|x| ::util::Tol(1e-4).unfloat(x * 12.0)).map(FracTrans).map(Self::reduce) }
 
-    /// Get the cartesian translation vector.
+    fn reduce(self) -> FracTrans
+    { FracTrans(self.0.map(|x| ::util::mod_euc(x, 12))) }
+
+    pub fn from_cart(prim_lattice: &Lattice, cart: V3) -> Result<FracTrans, ::IntPrecisionError>
+    { FracTrans::from_floats(cart / prim_lattice) }
+
+    /// Recover the cartesian translation vector.
     ///
-    /// This conversion requires the **primitive lattice.**
-    /// This is obvious if you think about it, considering that this type
-    /// is not capable of representing any translation shorter than 1/12th
-    /// of a lattice vector.
+    /// This conversion requires the same primitive lattice that was used to compute this
+    /// symmetry operator.
     pub fn cart(&self, prim_lattice: &Lattice) -> V3
     { self.float() * prim_lattice }
 
@@ -207,9 +233,7 @@ impl FracOp {
 
         // reduce the translation for a unique representation
         for x in &mut t[3][..3] {
-            *x %= 12;
-            *x += 12;
-            *x %= 12;
+            *x = ::util::mod_euc(*x, 12);
         }
         debug_assert!(t[3][..3].iter().all(|&x| 0 <= x && x < 12));
         debug_assert_eq!(t[3][3], 1);
@@ -224,7 +248,7 @@ impl FracOp {
 
 impl FracRot {
     pub fn transform_prim(&self, fracs: &[V3]) -> Vec<V3>
-    { fracs.iter().map(|v| v * &self.float_t()).collect() }
+    { fracs.iter().map(|v| v * self.float_t()).collect() }
 }
 
 impl<'a> From<&'a [[i32; 3]; 3]> for FracRot {
@@ -315,7 +339,7 @@ mod tests {
                 [-1,  1, 0],
                 [ 0,  0, 1],
             ]),
-            &FracTrans::from_floats(&V3([1./3., 2./3., 0.0])).unwrap(),
+            &FracTrans::from_floats(V3([1./3., 2./3., 0.0])).unwrap(),
         );
         let square = FracOp::new(
             &FracRot::from(&[
@@ -323,14 +347,14 @@ mod tests {
                 [-1, 0, 0],
                 [ 0, 0, 1],
             ]),
-            &FracTrans::from_floats(&V3([0., 0., 0.])).unwrap(),
+            &FracTrans::from_floats(V3([0., 0., 0.])).unwrap(),
         );
 
         assert_eq!(op.then(&op), square);
     }
 
     #[test]
-    fn symmop_to_cart()
+    fn symmop_to_cart_from_cart()
     {
         // graphene lattice
         let half_r3 = 0.5 * f64::sqrt(3.0);
@@ -355,5 +379,15 @@ mod tests {
             [half_r3,     -0.5, 0.0],
             [    0.0,      0.0, 1.0],
         ]);
+
+        // one with nonzero translation
+        let rot = FracRot::from(&[
+            [ 0, 1,  0],
+            [-1, 1,  0],
+            [ 0, 0, -1],
+        ]);
+        let trans = FracTrans::from_floats(V3([-1./3., 1./3., 0.0])).unwrap();
+        assert_eq!(rot, FracRot::from_cart(&lattice, &rot.cart(&lattice)).unwrap());
+        assert_eq!(trans, FracTrans::from_cart(&lattice, trans.cart(&lattice)).unwrap());
     }
 }

@@ -17,11 +17,11 @@ mod relaxation;
 use ::{FailResult, FailOk};
 use ::rsp2_tasks_config::{self as cfg, Settings, NormalizationMode, SupercellSpec};
 use ::traits::{AsPath};
-use ::phonopy::{DirWithBands, DirWithDisps, DirWithForces};
+use ::phonopy::{DirWithBands, DirWithDisps, DirWithForces, DirWithSymmetry};
 
 use ::util::ext_traits::{OptionResultExt, PathNiceExt};
 use ::math::basis::Basis3;
-use ::math::bonds::{FracBonds, FracBond};
+use ::math::bonds::{FracBonds};
 
 use ::path_abs::{PathArc, PathFile, PathDir};
 use ::rsp2_structure::consts::CARBON;
@@ -30,9 +30,8 @@ use ::rsp2_slice_math::{vnorm};
 use ::slice_of_array::prelude::*;
 use ::rsp2_array_utils::arr_from_fn;
 use ::rsp2_array_types::{V3, M33, Unvee};
-use ::rsp2_soa_ops::{Perm, Permute};
+use ::rsp2_soa_ops::{Permute};
 use ::rsp2_structure::{Coords, ElementStructure, Lattice};
-use ::rsp2_structure::supercell;
 use ::phonopy::Builder as PhonopyBuilder;
 use ::math::bands::ScMatrix;
 use ::rsp2_structure_io::poscar;
@@ -615,70 +614,78 @@ impl TrialDir {
 
 //=================================================================
 
-impl TrialDir {
-    // FIXME refactor once it's working, this is way too long
-    pub(crate) fn run_dynmat_test(
-        self,
-        settings: &Settings,
-        file_format: StructureFileType,
-        input: &PathFile,
-        cli: CliArgs,
-    ) -> FailResult<()>
-    {Ok({
-        let pot = PotentialBuilder::from_config(&settings.threading, &settings.potential.kind);
+// FIXME refactor once it's working, this is way too long
+pub(crate) fn run_dynmat_test(phonopy_dir: &PathDir) -> FailResult<()>
+{Ok({
+//        let pot = PotentialBuilder::from_config(&settings.threading, &settings.potential.kind);
 
-        let (prim_structure, _atom_layers, _layer_sc_mats) = read_structure_file(
-            Some(settings), file_format, input, Some(&*pot),
-        )?;
+//        let (prim_structure, _atom_layers, _layer_sc_mats) = read_structure_file(
+//            Some(settings), file_format, input, Some(&*pot),
+//        )?;
 
-        self.write_poscar("initial.vasp", "Initial structure", &prim_structure)?;
-        let phonopy = phonopy_builder_from_settings(&settings.phonons, prim_structure.lattice());
-        let disp_dir = phonopy.displacements(&prim_structure)?;
+//        self.write_poscar("initial.vasp", "Initial structure", &prim_structure)?;
+//        let phonopy = phonopy_builder_from_settings(&settings.phonons, prim_structure.lattice());
+//        let disp_dir = phonopy.displacements(&prim_structure)?;
 
-        // Make a supercell, and determine how our ordering of the supercell differs from
-        // phonopy.
-        let (superstructure, sc, displacements, perm_from_phonopy) = {
-            self._dynmat_test__supercell_and_displacements(settings, &prim_structure, disp_dir)?
-        };
+    // Make a supercell, and determine how our ordering of the supercell differs from phonopy.
+    let symmetry_dir = DirWithSymmetry::from_existing(phonopy_dir)?;
+    let forces_dir = DirWithForces::from_existing(phonopy_dir)?;
+    let disp_dir = DirWithDisps::from_existing(phonopy_dir)?;
+    let ::phonopy::Rsp2StyleDisplacements {
+        superstructure, sc, prim_displacements, perm_from_phonopy,
+    } = disp_dir.rsp2_style_displacements()?;
 
-        let space_group = phonopy.symmetry(&prim_structure)?;
+    let space_group = symmetry_dir.frac_ops()?;
+    let prim_lattice = symmetry_dir.structure()?.lattice().clone();
 
-        let space_group_deperms: Vec<_> = {
-            ::rsp2_structure::find_perm::of_spacegroup_for_general(
-                &superstructure,
-                &space_group,
-                prim_structure.lattice(),
-                1e-1, // FIXME should be slightly larger than configured tol,
-                      //       but I forgot where that is stored.
-            )?.into_iter().map(|p| p.inverted()).collect()
-        };
+    let space_group_deperms: Vec<_> = {
+        ::rsp2_structure::find_perm::of_spacegroup_for_general(
+            &superstructure,
+            &space_group,
+            &prim_lattice,
+            1e-1, // FIXME should be slightly larger than configured tol,
+                  //       but I forgot where that is stored.
+        )?.into_iter().map(|p| p.inverted()).collect()
+    };
 
-        let original_force_sets: Vec<_> = {
-            let mut diff_fn = pot.initialize_diff_fn(superstructure.clone())?;
-//            ::math::dynmat::ForceSets::concat_from({
-                displacements.iter()
-                    .map(|&displacement| diff_fn.compute_force_set(&superstructure, displacement))
-                    .collect::<FailResult<Vec<_>>>()?
-//            }).expect("(BUG) no displacements?")
-        };
+//        let original_force_sets: Vec<_> = {
+//            let mut diff_fn = pot.initialize_diff_fn(superstructure.clone())?;
+////            ::math::dynmat::ForceSets::concat_from({
+//                displacements.iter()
+//                    .map(|&displacement| diff_fn.compute_force_set(&superstructure, displacement))
+//                    .collect::<FailResult<Vec<_>>>()?
+////            }).expect("(BUG) no displacements?")
+//        };
+    let original_force_sets: Vec<_> = {
+        let ::phonopy::ForceSets {
+            force_sets: phonopy_force_sets, ..
+        } = forces_dir.force_sets()?;
 
-        let cart_rots: Vec<M33> = {
-            space_group.iter()
-                .map(|oper| oper.to_rot().cart(prim_structure.lattice()))
-                .collect()
-        };
-        let perm_to_phonopy = perm_from_phonopy.inverted();
+        phonopy_force_sets.into_iter()
+            .map(|vec| {
+                vec.into_iter().enumerate()
+                    .map(|(atom, v3)| (perm_from_phonopy.permute_index(atom), v3))
+                    .collect()
+            }).collect()
+    };
 
-        let frac_rots = space_group.iter().map(|oper| oper.to_rot().matrix()).collect::<Vec<_>>();
-        let force_constants = ::math::dynmat::ForceSets::like_phonopy(
-            &displacements,
-            &original_force_sets,
-            &frac_rots,
-            &cart_rots,
-            &space_group_deperms,
-            &sc,
-            &perm_to_phonopy,
-        ).unwrap();
+    let cart_rots: Vec<M33> = {
+        space_group.iter()
+            .map(|oper| oper.to_rot().cart(&prim_lattice))
+            .collect()
+    };
+    let perm_to_phonopy = perm_from_phonopy.inverted();
+
+    let frac_rots = space_group.iter().map(|oper| oper.to_rot().matrix()).collect::<Vec<_>>();
+    let force_constants = ::math::dynmat::ForceConstants::like_phonopy(
+        &prim_displacements,
+        &original_force_sets,
+        &frac_rots,
+        &cart_rots,
+        &space_group_deperms,
+        &sc,
+        &perm_to_phonopy,
+    ).unwrap();
 
 //        let force_sets = {
 //            ::math::dynmat::ForceSets::concat_from({
@@ -691,94 +698,29 @@ impl TrialDir {
 //        };
 
 //        let force_constants = force_sets.solve_force_constants(&sc, &perm_to_phonopy, &superstructure.to_carts())?;
-        {
-            let dense = force_constants.permuted_by(&perm_to_phonopy).to_dense_matrix();
-            println!("{:?}", dense); // FINALLY: THE MOMENT OF TRUTH
-        }
-        let _ = cli;
-
-        unimplemented!();
-        #[allow(unreachable_code)] {
-            let our_dynamical_matrix = {
-            };
-
-            // make phonopy compute dynamical matrix (as a gold standard)
-            // TODO: how to get the dynamical matrix from phonopy?
-            let phonopy_bands_dir = {
-                //force_dir
-                //    .build_bands()
-                //    .compute(&[Q_GAMMA])?
-            };
-
-            let _ = our_dynamical_matrix;
-            let _ = phonopy_bands_dir;
-
-        }
-    })}
-
-    #[allow(non_snake_case)]
-    fn _dynmat_test__supercell_and_displacements(
-        &self,
-        settings: &Settings,
-        prim_structure: &ElementStructure,
-        disp_dir: DirWithDisps<impl AsPath>,
-    ) -> FailResult<(
-        ElementStructure,
-        ::rsp2_structure::supercell::SupercellToken,
-        Vec<(usize, V3)>, // displacements with primitive site indices
-        Perm, // from phonopy supercell to our supercell
-    )> {
-        let sc_dims = settings.phonons.supercell.dim_for_unitcell(prim_structure.lattice());
-
-        let (our_superstructure, sc_token) = supercell::diagonal(sc_dims).build(prim_structure.clone());
-        let phonopy_superstructure = disp_dir.superstructure();
-
-        // make phonopy match us
-        let perm_from_phonopy = phonopy_superstructure.perm_to_match_coords(&our_superstructure, 1e-10)?;
-        let phonopy_superstructure = phonopy_superstructure.clone().permuted_by(&perm_from_phonopy);
-
-        // cmon, big money, big money....
-        // if these assertions always succeed, it will save us a
-        // good deal of implementation work.
-        {
-            let err_msg = "\
-                phonopy's superstructure does not match rsp2's conventions! \
-                Unfortunately, support for this scenario is not yet implemented.\
-            ";
-            assert_close!(
-                abs=1e-10,
-                our_superstructure.lattice(), phonopy_superstructure.lattice(),
-                "{}", err_msg,
-            );
-            let diffs = {
-                ::util::zip_eq(our_superstructure.to_carts(), phonopy_superstructure.to_carts())
-                    .map(|(a, b)| (a - b) / our_superstructure.lattice())
-                    .map(|v| v.map(|x| x - x.round()))
-                    .map(|v| v * our_superstructure.lattice())
-                    .collect::<Vec<_>>()
-            };
-            assert_close!(
-                abs=1e-10,
-                vec![[0.0; 3]; diffs.len()],
-                diffs.unvee(),
-                "{}", err_msg,
-            );
-        }
-        let _ = phonopy_superstructure;
-
-        let displacements = {
-            let primitive_atoms = sc_token.atom_primitive_atoms();
-            disp_dir.displacements().iter()
-                .map(|&(phonopy_idx, disp)| {
-                    let our_super_idx = perm_from_phonopy.permute_index(phonopy_idx);
-                    let our_prim_idx = primitive_atoms[our_super_idx];
-                    (our_prim_idx, disp)
-                })
-                .collect::<Vec<_>>()
-        };
-        Ok((our_superstructure, sc_token, displacements, perm_from_phonopy))
+    {
+        let dense = force_constants.permuted_by(&perm_to_phonopy).to_dense_matrix();
+        println!("{:?}", dense); // FINALLY: THE MOMENT OF TRUTH
     }
-}
+
+    unimplemented!();
+    #[allow(unreachable_code)] {
+        let our_dynamical_matrix = {
+        };
+
+        // make phonopy compute dynamical matrix (as a gold standard)
+        // TODO: how to get the dynamical matrix from phonopy?
+        let phonopy_bands_dir = {
+            //force_dir
+            //    .build_bands()
+            //    .compute(&[Q_GAMMA])?
+        };
+
+        let _ = our_dynamical_matrix;
+        let _ = phonopy_bands_dir;
+
+    }
+})}
 
 //=================================================================
 

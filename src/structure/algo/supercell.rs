@@ -385,7 +385,7 @@ impl SupercellToken {
     /// **Note:** The lattice point is wrapped into the supercell.
     pub fn cell_from_lattice_point(&self, v: V3<i32>) -> [u32; 3] {
         let diff = v - self.offset;
-        let cell = V3::from_fn(|k| mod_euc(diff[k], self.periods[k] as i32) as u32);
+        let cell = V3::from_fn(|k| ::util::mod_euc(diff[k], self.periods[k] as i32) as u32);
         cell.0
     }
 
@@ -465,18 +465,6 @@ impl SupercellToken {
             .with_inner(&axis_deperms[0])
             .with_inner(&axis_deperms[1])
             .with_inner(&axis_deperms[2])
-    }
-}
-
-#[cfg(feature = "nightly")]
-#[inline(always)]
-fn mod_euc(a: i32, b: i32) -> i32 { i32::mod_euc(a, b) }
-
-#[cfg(not(feature = "nightly"))]
-fn mod_euc(a: i32, b: i32) -> i32 {
-    match a % b {
-        r if r < 0 => r + i32::abs(b),
-        r => r,
     }
 }
 

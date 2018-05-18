@@ -99,10 +99,11 @@ mod errors {
     pub fn FailOk<T>(x: T) -> FailResult<T> { Ok(x) }
 
     #[derive(Debug, Clone)]
-    pub struct DisplayPathArc(pub ::path_abs::PathArc);
-    impl fmt::Display for DisplayPathArc {
+    pub struct DisplayPathArcNice(pub ::path_abs::PathArc);
+    impl fmt::Display for DisplayPathArcNice {
         fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            fmt::Display::fmt(&self.0.display(), f)
+            use ::util::ext_traits::PathNiceExt;
+            fmt::Display::fmt(&self.0.as_path().nice(), f)
         }
     }
 
