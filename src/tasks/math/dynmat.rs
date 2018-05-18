@@ -37,6 +37,7 @@ newtype_index!{PrimI}  // index of a primitive cell site
 newtype_index!{SuperI} // index of a supercell site
 newtype_index!{StarI}  // index of a star of sites equivalent under symmetry
 newtype_index!{OperI}  // index into the space group
+newtype_index!{EqnI}   // row of a table of equations that will be solved by pseudo inverse
 
 impl ForceSets {
     pub fn zero(num_atoms: usize) -> Self {
@@ -398,71 +399,16 @@ impl<'ctx> Context<'ctx> {
             // constants, the others within its star are related by symmetry)
             assert_eq!(star, prim_star_data[representative].star, "BUG!");
 
-            // Row of a table of equations that will be solved by pseudo inverse.
-            newtype_index!(EqnI);
-
-            // Inspired by phonopy, we build the complete forces in such a way that
-            // ensures that the forces at each affected atom are described by the same
-            // displacements (in the same order).
-            // This way we only need to compute one pseudoinverse per symmetry star.
-            let mut all_displacements = Indexed::<EqnI, Vec<V3>>::new();
-            let mut all_sparse_forces = BTreeMap::<SuperI, BTreeMap<EqnI, V3>>::new();
-
-            let mut jay_son_original_forces = vec![];
-            let mut jay_son_displacements = vec![];
-
-            // (opers that map the displaced (representative) atom into an image of itself
-            //  under the primitive lattice)
-            for &oper in &prim_star_data[representative].opers_from_rep {
-
-                // get a composite rotation + lattice-point translation that maps the
-                // displaced atom directly into itself (not just an image)
-                let (rotated_rep, rotate_and_translate_atom) = self.get_corrected_rotate(oper, representative);
-                assert_eq!(rotated_rep, representative);
-                let rotate_vector = |v: V3| v * self.cart_rots[oper].t();
-
-                assert_eq!(
-                    rotate_and_translate_atom(displaced_atom),
-                    displaced_atom,
-                );
-
-
-                for &disp in &disp_indices {
-                    assert_eq!(self.displacements[disp].0, representative);
-
-                    jay_son_original_forces.push({
-                        let mut out = vec![V3::zero(); self.sc.num_supercell_atoms()];
-                        for (&key, &thing) in &self.force_sets[disp] {
-                            out[self.perm_HACK_to_phonopy.permute_index(key.index())] = thing;
-                        }
-                        out
-                    });
-
-                    let eqn_i = {
-                        let new_displacement = rotate_vector(self.displacements[disp].1);
-                        jay_son_displacements.push(JaySonDisplacement {
-                            oper: self.frac_rots[oper.index()],
-                            cartoper: self.cart_rots[oper],
-                            vector: new_displacement,
-                        });
-                        all_displacements.push(new_displacement)
-                    };
-
-                    for (&affected_atom, &cart_force) in &self.force_sets[disp] {
-                        use ::util::ext_traits::OptionExpectNoneExt;
-
-                        let new_affected_atom = rotate_and_translate_atom(affected_atom);
-                        let new_cart_force = rotate_vector(cart_force);
-                        all_sparse_forces
-                            .entry(new_affected_atom)
-                            .or_insert_with(BTreeMap::new)
-                            .insert(eqn_i, new_cart_force)
-                            .expect_none("BUG! multiple affected atoms rotated to same one?!")
-                    }
-                }
-            }
-            let all_displacements = all_displacements;
-            let all_sparse_forces = all_sparse_forces;
+            let (
+                all_displacements,
+                all_forces,
+                jay_son_displacements,
+                jay_son_original_forces,
+            ) = self.build_all_equations_for_representative_row(
+                representative,
+                &disp_indices,
+                &prim_star_data[representative].opers_from_rep,
+            );
 
             let jay_son_displaced = self.perm_HACK_to_phonopy.permute_index(displaced_atom.index());
 
@@ -480,28 +426,7 @@ impl<'ctx> Context<'ctx> {
             let mut jay_son_forces = vec![];
 
             let force_constants_row: BTreeMap<SuperI, M33> = {
-                all_sparse_forces.into_iter()
-                    // "Densify" the BTreeMap<EqnI, V3>s into Vecs.
-                    // (it is not expected that missing elements should be a common occurrence,
-                    //  but in theory they *could* occur for atoms located on the order of
-                    //  symmetry precision away from the cutoff radius)
-                    .map(|(atom, force_map)| {
-                        if force_map.len() < num_eqns {
-                            // rare circumstance --> chance for bitrot.
-                            // Leave a note, but don't spam.
-                            info_once!("\
-                                Found atoms with nonzero forces at some rotations, but not others. \
-                                This is a rare circumstance!...but don't worry too much, I *think* \
-                                it is handled correctly. \
-                            ");
-                        }
-
-                        let mut force_vec = Indexed::from_elem(V3::zero(), &all_displacements);
-                        for (eqn, v3) in force_map {
-                            force_vec[eqn] = v3;
-                        }
-                        (atom, force_vec)
-                    })
+                all_forces.into_iter()
                     // solve for the fcs
                     .map(|(atom, force_vec)| {
                         jay_son_forces.push(JaySonForce { affected: self.perm_HACK_to_phonopy.permute_index(atom.index()), vectors: force_vec.raw.clone() });
@@ -537,6 +462,121 @@ impl<'ctx> Context<'ctx> {
 //        trace!("{}", ::serde_json::to_string(&jay_son).unwrap());
         let num_atoms = self.sc.num_supercell_atoms();
         Ok(ForceConstants { num_atoms, row_atom, col_atom, cart_matrix })
+    }
+
+    // Inspired by phonopy, we build the complete forces in such a way that
+    // ensures that the forces at each affected atom are described by the same
+    // displacements (in the same order).
+    //
+    // This way we only need to compute one pseudoinverse per symmetry star.
+    //
+    // I think this function vaguely corresponds to the first half of phonopy's
+    // `_solve_force_constants_svd` (though to be entirely honest, I just picked
+    // a sizable looking block of code and did `Extract Method`)
+    fn build_all_equations_for_representative_row(
+        &self,
+        // The row we are generating, which should be the representative atom
+        // of a site-symmetry star. (needed to determine lattice point corrections
+        // for each operator)
+        displaced_prim: PrimI,
+        // All displacements that displace this atom.
+        disp_indices: &[DispI],
+        // Operators that map `displaced_prim` to itself in the primitive structure.
+        invariant_opers: &[OperI],
+    ) -> (
+        Indexed<EqnI, Vec<V3>>,
+        BTreeMap<SuperI, Indexed<EqnI, Vec<V3>>>,
+        // FIXME REMOVE JaySon stuff
+        Vec<JaySonDisplacement>,
+        Vec<Vec<V3>>,
+    ) {
+        assert!(
+            disp_indices.len() <= 6,
+            "(BUG) got {} displacements. That's a lot! Are you sure these are all for the same atom?",
+            disp_indices.len(),
+        );
+
+        let displaced_atom = self.atom_from_lattice_point(displaced_prim, self.designated_lattice_point);
+
+        let mut all_displacements = Indexed::<EqnI, Vec<V3>>::new();
+        // Initially a BTreeMap<EqnI, _> is used for forces in case the set of affected atoms in
+        // a force set is somehow not symmetric (in which case some rotations will have a different
+        // set of affected atoms than others)
+        let mut all_sparse_forces = BTreeMap::<SuperI, BTreeMap<EqnI, V3>>::new();
+        let mut jay_son_original_forces = vec![];
+        let mut jay_son_displacements = vec![];
+
+        for &oper in invariant_opers {
+
+            // get a composite rotation + lattice-point translation that maps the
+            // displaced supercell atom directly into itself (not just an image)
+            let (rotated_prim, rotate_and_translate_atom) = self.get_corrected_rotate(oper, displaced_prim);
+            assert_eq!(rotated_prim, displaced_prim, "(BUG) prim not invariant under supplied oper!");
+
+            let rotate_vector = |v: V3| v * self.cart_rots[oper].t();
+
+            for &disp in disp_indices {
+                assert_eq!(self.displacements[disp].0, displaced_prim, "(BUG) disp for wrong atom");
+
+                jay_son_original_forces.push({
+                    let mut out = vec![V3::zero(); self.sc.num_supercell_atoms()];
+                    for (&key, &thing) in &self.force_sets[disp] {
+                        out[self.perm_HACK_to_phonopy.permute_index(key.index())] = thing;
+                    }
+                    out
+                });
+
+                let eqn_i = {
+                    let new_displacement = rotate_vector(self.displacements[disp].1);
+                    jay_son_displacements.push(JaySonDisplacement {
+                        oper: self.frac_rots[oper.index()],
+                        cartoper: self.cart_rots[oper],
+                        vector: new_displacement,
+                    });
+                    all_displacements.push(new_displacement)
+                };
+
+                for (&affected_atom, &cart_force) in &self.force_sets[disp] {
+                    use ::util::ext_traits::OptionExpectNoneExt;
+
+                    let new_affected_atom = rotate_and_translate_atom(affected_atom);
+                    let new_cart_force = rotate_vector(cart_force);
+                    all_sparse_forces
+                        .entry(new_affected_atom)
+                        .or_insert_with(BTreeMap::new)
+                        .insert(eqn_i, new_cart_force)
+                        .expect_none("BUG! multiple affected atoms rotated to same one?!")
+                }
+            }
+        }
+        // done mutating
+        let all_displacements = all_displacements;
+        let all_sparse_forces = all_sparse_forces;
+
+        // now that all equations have been built, we can "densify" the force matrices.
+        // (with respect to equations; not the entire supercell, of course!)
+        let num_eqns = all_displacements.len();
+        let all_forces = {
+            all_sparse_forces.into_iter()
+                .map(|(atom, force_map)| {
+                    if force_map.len() < num_eqns {
+                        // rare circumstance --> chance for bitrot.
+                        // Leave a note, but don't spam.
+                        info_once!("\
+                            Found atoms with nonzero forces at some rotations, but not others. \
+                            This is a rare circumstance!...but don't worry too much, I *think* \
+                            it is handled correctly. \
+                        ");
+                    }
+
+                    let mut force_vec = Indexed::from_elem(V3::zero(), &all_displacements);
+                    for (eqn, v3) in force_map {
+                        force_vec[eqn] = v3;
+                    }
+                    (atom, force_vec)
+                }).collect()
+        };
+        (all_displacements, all_forces, jay_son_displacements, jay_son_original_forces)
     }
 
     // Get a depermutation that applies a spacegroup operator to force sets or
