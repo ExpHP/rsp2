@@ -7,8 +7,9 @@ use ::rsp2_structure::supercell::SupercellToken;
 use ::rsp2_newtype_indices::{Idx, Indexed, cast_index};
 use ::std::collections::BTreeMap;
 use ::std::collections::HashMap;
-
 use ::slice_of_array::prelude::*;
+
+use ::util::ext_traits::OptionExpectNoneExt;
 
 #[derive(Debug, Clone)]
 pub struct ForceSets {
@@ -40,7 +41,7 @@ newtype_index!{OperI}  // index into the space group
 newtype_index!{EqnI}   // row of a table of equations that will be solved by pseudo inverse
 
 impl ForceSets {
-    pub fn zero(num_atoms: usize) -> Self {
+    pub(crate) fn zero(num_atoms: usize) -> Self {
         ForceSets {
             num_atoms,
             atom_displaced: vec![],
@@ -50,7 +51,7 @@ impl ForceSets {
         }
     }
 
-    pub fn from_displacement(
+    pub(crate) fn from_displacement(
         num_atoms: usize,
         // (atom_displaced, cart_displacement)
         displacement: (usize, V3),
@@ -237,7 +238,11 @@ impl ForceConstants {
     //   expensive brute force overlap searches, while this leaves everything where
     //   they are and adjusts indices to simulate translation by a lattice point)
     //
-    pub fn like_phonopy(
+    pub(crate) fn like_phonopy(
+        // Displacements, using primitive cell indices.
+        //
+        // For each symmetry star of sites in the primitive cell, only one of those
+        // sites may appear in this list. (this requirement is checked)
         prim_displacements: &[(usize, V3)], // [displacement] -> (prim_displaced, cart_disp)
         force_sets: &[BTreeMap<usize, V3>], // [displacement][affected] -> cart_force
         frac_rots: &[M33<i32>], // HACK
@@ -333,13 +338,26 @@ impl<'ctx> Context<'ctx> {
     fn like_phonopy(
         &self,
     ) -> FailResult<ForceConstants> {
+
+        #[derive(Debug, Clone)]
+        struct StarData {
+            representative: PrimI,
+            // operators that map the representative atom into this position.
+            displacements: Vec<DispI>,
+        }
+
         // Gather displacements for each star of sites.
         //
         // The non-equivalent atoms were discovered by phonopy and taken into account
         // in its generated displacements (always using the same atom from each star).
         // All we have to do is gather displacements with the same index.
-        let displacements_by_star: Indexed<StarI, Vec<(PrimI, Vec<DispI>)>>;
-        displacements_by_star = {
+        //
+        // (NOTE: At this point it is assumed that the input displacements only
+        //  ever displace one representative atom from each star, so that every
+        //  unique index in `displacements` corresponds to a star.
+        //  If this turns out not to be true, it will be caught later.)
+        let star_data: Indexed<StarI, Vec<StarData>>;
+        star_data = {
             // Use BTreeMap for consistent ordering, because the result of this block
             // is what defines the meaning of `StarI`.
             let mut map = BTreeMap::<PrimI, _>::new();
@@ -348,28 +366,29 @@ impl<'ctx> Context<'ctx> {
                     .or_insert_with(Vec::new)
                     .push(disp_i)
             }
-            map.into_iter().collect::<_>()
+            map.into_iter()
+                .map(|(representative, displacements)| StarData { representative, displacements })
+                .collect()
         };
 
-        // Find the star of each primitive site,
-        // and an oper that maps the representative atom into it.
+        // Find relationships between each primitive site and their site-symmetry representatives.
         #[derive(Debug, Clone)]
-        struct PrimStarData {
+        struct PrimData {
             star: StarI,
-            // operators that map the representative atom into this position.
+            // operators that move the star's representative into this primitive site.
             opers_from_rep: Vec<OperI>,
         }
 
-        let prim_star_data: Indexed<PrimI, Vec<PrimStarData>> = {
+        let prim_data: Indexed<PrimI, Vec<PrimData>> = {
             let mut data = Indexed::<PrimI, _>::from_elem_n(None, self.sc.num_primitive_atoms());
-            for (star, &(representative_prim, _)) in displacements_by_star.iter_enumerated() {
-                let representative_atom = self.atom_from_lattice_point(representative_prim, self.designated_lattice_point);
+            for (star, star_data) in star_data.iter_enumerated() {
+                let representative_atom = self.atom_from_lattice_point(star_data.representative, self.designated_lattice_point);
                 for oper in self.oper_indices() {
                     let permuted_atom = self.rotate_atom(oper, representative_atom);
                     let prim = self.primitive_atoms[permuted_atom];
 
                     if data[prim].is_none() {
-                        data[prim] = Some(PrimStarData { star, opers_from_rep: vec![] });
+                        data[prim] = Some(PrimData { star, opers_from_rep: vec![] });
                     }
 
                     let existing = data[prim].as_mut().expect("BUG!");
@@ -380,15 +399,26 @@ impl<'ctx> Context<'ctx> {
                     existing.opers_from_rep.push(oper)
                 }
             }
-            data.into_iter().map(|p| p.expect("BUG!")).collect()
+            data.into_iter_enumerated().map(|(prim, d)| d.unwrap_or_else(|| {
+                panic!(
+                    "\
+                        None of the displaced sites are equivalent under symmetry \
+                        to primitive site {}!!\
+                    ", prim,
+                );
+            })).collect()
         };
 
         let mut jay_son = JaySon(vec![]);
 
-        let mut row_atom = vec![];
-        let mut col_atom = vec![];
-        let mut cart_matrix = vec![];
-        for (star, (representative, disp_indices)) in displacements_by_star.into_iter_enumerated() {
+        let mut computed_rows: BTreeMap<PrimI, BTreeMap<SuperI, M33>> = Default::default();
+
+        // Populate the rows belonging to symmetry star representatives.
+        for (star, data) in star_data.iter_enumerated() {
+            let StarData {
+                representative,
+                displacements: ref disp_indices,
+            } = *data;
             let displaced_atom = self.atom_from_lattice_point(representative, self.designated_lattice_point);
 
             // Expand the available data using symmetry to ensure we have enough
@@ -397,28 +427,28 @@ impl<'ctx> Context<'ctx> {
             // Ignore symmetry operators that map the representative to another
             // primitive site. (after we solve for the representative's force
             // constants, the others within its star are related by symmetry)
-            assert_eq!(star, prim_star_data[representative].star, "BUG!");
+            assert_eq!(star, prim_data[representative].star, "BUG!");
 
             let (
-                all_displacements,
-                all_forces,
+                row_displacements,
+                row_forces,
                 jay_son_displacements,
                 jay_son_original_forces,
             ) = self.build_all_equations_for_representative_row(
                 representative,
                 &disp_indices,
-                &prim_star_data[representative].opers_from_rep,
+                &prim_data[representative].opers_from_rep,
             );
 
             let jay_son_displaced = self.perm_HACK_to_phonopy.permute_index(displaced_atom.index());
 
             use rsp2_linalg::{CMatrix, dot, left_pseudoinverse};
 
-            let num_eqns = all_displacements.len();
+            let num_eqns = row_displacements.len();
 
             // all forces we just computed use the same displacements,
             // so we only need to compute a single pseudoinverse
-            let pseudoinverse: CMatrix = left_pseudoinverse((&all_displacements.raw[..]).into())?;
+            let pseudoinverse: CMatrix = left_pseudoinverse((&row_displacements.raw[..]).into())?;
             let jay_son_pseudoinverse = {
                 (0..pseudoinverse.rows()).map(|r| (0..pseudoinverse.cols()).map(|c| pseudoinverse[(r, c)]).collect()).collect()
             };
@@ -426,7 +456,7 @@ impl<'ctx> Context<'ctx> {
             let mut jay_son_forces = vec![];
 
             let force_constants_row: BTreeMap<SuperI, M33> = {
-                all_forces.into_iter()
+                row_forces.into_iter()
                     // solve for the fcs
                     .map(|(atom, force_vec)| {
                         jay_son_forces.push(JaySonForce { affected: self.perm_HACK_to_phonopy.permute_index(atom.index()), vectors: force_vec.raw.clone() });
@@ -438,15 +468,8 @@ impl<'ctx> Context<'ctx> {
                     .collect()
             };
 
-            assert_eq!(self.lattice_points[displaced_atom], self.designated_lattice_point);
-            let (col_atom_part, cart_matrix_part): (Vec<_>, Vec<_>) = force_constants_row.into_iter().unzip();
-            let row_atom_part = vec![displaced_atom; col_atom_part.len()];
-
-            let row_atom_part: Vec<usize> = cast_index(row_atom_part);
-            let col_atom_part: Vec<usize> = cast_index(col_atom_part);
-            row_atom.extend(row_atom_part);
-            col_atom.extend(col_atom_part);
-            cart_matrix.extend(cart_matrix_part);
+            computed_rows.insert(representative, force_constants_row)
+                .expect_none("(BUG) computed same row of FCs twice!?");
 
             jay_son.0.push(JaySonItem {
                 displaced: jay_son_displaced,
@@ -455,20 +478,55 @@ impl<'ctx> Context<'ctx> {
                 forces: jay_son_forces,
                 pseudoinverse: jay_son_pseudoinverse,
             });
-
-
-            // FIXME rotate to get other atoms in star
         } // for star
+
+        for (prim, data) in prim_data.into_iter_enumerated() {
+            let PrimData { star, opers_from_rep } = data;
+            let new_row = match computed_rows.contains_key(&prim) {
+                true => continue,
+                false => {
+                    let representative = star_data[star].representative;
+                    let &oper = opers_from_rep.get(0).expect("(BUG!) was checked earlier");
+                    let new_row = self.derive_row_by_symmetry(
+                        representative,
+                        &computed_rows[&representative],
+                        prim,
+                        oper,
+                    );
+
+                    computed_rows.insert(prim, new_row)
+                        .expect_none("(BUG) computed same row of FCs twice!?");
+                },
+            };
+        }
+        //
 //        trace!("{}", ::serde_json::to_string(&jay_son).unwrap());
+
+        assert!(computed_rows.keys().cloned().eq(self.prim_indices()));
+        // HACK into COO
+        let mut row_atom = vec![];
+        let mut col_atom = vec![];
+        let mut cart_matrix = vec![];
+        for (prim, row) in computed_rows {
+            let row_i = self.atom_from_lattice_point(prim, self.designated_lattice_point);
+            for (col_i, mat) in row {
+                row_atom.push(SuperI::index(row_i));
+                col_atom.push(SuperI::index(col_i));
+                cart_matrix.push(mat);
+            }
+        }
+
         let num_atoms = self.sc.num_supercell_atoms();
         Ok(ForceConstants { num_atoms, row_atom, col_atom, cart_matrix })
     }
 
+    /// Use symmetry to expand the number of displacement-force equations for
+    /// a row belonging to a symmetry star representative.
+    //
     // Inspired by phonopy, we build the complete forces in such a way that
     // ensures that the forces at each affected atom are described by the same
-    // displacements (in the same order).
-    //
-    // This way we only need to compute one pseudoinverse per symmetry star.
+    // displacements (in the same order). This way we only need to compute one
+    // pseudoinverse per symmetry star.
     //
     // I think this function vaguely corresponds to the first half of phonopy's
     // `_solve_force_constants_svd` (though to be entirely honest, I just picked
@@ -495,8 +553,6 @@ impl<'ctx> Context<'ctx> {
             "(BUG) got {} displacements. That's a lot! Are you sure these are all for the same atom?",
             disp_indices.len(),
         );
-
-        let displaced_atom = self.atom_from_lattice_point(displaced_prim, self.designated_lattice_point);
 
         let mut all_displacements = Indexed::<EqnI, Vec<V3>>::new();
         // Initially a BTreeMap<EqnI, _> is used for forces in case the set of affected atoms in
@@ -537,10 +593,9 @@ impl<'ctx> Context<'ctx> {
                 };
 
                 for (&affected_atom, &cart_force) in &self.force_sets[disp] {
-                    use ::util::ext_traits::OptionExpectNoneExt;
-
                     let new_affected_atom = rotate_and_translate_atom(affected_atom);
                     let new_cart_force = rotate_vector(cart_force);
+
                     all_sparse_forces
                         .entry(new_affected_atom)
                         .or_insert_with(BTreeMap::new)
@@ -579,8 +634,49 @@ impl<'ctx> Context<'ctx> {
         (all_displacements, all_forces, jay_son_displacements, jay_son_original_forces)
     }
 
-    // Get a depermutation that applies a spacegroup operator to force sets or
-    // force constants in a way that derives new, meaningful data. The depermutation
+    fn derive_row_by_symmetry(
+        &self,
+        // Index and data of a finished row in the force constants table
+        finished_prim: PrimI,
+        finished_row: &BTreeMap<SuperI, M33>,
+        // The row to be computed. (for sanity checks)
+        todo_prim: PrimI,
+        // An arbitrarily chosen operator that maps `finished_prim` to `todo_prim`
+        // in the primitive structure.
+        oper: OperI,
+    ) -> BTreeMap<SuperI, M33>
+    {
+        // Visualize the operation described in the documentation of `get_corrected_rotate`.
+        //
+        // Performing this operation on a set of data would permute all indices according to the
+        // deperm returned by `get_corrected_rotate`, and would rotate all displacements and forces
+        // by the rotation part of the operator.  How does this impact the force constants?
+        //
+        // Clearly, the columns will be permuted by the deperm:
+        let (rotated_prim, apply_deperm) = self.get_corrected_rotate(oper, finished_prim);
+        assert_eq!(rotated_prim, todo_prim, "(BUG) oper produced different row?!");
+
+        // But their contents will also be transformed by the rotation.
+        //
+        // Consider that the new force and displacement are each obtained by rotating the old
+        // vectors by R, and substitute into the force constants equation. (`F = - U Phi`,
+        // recalling that rsp2 prefers a row-vector-centric formalism for everything except
+        // spatial transformation operators like R)
+        //
+        // The result:      Phi_new = R.T.inv() Phi_old R.T
+        // or equivalently: Phi_new = R Phi_old R.T
+        let cart_rot = self.cart_rots[oper];
+
+        finished_row.iter()
+            .map(|(&affected, fc_matrix)| {
+                let affected = apply_deperm(affected);
+                let fc_matrix = cart_rot * fc_matrix * cart_rot.t();
+                (affected, fc_matrix)
+            }).collect()
+    }
+
+    // Get a depermutation that applies a spacegroup operator to force sets
+    // in a way that derives new, meaningful data. The depermutation
     // is given in the form of a function that maps sparse indices.
     //
     // ---
@@ -590,22 +686,25 @@ impl<'ctx> Context<'ctx> {
     // * Suppose that our supercell were printed out, so that we may lay a
     //   transparency sheet over it. (also suppose that the structure were 2D, so
     //   that the printout could faithfully render it without perspective).
-    // * Draw arrows on various atoms representing forces, and draw
-    //   a circle around the displaced atom.  This is the initial set of data.
+    // * Draw arrows on various atoms representing forces. Draw a circle around the
+    //   displaced atom, and a displacement vector originating from it.
+    //   This is the initial set of data.
     // * Now apply a spacegroup operator to the transparency sheet.  The circle
     //   will move to a new site, and the arrows will move to new sites and rotate.
     //   This is a new set of data.
     //
     // Now, there's a catch; we only care about the rows of the force constants table that
-    // correspond to atoms in a specific image of primitive cell (`designated_lattice_point`).
-    // Rotating the sheet may have moved the displaced atom outside of this cell.
+    // correspond to the displaced atom lying in a specific image of primitive cell
+    // (`designated_lattice_point`). Rotating the sheet may have moved the displaced atom
+    // outside of this cell.
     //
-    // However, by applying a uniform lattice point translation to bring the displaced
-    // atom back to a primitive site, we end up with data for a row that we DO care about.
+    // However, by following up with a uniform lattice point translation, we can bring the
+    // displaced atom back to the correct cell, and end up with data for a row that we DO
+    // care about.
+    //
     // The returned depermutation simulates this sequence of a rotation followed by a
-    // corrective lattice point translation.
-    //
-    // Also returned is the new index of the displaced atom.
+    // corrective lattice point translation. Also returned is the new index of the displaced
+    // atom.
     fn get_corrected_rotate<'a>(&'a self, oper: OperI, displaced: PrimI) -> (PrimI, impl Fn(SuperI) -> SuperI + 'a)
     {
         let displaced_super = self.atom_from_lattice_point(displaced, self.designated_lattice_point);
@@ -633,6 +732,8 @@ impl<'ctx> Context<'ctx> {
     // helpers that wrap methods with newtyped indices
 
     fn oper_indices(&self) -> impl Iterator<Item=OperI> { self.super_deperms.indices() }
+    fn prim_indices(&self) -> impl Iterator<Item=PrimI>
+    { (0..self.sc.num_primitive_atoms()).map(PrimI::new) }
 
     // depermutations in the form of a function that maps sparse indices
     fn rotate_atom(&self, oper: OperI, atom: SuperI) -> SuperI {
