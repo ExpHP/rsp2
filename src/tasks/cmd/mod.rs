@@ -181,7 +181,7 @@ impl TrialDir {
             use self::ev_analyses::*;
 
             let classifications = acoustic_search::perform_acoustic_search(
-                pot, &evals, &evecs, &structure, settings,
+                pot, &evals, &evecs, &structure, &settings.acoustic_search,
             )?;
 
             let aux_info::Info { atom_layers, atom_masses, layer_sc_mats } = aux_info;

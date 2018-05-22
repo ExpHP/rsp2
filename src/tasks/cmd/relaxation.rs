@@ -3,7 +3,6 @@ use super::GammaSystemAnalysis;
 use super::potential::{PotentialBuilder, DiffFn, DynFlatDiffFn};
 use super::CliArgs;
 use super::{write_eigen_info_for_humans, write_eigen_info_for_machines};
-use super::SupercellSpecExt;
 use super::carbon;
 
 use ::{FailResult, FailOk};
@@ -17,9 +16,7 @@ use ::rsp2_slice_math::{v, V, vdot};
 
 use ::slice_of_array::prelude::*;
 use ::rsp2_array_types::{V3};
-use ::rsp2_structure::supercell::{self, SupercellToken};
 use ::rsp2_structure::{ElementStructure};
-use ::rsp2_structure::{CoordsKind};
 use ::rsp2_structure_io::layers_yaml::Assemble;
 use ::phonopy::Builder as PhonopyBuilder;
 use ::math::bands::ScMatrix;
@@ -49,7 +46,7 @@ impl TrialDir {
             trace!("============================");
             trace!("Begin relaxation # {}", iteration);
 
-            let structure = do_relax(pot, &settings.cg, &settings.potential, structure)?;
+            let structure = do_relax(pot, &settings.cg, structure)?;
 
             trace!("============================");
 
@@ -152,7 +149,6 @@ impl TrialDir {
                 let structure = do_eigenvector_chase(
                     pot,
                     &settings.ev_chase,
-                    &settings.potential,
                     structure,
                     &bad_evs[..],
                 )?;
@@ -174,6 +170,7 @@ pub enum EvLoopStatus {
     ItsBadGuys(&'static str),
 }
 
+// just a named bool for documentation
 pub struct DidEvChasing(bool);
 
 impl EvLoopFsm {
@@ -217,28 +214,21 @@ impl EvLoopFsm {
 fn do_relax(
     pot: &PotentialBuilder,
     cg_settings: &cfg::Acgsd,
-    potential_settings: &cfg::Potential,
     structure: ElementStructure,
 ) -> FailResult<ElementStructure>
 {Ok({
-    let sc_dims = potential_settings.supercell.dim_for_unitcell(structure.lattice());
-    let (supercell, sc_token) = supercell::diagonal(sc_dims).build(structure);
-
-    let mut flat_diff_fn = pot.threaded(true).initialize_flat_diff_fn(supercell.clone())?;
+    let mut flat_diff_fn = pot.threaded(true).initialize_flat_diff_fn(structure.clone())?;
     let relaxed_flat = ::rsp2_minimize::acgsd(
         cg_settings,
-        supercell.to_carts().flat(),
+        structure.to_carts().flat(),
         &mut *flat_diff_fn,
     ).unwrap().position;
-
-    let supercell = supercell.with_coords(CoordsKind::Carts(relaxed_flat.nest().to_vec()));
-    multi_threshold_deconstruct(sc_token, 1e-10, 1e-3, supercell)?
+    structure.with_carts(relaxed_flat.nest().to_vec())
 })}
 
 fn do_eigenvector_chase(
     pot: &PotentialBuilder,
     chase_settings: &cfg::EigenvectorChase,
-    potential_settings: &cfg::Potential,
     mut structure: ElementStructure,
     bad_evecs: &[(String, &[V3])],
 ) -> FailResult<ElementStructure>
@@ -246,7 +236,7 @@ fn do_eigenvector_chase(
     match chase_settings {
         cfg::EigenvectorChase::OneByOne => {
             for (name, evec) in bad_evecs {
-                let (alpha, new_structure) = do_minimize_along_evec(pot, potential_settings, structure, &evec[..])?;
+                let (alpha, new_structure) = do_minimize_along_evec(pot, structure, &evec[..])?;
                 info!("Optimized along {}, a = {:e}", name, alpha);
 
                 structure = new_structure;
@@ -258,7 +248,6 @@ fn do_eigenvector_chase(
             do_cg_along_evecs(
                 pot,
                 cg_settings,
-                potential_settings,
                 structure,
                 &evecs[..],
             )?
@@ -269,7 +258,6 @@ fn do_eigenvector_chase(
 fn do_cg_along_evecs<V, I>(
     pot: &PotentialBuilder,
     cg_settings: &cfg::Acgsd,
-    potential_settings: &cfg::Potential,
     structure: ElementStructure,
     evecs: I,
 ) -> FailResult<ElementStructure>
@@ -279,46 +267,36 @@ where
 {Ok({
     let evecs: Vec<_> = evecs.into_iter().collect();
     let refs: Vec<_> = evecs.iter().map(|x| x.as_ref()).collect();
-    _do_cg_along_evecs(pot, cg_settings, potential_settings, structure, &refs)?
+    _do_cg_along_evecs(pot, cg_settings, structure, &refs)?
 })}
 
 fn _do_cg_along_evecs(
     pot: &PotentialBuilder,
     cg_settings: &cfg::Acgsd,
-    potential_settings: &cfg::Potential,
     structure: ElementStructure,
     evecs: &[&[V3]],
 ) -> FailResult<ElementStructure>
 {Ok({
-    let sc_dims = potential_settings.supercell.dim_for_unitcell(structure.lattice());
-    let (mut supercell, sc_token) = supercell::diagonal(sc_dims).build(structure);
-    let evecs: Vec<_> = evecs.iter().map(|ev| sc_token.replicate(ev)).collect();
-
     let flat_evecs: Vec<_> = evecs.iter().map(|ev| ev.flat()).collect();
-    let init_pos = supercell.to_carts();
+    let init_pos = structure.to_carts();
 
-    let mut flat_diff_fn = pot.threaded(true).initialize_flat_diff_fn(supercell.clone())?;
+    let mut flat_diff_fn = pot.threaded(true).initialize_flat_diff_fn(structure.clone())?;
     let relaxed_coeffs = ::rsp2_minimize::acgsd(
         cg_settings,
         &vec![0.0; evecs.len()],
-        &mut *lammps_constrained_diff_fn(&mut *flat_diff_fn, init_pos.flat(), &flat_evecs),
+        &mut *constrained_diff_fn(&mut *flat_diff_fn, init_pos.flat(), &flat_evecs),
     ).unwrap().position;
 
     let final_flat_pos = flat_constrained_position(init_pos.flat(), &relaxed_coeffs, &flat_evecs);
-    supercell.carts_mut().copy_from_slice(final_flat_pos.nest());
-    multi_threshold_deconstruct(sc_token, 1e-10, 1e-3, supercell)?
+    structure.with_carts(final_flat_pos.nest().to_vec())
 })}
 
 fn do_minimize_along_evec(
     pot: &PotentialBuilder,
-    settings: &cfg::Potential,
     structure: ElementStructure,
     evec: &[V3],
 ) -> FailResult<(f64, ElementStructure)>
 {Ok({
-    let sc_dims = settings.supercell.dim_for_unitcell(structure.lattice());
-    let (structure, sc_token) = supercell::diagonal(sc_dims).build(structure);
-    let evec = sc_token.replicate(evec);
     let mut diff_fn = pot.threaded(true).initialize_flat_diff_fn(structure.clone())?;
 
     let from_structure = structure;
@@ -334,9 +312,8 @@ fn do_minimize_along_evec(
         FailOk(::rsp2_minimize::exact_ls::Slope(slope))
     })??.alpha;
     let pos = pos_at_alpha(alpha);
-    let structure = from_structure.with_coords(CoordsKind::Carts(pos.nest().to_vec()));
 
-    (alpha, multi_threshold_deconstruct(sc_token, 1e-10, 1e-3, structure)?)
+    (alpha, from_structure.with_carts(pos.nest().to_vec()))
 })}
 
 fn warn_on_improvable_lattice_params(
@@ -382,7 +359,7 @@ fn flat_constrained_position(
 // cg differential function along a restricted set of eigenvectors.
 //
 // There will be one coordinate for each eigenvector.
-fn lammps_constrained_diff_fn<'a>(
+fn constrained_diff_fn<'a>(
     // operates on 3N coords
     flat_3n_diff_fn: &'a mut DynFlatDiffFn<'a>,
     // K values, K <= 3N
@@ -408,22 +385,6 @@ fn lammps_constrained_diff_fn<'a>(
         (value, grad)
     }))
 }
-
-fn multi_threshold_deconstruct(
-    sc_token: SupercellToken,
-    warn: f64,
-    fail: f64,
-    supercell: ElementStructure,
-) -> FailResult<ElementStructure>
-{Ok({
-    match sc_token.deconstruct(warn, supercell.clone()) {
-        Ok(x) => x,
-        Err(e) => {
-            warn!("{}", e);
-            sc_token.deconstruct(fail, supercell)?
-        }
-    }
-})}
 
 //----------------------
 // a slice of slices is a really dumb representation for a matrix

@@ -180,10 +180,8 @@ pub enum EnergyPlotEvIndices {
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub struct Potential {
-    // supercell for lammps.
-    // Purpose is to help eliminate boundary effects or something?
-    // I forget.  Might not be necessary
-    pub supercell: SupercellSpec,
+    // FIXME should collapse heirarchy at some point when I feel
+    //       like redoing config files
     pub kind: PotentialKind,
 }
 
