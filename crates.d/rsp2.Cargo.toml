@@ -32,5 +32,4 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 [features]
 !!NIGHTLY-FEATURE-LINE
 
-# This is NOT a workspace anymore.
-# I don't have time to debug the RLS.
+!!MAYBE-ITS-A-WORKSPACE

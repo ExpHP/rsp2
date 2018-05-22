@@ -6,6 +6,7 @@
 
 from contextlib import contextmanager
 from pathlib import Path
+from argparse import ArgumentParser
 import os
 import sys
 import warnings
@@ -27,8 +28,6 @@ MASTER_USER_CFG_EXAMPLE_PATH = Path('crates.d/config.example.toml')
 INSERTION_POINT_TEXT = "#!!INSERTION POINT FOR NEW CRATES!!#"
 
 def main():
-    from argparse import ArgumentParser
-
     parser = ArgumentParser(description='manage Cargo.tomls in sp2')
 
     class no_command:
@@ -71,64 +70,53 @@ class Gen:
     )
 
     @staticmethod
-    def configure(_sub):
-        pass
+    def configure(sub):
+        sub.add_argument(
+            '--force-workspace', action='store_true',
+            help='temporarily override the simulated-workspace setting to prevent '
+                 'undue changes that would be checked into VCS')
 
     @staticmethod
-    def run(parser, _args):
+    def run(parser, args):
+        Gen._do_it(args, parser.error)
 
-        with pushd(search_for_root(parser.error)):
-            data = read_master_config(parser.error)
-            user_conf = read_master_user_config(parser.error)
+    # several other commands invoke 'gen'.  This is kind of a dumb
+    # hack to allow them to do so.
+    @staticmethod
+    def run_like_function(fail):
+        # HACK - get the default arguments as an argparse.Namespace
+        p = ArgumentParser()
+        Gen.configure(p)
+        default_args = p.parse_args([])
+        Gen._do_it(default_args, fail)
+
+    @staticmethod
+    def _do_it(args, fail):
+
+        with pushd(search_for_root(fail)):
+            data = read_master_config(fail)
+            user_conf = read_master_user_config(fail)
             crates = data.pop('crates')
-            preferred_versions = data.pop('preferred-versions')
 
             # catch some dumb user errors before we get too committed
             for (name, path) in crates.items():
 
                 if not path.is_dir():
-                    parser.error('[crates."{}"]: "{}": no such directory'.format(name, path))
+                    fail('[crates."{}"]: "{}": no such directory'.format(name, path))
 
                 src = root_rel_src_toml_path(name)
                 if not src.is_file():  # pylint: disable=E1101
-                    parser.error('{}: no such file'.format(src))
+                    fail('{}: no such file'.format(src))
 
             # FIXME vvv this is waaaaaay too application-specific.
             binary_shim_pairs = get_binary_shim_pairs()
             make_binary_shims(binary_shim_pairs)
             # FIXME ^^^ this is waaaaaay too application-specific.
 
-            lookup_get = make_callback_lookup(parser.error)
+            lookup_get = make_callback_lookup(args.force_workspace, fail)
 
-            # Make all target directories symlinks to the root package's target,
-            # to help reduce duplicate build artefacts even if we are not a
-            # true workspace.
-            #
-            # Also link together configuration directories for subcrates.
-            root_package_name = get_root_package(parser.error)
-
-            # prepare the root crate first
-            if user_conf.shared_target:
-                ensure_not_symlink('target')
-                Path('target').mkdir(parents=True, exist_ok=True)
-
-            if user_conf.shared_dot_idea:
-                (Path('.subcrate-cfg') / '.idea').mkdir(parents=True, exist_ok=True) # pylint: disable=E1101
-
-            if user_conf.shared_dot_vscode:
-                (Path('.subcrate-cfg') / '.vscode').mkdir(parents=True, exist_ok=True) # pylint: disable=E1101
-
-            # link the rest
-            for (name, path) in crates.items():
-                if name != root_package_name:
-                    if user_conf.shared_target:
-                        maybe_ensure_target_link('.', path)
-
-                    if user_conf.shared_dot_idea:
-                        maybe_ensure_target_link('.subcrate-cfg', path, filename='.idea')
-
-                    if user_conf.shared_dot_vscode:
-                        maybe_ensure_target_link('.subcrate-cfg', path, filename='.vscode')
+            if user_conf.simulated_workspace.enabled:
+                simulated_workspace_gen_symlinks(crates, user_conf.simulated_workspace, fail)
 
             # generate modified forms of each Cargo.toml
             for (name, path) in crates.items():
@@ -154,10 +142,11 @@ class Gen:
                             write(line)
                             continue
 
-                        (_kind, func) = lookup_get(macro)
-                        if func is None:
+                        tup = lookup_get(macro)
+                        if tup is None:
                             s = f"{src_path}:{i}: unknown macro: {format_macro(macro)}"
-                            parser.error(s)
+                            fail(s)
+                        (_kind, func) = tup
 
                         write(func(
                             # These are the keyword args available to callbacks:
@@ -167,11 +156,12 @@ class Gen:
                             cur_name=name,
                         ))
 
-def make_callback_lookup(fail):
+def make_callback_lookup(force_workspace, fail):
     with pushd(search_for_root(fail)):
         data = read_master_config(fail)
         crates = data.pop('crates')
         preferred_versions = data.pop('preferred-versions')
+        user_conf = read_master_user_config(fail)
 
         # callbacks that generate substitutions for the line !!some-crate-name,
         # which accept keyword arguments that are documented down by where the
@@ -196,6 +186,25 @@ def make_callback_lookup(fail):
                     lines.append(f'{name} = {{ path = "{path}" }}')
             return '\n'.join(lines)
 
+        def maybe_gen_workspace_line(**_ignored):
+            # This is unfortunate. The Cargo.toml files should not depend on
+            # config, but there is no other way to disable a workspace.
+            if user_conf.simulated_workspace.enabled and not force_workspace:
+                return '''
+# !!! CAUTION !!!
+# The workspace table has been removed for the 'simulated-workspace'
+# feature of 'crates'. Please do not check this into VCS!!!
+#
+# To correct it, do the following to temporarily override the
+# simulated-workspace setting before committing:
+#
+#      ./crates gen --force-workspace
+#
+#[workspace]
+                '''.strip()
+            else:
+                return '[workspace]'
+
         binary_shim_pairs = get_binary_shim_pairs()
 
         # for defining new macros
@@ -207,14 +216,18 @@ def make_callback_lookup(fail):
             # name = "crate-name"
             'CRATE-NAME-LINE': (KIND_SPECIAL, lambda *, cur_name, **_ignored: f'name = "{cur_name}"'),
 
-            # builtin macros
+            # generates all lines for our own crates in the root crate's dependencies
             'WORKSPACE-MEMBERS-AS-PATH-DEPS': (KIND_SPECIAL, gen_members_as_pathdeps),
+
+            # [workspace].  Or not.
+            'MAYBE-ITS-A-WORKSPACE': (KIND_SPECIAL, maybe_gen_workspace_line),
 
             # FIXME this is waaaaaay too application-specific.
             'BINARY-SHIM-BIN-ENTRIES': (KIND_SPECIAL, macro_subst_for_binary_shims(binary_shim_pairs)),
+
+            # FIXME this is waaaaaay too application-specific.
+            'NIGHTLY-FEATURE-LINE': (KIND_SPECIAL, macro_subst_for_nightly_feature(lookup_get, crates, fail)),
         }
-        # FIXME this is waaaaaay too application-specific.
-        lookup_d['NIGHTLY-FEATURE-LINE'] = (KIND_SPECIAL, macro_subst_for_nightly_feature(lookup_get, crates, fail))
 
         for (name, path) in crates.items():
             lookup_put(name, (KIND_INTERNAL_DEP, gen_relpath_to(name, path)))
@@ -257,6 +270,37 @@ def format_macro(name):
 def canonicalize_crate(crate_name):
     return crate_name.replace('_', '-')
 
+# For simulated workspaces, make all target directories symlinks to
+# the root package's target, to help reduce duplicate build
+# artefacts even if we are not a true workspace.
+#
+# Also link together configuration directories for subcrates.
+def simulated_workspace_gen_symlinks(crates, conf, fail):
+    root_package_name = get_root_package(fail)
+
+    # prepare the root crate first
+    if conf.shared_target:
+        ensure_not_symlink('target')
+        Path('target').mkdir(parents=True, exist_ok=True)
+
+    if conf.shared_dot_idea:
+        (Path('.subcrate-cfg') / '.idea').mkdir(parents=True, exist_ok=True) # pylint: disable=E1101
+
+    if conf.shared_dot_vscode:
+        (Path('.subcrate-cfg') / '.vscode').mkdir(parents=True, exist_ok=True) # pylint: disable=E1101
+
+    # link the rest
+    for (name, path) in crates.items():
+        if name != root_package_name:
+            if conf.shared_target:
+                maybe_ensure_target_link('.', path)
+
+            if conf.shared_dot_idea:
+                maybe_ensure_target_link('.subcrate-cfg', path, filename='.idea')
+
+            if conf.shared_dot_vscode:
+                maybe_ensure_target_link('.subcrate-cfg', path, filename='.vscode')
+
 # tries to have a crate's target symlink back to the root crate's target,
 # but may fail. (no big deal)
 #
@@ -270,7 +314,7 @@ def maybe_ensure_target_link(root_path, crate_path, filename='target'):
     dest = os.path.relpath(Path(root_path) / filename, crate_path)
 
     # don't remove existing links unless we have to.
-    if path.is_symlink() and os.readlink(path) == str(dest):
+    if path.is_symlink() and readlink(path) == str(dest):
         return
 
     # As soon as we destroy the existing contents, we are in a race
@@ -278,7 +322,7 @@ def maybe_ensure_target_link(root_path, crate_path, filename='target'):
     rm_rf(path)
 
     # gogogogogogogogo!!!!!!
-    try: os.symlink(dest, path)
+    try: symlink(dest, path)
     except FileExistsError:
         # Damn, the RLS probably beat us.
         # Let it win; maybe we'll have better luck next time.
@@ -351,7 +395,7 @@ fn it_works() { }
             f.writelines(lines)
 
         # regenerate
-        Gen.run(parser, None)
+        Gen.run_like_function(parser.error)
 
 #------------
 
@@ -412,7 +456,7 @@ def do_mv_or_rm(parser, curdir, destdir):
 
     if destdir is None: # rm
         rm_rf(str(curdir))
-        os.unlink(root / root_rel_src_toml_path(crate))
+        unlink(root / root_rel_src_toml_path(crate))
     else: # mv
         curdir.rename(destdir)
 
@@ -420,7 +464,7 @@ def do_mv_or_rm(parser, curdir, destdir):
         f.writelines(lines)
 
     # regenerate
-    Gen.run(parser, None)
+    Gen.run_like_function(parser.error)
 
 #------------
 
@@ -429,8 +473,8 @@ class Test:
     cmd = 'test'
     parser_kw = dict(
         description=
-            "Replacement for 'cargo test --all' now that this isn't a workspace."
-            " You won't believe how it works."
+            "Replacement for 'cargo test --all' when the 'simulated-workspace'"
+            " option is enabled. You won't believe how it works."
     )
 
     @staticmethod
@@ -442,21 +486,30 @@ class Test:
         from subprocess import Popen
 
         # regenerate
-        Gen.run(parser, None)
+        Gen.run_like_function(parser.error)
 
-        with pushd(search_for_root(parser.error)):
-            # Create a replica that looks exactly like our project,
-            #  except that it truly is a workspace.
-            TEST_ROOT = '.secret-test-dir'
-            ensure_test_replica_exists(TEST_ROOT)
-
-            code = Popen(['cargo', 'test', '--all'], cwd=TEST_ROOT).wait()
+        def do_cargo_test_all(**kw):
+            code = Popen(['cargo', 'test', '--all'], **kw).wait()
             if code:
                 sys.exit(code)
 
-            # keep TEST_ROOT around for build artefacts
+        user_config = read_master_user_config(parser.error)
+        with pushd(search_for_root(parser.error)):
+            if user_config.simulated_workspace.enabled:
+                # do the insane thing
 
-def ensure_test_replica_exists(test_root):
+                # Create a replica that looks exactly like our project,
+                #  except that it truly is a workspace.
+                TEST_ROOT = '.secret-test-dir'
+                simulated_workspace_ensure_test_replica_exists(TEST_ROOT)
+                do_cargo_test_all(cwd=TEST_ROOT)
+
+                # keep TEST_ROOT around for build artefacts
+            else:
+                # do something reasonable instead.
+                do_cargo_test_all()
+
+def simulated_workspace_ensure_test_replica_exists(test_root):
     import shutil
     test_root = Path(test_root)
 
@@ -500,7 +553,7 @@ class Dot:
         from networkx.drawing.nx_pydot import write_dot
 
         # regenerate
-        Gen.run(parser, None)
+        Gen.run_like_function(parser.error)
 
         crates = get_internal_crates_and_root_rel_paths(parser.error)
 
@@ -573,7 +626,7 @@ class Edit:
             sys.exit(1)
 
         # regenerate
-        Gen.run(parser, None)
+        Gen.run_like_function(parser.error)
 
 #------------
 
@@ -613,16 +666,21 @@ class UnusedDeps:
 class UserConfig:
     def __init__(self, d):
         d = dict(d)
-        config = d.pop('config')
+        simulated_workspace = d.pop('simulated-workspace')
         for key in d:
             warnings.warn(f"Unrecognized user-config section: {key}")
 
-        d = dict(config)
+        self.simulated_workspace = CfgSimulatedWorkspace(simulated_workspace)
+
+class CfgSimulatedWorkspace:
+    def __init__(self, d):
+        d = dict(d)
+        self.enabled = d.pop('enable', False)
         self.shared_target = d.pop('shared-target', True)
-        self.shared_dot_idea = d.pop('shared-dot-idea', False)
+        self.shared_dot_idea = d.pop('shared-dot-idea', True)
         self.shared_dot_vscode = d.pop('shared-dot-vscode', False)
         for key in d:
-            warnings.warn(f"Unrecognized user-config key: config.{key}")
+            warnings.warn(f'Unrecognized user-config key: simulated-workspace.{key}')
 
 #------------
 
@@ -674,11 +732,13 @@ def master_config_textual_add(lines, line, fail):
     lines = list(lines)
     stripped = [x.strip() for x in lines]
     try: i = stripped.index(INSERTION_POINT_TEXT)
-    except ValueError: fail(f'''
+    except ValueError:
+        fail(f'''
 Failed to find the new crate insertion point in '{MASTER_CFG_PATH}'
 It should look like the following:
     {INSERTION_POINT_TEXT}
 '''[:-1])
+        assert False, "unreachable"
 
     lines.insert(i, line)
     return lines
@@ -856,11 +916,23 @@ def rm_rf(path):
         if path.is_dir() and not path.is_symlink():
             shutil.rmtree(path)
         else:
-            os.unlink(path)
+            unlink(path)
     except FileNotFoundError:
         pass
 
 iife = lambda f: f()
+
+#------------
+
+# CLion thinks these functions can't accept pathlib.Path.
+def unlink(path):
+    return os.unlink(str(path))
+def symlink(a, b):
+    return os.symlink(str(a), str(b))
+def listdir(path):
+    return os.listdir(str(path))
+def readlink(path):
+    return os.readlink(str(path))
 
 #------------
 

@@ -1,9 +1,35 @@
 # User config file template for crates in this workspace.
 #
 # You can copy it to crates.d/config.toml
+#
+# (CAUTION: don't trust that the values in here are necessarily the defaults,
+#  because this file is currently maintained by hand and mistakes are possible)
 
-[config]
+[simulated-workspace]
+# A.k.a. "VSCode compatibility mode"
 
-# shared-target = true
-# shared-dot-idea = false
-# shared-dot-vscode = false
+# Remove the [workspace] table. RLS/VSCode sometimes hangs on workspaces and it
+# is extremely annoying; the workaround is to not have a true workspace, but to
+# instead symlink together a bunch of directories and open multiple instances
+# of the IDE in separate subcrates. Sounds absurd, but it *works.*
+# If you enable this, you should use './crates test' to run the test suite,
+# instead of 'cargo test --all'.
+#enable = false
+
+# The rest of the options are ignored if 'enable = false'.
+
+# Share IntelliJ configuration between subcrates. (the main crate 'rsp2' will
+# still have its own separate config). After using this for a long time, I can
+# say that CLion is *surprisingly stable* having multiple instances of itself
+# open all using the same symlinked config.
+# ...But I wouldn't blame you for being afraid to enable it.
+#shared-dot-idea = false
+
+# Share .vscode between subcrates. (the main crate 'rsp2' will still have its
+# own separate config). Unlike IntelliJ, there's clearly nothing to be afraid
+# of, due to the fundamental design of VSCode's configuration model.
+#shared-dot-vscode = true
+
+# Symlink together target directories for all of the subcrates. This results
+# in significantly less rebuilding while moving between crates.
+#shared-target = true
