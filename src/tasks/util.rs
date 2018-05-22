@@ -68,7 +68,7 @@ where
 
 //--------------------------------------------------------
 
-pub(crate) fn index_of_nearest(carts: &[V3], needle: &V3, tol: f64) -> Option<usize>
+pub(crate) fn index_of_nearest(carts: &[V3], needle: V3, tol: f64) -> Option<usize>
 {
     carts.into_iter()
         .map(|v| (v - needle).sqnorm())
@@ -80,7 +80,7 @@ pub(crate) fn index_of_nearest(carts: &[V3], needle: &V3, tol: f64) -> Option<us
 
 #[allow(unused)]
 pub(crate) fn index_of_shortest(carts: &[V3], tol: f64) -> Option<usize>
-{ index_of_nearest(carts, &V3([0.0; 3]), tol) }
+{ index_of_nearest(carts, V3([0.0; 3]), tol) }
 
 //--------------------------------------------------------
 pub(crate) use self::lockfile::{LockfilePath, LockfileGuard};

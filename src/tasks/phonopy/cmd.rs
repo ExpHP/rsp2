@@ -20,6 +20,7 @@ use ::{IoResult};
 use super::{MissingFileError, PhonopyFailed};
 use super::{Conf, DispYaml, SymmetryYaml, QPositions, Args, ForceSets};
 use ::traits::{AsPath, HasTempDir, Save, Load};
+use ::math::basis::Basis3;
 
 use ::rsp2_structure_io::poscar;
 use ::std::io::prelude::*;
@@ -27,7 +28,6 @@ use ::std::process::Command;
 use ::std::path::{Path, PathBuf};
 use ::rsp2_fs_util::{TempDir};
 
-use ::rsp2_kets::Basis;
 use ::rsp2_fs_util::{open, create, open_text, copy, hard_link};
 use ::rsp2_structure::{ElementStructure, Element};
 use ::rsp2_structure::{FracRot, FracTrans, FracOp};
@@ -803,12 +803,14 @@ impl<P: AsPath> DirWithBands<P> {
 
     /// This will be `None` if `.eigenvectors(true)` was not set prior
     /// to the band computation.
-    pub fn eigenvectors(&self) -> FailResult<Option<Vec<Basis>>>
+    pub fn eigenvectors(&self) -> FailResult<Option<Vec<Basis3>>>
     {Ok({
         let path = self.path().join("eigenvector.npy");
         if path.exists() {
             trace!("Reading eigenvectors...");
-            Some(npy::read_eigenvector_npy(open(path)?)?)
+            let bases = npy::read_eigenvector_npy(open(path)?)?;
+            let bases = bases.into_iter().map(Basis3::from_basis).collect();
+            Some(bases)
         } else { None }
     })}
 
@@ -821,6 +823,25 @@ impl<P: AsPath> DirWithBands<P> {
             .into_iter()
             .map(|evs| (v(evs) * THZ_TO_WAVENUMBER).0)
             .collect()
+    })}
+
+    pub fn eigensystem_at(&self, q: V3) -> FailResult<(Vec<f64>, Basis3)>
+    {Ok({
+        let index = ::util::index_of_nearest(&self.q_positions()?, q, 1e-4);
+        let index = match index {
+            Some(i) => i,
+            None => bail!("Bands do not include kpoint:\n  dir: {}\npoint: {:?}",
+        self.path().display(), q),
+        };
+
+        // (a little wasteful...)
+        let evals = self.eigenvalues()?.remove(index);
+        let evecs = match self.eigenvectors()? {
+            None => bail!("Directory has no eigenvectors: {}", self.path().display()),
+            Some(mut evs) => evs.remove(index),
+        };
+
+        (evals, evecs)
     })}
 }
 

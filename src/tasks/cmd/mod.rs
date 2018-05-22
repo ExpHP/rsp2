@@ -162,7 +162,7 @@ impl TrialDir {
         let bands_dir = do_diagonalize(
             pot, &settings.threading, phonopy, structure, save_bands, &[Q_GAMMA],
         )?;
-        let (evals, evecs) = read_eigensystem(&bands_dir, &Q_GAMMA)?;
+        let (evals, evecs) = bands_dir.eigensystem_at(Q_GAMMA)?;
 
         trace!("============================");
         trace!("Finished diagonalization");
@@ -202,19 +202,6 @@ impl TrialDir {
         (bands_dir, evals, evecs, ev_analysis)
     })}
 }
-
-#[allow(unused)]
-fn do_diagonalize_at_gamma(
-    pot: &PotentialBuilder,
-    threading: &cfg::Threading,
-    phonopy: &PhonopyBuilder,
-    structure: &ElementStructure,
-    save_bands: Option<&PathArc>,
-) -> FailResult<(Vec<f64>, Basis3)>
-{Ok({
-    let dir = do_diagonalize(pot, threading, phonopy, structure, save_bands, &[Q_GAMMA])?;
-    read_eigensystem(&dir, &Q_GAMMA)?
-})}
 
 fn do_diagonalize(
     pot: &PotentialBuilder,
@@ -350,27 +337,6 @@ fn do_force_sets_at_disps<P: AsPath + Send + Sync>(
     force_sets
 })}
 
-fn read_eigensystem(
-    bands_dir: &DirWithBands<impl AsPath>,
-    q: &V3,
-) -> FailResult<(Vec<f64>, Basis3)>
-{Ok({
-    let index = ::util::index_of_nearest(&bands_dir.q_positions()?, q, 1e-4);
-    let index = match index {
-        Some(i) => i,
-        None => bail!("Bands do not include kpoint:\n  dir: {}\npoint: {:?}",
-            bands_dir.path().display(), q),
-    };
-
-    let evals = bands_dir.eigenvalues()?.remove(index);
-    let evecs = match bands_dir.eigenvectors()? {
-        None => bail!("Directory has no eigenvectors: {}", bands_dir.path().display()),
-        Some(mut evs) => Basis3::from_basis(evs.remove(index)),
-    };
-
-    (evals, evecs)
-})}
-
 //-----------------------------------
 
 // HACK:
@@ -448,7 +414,7 @@ impl TrialDir {
         };
 
         let structure = bands_dir.structure()?;
-        let (evals, evecs) = read_eigensystem(&bands_dir, &Q_GAMMA)?;
+        let (evals, evecs) = bands_dir.eigensystem_at(Q_GAMMA)?;
 
         let plot_ev_indices = {
             use ::rsp2_tasks_config::EnergyPlotEvIndices::*;
