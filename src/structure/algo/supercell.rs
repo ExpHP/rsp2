@@ -168,6 +168,7 @@ where F: FnMut(&M, [u32; 3]) -> M2,
 ///   site. In method outputs, this will be in the range
 ///   `0 <= lattice_point[k] - offset[k] < periods[k]`.  In method inputs, this will
 ///   generally be allowed to be any arbitrary integer vector.
+#[derive(Debug, Clone)]
 pub struct SupercellToken {
     // Precomputed diagonal of the Hermite Normal Form of `integer_lattice`.
     periods: [u32; 3],

@@ -858,7 +858,6 @@ pub(crate) fn log_stdio_and_wait(
 ) -> FailResult<()>
 {Ok({
     use ::std::process::Stdio;
-    use ::std::io::{BufRead, BufReader};
 
     if stdin.is_some() {
         cmd.stdin(Stdio::piped());
@@ -875,23 +874,8 @@ pub(crate) fn log_stdio_and_wait(
         child.stdin.take().unwrap().write_all(text.as_bytes())?;
     }
 
-    let stdout_worker = {
-        let f = BufReader::new(child.stdout.take().unwrap());
-        ::std::thread::spawn(move || -> FailResult<()> {Ok({
-            for line in f.lines() {
-                ::stdout::log(&(line?[..]));
-            }
-        })})
-    };
-
-    let stderr_worker = {
-        let f = BufReader::new(child.stderr.take().unwrap());
-        ::std::thread::spawn(move || -> FailResult<()> {Ok({
-            for line in f.lines() {
-                ::stderr::log(&(line?[..]));
-            }
-        })})
-    };
+    let stdout_worker = ::stdout::log_worker(child.stdout.take().unwrap());
+    let stderr_worker = ::stderr::log_worker(child.stderr.take().unwrap());
 
     check_status(child.wait()?)?;
 
@@ -999,3 +983,4 @@ mod tests {
         let _: DirWithBands<Box<AsPath>> = x.map_dir(|e| Box::new(e) as _);
     }
 }
+

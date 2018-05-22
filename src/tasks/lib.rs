@@ -33,7 +33,7 @@ extern crate rayon;
 extern crate rand;
 extern crate slice_of_array;
 extern crate serde;
-extern crate indoc;
+#[macro_use] extern crate indoc;
 extern crate ansi_term;
 extern crate fern;
 extern crate shlex;
@@ -43,6 +43,7 @@ extern crate rsp2_kets;
 extern crate path_abs;
 extern crate serde_ignored;
 extern crate serde_yaml;
+extern crate num_traits;
 #[macro_use] extern crate serde_json;
 #[macro_use] extern crate serde_derive;
 #[macro_use] extern crate log;
@@ -111,17 +112,41 @@ mod errors {
 }
 
 /// This module only exists to have its name appear in logs.
-/// It marks a process's stdout.
+/// It marks a child process's stdout.
 mod stdout {
+    use ::FailResult;
+    use std::{process, thread, io::{BufReader, BufRead}};
+
     pub fn log(s: &str)
     { info!("{}", s) }
+
+    pub fn log_worker(stdout: process::ChildStdout) -> thread::JoinHandle<FailResult<()>> {
+        let f = BufReader::new(stdout);
+        thread::spawn(move || -> ::FailResult<()> {Ok({
+            for line in f.lines() {
+                log(&(line?[..]));
+            }
+        })})
+    }
 }
 
 /// This module only exists to have its name appear in logs.
-/// It marks a process's stderr.
+/// It marks a child process's stderr.
 mod stderr {
+    use ::FailResult;
+    use std::{process, thread, io::{BufReader, BufRead}};
+
     pub fn log(s: &str)
     { warn!("{}", s) }
+
+    pub fn log_worker(stderr: process::ChildStderr) -> thread::JoinHandle<FailResult<()>> {
+        let f = BufReader::new(stderr);
+        thread::spawn(move || -> ::FailResult<()> {Ok({
+            for line in f.lines() {
+                log(&(line?[..]));
+            }
+        })})
+    }
 }
 
 mod env {

@@ -1,37 +1,38 @@
 
 use ::std::ops::{Deref, DerefMut};
+use ::std::fmt;
 
 // ---------------------------------------------------------------------------
 
 /// A 2-dimensional vector with operations for linear algebra.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 #[derive(Serialize, Deserialize)]
 pub struct V2<X=f64>(pub [X; 2]);
 
 /// A 3-dimensional vector with operations for linear algebra.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 #[derive(Serialize, Deserialize)]
 pub struct V3<X=f64>(pub [X; 3]);
 
 /// A 4-dimensional vector with operations for linear algebra.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 #[derive(Serialize, Deserialize)]
 pub struct V4<X=f64>(pub [X; 4]);
 
 // ---------------------------------------------------------------------------
 
 /// A linear algebra dense matrix with 2 rows and fixed width.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 #[derive(Serialize, Deserialize)]
 pub struct M2<V>(pub [V; 2]);
 
 /// A linear algebra dense matrix with 3 rows and fixed width.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 #[derive(Serialize, Deserialize)]
 pub struct M3<V>(pub [V; 3]);
 
 /// A linear algebra dense matrix with 4 rows and fixed width.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 #[derive(Serialize, Deserialize)]
 pub struct M4<V>(pub [V; 4]);
 
@@ -88,6 +89,16 @@ gen_each!{
             #[inline(always)]
             fn into_iter(self) -> Self::IntoIter
             { self.0.iter_mut() }
+        }
+
+        // forward the debug impl without a surrounding "V3(...)", for somewhat
+        // selfish reasons (it makes the debug output valid JSON and Python for
+        // many types, significantly lowering the barrier to some common tasks
+        // during debugging)
+        impl<$T: fmt::Debug> fmt::Debug for $Cn<$T> {
+            #[inline]
+            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result
+            { fmt::Debug::fmt(&self.0, f) }
         }
     }
 }

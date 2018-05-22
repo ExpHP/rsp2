@@ -13,6 +13,7 @@ pub(crate) mod trial;
 
 mod acoustic_search;
 mod relaxation;
+mod scipy_eigsh;
 
 use ::{FailResult, FailOk};
 use ::rsp2_tasks_config::{self as cfg, Settings, NormalizationMode, SupercellSpec};
@@ -30,7 +31,6 @@ use ::rsp2_slice_math::{vnorm};
 use ::slice_of_array::prelude::*;
 use ::rsp2_array_utils::arr_from_fn;
 use ::rsp2_array_types::{V3, M33, Unvee};
-use ::rsp2_soa_ops::{Permute};
 use ::rsp2_structure::{Coords, ElementStructure, Lattice};
 use ::phonopy::Builder as PhonopyBuilder;
 use ::math::bands::ScMatrix;
@@ -617,6 +617,7 @@ impl TrialDir {
 // FIXME refactor once it's working, this is way too long
 pub(crate) fn run_dynmat_test(phonopy_dir: &PathDir) -> FailResult<()>
 {Ok({
+    ::cmd::scipy_eigsh::check_scipy_availability()?;
 //        let pot = PotentialBuilder::from_config(&settings.threading, &settings.potential.kind);
 
 //        let (prim_structure, _atom_layers, _layer_sc_mats) = read_structure_file(
@@ -699,25 +700,19 @@ pub(crate) fn run_dynmat_test(phonopy_dir: &PathDir) -> FailResult<()>
 
 //        let force_constants = force_sets.solve_force_constants(&sc, &perm_to_phonopy, &superstructure.to_carts())?;
     {
-        let dense = force_constants.permuted_by(&perm_to_phonopy).to_dense_matrix();
-        println!("{:?}", dense); // FINALLY: THE MOMENT OF TRUTH
+        // let dense = force_constants.permuted_by(&perm_to_phonopy).to_dense_matrix();
+        // println!("{:?}", dense); // FINALLY: THE MOMENT OF TRUTH
     }
 
-    unimplemented!();
-    #[allow(unreachable_code)] {
-        let our_dynamical_matrix = {
-        };
+    {
+        let our_dynamical_matrix = force_constants.gamma_dynmat(&sc);
+        println!("{:?}", our_dynamical_matrix);
+        let (low, _low_basis) = our_dynamical_matrix.compute_most_negative_eigensolutions(3)?;
+        let (high, _high_basis) = our_dynamical_matrix.compute_most_extreme_eigensolutions(3)?;
 
-        // make phonopy compute dynamical matrix (as a gold standard)
-        // TODO: how to get the dynamical matrix from phonopy?
-        let phonopy_bands_dir = {
-            //force_dir
-            //    .build_bands()
-            //    .compute(&[Q_GAMMA])?
-        };
-
+        println!("{:?}", low);
+        println!("{:?}", high);
         let _ = our_dynamical_matrix;
-        let _ = phonopy_bands_dir;
 
     }
 })}

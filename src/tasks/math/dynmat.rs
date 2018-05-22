@@ -1,36 +1,32 @@
-#![allow(unused)] // FIXME
+
+// TODO:
+// Required bits of cleanup here:
+//
+// * Rip out JaySon (debug output)
+// * Kill the old functions once confident that `like_phonopy` is the best solution.
+// * Cleanup translational invariance function to stop being the most retarded hack ever.
+//   Also, I don't see this written anywhere here currently, (in fact I only see an old
+//   comment contrary to this fact), but the way it's done by the C code in phonopy is
+//   actually a very clever design that, AFAICT, manages to AVOID data dependencies
+//   despite being performed in-place, by exploiting matrix symmetry. (the older python
+//   code, on the other hand, DOES appear to suffer from accidental data dependencies)
+//   (that said, doing it in-place is 100% unnecessary)
+
 
 use ::FailResult;
-use ::rsp2_array_types::{V3, M33, M3, mat};
+use ::rsp2_array_types::{V3, M33, M3};
 use ::rsp2_soa_ops::{Perm, Permute};
 use ::rsp2_structure::supercell::SupercellToken;
 use ::rsp2_newtype_indices::{Idx, Indexed, cast_index};
 use ::std::collections::BTreeMap;
-use ::std::collections::HashMap;
 use ::slice_of_array::prelude::*;
+use ::math::sparse::{self, RawCoo, RawCsr};
 
 use ::util::ext_traits::OptionExpectNoneExt;
 
-#[derive(Debug, Clone)]
-pub struct ForceSets {
-    num_atoms: usize,
-    // These are both indices in the supercell.
-    //
-    // Invariant: the displaced atom always has an index where `cell = DISPLACED_CELL`.
-    //
-    // (technically we *could* store primitive sites in `atom_displaced`...
-    //  but I feel that storing supercell sites is safer, because it forces us
-    //  to be wary of the fact that rotations might move `atom_displaced` to a
-    //  different cell. (which is a fact we must account for in `atom_affected`))
-    atom_displaced: Vec<usize>,
-    atom_affected: Vec<usize>,
-    cart_force: Vec<V3>,
-    cart_displacement: Vec<V3>,
-}
-
 // Displaced atoms are always in this cell.
 // (HACK: shouldn't need to be pub(crate))
-pub(crate) const DISPLACED_CELL: [u32; 3] = [0, 0, 0];
+pub(crate) const DESIGNATED_CELL: [u32; 3] = [0, 0, 0];
 
 // index types for local use, to aid in reasoning
 newtype_index!{DispI}  // index of a displacement
@@ -40,194 +36,18 @@ newtype_index!{StarI}  // index of a star of sites equivalent under symmetry
 newtype_index!{OperI}  // index into the space group
 newtype_index!{EqnI}   // row of a table of equations that will be solved by pseudo inverse
 
-impl ForceSets {
-    pub(crate) fn zero(num_atoms: usize) -> Self {
-        ForceSets {
-            num_atoms,
-            atom_displaced: vec![],
-            atom_affected: vec![],
-            cart_force: vec![],
-            cart_displacement: vec![],
-        }
-    }
-
-    pub(crate) fn from_displacement(
-        num_atoms: usize,
-        // (atom_displaced, cart_displacement)
-        displacement: (usize, V3),
-        // Item = (atom_affected, cart_force)
-        forces: impl IntoIterator<Item=(usize, V3)>,
-    ) -> Self {
-        let (atom_displaced, cart_displacement) = displacement;
-        let (atom_affected, cart_force): (Vec<_>, _) = forces.into_iter().unzip();
-
-        let count = atom_affected.len();
-        let atom_displaced = vec![atom_displaced; count];
-        let cart_displacement = vec![cart_displacement; count];
-        ForceSets { num_atoms, atom_affected, atom_displaced, cart_force, cart_displacement }
-    }
-
-
-    //
-    // `super_deperm` should describe the symmop as a depermutation of the supercell.
-    //
-    // see conventions.md for info about depermutations.
-    //
-    // FIXME shouldn't be pub(crate)
-    // FIXME there is a better strategy which lets us do only one pseudoinversion per unique
-    //       displacement vector.  Basically, once all space group operators are accounted
-    //       for, we will have one force per space group op in every interacting pair,
-    //       so we simply need to make sure they are always in the same order.
-    pub(crate) fn derive_from_symmetry(
-        &self,
-        sc: &SupercellToken,
-        cart_rot: &M33,
-        super_deperm: &Perm,
-    ) -> Self {
-        assert_eq!(super_deperm.len(), sc.num_supercell_atoms());
-
-        let primitive_atoms = sc.atom_primitive_atoms();
-        let lattice_points = sc.atom_lattice_points();
-        let expected_lattice_point = sc.lattice_point_from_cell(DISPLACED_CELL);
-
-        let (atom_displaced, atom_affected) = {
-            ::util::zip_eq(&self.atom_displaced, &self.atom_affected)
-                .map(|(&displaced, &affected)| {
-                    assert_eq!(expected_lattice_point, lattice_points[displaced as usize]);
-
-                    // Rotate the atoms to a new index.
-                    let displaced = super_deperm.permute_index(displaced);
-                    let affected = super_deperm.permute_index(affected);
-
-                    // 'displaced' might have been moved to a new cell.
-                    // Translate the atoms to move it back.
-                    let correction = expected_lattice_point - lattice_points[displaced as usize];
-                    let translate_atom = |old_super| {
-                        let old_super = old_super as usize;
-                        sc.atom_from_lattice_point(
-                            primitive_atoms[old_super],
-                            lattice_points[old_super] + correction,
-                        )
-                    };
-                    let displaced = translate_atom(displaced);
-                    let affected = translate_atom(affected);
-
-                    assert_eq!(expected_lattice_point, lattice_points[displaced as usize]);
-                    (displaced, affected)
-                }).unzip()
-        };
-
-        // rotate the cartesian vectors
-        let cart_op_t = cart_rot.t();
-        let cart_force = self.cart_force.iter().map(|v| v * &cart_op_t).collect();
-        let cart_displacement = self.cart_displacement.iter().map(|v| v * &cart_op_t).collect();
-
-        let num_atoms = self.num_atoms;
-        ForceSets { num_atoms, atom_displaced, atom_affected, cart_force, cart_displacement }
-    }
-
-    // FIXME shouldn't be pub(crate)
-    pub(crate) fn concat_from<Ss>(iter: Ss) -> Option<Self>
-    where Ss: IntoIterator<Item=ForceSets>,
-    {
-        use ::itertools::Itertools;
-        iter.into_iter().fold1(|mut a, b| {
-            assert_eq!(a.num_atoms, b.num_atoms);
-            a.atom_affected.extend(b.atom_affected);
-            a.atom_displaced.extend(b.atom_displaced);
-            a.cart_force.extend(b.cart_force);
-            a.cart_displacement.extend(b.cart_displacement);
-            a
-        })
-    }
-
-    // FIXME shouldn't be pub(crate)
-    pub(crate) fn solve_force_constants(&self, sc: &SupercellToken
-                                        , perm_HACK: &Perm
-        , carts_HACK: &[V3]
-    ) -> FailResult<ForceConstants>
-    {
-        use ::util::zip_eq as z;
-        let ForceSets {
-            num_atoms,
-            ref atom_displaced,
-            ref atom_affected,
-            ref cart_force,
-            ref cart_displacement,
-        } = *self;
-
-        let mut map = HashMap::new();
-
-        // build a (likely overconstrained) system of equations for each interacting (i,j) pair
-        z(z(z(atom_displaced, atom_affected), cart_force), cart_displacement)
-            .for_each(|(((&displaced, &affected), force), displacement)| {
-                let key = (displaced, affected);
-                let entry = map.entry(key).or_insert((vec![], vec![]));
-                let (fs, us) = entry;
-                fs.push(*force);
-                us.push(*displacement);
-            });
-
-        let mut row_atom = vec![];
-        let mut col_atom = vec![];
-        let mut cart_matrix = vec![];
-        for ((displaced, affected), (forces, displacements)) in map {
-            use rsp2_linalg::{CMatrix, left_pseudoinverse, dot};
-            //
-            //    F = -U Phi
-            //
-            // * Phi is the 3x3 matrix of force constants for this pair of atoms
-            // * F is the Nx3 matrix of forces experienced by 'affected'
-            // * U is the Nx3 matrix of corresponding displacements for 'displaced'
-            //
-            // for large enough N (and assuming sufficient rank),
-            // we can solve for Phi using the pseudoinverse
-            assert!(forces.len() > 3, "not enough FCs? (got {})", forces.len());
-//
-//            if forces.flat().iter().any(|&x| f64::abs(x) > 1e-7) && displaced == 0 {
-//
-//                let V3([x, y, z]) = carts_HACK[affected];
-//                info!("displacements {} {} [{}, {}, {}]", perm_HACK[displaced], perm_HACK[affected], x, y, z);
-//                use ::rsp2_array_types::Unvee;
-//    //            let mut show = (&displacements[..]).unvee().to_vec();
-//                //show.sort_by(|a, b| a.partial_cmp(b).unwrap());
-//                for (V3([ux, uy, uz]), V3([fx, fy, fz])) in ::util::zip_eq(&displacements, &forces) {
-//                    info!(" [{:+.06}, {:+.06}, {:+.06}, {:+.06}, {:+.06}, {:+.06}]", ux, uy, uz, fx, fy, fz);
-//                }
-//            }
-
-            let displacements: CMatrix = displacements.into();
-            let forces: CMatrix = forces.into();
-            let phi: CMatrix = dot(&*left_pseudoinverse(displacements)?, &*forces).into();
-            row_atom.push(displaced as usize);
-            col_atom.push(affected as usize);
-            cart_matrix.push(-&M3(phi.c_order_data().nest::<V3>().to_array()));
-        }
-
-        let fcs = {
-            ForceConstants { num_atoms, row_atom, col_atom, cart_matrix }
-                .add_rows_for_other_cells(sc)
-                //.symmetrize_by_transpose()
-                .impose_perm_and_translational_invariance_a_la_phonopy()
-                .canonicalize()
-        };
-        Ok(fcs)
-    }
-}
+#[derive(Debug, Clone)]
+pub struct ForceConstants(
+    RawCoo<M33, SuperI, SuperI>,
+);
 
 #[derive(Debug, Clone)]
-pub struct ForceConstants { // conceptually ForceConstants<I: Idx>
-    num_atoms: usize,
-    row_atom: Vec<usize>,   // conceptually Vec<I>
-    col_atom: Vec<usize>,   // conceptually Vec<I>
-    cart_matrix: Vec<M33>,
-}
-
-
-
+pub struct DynamicalMatrix(
+    // entries are [real, imag]
+    pub RawCsr<[M33; 2], PrimI, PrimI>,
+);
 
 impl ForceConstants {
-
     // This basically follows Phonopy's method for `--writefc` to a T, although it
     // is a bit smarter in some places, and probably dumber in other places.
     //
@@ -238,6 +58,8 @@ impl ForceConstants {
     //   expensive brute force overlap searches, while this leaves everything where
     //   they are and adjusts indices to simulate translation by a lattice point)
     //
+    // The produced ForceConstants only include the rows in the 'designated cell.'
+    // (the only rows that are required to produce a dynamical matrix)
     pub(crate) fn like_phonopy(
         // Displacements, using primitive cell indices.
         //
@@ -273,7 +95,7 @@ impl ForceConstants {
         let primitive_atoms = &primitive_atoms[..];
         let lattice_points = &lattice_points[..];
 
-        let designated_lattice_point = sc.lattice_point_from_cell(DISPLACED_CELL);
+        let designated_lattice_point = sc.lattice_point_from_cell(DESIGNATED_CELL);
 
         Context {
             sc, primitive_atoms, lattice_points, displacements, force_sets,
@@ -284,7 +106,6 @@ impl ForceConstants {
         }.like_phonopy()
     }
 }
-
 
 // a variety of precomputed things made available during the whole computation
 struct Context<'ctx> {
@@ -444,8 +265,6 @@ impl<'ctx> Context<'ctx> {
 
             use rsp2_linalg::{CMatrix, dot, left_pseudoinverse};
 
-            let num_eqns = row_displacements.len();
-
             // all forces we just computed use the same displacements,
             // so we only need to compute a single pseudoinverse
             let pseudoinverse: CMatrix = left_pseudoinverse((&row_displacements.raw[..]).into())?;
@@ -482,7 +301,7 @@ impl<'ctx> Context<'ctx> {
 
         for (prim, data) in prim_data.into_iter_enumerated() {
             let PrimData { star, opers_from_rep } = data;
-            let new_row = match computed_rows.contains_key(&prim) {
+            match computed_rows.contains_key(&prim) {
                 true => continue,
                 false => {
                     let representative = star_data[star].representative;
@@ -503,21 +322,16 @@ impl<'ctx> Context<'ctx> {
 //        trace!("{}", ::serde_json::to_string(&jay_son).unwrap());
 
         assert!(computed_rows.keys().cloned().eq(self.prim_indices()));
-        // HACK into COO
-        let mut row_atom = vec![];
-        let mut col_atom = vec![];
-        let mut cart_matrix = vec![];
-        for (prim, row) in computed_rows {
-            let row_i = self.atom_from_lattice_point(prim, self.designated_lattice_point);
-            for (col_i, mat) in row {
-                row_atom.push(SuperI::index(row_i));
-                col_atom.push(SuperI::index(col_i));
-                cart_matrix.push(mat);
-            }
-        }
-
-        let num_atoms = self.sc.num_supercell_atoms();
-        Ok(ForceConstants { num_atoms, row_atom, col_atom, cart_matrix })
+        let matrix = {
+            let dim = (self.sc.num_supercell_atoms(), self.sc.num_supercell_atoms());
+            let map = {
+                computed_rows.into_iter()
+                    .map(|(prim, row_map)| (self.designated_super(prim), row_map))
+                    .collect()
+            };
+            sparse::RawBee { dim, map }.into_coo()
+        };
+        Ok(ForceConstants(matrix))
     }
 
     /// Use symmetry to expand the number of displacement-force equations for
@@ -746,6 +560,10 @@ impl<'ctx> Context<'ctx> {
         SuperI::new(self.sc.atom_from_lattice_point(prim.index(), lattice_point))
     }
 
+    fn designated_super(&self, prim: PrimI) -> SuperI {
+        self.atom_from_lattice_point(prim, self.designated_lattice_point)
+    }
+
     // recovers the primitive index from a supercell index whose lattice point is
     // `designated_lattice_point`. (panics if this does not hold, in which case you
     // may have forgotten to apply a translation or something)
@@ -755,16 +573,30 @@ impl<'ctx> Context<'ctx> {
     }
 }
 
+#[allow(unused)]
 impl ForceConstants {
+    //------------------------------
+    // NOTE: we should not be afraid to use this. (and then we can use
+    // straightforward methods for symmetrization and translational invariance
+    // that access the entire matrix).
+    //
+    // Basically there is not expected to be much of any real cost associated
+    // with turning a N_PRIM x N_SUPER size data structure into N_SUPER x N_SUPER.
+    // After all, rsp2's problem has never been large supercells, but rather,
+    // large *primitive* cells... and the vast majority of structures end up with
+    // a 1x1x1 supercell anyways.
+    //------------------------------
+    //
+    //
     // take ForceConstants where row_atom is always in DISPLACED_CELL
     // and generate all the other rows
     fn add_rows_for_other_cells(mut self, sc: &SupercellToken) -> Self {
         assert!({
             let cells = sc.atom_cells();
-            self.row_atom.iter().all(|&row| cells[row] == DISPLACED_CELL)
+            self.0.row.iter().all(|&SuperI(row)| cells[row] == DESIGNATED_CELL)
         });
 
-        let old_len = self.row_atom.len();
+        let old_len = self.0.row.len();
         for axis in 0..3 {
             // get deperm that translates data by one cell along this axis
             let unit = V3::from_fn(|i| (i == axis) as i32);
@@ -778,14 +610,16 @@ impl ForceConstants {
                 self.add(permuted_fcs.clone());
             }
         }
-        assert_eq!(self.row_atom.len(), old_len * sc.num_cells());
+        assert_eq!(self.0.row.len(), old_len * sc.num_cells());
         self
     }
 
+    // NOTE: We should use this.
+    //
     fn symmetrize_by_transpose(mut self) -> Self {
         let t = self.clone().transpose();
         self.add(t);
-        for m in &mut self.cart_matrix {
+        for m in &mut self.0.val {
             *m *= 0.5;
         }
         self
@@ -793,70 +627,25 @@ impl ForceConstants {
 
     /// Transpose as if it were a 3N by 3N matrix.
     fn transpose(self) -> Self {
-        let ForceConstants { num_atoms, row_atom, col_atom, cart_matrix } = self;
-        let cart_matrix = cart_matrix.into_iter().map(|m| m.t()).collect();
-        ForceConstants {
-            num_atoms,
-            row_atom: col_atom,
-            col_atom: row_atom,
-            cart_matrix,
-        }
+        let ForceConstants(RawCoo{ dim, row, col, val }) = self;
+        let val = val.into_iter().map(|m| m.t()).collect();
+        let (row, col) = (col, row);
+        let dims = (dim.1, dim.0);
+        ForceConstants(RawCoo { dim, row, col, val })
     }
 
     fn add(&mut self, other: Self) {
-        assert_eq!(self.num_atoms, other.num_atoms);
-        self.row_atom.extend(other.row_atom);
-        self.col_atom.extend(other.col_atom);
-        self.cart_matrix.extend(other.cart_matrix);
+        assert_eq!(self.0.dim, other.0.dim);
+        self.0.row.extend(other.0.row);
+        self.0.col.extend(other.0.col);
+        self.0.val.extend(other.0.val);
     }
-
-//    // this is something done by the C code in Phonopy which purportedly
-//    // imposes translational invariance.
-//    fn impose_translational_invariance_a_la_phonopy(mut self) -> Self {
-//
-//        // first, we need to iterate over each row, which is unnatural for our COO-based
-//        // representation (that's our fault)
-//        fn insertion_index<K: Ord>(data: &[K], value: K) -> usize {
-//            match data.binary_search(&value) {
-//                Ok(i) | Err(i) => i,
-//            }
-//        }
-//
-//        self.sort_data_by(|r, _| r);
-//        let row_ptr = (0..=self.num_atoms).map(|r| insertion_index(&self.row_atom, r)).collect::<Vec<_>>();
-//        for &[row_start, row_end] in row_ptr.windows(2) {
-//            // okay.  Here's where things get interesting.
-//            //
-//            // For each of the 3 diagonal matrix components labeled by `(r_k, r_k)`,
-//            // phonopy's C code sums up all values in that component along the row for atom `r_atom`,
-//            // and subtracts it from `[r_atom][r_atom][r_k][r_k]`.
-//            //
-//            // For each of the 3 off-diagonal components labeled by `(r_k, c_k)` where `c_k > r_k`,
-//            // the code sums up all values in that component along the row for atom `r_atom`,
-//            // and subtracts it from two elements in the `[r_atom][r_atom]` matrix (`[r_k][c_k]`
-//            // and `[c_k][r_k]`).
-//            //
-//            // If you look at the original python code, you'll see that it used to do something
-//            // that first went over each row, then over each column.  ISTM that the "over each column"
-//            // part is why the `[c_k][r_k]` term is modified, and that this is equivalent presuming that
-//            // the
-//            // Notice that there are data dependencies here.
-//            //
-//            //
-//            fn without_diagonal(mut mat: M33) -> M33 {
-//                for k in 0..3 {
-//                    mat[k][k] = 0;
-//                }
-//                mat
-//            }
-//            let start =
-//        }
-//    }
 
     // this is something done by the C code in Phonopy which purportedly
     // imposes translational invariance.
     fn impose_perm_and_translational_invariance_a_la_phonopy(mut self) -> Self {
-        let mut dense = self.to_dense_matrix();
+        // FIXME HACK HACK HACK HACK TERRIBLE SLOW SLOW NO GOOD HACK
+        let mut dense = self.0.into_dense();
 
         for i in 0..dense.len() {
             let rest = &mut dense[i..];
@@ -903,50 +692,82 @@ impl ForceConstants {
     }
 
     // HACK
-    fn from_dense_matrix(mat: Vec<Vec<[[f64; 3]; 3]>>) -> ForceConstants {
-        let num_atoms = mat.len();
-        let (mut row_atom, mut col_atom, mut cart_matrix) = (vec![], vec![], vec![]);
-        for (r, row) in mat.into_iter().enumerate() {
-            for (c, m) in row.into_iter().enumerate() {
-                let m = mat::from_array(m);
+    fn from_dense_matrix(mat: Vec<Vec<M33>>) -> ForceConstants {
+        let nrows = mat.len();
+        let ncols = mat.get(0).expect("cant sparsify matrix with no rows").len();
+        let dim = (nrows, ncols);
+
+        let (mut row, mut col, mut val) = (vec![], vec![], vec![]);
+        for (r, row_vec) in mat.into_iter().enumerate() {
+            assert_eq!(row_vec.len(), ncols);
+            for (c, m) in row_vec.into_iter().enumerate() {
                 if m != M33::zero() {
-                    row_atom.push(r);
-                    col_atom.push(c);
-                    cart_matrix.push(m);
+                    row.push(SuperI(r));
+                    col.push(SuperI(c));
+                    val.push(m);
                 }
             }
         }
-        ForceConstants { num_atoms, row_atom, col_atom, cart_matrix }
+        ForceConstants(RawCoo { dim, row, col, val })
     }
-
 
     fn sort_data_by<K, F>(self, mut f: F) -> Self
     where
         K: Ord,
-        F: FnMut(usize, usize) -> K,
+        F: FnMut(SuperI, SuperI) -> K,
     {
-        let ForceConstants { num_atoms, row_atom, col_atom, cart_matrix } = self;
-        let data = zip_eq!(&row_atom, &col_atom).map(|(&r, &c)| f(r, c)).collect::<Vec<_>>();
+        let ForceConstants(RawCoo { dim, row, col, val }) = self;
+        let data = zip_eq!(&row, &col).map(|(&r, &c)| f(r, c)).collect::<Vec<_>>();
         let perm = Perm::argsort(&data);
 
-        let row_atom = row_atom.permuted_by(&perm);
-        let col_atom = col_atom.permuted_by(&perm);
-        let cart_matrix = cart_matrix.permuted_by(&perm);
-        ForceConstants { num_atoms, row_atom, col_atom, cart_matrix }
+        let row = row.permuted_by(&perm);
+        let col = col.permuted_by(&perm);
+        let val = val.permuted_by(&perm);
+        ForceConstants(RawCoo { dim, row, col, val })
     }
 
     /// Ensure that at most a single item per atom pair exists by summing duplicates.
     fn canonicalize(self) -> Self {
-        let row_major = self.sort_data_by(|r, c| (r, c));
-        let ForceConstants { num_atoms, row_atom, col_atom, cart_matrix } = row_major;
+        ForceConstants(self.0.into_bee().into_coo())
+    }
 
-        // reduce
-        let iter = zip_eq!(zip_eq!(row_atom, col_atom), cart_matrix);
-        let iter = IntoReducedIter::new(iter, ::std::ops::Add::add);
-        let (pos, cart_matrix): (Vec<_>, _) = iter.unzip();
-        let (row_atom, col_atom) = pos.into_iter().unzip();
+    // note: other K points will require cartesian coords for the right phase factors
+    /// Compute the dynamical matrix at gamma.
+    ///
+    /// The force constants do not need to contain data for rows outside the
+    /// designated cell. (but if they do, it won't hurt)
+    pub fn gamma_dynmat(&self, sc: &SupercellToken) -> DynamicalMatrix {
+        let sc = sc.clone();
 
-        ForceConstants { num_atoms, row_atom, col_atom, cart_matrix }
+        let primitive_atoms = sc.atom_primitive_atoms();
+        let cells = sc.atom_cells();
+        let get_prim = |SuperI(r)| PrimI(primitive_atoms[r.index()]);
+
+        let iter = zip_eq!(&self.0.row, &self.0.col, &self.0.val)
+            // ignore elements outside the rows of the designated cell, which were added
+            // for no other purpose than to facilitate imposing translational invariance
+            .filter(|&(&SuperI(r), _, _)| cells[r] == DESIGNATED_CELL)
+            // each column of the dynamical matrix sums over columns for images in
+            // the force constants matrix, with phase factors.
+            .map(|(&r, &c, &m)| {
+                // at gamma, phase is 1
+                let real = m;
+                let imag = M33::zero();
+                ((get_prim(r), get_prim(c)), [real, imag])
+            });
+
+        let (pos, val): (Vec<_>, Vec<_>) = iter.unzip();
+        let (row, col) = pos.into_iter().unzip();
+        let dim = (sc.num_primitive_atoms(), sc.num_primitive_atoms());
+        let matrix = {
+            RawCoo { dim, val, row, col }
+                .into_csr_with(|[real_dest, imag_dest], [real, imag]| {
+                    *real_dest += real;
+                    *imag_dest += imag;
+                })
+        };
+
+        DynamicalMatrix(matrix)
     }
 }
 
@@ -954,86 +775,13 @@ impl ForceConstants {
 // by the same index type, so the Permute impl permutes both.
 impl Permute for ForceConstants {
     fn permuted_by(self, perm: &Perm) -> ForceConstants {
-        let ForceConstants { num_atoms, mut row_atom, mut col_atom, cart_matrix } = self;
-        for row in &mut row_atom {
-            *row = perm.permute_index(*row);
+        let ForceConstants(RawCoo { dim, mut row, mut col, val }) = self;
+        for SuperI(r) in &mut row {
+            *r = perm.permute_index(*r);
         }
-        for col in &mut col_atom {
-            *col = perm.permute_index(*col);
+        for SuperI(c) in &mut col {
+            *c = perm.permute_index(*c);
         }
-        ForceConstants { num_atoms, row_atom, col_atom, cart_matrix }
+        ForceConstants(RawCoo { dim, row, col, val })
     }
 }
-
-use self::reduce_items::IntoReducedIter;
-mod reduce_items {
-    // from an old project
-
-    /// Iterator adapter that sums consecutive consecutive Ts with the same key pair.
-    #[must_use = "iterator adaptors are lazy and do nothing unless consumed"]
-    pub struct IntoReducedIter<K, T, F> {
-        iter: ::std::iter::Peekable<::std::vec::IntoIter<(K, T)>>,
-        function: F,
-    }
-
-    impl<K: Eq, T, F> IntoReducedIter<K, T, F>
-    where
-        F: FnMut(T, T) -> T,
-    {
-        #[inline]
-        pub fn new(iter: impl IntoIterator<Item=(K, T)>, function: F) -> Self {
-            IntoReducedIter {
-                iter: iter.into_iter().collect::<Vec<_>>().into_iter().peekable(),
-                function,
-            }
-        }
-    }
-
-    impl<K: Eq, T, F> Iterator for IntoReducedIter<K, T, F>
-    where
-        K: Copy, // greatly simplifies a borrowck issue
-        F: FnMut(T, T) -> T,
-    {
-        type Item = (K, T);
-        #[inline]
-        fn next(&mut self) -> Option<Self::Item> {
-            self.iter.next().and_then(|(pos, mut val)| {
-                while let Some(&(next_pos, _)) = self.iter.peek() {
-                    if next_pos == pos {
-                        val = (self.function)(val, self.iter.next().unwrap().1);
-                    } else {
-                        break;
-                    }
-                }
-                Some((pos, val))
-            })
-        }
-
-        #[inline]
-        fn size_hint(&self) -> (usize, Option<usize>) {
-            // any number of elements may be reduced together
-            let (lo, hi) = self.iter.size_hint();
-            (::std::cmp::min(lo, 1), hi)
-        }
-    }
-}
-
-impl ForceConstants {
-    /// For debugging purposes only...
-    #[allow(unused)]
-    pub(crate) fn to_dense_matrix(&self) -> Vec<Vec<[[f64; 3]; 3]>> {
-        use ::rsp2_array_types::Unvee;
-        let n_basis = self.num_atoms;
-        let mut out = vec![vec![[[0.0f64; 3]; 3]; n_basis]; n_basis];
-        for ((&row_atom, &col_atom), matrix) in ::util::zip_eq(::util::zip_eq(&self.row_atom, &self.col_atom), &self.cart_matrix) {
-            //out[row_atom][col_atom] = matrix.unvee();
-            for row in 0..3 {
-                for col in 0..3 {
-                    out[row_atom][col_atom][row][col] += matrix[row][col];
-                }
-            }
-        }
-        out
-    }
-}
-

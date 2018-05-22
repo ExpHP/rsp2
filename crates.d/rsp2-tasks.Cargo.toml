@@ -51,6 +51,7 @@ path = "lib.rs"
 !!indoc
 !!lapacke
 !!lapack-src
+!!num-traits
 
 [features]
 !!NIGHTLY-FEATURE-LINE
