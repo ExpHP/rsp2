@@ -27,7 +27,7 @@ where V: Zero + IsV,
 
 gen_each!{
     @{Vn}
-    impl_v_inherent_wrappers!(
+    for_each!(
         {$Vn:ident}
     ) => {
         impl<X> $Vn<X> {
@@ -157,7 +157,7 @@ pub trait IsV {
 
 gen_each!{
     @{Vn}
-    impl_from_fn!(
+    for_each!(
         {$Vn:ident}
     ) => {
         impl<X> IsV for $Vn<X>
@@ -171,7 +171,7 @@ gen_each!{
 
 gen_each!{
     @{Vn_n}
-    impl_num_zero!(
+    for_each!(
         {$Vn:ident $n:tt}
     ) => {
         impl<X: Semiring> Zero for $Vn<X>
@@ -202,7 +202,7 @@ pub trait FromFn<F>: Sized {
 
 gen_each!{
     @{Vn}
-    impl_from_fn!(
+    for_each!(
         {$Vn:ident}
     ) => {
         impl<X, F> FromFn<F> for $Vn<X>
@@ -229,7 +229,7 @@ pub trait Dot: IsV {
 
 gen_each!{
     @{Vn_n}
-    impl_v_dot!( {$Vn:ident $n:tt} ) => {
+    for_each!( {$Vn:ident $n:tt} ) => {
         impl<X: Semiring> Dot for $Vn<X>
           where X: PrimitiveSemiring,
         {
@@ -248,7 +248,7 @@ gen_each!{
 
 gen_each!{
     @{Vn_n}
-    impl_is_sliceomorphic!( {$Vn:ident $n:tt} ) => {
+    for_each!( {$Vn:ident $n:tt} ) => {
         unsafe impl<X> ::slice_of_array::IsSliceomorphic for $Vn<X> {
             type Element = X;
             const LEN: usize = $n;

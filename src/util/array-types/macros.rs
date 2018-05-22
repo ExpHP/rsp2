@@ -10,26 +10,18 @@
 /// See the examples module in the source for example usage.
 macro_rules! cartesian {
     (
-        //
-        // FIXME: remove macro name from invocation syntax.
-        //        The purpose of it was because earlier versions of rust
-        //        rejected duplicate macros with the same name.
-        //        In recent versions, new definitions simply replace old ones,
-        //        and so you may see sloppy code where the same name is reused.
-        //
-        //        (the macro name also serves to allow nesting of invocations;
-        //         but the monolithic design of the macro makes the ability to
-        //         nest rather pointless)
-        //
         $([$($groups:tt)*])*
-        $mac:ident!($($mac_match:tt)*)
+        for_each!($($mac_match:tt)*)
         => {$($mac_body:tt)*}$(;)*
     )
     => {
-        macro_rules! $mac {
+        // (this fixed name gets overwritten on each use.  Technically, using a fixed name
+        //  makes this macro not "re-entrant", in the sense that you can't call it in a nested
+        //  fashion... but there is no reason to do so, because the macro has a monolithic design)
+        macro_rules! __cartesian__user_macro {
             ($($mac_match)*) => {$($mac_body)*};
         }
-        cartesian__!{ @product::next($([$($groups)*])*) -> ($mac!()) }
+        cartesian__!{ @product::next($([$($groups)*])*) -> (__cartesian__user_macro!()) }
     };
 }
 

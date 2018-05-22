@@ -63,7 +63,7 @@ pub unsafe trait Unvee {
 
 gen_each!{
     @{Vn_n}
-    impl_envee_unvee_slice!( {$Vn:ident $n:tt} ) => {
+    for_each!( {$Vn:ident $n:tt} ) => {
         unsafe impl<X> Envee for [[X;$n]] { type En = [$Vn<X>]; }
         unsafe impl<X> Unvee for [$Vn<X>] { type Un = [[X;$n]]; }
 
@@ -75,7 +75,7 @@ gen_each!{
 gen_each!{
     @{Vn_n}
     @{0...8}
-    impl_envee_unvee_array!( {$Vn:ident $n:tt} {$k:tt} ) => {
+    for_each!( {$Vn:ident $n:tt} {$k:tt} ) => {
         unsafe impl<X> Envee for [[X;$n]; $k] { type En = [$Vn<X>; $k]; }
         unsafe impl<X> Unvee for [$Vn<X>; $k] { type Un = [[X;$n]; $k]; }
     }
@@ -90,7 +90,7 @@ mod envee_generic_impls {
 
     gen_each!{
         [ {Envee En} {Unvee Un} ]
-        impl_envee_unvee_generic!( {$Envee:ident $En:ident} ) => {
+        for_each!( {$Envee:ident $En:ident} ) => {
             unsafe impl<'a, V: $Envee + ?Sized> $Envee for &'a V      { type $En = &'a V::$En; }
             unsafe impl<'a, V: $Envee + ?Sized> $Envee for &'a mut V  { type $En = &'a mut V::$En; }
             unsafe impl<    V: $Envee + ?Sized> $Envee for Box<V>     { type $En = Box<V::$En>; }

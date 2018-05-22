@@ -54,7 +54,7 @@ gen_each!{
         {V2 X 2} {V3 X 3} {V4 X 4}
         {M2 V 2} {M3 V 3} {M4 V 4}
     ]
-    impl_v_deref!(
+    for_each!(
         {$Cn:ident $T:ident $n:tt}
     ) => {
         impl<$T> Deref for $Cn<$T> {

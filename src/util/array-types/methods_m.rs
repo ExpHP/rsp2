@@ -59,7 +59,7 @@ where M: Inv,
 // Square matrices
 gen_each!{
     @{Mnn_Mn_Vn_n}
-    impl_square_inherent_wrappers!(
+    for_each!(
         {$Mnn:ident $Mn:ident $Vn:ident $n:tt}
     ) => {
         impl<X> $Mnn<X> {
@@ -92,7 +92,7 @@ gen_each!{
 // (due to e.g. an associated type)
 gen_each!{
     @{Mn_n}
-    impl_general_inherent_wrappers!(
+    for_each!(
         {$Mr:ident $r:tt}
     ) => {
         impl<V> $Mr<V> {
@@ -127,7 +127,7 @@ gen_each!{
 gen_each!{
     @{Mn_n}
     @{Vn_n}
-    impl_general_inherent_wrappers_with_scalar!(
+    for_each!(
         {$Mr:ident $r:tt}
         {$Vc:ident $c:tt}
     ) => {
@@ -186,7 +186,7 @@ pub trait IsMatrix: Sized { }
 gen_each!{
     @{Mn_n}
     @{Vn_n}
-    impl_from_fn!(
+    for_each!(
         {$Mr:ident $r:tt}
         {$Vc:ident $c:tt}
     ) => {
@@ -199,7 +199,7 @@ gen_each!{
 gen_each!{
     @{Mn_n}
     @{Vn_n}
-    impl_num_zero!(
+    for_each!(
         {$Mr:ident $r:tt}
         {$Vc:ident $c:tt}
     ) => {
@@ -229,7 +229,7 @@ pub trait FromFn<F>: Sized {
 gen_each!{
     @{Mn_n}
     @{Vn_n}
-    impl_transpose!(
+    for_each!(
         {$Mr:ident $r:tt}
         {$Vc:ident $c:tt}
     ) => {
@@ -273,7 +273,7 @@ pub trait IntoArray: Sized {
 gen_each!{
     @{Mn_n}
     @{Vn_n}
-    impl_transpose!(
+    for_each!(
         {$Mr:ident $r:tt}
         {$Vc:ident $c:tt}
     ) => {
@@ -479,7 +479,7 @@ pub trait Transpose {
 gen_each!{
     @{Mn_n}
     @{Vn_n}
-    impl_transpose!(
+    for_each!(
         {$Mr:ident $r:tt}
         {$Vc:ident $c:tt}
     ) => {

@@ -1,6 +1,4 @@
 
-// NOTE: This is really part of rsp2-array-types.
-
 use ::std::ops::{Add, Sub, AddAssign, SubAssign, Neg};
 use ::std::ops::{Mul, Div, MulAssign, DivAssign};
 use ::std::fmt;
@@ -22,7 +20,7 @@ gen_each!{
     @{Vn}
     [ [(   ) (   )] [('a,) (&'a)] ]
     [ [(   ) (   )] [('b,) (&'b)] ]
-    impl_v_add_sub!(
+    for_each!(
         {$Vn:ident}
         [ ($($lt_a:tt)*) ($($ref_a:tt)*) ]
         [ ($($lt_b:tt)*) ($($ref_b:tt)*) ]
@@ -59,7 +57,7 @@ gen_each!{
     @{Vn}
     [ [(   ) (   )] [('a,) (&'a)] ]
     [ [(   ) (   )] [('b,) (&'b)] ]
-    impl_v_add_sub!(
+    for_each!(
         {$Mr:ident $r:tt}
         {$Vc:ident}
         [ ($($lt_a:tt)*) ($($ref_a:tt)*) ]
@@ -95,7 +93,7 @@ gen_each!{
 gen_each!{
     @{Vn}
     [ [(   ) (   )] [('a,) (&'a)] ]
-    impl_v_unops!(
+    for_each!(
         {$Vn:ident}
         [ ($($lt_a:tt)*) ($($ref_a:tt)*) ]
     ) => {
@@ -116,7 +114,7 @@ gen_each!{
     @{Mn_n}
     @{Vn}
     [ [(   ) (   )] [('a,) (&'a)] ]
-    impl_m_unops!(
+    for_each!(
         {$Mr:ident $r:tt}
         {$Vc:ident}
         [ ($($lt_a:tt)*) ($($ref_a:tt)*) ]
@@ -145,7 +143,7 @@ gen_each!{
     //       being generic over X: Semiring
     @{semiring}
     [ [(   ) (   )] [('a,) (&'a)] ]
-    impl_v_scalar_ops!(
+    for_each!(
         {$Vn:ident}
         {$X:ty}
         [ ($($lt_a:tt)*) ($($ref_a:tt)*) ]
@@ -169,7 +167,7 @@ gen_each!{
 gen_each!{
     @{Vn}
     [ [(   ) (   )] [('a,) (&'a)] ]
-    impl_v_scalar_ops!(
+    for_each!(
         {$Vn:ident}
         [ ($($lt_a:tt)*) ($($ref_a:tt)*) ]
     ) => {
@@ -212,7 +210,7 @@ gen_each!{
     //       being generic over X: Semiring
     @{semiring}
     [ [(   ) (   )] [('a,) (&'a)] ]
-    impl_v_scalar_ops!(
+    for_each!(
         {$Mr:ident $r:tt}
         {$Vc:ident}
         {$X:ty}
@@ -238,7 +236,7 @@ gen_each!{
     @{Mn_n}
     @{Vn}
     [ [(   ) (   )] [('a,) (&'a)] ]
-    impl_m_scalar_ops!(
+    for_each!(
         {$Mr:ident $r:tt}
         {$Vc:ident}
         [ ($($lt_a:tt)*) ($($ref_a:tt)*) ]
@@ -275,7 +273,7 @@ gen_each!{
         {V2 X} {V3 X} {V4 X}
         {M2 V} {M3 V} {M4 V}
     ]
-    impl_v_assign_ops!(
+    for_each!(
         {$Cn:ident $T:ident}
     ) => {
         // vector += vector;
@@ -322,7 +320,7 @@ gen_each!{
     [{2} {3} {4}]
     [ [(   ) (   )] [('v,) (&'v)] ]
     [ [(   ) (   )] [('m,) (&'m)] ]
-    impl_mat_vec_mul!(
+    for_each!(
         {$r:tt}
         {$c:tt}
         [ ($($lt_v:tt)*) ($($ref_v:tt)*) ]
@@ -364,7 +362,7 @@ gen_each!{
     [{2} {3} {4}]
     [ [(   ) (   )] [('a,) (&'a)] ]
     [ [(   ) (   )] [('b,) (&'b)] ]
-    impl_mat_mat_mul!(
+    for_each!(
         {$r:tt}
         {$k:tt}
         {$c:tt}
@@ -400,7 +398,7 @@ gen_each!{
         {Binary} {LowerExp} {LowerHex} {Display}
         {Octal} {Pointer} {UpperExp} {UpperHex}
     ]
-    impl_mat_vec_mul!(
+    for_each!(
         {$Cn:ident $T:ident}
         {$Format:ident}
     ) => {

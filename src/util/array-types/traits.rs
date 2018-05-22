@@ -61,7 +61,7 @@ mod field {
 // Generate the (trivial) impls of Field, Ring, and Semiring.
 gen_each!{
     @{field}
-    impl_field!({$T:ty}) => {
+    for_each!({$T:ty}) => {
         impl Field for $T { }
         impl field::Sealed for $T { }
     };
@@ -69,7 +69,7 @@ gen_each!{
 
 gen_each!{
     @{ring}
-    impl_ring!({$T:ty}) => {
+    for_each!({$T:ty}) => {
         impl Ring for $T { }
         impl ring::Sealed for $T { }
     };
@@ -77,7 +77,7 @@ gen_each!{
 
 gen_each!{
     @{semiring}
-    impl_semiring!({$T:ty}) => {
+    for_each!({$T:ty}) => {
         impl Semiring for $T { }
         impl semiring::Sealed for $T { }
     };
@@ -132,7 +132,7 @@ pub(crate) mod internal {
 
     gen_each!{
         @{semiring}
-        impl_primitive_semiring!({$T:ty})
+        for_each!({$T:ty})
         => {
             impl PrimitiveSemiring for $T {
                 #[inline(always)] fn from_uint(u: u8) -> $T { u as $T }
@@ -149,7 +149,7 @@ pub(crate) mod internal {
 
     gen_each!{
         @{ring}
-        impl_primitive_ring!({$T:ty})
+        for_each!({$T:ty})
         => {
             impl PrimitiveRing for $T {
                 #[inline(always)] fn from_int(i: i8) -> $T { i as $T }
@@ -172,7 +172,7 @@ pub(crate) mod internal {
 
     gen_each!{
         @{float}
-        impl_primitive_float!({$T:ty})
+        for_each!({$T:ty})
         => {
             impl PrimitiveFloat for $T {
                 #[inline(always)] fn sqrt(self) -> $T { self.sqrt() }
