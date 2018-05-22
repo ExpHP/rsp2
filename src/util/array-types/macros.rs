@@ -190,7 +190,7 @@ mod examples {
         cartesian!{
             [{i32} {u32}]
             [{0} {1} {2} {3}]
-            unique_name!({$T:ty} {$n:expr})
+            for_each!({$T:ty} {$n:expr})
             => {
                 impl Trait for [$T; $n] { }
             }
@@ -210,7 +210,7 @@ mod examples {
             @{field}      // equivalent to [{f32} {f64}]
             @{0...4}      // equivalent to [{0} {1} {2} {3} {4}]
             [{i32} {u32}] // explicitly defined groups are still allowed
-            unique_name!({$A:ty} {$n:expr} {$B:ty})
+            for_each!({$A:ty} {$n:expr} {$B:ty})
             => {
                 impl Trait for ([$A; $n], $B) { }
             }
