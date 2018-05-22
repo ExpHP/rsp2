@@ -4,10 +4,28 @@ use ::FailResult;
 use ::traits::IsNewtype;
 use ::path_abs::{FileRead, FileWrite};
 
+/// Uniform-ish "load a file" API for use by the highest level code (cmd).
+/// Kinda technical debt now.
+///
+/// The idea here was to clean up ::cmd and phonopy::cmd by providing a
+/// simple single-function interface for reading a value from a filepath
+/// (i.e. the 90% use case for opening a file from the filesystem),
+/// to hide away all of the (largely repetitive) details for composing all of the
+/// orthogonal APIs for opening files, dealing with text vs binary, and
+/// parsing/serialization.
+///
+/// I'm not sure whether it has been successful at this role. It has only made
+/// `phonopy::cmd` a tad cleaner, and there's a decent number of things that simply
+/// cannot use it, such as POSCAR files (because the values that are read/written
+/// are asymmetric, and it's not nice to have to clone a structure into a wrapper
+/// type just to be written).
+///
+/// ...as for now, it is what it is.
 pub trait Load: Sized {
     fn load(path: impl AsPath) -> FailResult<Self>;
 }
 
+/// Load, but in the other direction.
 pub trait Save {
     fn save(&self, path: impl AsPath) -> FailResult<()>;
 }
