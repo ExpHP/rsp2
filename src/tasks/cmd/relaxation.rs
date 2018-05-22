@@ -20,7 +20,7 @@ use ::rsp2_array_types::{V3};
 use ::rsp2_structure::supercell::{self, SupercellToken};
 use ::rsp2_structure::{ElementStructure};
 use ::rsp2_structure::{CoordsKind};
-use ::rsp2_structure_gen::Assemble;
+use ::rsp2_structure_io::layers_yaml::Assemble;
 use ::phonopy::Builder as PhonopyBuilder;
 use ::math::bands::ScMatrix;
 

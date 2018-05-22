@@ -13,8 +13,8 @@ description = "A safe(r) wrapper around the lammps C bindings."
 path = "lib.rs"
 
 [dependencies]
-rsp2-structure = { path = "../structure" }
-rsp2-array-types = { path = "../util/array-types" }
+rsp2-structure = { path = "../../structure" }
+rsp2-array-types = { path = "../../util/array-types" }
 lammps-sys = { tag = "v0.3.0", git = "https://github.com/ExpHP/lammps-sys" } 
 
 log = "0.3"

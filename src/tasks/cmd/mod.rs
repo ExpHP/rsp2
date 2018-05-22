@@ -782,10 +782,10 @@ pub(crate) fn read_structure_file(
             layer_sc_mats = None;
         },
         StructureFileType::LayersYaml => {
-            use ::rsp2_structure_gen::load_layers_yaml;
-            use ::rsp2_structure_gen::layer_sc_info_from_layers_yaml;
+            use ::rsp2_structure_io::layers_yaml::load;
+            use ::rsp2_structure_io::layers_yaml::load_layer_sc_info;
 
-            let mut layer_builder = load_layers_yaml(input.read()?)?;
+            let mut layer_builder = load(input.read()?)?;
             if let (Some(settings), Some(pot)) = (settings, pot) {
                 layer_builder = self::relaxation::optimize_layer_parameters(
                     &settings.scale_ranges, pot, layer_builder,
@@ -794,7 +794,7 @@ pub(crate) fn read_structure_file(
             original_structure = carbon(layer_builder.assemble());
 
             layer_sc_mats = Some({
-                layer_sc_info_from_layers_yaml(input.read()?)?
+                load_layer_sc_info(input.read()?)?
                     .into_iter()
                     .map(|(matrix, periods, _)| ScMatrix::new(&matrix, &periods))
                     .collect_vec()

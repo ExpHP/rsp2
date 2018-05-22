@@ -9,22 +9,22 @@ use ::std::io::Read;
 
 use ::rsp2_array_types::{M22, M33, V2, V3, mat, inv, Unvee};
 
-pub fn load_layers_yaml(mut file: impl Read) -> FailResult<Assemble>
-{ _load_layers_yaml(&mut file) }
+pub fn load(mut file: impl Read) -> FailResult<Assemble>
+{ _load(&mut file) }
 
 // Monomorphized to ensure YAML parsing code is generated in this crate
-fn _load_layers_yaml(file: &mut Read) -> FailResult<Assemble>
+fn _load(file: &mut Read) -> FailResult<Assemble>
 {
     let cereal = ::serde_yaml::from_reader(file)?;
     assemble_from_cereal(cereal).map(|a| a)
 }
 
 // FIXME this really doesn't belong here, but it's the easiest reuse of code
-pub fn layer_sc_info_from_layers_yaml(mut file: impl Read) -> FailResult<Vec<(M33<i32>, [u32; 3], usize)>>
-{ _layer_sc_info_from_layers_yaml(&mut file) }
+pub fn load_layer_sc_info(mut file: impl Read) -> FailResult<Vec<(M33<i32>, [u32; 3], usize)>>
+{ _load_layer_sc_info(&mut file) }
 
 // Monomorphized to ensure YAML parsing code is generated in this crate
-fn _layer_sc_info_from_layers_yaml(file: &mut Read) -> FailResult<Vec<(M33<i32>, [u32; 3], usize)>>
+fn _load_layer_sc_info(file: &mut Read) -> FailResult<Vec<(M33<i32>, [u32; 3], usize)>>
 {
     let cereal = ::serde_yaml::from_reader(file)?;
     layer_sc_info_from_cereal(cereal)

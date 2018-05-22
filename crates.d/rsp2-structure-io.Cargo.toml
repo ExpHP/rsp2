@@ -11,9 +11,14 @@ path = "lib.rs"
 !!itertools
 !!failure
 !!vasp-poscar
+!!log
+!!serde
+!!serde_derive
+!!serde_yaml
 
 !!rsp2-structure
 !!rsp2-array-types
+!!rsp2-array-utils
 
 [features]
 !!NIGHTLY-FEATURE-LINE
