@@ -60,11 +60,11 @@ impl<T, R: Idx, C: Idx> RawCoo<T, R, C> {
 
     pub fn into_indexed_dense(self) -> Indexed<R, Vec<Indexed<C, Vec<T>>>>
     where T: Zero + AddAssign + Clone,
-    { self.into_indexed_dense_with(Zero::zero(), AddAssign::add_assign) }
+    { self.into_indexed_dense_with(Zero::zero, AddAssign::add_assign) }
 
     pub fn into_dense(self) -> Vec<Vec<T>>
     where T: Zero + AddAssign + Clone,
-    { self.into_dense_with(Zero::zero(), AddAssign::add_assign) }
+    { self.into_dense_with(Zero::zero, AddAssign::add_assign) }
 
     pub fn into_csr_with<F>(self, add_assign: F) -> RawCsr<T, R, C>
     where F: FnMut(&mut T, T),
@@ -93,22 +93,25 @@ impl<T, R: Idx, C: Idx> RawCoo<T, R, C> {
         RawBee { dim, map }
     }
 
-    pub fn into_indexed_dense_with<F>(self, zero: T, mut add_assign: F) -> Indexed<R, Vec<Indexed<C, Vec<T>>>>
+    pub fn into_indexed_dense_with<Z, F>(self, mut zero: Z, mut add_assign: F) -> Indexed<R, Vec<Indexed<C, Vec<T>>>>
     where
-        T: Clone,
+        Z: FnMut() -> T,
         F: FnMut(&mut T, T),
     {
         let dim = self.dim;
-        let mut out = Indexed::from_elem_n(Indexed::from_elem_n(zero, dim.1), dim.0);
+        let mut zero_row = || (0..dim.1).map(|_| zero()).collect();
+        let mut zero_mat = || (0..dim.0).map(|_| zero_row()).collect();
+
+        let mut out: Indexed<R, Vec<Indexed<C, Vec<T>>>> = zero_mat();
         for (r, c, x) in zip_eq!(self.row, self.col, self.val) {
             add_assign(&mut out[r][c], x);
         }
         out
     }
 
-    pub fn into_dense_with<F>(self, zero: T, add_assign: F) -> Vec<Vec<T>>
+    pub fn into_dense_with<Z, F>(self, zero: Z, add_assign: F) -> Vec<Vec<T>>
     where
-        T: Clone,
+        Z: FnMut() -> T,
         F: FnMut(&mut T, T),
     {
         self.into_indexed_dense_with(zero, add_assign)
@@ -133,6 +136,14 @@ pub struct RawCsr<T, R: Idx = usize, C: Idx = R> {
 }
 
 impl<T, R: Idx, C: Idx> RawCsr<T, R, C> {
+    pub fn map<F, T2>(self, mut f: F) -> RawCsr<T2, R, C>
+    where F: FnMut(T) -> T2,
+    {
+        let RawCsr { dim, val, col, row_ptr } = self;
+        let val = val.into_iter().map(f).collect();
+        RawCsr { dim, val, col, row_ptr }
+    }
+
     // Check properties that would typically be considered invariants of the format.
     // It is a logic error to call other methods on this type when these properties
     // are not satisfied.
@@ -145,18 +156,28 @@ impl<T, R: Idx, C: Idx> RawCsr<T, R, C> {
         ensure!(*row_ptr.raw.first().unwrap() == 0, "row_ptr first value incorrect");
         ensure!(*row_ptr.raw.last().unwrap() == val.len(), "row_ptr last value incorrect");
         ensure!(
-            self.row_ranges().all(|range| col[range].windows(2).all(|w| w[0] < w[1])),
+            self.row_ranges().into_iter().all(|range| col[range].windows(2).all(|w| w[0] < w[1])),
             "columns in at least one row not strictly sorted"
         );
         Ok(())
     }
 
-    pub fn row_ranges(&self) -> impl VeclikeIterator<Item=Range<usize>> {
-        // can't validate() because validate() calls this
+    // Vec to not extend the borrow of self
+    pub fn row_ranges(&self) -> Indexed<R, Vec<Range<usize>>> {
+        self.row_ptr.raw.windows(2).map(|w| w[0]..w[1]).collect()
+    }
 
-        // Vec to not extend the borrow of self
-        let out = self.row_ptr.raw.windows(2).map(|w| w[0]..w[1]).collect::<Vec<_>>();
-        out.into_iter()
+    pub fn into_coo(mut self) -> RawCoo<T, R, C> {
+        let dim = self.dim;
+        let (mut row, mut col, mut val) = (vec![], vec![], vec![]);
+        for (r, range) in self.row_ranges().into_iter_enumerated().rev() {
+            for (x, c) in zip_eq!(self.val.drain(range.clone()), self.col.drain(range)) {
+                row.push(r);
+                col.push(c);
+                val.push(x);
+            }
+        }
+        RawCoo { dim, row, col, val }
     }
 }
 

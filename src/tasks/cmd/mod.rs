@@ -636,8 +636,9 @@ pub(crate) fn run_dynmat_test(phonopy_dir: &PathDir) -> FailResult<()>
         superstructure, sc, prim_displacements, perm_from_phonopy,
     } = disp_dir.rsp2_style_displacements()?;
 
+    let prim_structure = symmetry_dir.structure()?;
     let space_group = symmetry_dir.frac_ops()?;
-    let prim_lattice = symmetry_dir.structure()?.lattice().clone();
+    let prim_lattice = prim_structure.lattice().clone();
 
     let space_group_deperms: Vec<_> = {
         ::rsp2_structure::find_perm::of_spacegroup_for_general(
@@ -705,8 +706,16 @@ pub(crate) fn run_dynmat_test(phonopy_dir: &PathDir) -> FailResult<()>
     }
 
     {
-        let our_dynamical_matrix = force_constants.gamma_dynmat(&sc);
+        // HACK
+        let masses: Vec<_> = {
+            prim_structure.metadata().iter()
+                .map(|&s| ::common::element_mass(s))
+                .collect()
+        };
+        let our_dynamical_matrix = force_constants.gamma_dynmat(&sc, &masses);
         println!("{:?}", our_dynamical_matrix);
+        let mat_2 = force_constants.add_rows_for_other_cells(&sc).impose_perm_and_translational_invariance_a_la_phonopy().gamma_dynmat(&sc, &masses);
+        println!("{:?}", mat_2);
         let (low, _low_basis) = our_dynamical_matrix.compute_most_negative_eigensolutions(3)?;
         let (high, _high_basis) = our_dynamical_matrix.compute_most_extreme_eigensolutions(3)?;
 

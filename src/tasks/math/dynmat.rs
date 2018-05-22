@@ -590,7 +590,7 @@ impl ForceConstants {
     //
     // take ForceConstants where row_atom is always in DISPLACED_CELL
     // and generate all the other rows
-    fn add_rows_for_other_cells(mut self, sc: &SupercellToken) -> Self {
+    pub fn add_rows_for_other_cells(mut self, sc: &SupercellToken) -> Self {
         assert!({
             let cells = sc.atom_cells();
             self.0.row.iter().all(|&SuperI(row)| cells[row] == DESIGNATED_CELL)
@@ -643,7 +643,7 @@ impl ForceConstants {
 
     // this is something done by the C code in Phonopy which purportedly
     // imposes translational invariance.
-    fn impose_perm_and_translational_invariance_a_la_phonopy(mut self) -> Self {
+    pub fn impose_perm_and_translational_invariance_a_la_phonopy(mut self) -> Self {
         // FIXME HACK HACK HACK HACK TERRIBLE SLOW SLOW NO GOOD HACK
         let mut dense = self.0.into_dense();
 
@@ -736,7 +736,14 @@ impl ForceConstants {
     ///
     /// The force constants do not need to contain data for rows outside the
     /// designated cell. (but if they do, it won't hurt)
-    pub fn gamma_dynmat(&self, sc: &SupercellToken) -> DynamicalMatrix {
+    pub fn gamma_dynmat(
+        &self,
+        sc: &SupercellToken,
+        masses: &[f64],
+    ) -> DynamicalMatrix {
+        assert_eq!(masses.len(), sc.num_primitive_atoms());
+        let masses: &Indexed<PrimI, _> = Indexed::from_raw_ref(masses);
+
         let sc = sc.clone();
 
         let primitive_atoms = sc.atom_primitive_atoms();
@@ -750,10 +757,18 @@ impl ForceConstants {
             // each column of the dynamical matrix sums over columns for images in
             // the force constants matrix, with phase factors.
             .map(|(&r, &c, &m)| {
+                let r = get_prim(r);
+                let c = get_prim(c);
+
+                // mass-normalizing scale factor
+                let scale = 1.0 / f64::sqrt(masses[r] * masses[c]);
+
                 // at gamma, phase is 1
-                let real = m;
-                let imag = M33::zero();
-                ((get_prim(r), get_prim(c)), [real, imag])
+                let (phase_real, phase_imag) = (1.0, 0.0);
+                let real = scale * phase_real * m;
+                let imag = scale * phase_imag * m;
+
+                ((r, c), [real, imag])
             });
 
         let (pos, val): (Vec<_>, Vec<_>) = iter.unzip();

@@ -42,6 +42,13 @@ use ::slice_of_array::prelude::*;
 
 use ::std::process;
 
+// Conversion factor phonopy uses to scale the eigenvalues to THz angular momentum.
+//    = sqrt(eV/amu)/angstrom/(2*pi)/THz
+const SQRT_EIGENVALUE_TO_THZ: f64 = 15.6333043006705;
+//    = THz / (c / cm)
+const THZ_TO_WAVENUMBER: f64 = 33.3564095198152;
+const SQRT_EIGENVALUE_TO_WAVENUMBER: f64 = SQRT_EIGENVALUE_TO_THZ * THZ_TO_WAVENUMBER;
+
 const PY_NOOP: &'static str = indoc!(r#"
     #!/usr/bin/env python3
 "#);
@@ -157,7 +164,11 @@ pub fn check_scipy_availability() -> FailResult<()> {
     Ok(())
 }
 
+// Returns:
+// - frequencies (not eigenvalues)
+// - eigenvectors
 fn call_eigsh(input: &Input<'_>) -> FailResult<(Vec<f64>, Basis3)> {
+
     let (vals, (real, imag)) = call_script_and_communicate(PY_CALL_EIGSH, input)?;
     // annotate types to select Deserialize impl
     let _: &Vec<f64> = &vals;
@@ -170,7 +181,9 @@ fn call_eigsh(input: &Input<'_>) -> FailResult<(Vec<f64>, Basis3)> {
         let imag = imag.nest().to_vec();
         kets.push(Ket3 { real, imag });
     }
-    Ok((vals, Basis3(kets)))
+    let freqs = vals.into_iter().map(eigenvalue_to_frequency).collect();
+
+    Ok((freqs, Basis3(kets)))
 }
 
 #[derive(Debug, Fail)]
@@ -291,4 +304,8 @@ impl DynamicalMatrix {
             },
         })
     }
+}
+
+fn eigenvalue_to_frequency(val: f64) -> f64 {
+    f64::sqrt(f64::abs(val)) * f64::signum(val) * SQRT_EIGENVALUE_TO_WAVENUMBER
 }
