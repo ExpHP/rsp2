@@ -5,6 +5,7 @@ extern crate serde_json;
 extern crate path_abs;
 extern crate failure;
 
+#[macro_use] extern crate rsp2_assert_close;
 extern crate rsp2_integration_test;
 
 use ::rsp2_integration_test::CliTest;
@@ -28,9 +29,24 @@ fn simple_test() {
             let actual: filetypes::RamanJson = read(&dir.join("out/raman.json"))?;
             let expected: filetypes::RamanJson = read("tests/resources/simple-out/raman.json".as_ref())?;
 
-            // This is obviously overly-strict and will easily get triggered by e.g. updates
-            // to phonopy. The point is just to call attention to unexpected changes in results.
-            assert_eq!(actual, expected);
+            // Comparing this data in a meaningful manner is not easy; there is no
+            // one-size-fits-all tolerance.
+
+            // Acoustic mode frequencies; magnitude is irrelevant as long as it is not large.
+            actual.check_against(&expected, filetypes::RamanJsonTolerances {
+                frequency: filetypes::FrequencyTolerances {
+                    max_acoustic: 0.01,
+                    rel_tol: 1e-9,
+                },
+                // the zero thresh can be pressed down surprisingly far;
+                // right now I'm not seeing failures until it is 1e-24.
+                //
+                // This value is probably pushing my luck, but I just want to satisfy
+                // my curiosity and see how many software stack updates it takes before
+                // this fails.
+                intensity_nonzero_thresh: 1e-19,
+                intensity_nonzero_rel_tol: 1e-9,
+            });
             Ok(())
         })
         .run().unwrap();
