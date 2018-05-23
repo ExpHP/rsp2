@@ -23,9 +23,14 @@ use ::rsp2_array_types::{V3, M3, dot};
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
 pub struct FracBonds {
-    num_atoms: usize, // used for sanity checks
+    // used for sanity checks
+    num_atoms: usize,
+
+    // NOTE: Multiple bonds may have the same `(from, to)` pair, for interaction
+    //       with multiple images!
     from: Vec<usize>,
     to: Vec<usize>,
+
     // Rather than the cartesian vectors (which change as the structure relaxes),
     // we keep differences in image index (as cell_to - cell_from).
     //

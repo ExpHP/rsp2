@@ -12,9 +12,15 @@
 
 use ::FailResult;
 use ::std::collections::BTreeMap;
-use ::std::ops::{Range, AddAssign};
+use ::std::ops::{Range, Add, AddAssign};
 use ::num_traits::Zero;
 use ::rsp2_newtype_indices::{Idx, Indexed};
+
+pub trait VeclikeIterator: Iterator + ExactSizeIterator + DoubleEndedIterator + ::std::iter::FusedIterator {}
+impl<I> VeclikeIterator for I
+where I: Iterator + ExactSizeIterator + DoubleEndedIterator + ::std::iter::FusedIterator {}
+
+//=============================================================================================
 
 /// Coordinate format.
 ///
@@ -33,10 +39,6 @@ pub struct RawCoo<T, R: Idx = usize, C: Idx = R> {
     pub col: Vec<C>,
 }
 
-pub trait VeclikeIterator: Iterator + ExactSizeIterator + DoubleEndedIterator + ::std::iter::FusedIterator {}
-impl<I> VeclikeIterator for I
-where I: Iterator + ExactSizeIterator + DoubleEndedIterator + ::std::iter::FusedIterator {}
-
 impl<T, R: Idx, C: Idx> RawCoo<T, R, C> {
     // Check properties that would typically be considered invariants of the format.
     // It is a logic error to call other methods on this type when these properties
@@ -50,6 +52,39 @@ impl<T, R: Idx, C: Idx> RawCoo<T, R, C> {
         Ok(())
     }
 
+    pub fn map<F, T2>(self, f: F) -> RawCoo<T2, R, C>
+    where F: FnMut(T) -> T2,
+    {
+        let RawCoo { dim, val, col, row } = self;
+        let val = val.into_iter().map(f).collect();
+        RawCoo { dim, val, col, row }
+    }
+
+    /// Transpose R and C, disregarding T.  (i.e. if T happens to be some kind of matrix
+    /// block type like M33, it will not be affected by this operation)
+    pub fn into_raw_transpose(self) -> RawCoo<T, C, R> {
+        let RawCoo { dim, val, row, col } = self;
+        let (row, col) = (col, row);
+        RawCoo { dim, val, row, col }
+    }
+}
+
+impl<T, R: Idx, C: Idx> Add for RawCoo<T, R, C> {
+    type Output = Self;
+
+    fn add(mut self, other: Self) -> Self::Output {
+        let RawCoo { dim, val, row, col } = other;
+
+        // addition is implied in COO format, so......
+        assert_eq!(self.dim, dim);
+        self.val.extend(val);
+        self.row.extend(row);
+        self.col.extend(col);
+        self
+    }
+}
+
+impl<T, R: Idx, C: Idx> RawCoo<T, R, C> {
     pub fn into_csr(self) -> RawCsr<T, R, C>
     where T: AddAssign,
     { self.into_csr_with(AddAssign::add_assign) }
@@ -59,11 +94,11 @@ impl<T, R: Idx, C: Idx> RawCoo<T, R, C> {
     { self.into_bee_with(AddAssign::add_assign) }
 
     pub fn into_indexed_dense(self) -> Indexed<R, Vec<Indexed<C, Vec<T>>>>
-    where T: Zero + AddAssign + Clone,
+    where T: Zero + AddAssign,
     { self.into_indexed_dense_with(Zero::zero, AddAssign::add_assign) }
 
     pub fn into_dense(self) -> Vec<Vec<T>>
-    where T: Zero + AddAssign + Clone,
+    where T: Zero + AddAssign,
     { self.into_dense_with(Zero::zero, AddAssign::add_assign) }
 
     pub fn into_csr_with<F>(self, add_assign: F) -> RawCsr<T, R, C>
@@ -119,6 +154,57 @@ impl<T, R: Idx, C: Idx> RawCoo<T, R, C> {
     }
 }
 
+#[allow(unused)]
+impl<T, R: Idx, C: Idx> RawCoo<T, R, C>
+where
+    T: Clone,
+{
+    // these are currently just here as a placebo.  If one of them ends
+    // up becoming a hot function it can be optimized to remove the clone
+    // of `self`.
+
+    pub fn to_raw_transpose(&self) -> RawCoo<T, C, R>
+    { self.clone().into_raw_transpose() }
+
+    pub fn to_csr(&self) -> RawCsr<T, R, C>
+    where T: AddAssign,
+    { self.clone().into_csr() }
+
+    pub fn to_bee(&self) -> RawBee<T, R, C>
+    where T: AddAssign,
+    { self.clone().into_bee() }
+
+    pub fn to_indexed_dense(&self) -> Indexed<R, Vec<Indexed<C, Vec<T>>>>
+    where T: Zero + AddAssign,
+    { self.clone().into_indexed_dense() }
+
+    pub fn to_dense(&self) -> Vec<Vec<T>>
+    where T: Zero + AddAssign,
+    { self.clone().into_dense() }
+
+    pub fn to_csr_with<F>(&self, add_assign: F) -> RawCsr<T, R, C>
+    where F: FnMut(&mut T, T),
+    { self.clone().into_csr_with(add_assign) }
+
+    pub fn to_bee_with<F>(&self, mut add_assign: F) -> RawBee<T, R, C>
+    where F: FnMut(&mut T, T),
+    { self.clone().into_bee_with(add_assign) }
+
+    pub fn to_indexed_dense_with<Z, F>(&self, mut zero: Z, mut add_assign: F) -> Indexed<R, Vec<Indexed<C, Vec<T>>>>
+    where
+        Z: FnMut() -> T,
+        F: FnMut(&mut T, T),
+    { self.clone().into_indexed_dense_with(zero, add_assign) }
+
+    pub fn to_dense_with<Z, F>(&self, zero: Z, add_assign: F) -> Vec<Vec<T>>
+    where
+        Z: FnMut() -> T,
+        F: FnMut(&mut T, T),
+    { self.clone().into_dense_with(zero, add_assign) }
+}
+
+//=============================================================================================
+
 /// Compressed sparse row.
 ///
 /// Everybody's favorite.  Great for mathematical operations that must
@@ -136,14 +222,6 @@ pub struct RawCsr<T, R: Idx = usize, C: Idx = R> {
 }
 
 impl<T, R: Idx, C: Idx> RawCsr<T, R, C> {
-    pub fn map<F, T2>(self, mut f: F) -> RawCsr<T2, R, C>
-    where F: FnMut(T) -> T2,
-    {
-        let RawCsr { dim, val, col, row_ptr } = self;
-        let val = val.into_iter().map(f).collect();
-        RawCsr { dim, val, col, row_ptr }
-    }
-
     // Check properties that would typically be considered invariants of the format.
     // It is a logic error to call other methods on this type when these properties
     // are not satisfied.
@@ -162,11 +240,28 @@ impl<T, R: Idx, C: Idx> RawCsr<T, R, C> {
         Ok(())
     }
 
+    pub fn map<F, T2>(self, f: F) -> RawCsr<T2, R, C>
+    where F: FnMut(T) -> T2,
+    {
+        let RawCsr { dim, val, col, row_ptr } = self;
+        let val = val.into_iter().map(f).collect();
+        RawCsr { dim, val, col, row_ptr }
+    }
+
+    /// Transpose R and C, disregarding T.  (i.e. if T happens to be some kind of matrix
+    /// block type like M33, it will not be affected by this operation)
+    pub fn into_raw_transpose(self) -> RawCsr<T, C, R> {
+        self.into_coo().into_raw_transpose()
+            .into_csr_with(|_, _| panic!("(logic error) csr indices were not unique"))
+    }
+
     // Vec to not extend the borrow of self
     pub fn row_ranges(&self) -> Indexed<R, Vec<Range<usize>>> {
         self.row_ptr.raw.windows(2).map(|w| w[0]..w[1]).collect()
     }
+}
 
+impl<T, R: Idx, C: Idx> RawCsr<T, R, C> {
     pub fn into_coo(mut self) -> RawCoo<T, R, C> {
         let dim = self.dim;
         let (mut row, mut col, mut val) = (vec![], vec![], vec![]);
@@ -177,9 +272,30 @@ impl<T, R: Idx, C: Idx> RawCsr<T, R, C> {
                 val.push(x);
             }
         }
+        assert_eq!(self.val.len(), 0);
+        assert_eq!(self.col.len(), 0);
         RawCoo { dim, row, col, val }
     }
 }
+
+#[allow(unused)]
+impl<T, R: Idx, C: Idx> RawCsr<T, R, C>
+where
+    T: Clone,
+{
+    // these are currently just here as a placebo.  If one of them ends
+    // up becoming a hot function it can be optimized to remove the clone
+    // of `self`.
+
+    pub fn to_raw_transpose(&self) -> RawCsr<T, C, R>
+    { self.clone().into_raw_transpose() }
+
+    pub fn to_coo(&self) -> RawCoo<T, R, C>
+    { self.clone().into_coo() }
+}
+
+
+//=============================================================================================
 
 /// BTreeMap-based representation.
 ///
@@ -206,7 +322,9 @@ impl<T, R: Idx, C: Idx> RawBee<T, R, C> {
         ensure!(map.values().filter_map(|m| m.keys().max()).max().unwrap().index() < dim.1, "col out of range");
         Ok(())
     }
+}
 
+impl<T, R: Idx, C: Idx> RawBee<T, R, C> {
     pub fn into_csr(self) -> RawCsr<T, R, C> {
         if cfg!(debug_assertions) {
             self.validate().unwrap();
@@ -255,8 +373,26 @@ impl<T, R: Idx, C: Idx> RawBee<T, R, C> {
     }
 }
 
+#[allow(unused)]
+impl<T, R: Idx, C: Idx> RawBee<T, R, C>
+where
+    T: Clone,
+{
+    // these are currently just here as a placebo.  If one of them ends
+    // up becoming a hot function it can be optimized to remove the clone
+    // of `self`.
+
+    pub fn to_csr(&self) -> RawCsr<T, R, C>
+    { self.clone().into_csr() }
+
+    pub fn to_coo(&self) -> RawCoo<T, R, C>
+    { self.clone().into_coo() }
+}
+
+//=============================================================================================
+
 #[test]
-fn bee_into_csr() {
+fn bee_to_csr() {
     // Test case with variety of hostile qualities:
     // * Rows that are outright not present in the map
     // * A row that is present but has no nonzero entries
@@ -275,7 +411,7 @@ fn bee_into_csr() {
         ])),
     ]);
     let bee = RawBee { dim, map };
-    let RawCsr { dim, val, row_ptr, col } = bee.into_csr();
+    let RawCsr { dim, val, row_ptr, col } = bee.to_csr();
     assert_eq!(dim, (7, 4));
     assert_eq!(val, vec![1.0, 3.0, 2.0]);
     assert_eq!(col, vec![2, 3, 2]);

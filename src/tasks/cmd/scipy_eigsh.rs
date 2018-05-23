@@ -69,24 +69,30 @@ const PY_CALL_EIGSH: &'static str = indoc!(r#"
     import scipy.sparse
     import scipy.sparse.linalg as spla
 
+    import time
+
+    print("json.load go", file=sys.stderr); sys.stderr.flush(); time.sleep(0)
     d = json.load(sys.stdin)
-    json.dump(d, open('/tmp/zzzzzzzzzzzzzzzw', 'w'))
+    print("json.load og", file=sys.stderr); sys.stderr.flush(); time.sleep(0)
     kw = d.pop('kw')
     m = d.pop('matrix')
     assert not d
 
     data = np.array(m['complex_blocks'])
-    json.dump(data.tolist(), open('/tmp/zzzzzzzzzzzzzzzx', 'w'))
+
+    assert data.shape[1] == 2
     data = 1.0 * data[:, 0] + 1.0j * data[:, 1]
-    json.dump(data.real.tolist(), open('/tmp/zzzzzzzzzzzzzzzy', 'w'))
-    assert data.ndim == 3 and data.shape[1] == data.shape[2] == 3
+
+    assert data.ndim == 3
+    assert data.shape[1] == data.shape[2] == 3
     m = scipy.sparse.bsr_matrix(
         (data, m['col'], m['row_ptr']),
         shape=tuple(3*x for x in m['dim']),
     ).tocsc()
-    json.dump(m.todense().real.tolist(), open('/tmp/zzzzzzzzzzzzzzzz', 'w'))
 
+    print("eig go", file=sys.stderr); sys.stderr.flush(); time.sleep(0)
     (vals, vecs) = scipy.sparse.linalg.eigsh(m, **kw)
+    print("eig og", file=sys.stderr); sys.stderr.flush(); time.sleep(0)
 
     real = vecs.real.T.tolist()
     imag = vecs.imag.T.tolist()
@@ -107,7 +113,7 @@ struct Matrix<'a> {
     pub dim: (usize, usize),
 
     // CSR format (or technically Block CSR).
-    pub complex_blocks: &'a [[M33; 2]],
+    pub complex_blocks: &'a [::math::dynmat::Complex33],
     pub col: &'a [usize],
     pub row_ptr: &'a [usize],
 }
@@ -254,8 +260,11 @@ where
 
     let stderr_worker = ::stderr::log_worker(child_stderr);
 
+    trace!("serializing...");
     ::serde_json::to_writer(child_stdin, stdin_data)?;
+    trace!("waiting for results...");
     let stdout = ::serde_json::from_reader(child_stdout)?;
+    trace!("done deserializing...");
 
     if !child.wait()?.success() {
         bail!("an error occurred in a python script");

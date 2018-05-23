@@ -3,14 +3,6 @@
 // Required bits of cleanup here:
 //
 // * Rip out JaySon (debug output)
-// * Kill the old functions once confident that `like_phonopy` is the best solution.
-// * Cleanup translational invariance function to stop being the most retarded hack ever.
-//   Also, I don't see this written anywhere here currently, (in fact I only see an old
-//   comment contrary to this fact), but the way it's done by the C code in phonopy is
-//   actually a very clever design that, AFAICT, manages to AVOID data dependencies
-//   despite being performed in-place, by exploiting matrix symmetry. (the older python
-//   code, on the other hand, DOES appear to suffer from accidental data dependencies)
-//   (that said, doing it in-place is 100% unnecessary)
 
 
 use ::FailResult;
@@ -43,8 +35,7 @@ pub struct ForceConstants(
 
 #[derive(Debug, Clone)]
 pub struct DynamicalMatrix(
-    // entries are [real, imag]
-    pub RawCsr<[M33; 2], PrimI, PrimI>,
+    pub RawCsr<Complex33, PrimI, PrimI>,
 );
 
 impl ForceConstants {
@@ -575,21 +566,21 @@ impl<'ctx> Context<'ctx> {
 
 #[allow(unused)]
 impl ForceConstants {
-    //------------------------------
-    // NOTE: we should not be afraid to use this. (and then we can use
-    // straightforward methods for symmetrization and translational invariance
-    // that access the entire matrix).
+    // Take ForceConstants where row_atom is always in DISPLACED_CELL
+    // and generate all the other rows.
     //
-    // Basically there is not expected to be much of any real cost associated
-    // with turning a N_PRIM x N_SUPER size data structure into N_SUPER x N_SUPER.
-    // After all, rsp2's problem has never been large supercells, but rather,
-    // large *primitive* cells... and the vast majority of structures end up with
-    // a 1x1x1 supercell anyways.
-    //------------------------------
+    // NOTE: This is just here for the lulz, in case you need something easier to
+    //       compare against phonopy pre-12.8.  The rows outside of the designated
+    //       cell are merely permuted forms of the designated rows, and do not even
+    //       appear in the formula for the dynamical matrix.
     //
-    //
-    // take ForceConstants where row_atom is always in DISPLACED_CELL
-    // and generate all the other rows
+    //       Adding them *could* make cleaning the FCs easier, if we wanted to simulate
+    //       phonopy's FC_SYMMETRY, though I think that *even then* they are still
+    //       unnecessary. Phonopy's `perm_trans_symmetrize_fc` C function does something
+    //       clever (and obscure, and undocumented...) to impose translational invariance
+    //       on both the rows and columns by only using the data within a row.
+    //       (together with the fact that it just symmetrized the matrix)
+    #[allow(unused)]
     pub fn add_rows_for_other_cells(mut self, sc: &SupercellToken) -> Self {
         assert!({
             let cells = sc.atom_cells();
@@ -607,88 +598,11 @@ impl ForceConstants {
             // skip 0 because 'self' already has the data for 0 cell translation
             for _ in 1..sc.periods()[axis] {
                 permuted_fcs = permuted_fcs.permuted_by(&deperm);
-                self.add(permuted_fcs.clone());
+                self.0 = self.0 + permuted_fcs.0.clone();
             }
         }
         assert_eq!(self.0.row.len(), old_len * sc.num_cells());
         self
-    }
-
-    // NOTE: We should use this.
-    //
-    fn symmetrize_by_transpose(mut self) -> Self {
-        let t = self.clone().transpose();
-        self.add(t);
-        for m in &mut self.0.val {
-            *m *= 0.5;
-        }
-        self
-    }
-
-    /// Transpose as if it were a 3N by 3N matrix.
-    fn transpose(self) -> Self {
-        let ForceConstants(RawCoo{ dim, row, col, val }) = self;
-        let val = val.into_iter().map(|m| m.t()).collect();
-        let (row, col) = (col, row);
-        let dims = (dim.1, dim.0);
-        ForceConstants(RawCoo { dim, row, col, val })
-    }
-
-    fn add(&mut self, other: Self) {
-        assert_eq!(self.0.dim, other.0.dim);
-        self.0.row.extend(other.0.row);
-        self.0.col.extend(other.0.col);
-        self.0.val.extend(other.0.val);
-    }
-
-    // this is something done by the C code in Phonopy which purportedly
-    // imposes translational invariance.
-    pub fn impose_perm_and_translational_invariance_a_la_phonopy(mut self) -> Self {
-        // FIXME HACK HACK HACK HACK TERRIBLE SLOW SLOW NO GOOD HACK
-        let mut dense = self.0.into_dense();
-
-        for i in 0..dense.len() {
-            let rest = &mut dense[i..];
-            let (row_i, rest) = rest.split_first_mut().unwrap();
-
-            /* non diagonal part */
-            for (offset_j, row_j) in rest.iter_mut().enumerate() {
-                let j = offset_j + i + 1;
-                for k in 0..3 {
-                    for l in 0..3 {
-                        let elem_m = &mut row_i[j][k][l];
-                        let elem_n = &mut row_j[i][l][k];
-                        *elem_m += *elem_n;
-                        *elem_m /= 2.0;
-                        *elem_n = *elem_m;
-                    }
-                }
-            }
-
-            /* diagnoal part */
-            let diag = &mut row_i[i];
-            for k in 1..3 {
-                for l in k + 1..3 {
-                    diag[k][l] += diag[l][k];
-                    diag[k][l] /= 2.0;
-                    diag[l][k] = diag[k][l];
-                }
-            }
-        }
-
-        for i in 0..dense.len() {
-            for k in 0..3 {
-                for l in k..3 {
-                    let sum: f64 = (0..dense.len()).map(|j| dense[i][j][k][l]).sum();
-                    dense[i][i][k][l] -= sum;
-                    if k != l {
-                        dense[i][i][l][k] -= sum;
-                    }
-                }
-            }
-        }
-
-        Self::from_dense_matrix(dense)
     }
 
     // HACK
@@ -709,26 +623,6 @@ impl ForceConstants {
             }
         }
         ForceConstants(RawCoo { dim, row, col, val })
-    }
-
-    fn sort_data_by<K, F>(self, mut f: F) -> Self
-    where
-        K: Ord,
-        F: FnMut(SuperI, SuperI) -> K,
-    {
-        let ForceConstants(RawCoo { dim, row, col, val }) = self;
-        let data = zip_eq!(&row, &col).map(|(&r, &c)| f(r, c)).collect::<Vec<_>>();
-        let perm = Perm::argsort(&data);
-
-        let row = row.permuted_by(&perm);
-        let col = col.permuted_by(&perm);
-        let val = val.permuted_by(&perm);
-        ForceConstants(RawCoo { dim, row, col, val })
-    }
-
-    /// Ensure that at most a single item per atom pair exists by summing duplicates.
-    fn canonicalize(self) -> Self {
-        ForceConstants(self.0.into_bee().into_coo())
     }
 
     // note: other K points will require cartesian coords for the right phase factors
@@ -768,18 +662,14 @@ impl ForceConstants {
                 let real = scale * phase_real * m;
                 let imag = scale * phase_imag * m;
 
-                ((r, c), [real, imag])
+                ((r, c), Complex33(real, imag))
             });
 
-        let (pos, val): (Vec<_>, Vec<_>) = iter.unzip();
-        let (row, col) = pos.into_iter().unzip();
-        let dim = (sc.num_primitive_atoms(), sc.num_primitive_atoms());
         let matrix = {
-            RawCoo { dim, val, row, col }
-                .into_csr_with(|[real_dest, imag_dest], [real, imag]| {
-                    *real_dest += real;
-                    *imag_dest += imag;
-                })
+            let (pos, val): (Vec<_>, Vec<_>) = iter.unzip();
+            let (row, col) = pos.into_iter().unzip();
+            let dim = (sc.num_primitive_atoms(), sc.num_primitive_atoms());
+            RawCoo { dim, val, row, col }.into_csr()
         };
 
         DynamicalMatrix(matrix)
@@ -798,5 +688,95 @@ impl Permute for ForceConstants {
             *c = perm.permute_index(*c);
         }
         ForceConstants(RawCoo { dim, row, col, val })
+    }
+}
+
+impl DynamicalMatrix {
+    // max absolute value of M - M.H
+    //
+    // I saw a value of up to 1e-4 times the maximum matrix element while
+    // debugging this; but hermitianizing produced something uniformly within
+    // 1e-14 of phonopy's matrix, so I believe this is normal.
+    #[allow(unused)]
+    pub fn max_hermitian_error(&self) -> f64 {
+        let coo_1 = self.0.to_coo();
+        let coo_2 = self.conj_t().0.into_coo();
+        let difference = coo_1 + coo_2.map(|c| -c);
+        difference.val.into_iter()
+            .fold(0.0, |mut acc, Complex33(real, imag)| {
+                for i in 0..3 {
+                    for k in 0..3 {
+                        let r2 = real[i][k] * real[i][k];
+                        let i2 = imag[i][k] * imag[i][k];
+                        acc = f64::max(acc, r2 + i2);
+                    }
+                }
+                acc
+            })
+            .sqrt()
+    }
+
+    pub fn hermitianize(&self) -> Self {
+        let coo_1 = self.0.to_coo();
+        let coo_2 = self.conj_t().0.into_coo();
+        let csr = (coo_1 + coo_2).into_csr().map(|mut c| {
+            c.0 *= 0.5;
+            c.1 *= 0.5;
+            c
+        });
+        DynamicalMatrix(csr)
+    }
+
+    pub fn conj_t(&self) -> Self {
+        let csr = self.0.to_raw_transpose().map(|c| c.conj_t());
+        DynamicalMatrix(csr)
+    }
+}
+
+pub use self::complex_33::Complex33;
+mod complex_33 {
+    use super::*;
+
+    // element type of the dynamical matrix, used to shoehorn it into a sparse matrix container
+    #[derive(Debug, Copy, Clone)]
+    #[derive(Serialize, Deserialize)]
+    pub struct Complex33(pub M33, pub M33);
+
+    impl ::num_traits::Zero for Complex33 {
+        fn zero() -> Self { Complex33(M33::zero(), M33::zero()) }
+        fn is_zero(&self) -> bool { self.0.is_zero() && self.1.is_zero() }
+    }
+
+    impl Complex33 {
+        pub fn conj_t(&self) -> Self
+        { Complex33(self.0.t(), -self.1.t()) }
+    }
+
+    impl ::std::ops::Add for Complex33 {
+        type Output = Complex33;
+
+        fn add(mut self, rhs: Complex33) -> Self::Output
+        { self += rhs; self }
+    }
+
+    impl ::std::ops::Sub for Complex33 {
+        type Output = Complex33;
+
+        fn sub(self, rhs: Complex33) -> Self::Output
+        { self + -rhs }
+    }
+
+    impl ::std::ops::Neg for Complex33 {
+        type Output = Complex33;
+
+        fn neg(self: Complex33) -> Self::Output
+        { Complex33(-self.0, -self.1) }
+    }
+
+    impl ::std::ops::AddAssign for Complex33 {
+        fn add_assign(&mut self, Complex33(real, imag): Complex33) {
+            self.0 += real;
+            self.1 += imag;
+        }
     }
 }
