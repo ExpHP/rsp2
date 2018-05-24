@@ -16,3 +16,55 @@ macro_rules! collect {
 macro_rules! from_json {
     ($($arg:tt)*) => { ::serde_json::from_value(json!($($arg)*)).unwrap() };
 }
+
+#[macro_export]
+macro_rules! zip_eq {
+    // (I have a variadic, token munching version lying around somewhere, but frankly
+    //  if you need more than four you should just use indices)
+    ($a:expr $(,)*) => {
+        $a.into_iter().map(|a| (a,))
+    };
+    ($a:expr, $b:expr $(,)*) => {
+        $crate::zip_eq($a, $b)
+    };
+    ($a:expr, $b:expr, $c:expr $(,)*) => {
+        $crate::zip_eq($crate::zip_eq($a, $b), $c)
+            .map(|((a, b), c)| (a, b, c))
+    };
+    ($a:expr, $b:expr, $c:expr, $d:expr $(,)*) => {
+        $crate::zip_eq($crate::zip_eq($crate::zip_eq($a, $b), $c), $d)
+            .map(|(((a, b), c), d)| (a, b, c, d))
+    };
+}
+
+pub fn zip_eq<As, Bs>(a: As, b: Bs) -> ::std::iter::Zip<As::IntoIter, Bs::IntoIter>
+where
+    As: IntoIterator, As::IntoIter: ExactSizeIterator,
+    Bs: IntoIterator, Bs::IntoIter: ExactSizeIterator,
+{
+    let (a, b) = (a.into_iter(), b.into_iter());
+    assert_eq!(a.len(), b.len());
+    a.zip(b)
+}
+
+#[macro_export]
+macro_rules! _log_once_impl {
+    ($mac:ident!($($arg:tt)*)) => {{
+        use std::sync::{Once, ONCE_INIT};
+        static ONCE: Once = ONCE_INIT;
+        ONCE.call_once(|| {
+            // Explicitly label one-time messages to discourage reasoning
+            // along the lines of "well it didn't say anything THIS time"
+            $mac!("{} (this message will not be shown again)", format_args!($($arg)*));
+        });
+    }};
+}
+
+#[macro_export]
+macro_rules! warn_once { ($($arg:tt)*) => { _log_once_impl!{warn!($($arg)*)} }; }
+#[macro_export]
+macro_rules! info_once { ($($arg:tt)*) => { _log_once_impl!{info!($($arg)*)} }; }
+#[macro_export]
+macro_rules! trace_once { ($($arg:tt)*) => { _log_once_impl!{trace!($($arg)*)} }; }
+#[macro_export]
+macro_rules! debug_once { ($($arg:tt)*) => { _log_once_impl!{debug!($($arg)*)} }; }

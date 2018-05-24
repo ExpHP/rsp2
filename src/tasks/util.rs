@@ -21,33 +21,6 @@ impl fmt::Display for AtomicCounter {
 
 //--------------------------------------------------------
 
-macro_rules! zip_eq {
-    ($a:expr $(,)*) => {
-        $a.into_iter().map(|a| (a,))
-    };
-    ($a:expr, $b:expr $(,)*) => {
-        ::util::zip_eq($a, $b)
-    };
-    ($a:expr, $b:expr, $c:expr $(,)*) => {
-        ::util::zip_eq(::util::zip_eq($a, $b), $c)
-            .map(|((a, b), c)| (a, b, c))
-    };
-    ($a:expr, $b:expr, $c:expr, $d:expr $(,)*) => {
-        ::util::zip_eq(::util::zip_eq(::util::zip_eq($a, $b), $c), $d)
-            .map(|(((a, b), c), d)| (a, b, c, d))
-    };
-}
-
-pub(crate) fn zip_eq<As, Bs>(a: As, b: Bs) -> ::std::iter::Zip<As::IntoIter, Bs::IntoIter>
-where
-    As: IntoIterator, As::IntoIter: ExactSizeIterator,
-    Bs: IntoIterator, Bs::IntoIter: ExactSizeIterator,
-{
-    let (a, b) = (a.into_iter(), b.into_iter());
-    assert_eq!(a.len(), b.len());
-    a.zip(b)
-}
-
 pub(crate) fn transpose_iter_to_vec<Tss, Ts, T>(input: Tss) -> Vec<Vec<T>>
 where
     Tss: IntoIterator<Item=Ts>,
@@ -59,7 +32,7 @@ where
         .map(|x| vec![x]).collect();
 
     for row in input {
-        for (dest, x) in zip_eq(&mut out, row) {
+        for (dest, x) in zip_eq!(&mut out, row) {
             dest.push(x);
         }
     }

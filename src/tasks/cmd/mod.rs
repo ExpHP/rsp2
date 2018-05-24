@@ -14,6 +14,7 @@ pub(crate) mod trial;
 mod acoustic_search;
 mod relaxation;
 mod scipy_eigsh;
+mod param_optimization;
 
 use ::{FailResult, FailOk};
 use ::rsp2_tasks_config::{self as cfg, Settings, NormalizationMode, SupercellSpec};

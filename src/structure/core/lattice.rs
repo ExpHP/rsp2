@@ -199,8 +199,6 @@ impl<'a, 'b> Mul<&'b Lattice> for &'a Lattice {
 
     #[inline(always)]
     fn mul(self, other: &'b Lattice) -> Lattice {
-        // Let the inverse be computed from scratch,
-        // for sustained accuracy after many products
         self * other.matrix()
     }
 }
@@ -209,6 +207,8 @@ impl<'a, 'b> Mul<&'b M33> for &'a Lattice {
     type Output = Lattice;
 
     fn mul(self, other: &'b M33) -> Lattice {
+        // Let the inverse be computed from scratch,
+        // for sustained accuracy after many products
         Lattice::new(&(self.matrix() * other))
     }
 }

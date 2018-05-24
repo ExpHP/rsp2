@@ -17,14 +17,15 @@ itertools = "0.7"
 failure = "0.1"
 vasp-poscar = "0.1.1"
 log = "0.3"
-serde = "1"
-serde_derive = "1"
+serde = "1.0.47"
+serde_derive = "1.0.47"
 serde_yaml = "0.7"
 
 rsp2-structure = { path = "../../structure" }
 rsp2-array-types = { path = "../../util/array-types" }
 rsp2-array-utils = { path = "../../util/array" }
+rsp2-util-macros = { path = "../../util/macros" }
 
 [features]
-nightly = ["beta", "rsp2-array-types/nightly", "rsp2-array-utils/nightly", "rsp2-structure/nightly"]
-beta = ["rsp2-array-types/beta", "rsp2-array-utils/beta", "rsp2-structure/beta"]
+nightly = ["beta", "rsp2-array-types/nightly", "rsp2-array-utils/nightly", "rsp2-structure/nightly", "rsp2-util-macros/nightly"]
+beta = ["rsp2-array-types/beta", "rsp2-array-utils/beta", "rsp2-structure/beta", "rsp2-util-macros/beta"]

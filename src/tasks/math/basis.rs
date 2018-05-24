@@ -72,7 +72,7 @@ impl<'iter> Partition<'iter> for Basis3
                 vec![Basis3(vec![]); part.region_keys().len()],
                 |mut bases, kets| {
                     // (over each partition)
-                    for (basis, ket) in ::util::zip_eq(&mut bases, kets) {
+                    for (basis, ket) in zip_eq!(&mut bases, kets) {
                         basis.0.push(ket);
                     }
                     bases

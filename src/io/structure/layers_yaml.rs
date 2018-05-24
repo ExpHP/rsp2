@@ -7,7 +7,8 @@ use ::{FailResult, FailOk};
 use ::rsp2_structure::{CoordsKind, Lattice, Coords};
 use ::std::io::Read;
 
-use ::rsp2_array_types::{M22, M33, V2, V3, mat, inv, Unvee};
+use ::rsp2_array_utils::map_arr;
+use ::rsp2_array_types::{M22, M33, V2, V3, dot, mat, inv, Unvee};
 
 pub fn load(mut file: impl Read) -> FailResult<Assemble>
 { _load(&mut file) }
@@ -33,36 +34,66 @@ fn _load_layer_sc_info(file: &mut Read) -> FailResult<Vec<(M33<i32>, [u32; 3], u
 /// A partially assembled structure for which
 /// some parameters are still configurable
 pub struct Assemble {
-    /// scales the x and y axes
-    pub scale: f64,
-    /// separation across periodic boundary
+    // currently, only normals along a lattice vector are supported, and that
+    // lattice vector must be orthogonal to the others.
+    normal_axis: usize,
+
+    /// scales each lattice vector.  The value on the normal axis is ignored.
+    pub scale: [f64; 3],
+
+    // a lattice where lattice[normal_axis] is a unit vector and the others
+    // are orthogonal to it.
+    lattice: M33,
+    // These are all zero along the normal axis
+    fracs_in_plane: Vec<Vec<V3>>, // [layer][atom_in_layer]
+    carts_along_normal: Vec<Vec<f64>>, // [layer][atom_in_layer]
+
+    /// separation across periodic boundary (as the center-center distance
+    /// between the first layer encountered on either side of the boundary)
     pub vacuum_sep: f64,
-    // a lattice with a dummy z length, and without 'scale' taken into account
-    lattice: M22,
-    frac_sites: Vec<Vec<V2>>,
-    layer_seps: Vec<f64>,
+    layer_seps: Vec<f64>, // [layer] (length: nlayer - 1)
 }
 
 impl Assemble {
+    /// Allows setting layer separations (as center-center distances)
     pub fn layer_seps(&mut self) -> &mut [f64]
     { &mut self.layer_seps }
+
+    pub fn num_layer_seps(&self) -> usize
+    { self.layer_seps.len() }
+
+    pub fn normal_axis(&self) -> usize
+    { self.normal_axis }
 
     pub fn assemble(&self) -> Coords
     {
         let lattice = {
-            let scales = [self.scale, self.scale, self.get_z_length()];
-            let lattice = Lattice::new(&m22_to_m33(&self.lattice));
+            let mut scales = self.scale;
+            scales[self.normal_axis] = self.get_z_length();
+
+            // (assumption in our use of `scales` below)
+            assert!(f64::abs(self.lattice[self.normal_axis].sqnorm() - 1.0) < 1e-5);
+
+            let lattice = Lattice::new(&self.lattice);
             &Lattice::diagonal(&scales) * &lattice
         };
         let layer_zs = self.get_z_positions();
 
         let mut full_carts = vec![];
-        for (xy_fracs, z_cart) in self.frac_sites.iter().zip(layer_zs) {
-            let mut structure =
-                Coords::new(lattice.clone(), CoordsKind::Fracs(v2_to_v3(xy_fracs)));
 
-            structure.translate_cart(&V3([0.0, 0.0, z_cart]));
-            full_carts.extend(structure.to_carts());
+        // each layer
+        let it = zip_eq!(&self.fracs_in_plane, &self.carts_along_normal, layer_zs);
+        for (plane_fracs, z_carts, z_offset) in it {
+            // convert the two fractional coords into cartesian
+            let mut carts = CoordsKind::Fracs(plane_fracs).to_carts(&lattice);
+
+            // add in the final coordinate, which is already cartesian
+            let unit_z = self.lattice[self.normal_axis].unit();
+            for (v, z) in zip_eq!(&mut carts, z_carts) {
+                *v += (z + z_offset) * unit_z;
+            }
+
+            full_carts.extend(carts);
         }
 
         Coords::new(lattice, CoordsKind::Carts(full_carts))
@@ -245,7 +276,7 @@ fn assemble_from_cereal(cereal: self::cereal::Root) -> FailResult<Assemble>
         lattice_a, layers, full_lattice, vacuum_sep, layer_seps,
     } = interpret_cereal(cereal)?;
 
-    let mut frac_sites = vec![];
+    let mut fracs_in_plane = vec![];
     for layer in layers.into_iter() {
         let lattice = layer.cart_lattice.clone();
         let sites = layer.cart_sites.clone();
@@ -275,15 +306,155 @@ fn assemble_from_cereal(cereal: self::cereal::Root) -> FailResult<Assemble>
         //       (taking unique positions in the diagonal layer supercells and mapping
         //        them into the cell that we generally use for the structure)
         structure.reduce_positions();
-        frac_sites.push(v3_to_v2(&structure.to_fracs()));
+        fracs_in_plane.push(structure.to_fracs());
     }
 
-    Assemble {
-        scale: lattice_a,
-        lattice: m33_to_m22(&full_lattice),
-        frac_sites, layer_seps, vacuum_sep,
-    }
+    let carts_along_normal = {
+        fracs_in_plane.iter()
+            .map(|vec| vec![0.0; vec.len()]) // uniform value for zero width
+            .collect()
+    };
+
+    let raw = RawAssemble {
+        normal_axis: 2,
+        lattice: Lattice::new(&full_lattice),
+        initial_scale: Some([lattice_a, lattice_a, 0.0]),
+        fracs_in_plane,
+        carts_along_normal,
+        initial_layer_seps: layer_seps,
+        initial_vacuum_sep: vacuum_sep,
+        check_intralayer_distance: None,
+    };
+
+    // FIXME: some of the possible errors produced by `from_raw` here are
+    //        really indicative of bugs in this function, and should panic
+    //        instead of being propagated
+    Assemble::from_raw(raw)?
 })}
+
+pub struct RawAssemble {
+    /// The axis normal to the layers, as the index of a lattice vector.
+    pub normal_axis: usize,
+
+    /// A lattice in which the lattice vector for `normal_axis` is orthogonal
+    /// to the other two.  The length of the `normal_axis` vector is ignored.
+    pub lattice: Lattice,
+
+    /// Fractional coordinates for each layer.  Must all be zero in the normal axis.
+    pub fracs_in_plane: Vec<Vec<V3>>, // [layer][atom_in_layer]
+
+    /// Cartesian coordinates along the normal within each layer.  This allows layers
+    /// to have a "thickness" to them.
+    ///
+    /// Only the variation in value within each layer matters.  It is important that,
+    /// within each layer, these coordinates form a contiguous image.
+    pub carts_along_normal: Vec<Vec<f64>>, // [layer][atom_in_layer]
+
+    // NOTE: bulk has no vacuum sep, and 'nlayer' layer seps.
+    //       The current API does not present a nice way of handling this.
+    /// Initial separation across periodic boundary.
+    pub initial_vacuum_sep: f64,
+    /// Initial separations between layers.
+    pub initial_layer_seps: Vec<f64>, // [layer] (length: nlayer - 1)
+
+    /// Initial scale factors.  The value on `normal_axis` is ignored.
+    pub initial_scale: Option<[f64; 3]>,
+
+    /// Adds a sanity check that each pair of successive atoms along a layer lie within
+    /// this distance from each other (with a little extra bit of fuzz). Construction
+    /// of an `Assemble` will fail if this is untrue.
+    ///
+    /// This is to help catch bugs related to accidentally wrapping `carts_along_normal`
+    /// across a periodic boundary.
+    pub check_intralayer_distance: Option<f64>,
+}
+
+impl Assemble {
+    fn from_raw(raw: RawAssemble) -> FailResult<Self> {
+        let RawAssemble {
+            normal_axis, lattice, fracs_in_plane, carts_along_normal,
+            initial_vacuum_sep, initial_layer_seps, initial_scale,
+            check_intralayer_distance,
+        } = raw;
+        assert!(normal_axis < 3);
+
+        let other_axes = (0..3).filter(|&k| k != normal_axis).collect::<Vec<_>>();
+
+        // selected vector must be orthogonal to the others.
+        // It is normalized so that it can be easily scaled later.
+        let lattice = {
+            let units = map_arr(lattice.vectors().clone(), |v| v.unit());
+            for &k in &other_axes {
+                let d = dot(&units[normal_axis], &units[k]);
+                ensure!(
+                    d.abs() < 1e-6,
+                    "Normal vector of Assemble must be orthogonal to the others \
+                    (got normalized dot product of {})", d,
+                );
+            }
+
+            let mut matrix = lattice.matrix().clone();
+            matrix[normal_axis] = units[normal_axis];
+            matrix
+        };
+
+        // while arbitrary vectors are supported *in spirit,* this code is almost
+        // always only ever run for cases where it is along the corresponding
+        // cartesian axis.  Warn about undertested code paths.
+        if other_axes.iter().any(|&k| f64::abs(lattice[normal_axis][k]) > 1e-9) {
+            warn_once!(
+                "Your layer normal is along a nontrivial direction.  In *theory* rsp2 should \
+                be able to handle this, but this functionality is seldom used so it is poorly \
+                tested.  Ping Michael if the structure files created by rsp2 don't look right."
+            );
+        }
+
+        for vs in &fracs_in_plane {
+            for v in vs {
+                ensure!(v[normal_axis] == 0.0, "Frac positions along normal must be zero!");
+            }
+        }
+
+        // layer_seps and vacuum_sep will be interpreted as distance from
+        // center to center.  Maybe this could be made configurable later.
+        //
+        // This is accomplished by simply recentering the coordinates prior
+        // to construction of the Assemble, which will continue to treat them
+        // as basically zero-width when computing layer offsets.
+        let mut carts_along_normal = carts_along_normal;
+        for v in &mut carts_along_normal {
+            if let Some(mut thresh) = check_intralayer_distance {
+                thresh *= 1.0 + 1e-8;
+                let mut sorted = v.clone();
+                sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                for w in sorted.windows(2) {
+                    let distance = w[1] - w[0];
+                    ensure!(
+                        distance < thresh,
+                        "check_intralayer_distance failed! (distance = {}) Was a layer \
+                        wrapped across the periodic boundary?", distance);
+                }
+            }
+
+            use ::std::f64::INFINITY;
+            let min = v.iter().cloned().fold(INFINITY, f64::min);
+            let max = v.iter().cloned().fold(-INFINITY, f64::max);
+            let center = 0.5 * (min + max);
+            assert!(center.is_finite());
+            for x in v {
+                *x -= center;
+            }
+        }
+
+        let scale = initial_scale.unwrap_or([1.0; 3]);
+        let vacuum_sep = initial_vacuum_sep;
+        let layer_seps = initial_layer_seps;
+        Ok(Assemble {
+            normal_axis, scale, lattice, fracs_in_plane, carts_along_normal,
+            vacuum_sep, layer_seps,
+        })
+    }
+}
 
 // FIXME this really doesn't belong here, but it's the easiest reuse of code
 fn layer_sc_info_from_cereal(cereal: cereal::Root) -> FailResult<Vec<(M33<i32>, [u32; 3], usize)>>
@@ -320,35 +491,5 @@ fn m22_to_m33(mat: &M22) -> M33
     ])
 }
 
-fn m33_to_m22(mat: &M33) -> M22
-{
-    let [[m00, m01, m02], [m10, m11, m12], [m20, m21, m22]] = mat.unvee();
-    assert_eq!(m02, 0.0);
-    assert_eq!(m12, 0.0);
-    assert_eq!(m20, 0.0);
-    assert_eq!(m21, 0.0);
-    assert_eq!(m22, 1.0);
-    mat::from_array([
-        [m00, m01],
-        [m10, m11],
-    ])
-}
-
 fn v2_to_v3(xs: &[V2]) -> Vec<V3>
 { xs.unvee().iter().map(|&[x, y]| V3([x, y, 0.0])).collect() }
-
-fn v3_to_v2(xs: &[V3]) -> Vec<V2>
-{ xs.unvee().iter().map(|&[x, y, z]| {
-    assert_eq!(z, 0.0);
-    V2([x, y])
-}).collect() }
-
-// fn zip_eq<As, Bs>(a: As, b: Bs) -> ::std::iter::Zip<As::IntoIter, Bs::IntoIter>
-// where
-//     As: IntoIterator, As::IntoIter: ExactSizeIterator,
-//     Bs: IntoIterator, Bs::IntoIter: ExactSizeIterator,
-// {
-//     let (a, b) = (a.into_iter(), b.into_iter());
-//     assert_eq!(a.len(), b.len());
-//     a.zip(b)
-// }

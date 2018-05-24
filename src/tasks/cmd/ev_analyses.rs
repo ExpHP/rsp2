@@ -2,7 +2,6 @@
 use ::FailResult;
 use ::ui::color::{ColorByRange, PaintAs, NullPainter};
 use ::ui::cfg_merging::{no_summary, merge_summaries, make_nested_mapping};
-use ::util::zip_eq;
 use ::math::basis::Basis3;
 use ::math::bands::{GammaUnfolder, ScMatrix};
 #[allow(unused)] // compiler bug
@@ -24,6 +23,7 @@ use super::acoustic_search;
 //
 // NOTE: Since a lot of the wrapped types are just vectors, the naming convention
 //       is to prefix the name with each thing they are indexed over (in order)
+// FIXME: Y'know, we DO have `Indexed` now...
 #[derive(Debug, Clone)]                         pub struct AtomCoordinates(pub Coords);
 #[derive(Debug, Clone, Serialize, Deserialize)] pub struct AtomLayers(pub Vec<usize>);
 #[derive(Debug, Clone)]                         pub struct AtomElements(pub Vec<Element>);
@@ -40,6 +40,16 @@ pub mod gamma_system_analysis {
 
     #[derive(Debug, Clone)]
     pub struct Input {
+        // "Le gasp," I know.  Using Options for everything tosses away a lot of would-be static
+        // guarantees and basically throws us into the land of Hoare's "billion dollar mistake."
+        //
+        // Basically what happens here is that values in the Output are selectively computed
+        // based on whether all of the inputs they depend on are available. The logic for handling
+        // this is in a macro, which is why everything must be Option.
+        //
+        // The point is to allow properties specific to certain types of materials to be
+        // selectively computed (and displayed, and written to output files...).
+        //
         pub atom_coords:        Option<AtomCoordinates>,
         pub atom_layers:        Option<AtomLayers>,
         pub atom_elements:      Option<AtomElements>,
@@ -239,10 +249,10 @@ impl UnfoldProbs {
     fn layer_ev_gamma_probs(&self) -> Vec<Vec<f64>> {
         let UnfoldProbs { layer_unfolders, layer_ev_q_probs } = self;
 
-        zip_eq(layer_unfolders, layer_ev_q_probs)
+        zip_eq!(layer_unfolders, layer_ev_q_probs)
             .map(|(unfolder, ev_q_probs)| {
                 ev_q_probs.iter().map(|probs| {
-                    zip_eq(unfolder.q_indices(), probs.iter().cloned())
+                    zip_eq!(unfolder.q_indices(), probs.iter().cloned())
                         .find(|&(idx, _)| idx == &[0, 0, 0])
                         .unwrap().1
                 }).collect()
@@ -268,8 +278,8 @@ fn _unfold_probs(
     let layer_partial_evs = ::util::transpose_iter_to_vec(ev_layer_partial_evs);
 
     let (layer_unfolders, layer_ev_q_probs) = {
-        zip_eq(layer_partial_coords, zip_eq(layer_partial_evs, &layer_sc_mats.0))
-            .map(|(partial_structure, (partial_evs, sc_mat))| {
+        zip_eq!(layer_partial_coords, layer_partial_evs, &layer_sc_mats.0)
+            .map(|(partial_structure, partial_evs, sc_mat)| {
                 // precompute data applicable to all kets
                 let unfolder = GammaUnfolder::from_config(
                     &from_json!({
@@ -519,7 +529,7 @@ impl GammaSystemAnalysis {
         where F: FnMut(&A, &B) -> R,
         {
             Some({
-                zip_eq(a.as_ref()?, b.as_ref()?)
+                zip_eq!(a.as_ref()?, b.as_ref()?)
                     .map(|(a, b)| f(a, b))
                     .collect()
             })
@@ -545,7 +555,7 @@ impl GammaSystemAnalysis {
         fn select<T: Clone>(pred: &Option<Vec<bool>>, values: &Option<Vec<T>>) -> Option<Vec<T>>
         {
             Some({
-                zip_eq(pred.as_ref()?, values.as_ref()?)
+                zip_eq!(pred.as_ref()?, values.as_ref()?)
                     .filter_map(|(&p, v)| if p { Some(v.clone()) } else { None })
                     .collect()
             })
@@ -726,7 +736,7 @@ mod columns {
         let mut out = columns.next().expect("can't join 0 columns").clone();
         for column in columns {
             out.header = out.header + sep + &column.header;
-            for (dest, src) in zip_eq(&mut out.entries, &column.entries) {
+            for (dest, src) in zip_eq!(&mut out.entries, &column.entries) {
                 *dest += sep;
                 *dest += src;
             }
@@ -776,7 +786,7 @@ mod columns {
 
         let &max_period = period_indices.iter().max().expect("no lines!?");
         let padding_source = " ".repeat(max_period);
-        for (period, s) in ::util::zip_eq(period_indices, &mut strings) {
+        for (period, s) in zip_eq!(period_indices, &mut strings) {
             match max_period - period {
                 0 => {},
                 n => {

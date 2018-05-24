@@ -4,7 +4,6 @@
 //! Adapted from the sp2 code.
 
 use ::FailResult;
-use ::util::zip_eq;
 use ::math::basis::Basis3;
 use ::math::bonds::{CartBond, CartBonds};
 use ::enum_map::EnumMap;
@@ -266,7 +265,7 @@ impl<'a> Input<'a> {
 
         let pol_constants = default_CH_pol_constants();
 
-        zip_eq(ev_frequencies, &ev_eigenvectors.0)
+        zip_eq!(ev_frequencies, &ev_eigenvectors.0)
             .map(|(&frequency, eigs)| {
                 let prefactor = raman_prefactor(frequency, temperature);
                 let tensor = raman_tensor(

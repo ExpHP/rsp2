@@ -1,6 +1,9 @@
 extern crate rsp2_structure;
+extern crate rsp2_array_utils;
 extern crate rsp2_array_types;
+#[macro_use] extern crate rsp2_util_macros;
 
+#[macro_use] extern crate log;
 #[macro_use] extern crate itertools;
 #[macro_use] extern crate failure;
 #[macro_use] extern crate serde_derive;

@@ -226,15 +226,14 @@ pub trait DiffFn<Meta> {
         let displaced_force = self.compute_force(&structure)?;
 
         let diffs = {
-            ::util::zip_eq(original_force, displaced_force).enumerate()
+            zip_eq!(original_force, displaced_force).enumerate()
                 // assuming that the potential is deterministic and implements a cutoff radius,
                 // this might actually succeed at filtering out a lot of zero terms.
-//                .filter(|(_, (old, new))| old != new)
-//                .map(|(atom, (old, new))| (atom, new - old))
+                .filter(|(_, (old, new))| old != new)
+                .map(|(atom, (old, new))| (atom, new - old))
 
-                // closer approximation of phonopy
-                // FIXME use the above instead
-                .map(|(atom, (_old, new))| (atom, new))
+                // this one is a closer approximation of phonopy
+//                .map(|(atom, (_old, new))| (atom, new))
         };
         Ok(diffs.collect())
 //        Ok(::math::dynmat::ForceSets::from_displacement(
@@ -355,7 +354,7 @@ mod helper {
             let value = a_value + b_value;
 
             let mut grad = a_grad;
-            for (out_vec, b_vec) in ::util::zip_eq(&mut grad, b_grad) {
+            for (out_vec, b_vec) in zip_eq!(&mut grad, b_grad) {
                 *out_vec += b_vec;
             }
             Ok((value, grad))
@@ -867,7 +866,7 @@ pub mod test {
             let cur_fracs = structure.to_fracs();
             let target_fracs = self.target.to_fracs();
             let args_by_coord = {
-                ::util::zip_eq(&cur_fracs, target_fracs)
+                zip_eq!(&cur_fracs, target_fracs)
                     .map(|(c, t)| V3::from_fn(|k| (c[k] - t[k]) * 2.0 * PI))
                     .collect::<Vec<_>>()
             };
@@ -888,7 +887,7 @@ pub mod test {
                 parts_by_coord.iter().map(|v| v.iter().product::<f64>()).sum()
             };
             let frac_grad = {
-                ::util::zip_eq(&parts_by_coord, &derivs_by_coord)
+                zip_eq!(&parts_by_coord, &derivs_by_coord)
                     .map(|(parts, derivs)| { // by atom
                         V3::from_fn(|k0| {
                             (0..3).map(|k| {
