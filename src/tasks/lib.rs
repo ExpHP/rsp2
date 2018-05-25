@@ -188,3 +188,22 @@ mod common {
         }
     }
 }
+
+mod hlist_aliases {
+    use ::frunk::{HNil, HCons};
+    pub type HList0 = HNil;
+    pub type HList1<A> = HCons<A, HList0<>>;
+    pub type HList2<A, B> = HCons<A, HList1<B>>;
+    pub type HList3<A, B, C> = HCons<A, HList2<B, C>>;
+    pub type HList4<A, B, C, D> = HCons<A, HList3<B, C, D>>;
+}
+
+use self::_compat::compat;
+mod _compat {
+    use ::hlist_aliases::*;
+    use ::rsp2_structure::{Coords, Element, ElementStructure};
+
+    pub fn compat(coords: &Coords, meta: HList1<&[Element]>) -> ElementStructure {
+        coords.clone().with_metadata(meta.head.to_owned())
+    }
+}

@@ -1,5 +1,5 @@
 use ::failure::Error;
-use ::{Structure, Coords, Lattice};
+use ::{Coords, Lattice};
 use ::rsp2_soa_ops::{Permute, Perm, Part, Partition};
 
 use ::std::mem;
@@ -315,18 +315,18 @@ impl LayersPerUnitCell {
     /// Partition into structures where each layer's structure has contiguous
     /// cartesian coordinates along the normal axis. (be aware this means that images
     /// will be taken!)
-    pub fn partition_into_contiguous_layers<M>(
+    pub fn partition_into_contiguous_layers(
         &self,
         normal: V3<i32>,
-        mut structure: Structure<M>,
-    ) -> Vec<Structure<M>> {
+        mut coords: Coords,
+    ) -> Vec<Coords> {
         let axis = {
-            require_simple_axis_normal(normal, structure.lattice())
+            require_simple_axis_normal(normal, coords.lattice())
                 .expect("method has not been updated to support other normal vectors")
         };
 
         { // scope fracs_mut()
-            let fracs = structure.fracs_mut();
+            let fracs = coords.fracs_mut();
 
             // reduce into first unit cell to make most layers contiguous
             for v in &mut fracs[..] {
@@ -373,7 +373,7 @@ impl LayersPerUnitCell {
         } // scope fracs_mut()
 
         let part = self.get_part();
-        let vec = structure.into_unlabeled_partitions(&part).collect::<Vec<_>>();
+        let vec = coords.into_unlabeled_partitions(&part).collect::<Vec<_>>();
         vec
     }
 }

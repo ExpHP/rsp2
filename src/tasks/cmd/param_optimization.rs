@@ -1,18 +1,22 @@
 use ::{FailResult};
 use ::cmd::potential::{PotentialBuilder, DiffFn};
+use ::hlist_aliases::*;
 
 use ::rsp2_minimize::exact_ls::{Value, Golden};
-use ::rsp2_structure::{Lattice, Structure, CoordsKind};
+use ::rsp2_structure::{Lattice, CoordsKind, Element, Coords};
 use ::rsp2_structure::layer::{LayersPerUnitCell, require_simple_axis_normal};
 use ::rsp2_structure_io::assemble::{Assemble, RawAssemble};
 use ::rsp2_array_types::{V3};
 use ::rsp2_tasks_config as cfg;
 
-pub(crate) fn optimize_layer_parameters<M: Clone + 'static>(
+pub(crate) fn optimize_layer_parameters(
     settings: &cfg::ScaleRanges,
-    pot: &PotentialBuilder<M>,
-    mut structure_builder: ScalableStructure<M>,
-) -> FailResult<ScalableStructure<M>>
+    pot: &PotentialBuilder,
+    mut coords_builder: ScalableCoords,
+    meta: HList1<
+        &[Element],
+    >,
+) -> FailResult<ScalableCoords>
 {Ok({
     // Gather a bunch of setter functions and search ranges
     let scalables = {
@@ -20,7 +24,7 @@ pub(crate) fn optimize_layer_parameters<M: Clone + 'static>(
         for cfg in &settings.scalables {
             add_scalables(
                 cfg,
-                &structure_builder,
+                &coords_builder,
                 |s| scalables.push(s),
             )?;
         }
@@ -32,7 +36,7 @@ pub(crate) fn optimize_layer_parameters<M: Clone + 'static>(
         match *spec {
             cfg::ScalableRange::Exact { value } |
             cfg::ScalableRange::Search { range: _, guess: Some(value) } => {
-                setter(&mut structure_builder, value);
+                setter(&mut coords_builder, value);
             },
             // no guess ==> use whatever the structure had when we got it
             cfg::ScalableRange::Search { range: _, guess: None } => {},
@@ -55,14 +59,14 @@ pub(crate) fn optimize_layer_parameters<M: Clone + 'static>(
                     let best = Golden::new()
                         .stop_condition(&from_json!({"interval-size": 1e-7}))
                         .run(range, |a| {
-                            setter(&mut structure_builder, a);
+                            setter(&mut coords_builder, a);
 
                             // FIXME: I'm not sure why this is a one-off computation; I should try
                             //        reusing a single lammps instance and see what happens.
                             //
                             //        (maybe I had issues with "lost atoms" errors or something)
                             pot.one_off()
-                                .compute_value(&structure_builder.construct())
+                                .compute_value(&::compat(&coords_builder.construct(), meta.sculpt().0))
                                 .map(Value)
 
                         // note: result is Result<Result<_, E>, GoldenSearchError>
@@ -95,42 +99,40 @@ pub(crate) fn optimize_layer_parameters<M: Clone + 'static>(
                 },
             }; // let best = { ... }
 
-            setter(&mut structure_builder, best);
+            setter(&mut coords_builder, best);
         } // for ... in optimizables
     } // for ... in repeat_count
 
-    structure_builder
+    coords_builder
 })}
 
-struct Scalable<M> {
-    setter: Box<Fn(&mut ScalableStructure<M>, f64)>,
+struct Scalable {
+    setter: Box<Fn(&mut ScalableCoords, f64)>,
     name: String,
     spec: cfg::ScalableRange,
 }
 
-pub enum ScalableStructure<M> {
+pub enum ScalableCoords {
     KnownLayers {
         layer_builder: Assemble,
-        meta: Vec<M>,
     },
     UnknownLayers {
         scales: [f64; 3],
         lattice: Lattice,
         fracs: Vec<V3>,
-        meta: Vec<M>,
     },
 }
 
-fn add_scalables<M>(
+fn add_scalables(
     cfg: &cfg::Scalable,
-    structure: &ScalableStructure<M>,
-    mut emit: impl FnMut(Scalable<M>),
+    structure: &ScalableCoords,
+    mut emit: impl FnMut(Scalable),
 ) -> FailResult<()> {
     // validate
     match (cfg, structure) {
         (
             &cfg::Scalable::Param { axis_mask, .. },
-            &ScalableStructure::KnownLayers { ref layer_builder, .. },
+            &ScalableCoords::KnownLayers { ref layer_builder, .. },
         ) => {
             // (this is unfair to bulk...)
             ensure!(
@@ -141,10 +143,10 @@ fn add_scalables<M>(
 
         (
             &cfg::Scalable::UniformLayerSep { .. },
-            &ScalableStructure::UnknownLayers { .. },
+            &ScalableCoords::UnknownLayers { .. },
         ) | (
             &cfg::Scalable::LayerSeps { .. },
-            &ScalableStructure::UnknownLayers { .. },
+            &ScalableCoords::UnknownLayers { .. },
         ) => bail!("cannot scale layer separations when layers have not been determined"),
 
         _ => {},
@@ -153,7 +155,7 @@ fn add_scalables<M>(
     // obtain data to be used by some scalables
     let mut n_layer_seps = None;
     match structure {
-        ScalableStructure::KnownLayers { ref layer_builder, .. } => {
+        ScalableCoords::KnownLayers { ref layer_builder, .. } => {
             n_layer_seps = Some(layer_builder.num_layer_seps());
         },
         _ => {},
@@ -166,8 +168,8 @@ fn add_scalables<M>(
                 name: format!("lattice param"),
                 setter: Box::new(move |s, val| {
                     let scales = match s {
-                        ScalableStructure::KnownLayers { layer_builder, .. } => &mut layer_builder.scale,
-                        ScalableStructure::UnknownLayers { scales, .. } => scales,
+                        ScalableCoords::KnownLayers { layer_builder, .. } => &mut layer_builder.scale,
+                        ScalableCoords::UnknownLayers { scales, .. } => scales,
                     };
 
                     for k in 0..3 {
@@ -185,8 +187,8 @@ fn add_scalables<M>(
             emit(Scalable {
                 name: format!("a uniform layer separation"),
                 setter: Box::new(|s, val| match s {
-                    ScalableStructure::UnknownLayers { .. } => unreachable!(),
-                    ScalableStructure::KnownLayers { layer_builder, .. } => {
+                    ScalableCoords::UnknownLayers { .. } => unreachable!(),
+                    ScalableCoords::KnownLayers { layer_builder, .. } => {
                         for x in layer_builder.layer_seps() {
                             *x = val;
                         }
@@ -203,8 +205,8 @@ fn add_scalables<M>(
                 emit(Scalable {
                     name: format!("layer separation {}", k),
                     setter: Box::new(move |s, val| match s {
-                        ScalableStructure::UnknownLayers { .. } => unreachable!(),
-                        ScalableStructure::KnownLayers { layer_builder, .. } => {
+                        ScalableCoords::UnknownLayers { .. } => unreachable!(),
+                        ScalableCoords::KnownLayers { layer_builder, .. } => {
                             layer_builder.layer_seps()[k] = val;
                         },
                     }),
@@ -216,38 +218,37 @@ fn add_scalables<M>(
     Ok(())
 }
 
-
-impl<M: Clone> ScalableStructure<M> {
-    pub fn construct(&self) -> Structure<M> {
+impl ScalableCoords {
+    pub fn construct(&self) -> Coords {
         match self {
-            &ScalableStructure::KnownLayers {
-                ref layer_builder, ref meta,
+            &ScalableCoords::KnownLayers {
+                ref layer_builder,
             } => {
-                layer_builder.assemble().with_metadata(meta.to_vec())
+                layer_builder.assemble()
             },
 
-            &ScalableStructure::UnknownLayers {
-                ref scales, ref lattice, ref fracs, ref meta,
+            &ScalableCoords::UnknownLayers {
+                ref scales, ref lattice, ref fracs,
             } => {
-                Structure::new(
+                Coords::new(
                     &Lattice::diagonal(scales) * lattice,
                     CoordsKind::Fracs(fracs.to_vec()),
-                    meta.to_vec(),
                 )
             },
         }
     }
 
-    pub fn from_unlayered(structure: Structure<M>) -> Self {
+    pub fn from_unlayered(
+        coords: Coords,
+    ) -> Self {
         let scales = [1.0; 3];
-        let fracs = structure.to_fracs();
-        let lattice = structure.lattice().clone();
-        let meta = structure.metadata().to_vec();
-        ScalableStructure::UnknownLayers { scales, fracs, lattice, meta }
+        let fracs = coords.to_fracs();
+        let lattice = coords.lattice().clone();
+        ScalableCoords::UnknownLayers { scales, fracs, lattice }
     }
 
     pub fn from_layer_search_results(
-        structure: Structure<M>,
+        coords: Coords,
         cfg: &cfg::LayerSearch,
         layers: &LayersPerUnitCell,
     ) -> Self {
@@ -264,19 +265,18 @@ impl<M: Clone> ScalableStructure<M> {
         let initial_vacuum_sep = gaps.pop().unwrap();
         let initial_layer_seps = gaps;
 
-        let lattice = structure.lattice().clone();
-        let meta = structure.metadata().to_vec();
+        let lattice = coords.lattice().clone();
         let axis = require_simple_axis_normal(V3(cfg.normal), &lattice).unwrap();
 
         let (mut fracs_in_plane, mut carts_along_normal) = (vec![], vec![]);
-        for layer_structure in layers.partition_into_contiguous_layers(V3(cfg.normal), structure) {
-            let mut fracs = layer_structure.to_fracs();
+        for layer_coords in layers.partition_into_contiguous_layers(V3(cfg.normal), coords) {
+            let mut fracs = layer_coords.to_fracs();
             for v in &mut fracs {
                 v[axis] = 0.0;
             }
             fracs_in_plane.push(fracs);
 
-            let carts = layer_structure.to_carts().into_iter().map(|v| v[axis]).collect();
+            let carts = layer_coords.to_carts().into_iter().map(|v| v[axis]).collect();
             carts_along_normal.push(carts);
         }
 
@@ -291,6 +291,6 @@ impl<M: Clone> ScalableStructure<M> {
             part: Some(layers.get_part()),
             check_intralayer_distance: Some(cfg.threshold),
         }).unwrap();
-        ScalableStructure::KnownLayers { layer_builder, meta }
+        ScalableCoords::KnownLayers { layer_builder }
     }
 }

@@ -8,6 +8,7 @@ use ::{FailResult, FailOk};
 use ::rsp2_tasks_config::{self as cfg, Settings};
 use ::traits::{AsPath};
 use ::phonopy::{DirWithBands};
+use ::hlist_aliases::*;
 
 use ::math::basis::Basis3;
 
@@ -15,7 +16,7 @@ use ::rsp2_slice_math::{v, V, vdot};
 
 use ::slice_of_array::prelude::*;
 use ::rsp2_array_types::{V3};
-use ::rsp2_structure::{ElementStructure};
+use ::rsp2_structure::{Coords, Element};
 use ::phonopy::Builder as PhonopyBuilder;
 use ::math::bands::ScMatrix;
 
@@ -30,28 +31,31 @@ impl TrialDir {
         atom_layers: &Option<Vec<usize>>,
         layer_sc_mats: &Option<Vec<ScMatrix>>,
         phonopy: &PhonopyBuilder,
-        original_structure: ElementStructure,
-    ) -> FailResult<(ElementStructure, GammaSystemAnalysis, DirWithBands<Box<AsPath>>)>
+        original_coords: Coords,
+        meta: HList1<
+            &[Element],
+        >,
+    ) -> FailResult<(Coords, GammaSystemAnalysis, DirWithBands<Box<AsPath>>)>
     {
-        let mut from_structure = original_structure;
+        let mut from_coords = original_coords;
         let mut loop_state = EvLoopFsm::new(&settings.ev_loop);
         loop {
-            // move out of from_structure so that Rust's control-flow analysis
+            // move out of from_coords so that Rust's control-flow analysis
             // will make sure we put something back.
-            let structure = from_structure;
+            let coords = from_coords;
             let iteration = loop_state.iteration;
 
             trace!("============================");
             trace!("Begin relaxation # {}", iteration);
 
-            let structure = do_relax(pot, &settings.cg, structure)?;
+            let coords = do_relax(pot, &settings.cg, coords, meta.sculpt().0)?;
 
             trace!("============================");
 
             self.write_poscar(
                 &format!("structure-{:02}.1.vasp", iteration),
                 &format!("Structure after CG round {}", iteration),
-                &structure,
+                &coords, meta.sculpt().0,
             )?;
 
             let aux_info = {
@@ -59,7 +63,8 @@ impl TrialDir {
 
                 // HACK
                 let masses = {
-                    structure.metadata().iter()
+                    let hlist_pat![elements] = meta;
+                    elements.iter()
                         .map(|&s| ::common::element_mass(s))
                         .collect()
                 };
@@ -80,7 +85,8 @@ impl TrialDir {
                 };
 
                 self.do_post_relaxation_computations(
-                    settings, save_bands.as_ref(), pot, aux_info, phonopy, &structure,
+                    settings, save_bands.as_ref(), pot, aux_info, phonopy,
+                    &coords, meta,
                 )?
             };
 
@@ -90,25 +96,25 @@ impl TrialDir {
                 write_eigen_info_for_humans(&ev_analysis, &mut |s| FailOk(info!("{}", s)))?;
             }
 
-            let (structure, did_chasing) = self.maybe_do_ev_chasing(
-                settings, pot, structure, &ev_analysis, &evals, &evecs,
+            let (coords, did_chasing) = self.maybe_do_ev_chasing(
+                settings, pot, coords, meta, &ev_analysis, &evals, &evecs,
             )?;
 
             self.write_poscar(
                 &format!("structure-{:02}.2.vasp", iteration),
                 &format!("Structure after eigenmode-chasing round {}", iteration),
-                &structure,
+                &coords, meta.sculpt().0,
             )?;
 
-            warn_on_improvable_lattice_params(pot, &structure)?;
+            warn_on_improvable_lattice_params(pot, &coords, meta.sculpt().0)?;
 
             match loop_state.step(did_chasing) {
                 EvLoopStatus::KeepGoing => {
-                    from_structure = structure;
+                    from_coords = coords;
                     continue;
                 },
                 EvLoopStatus::Done => {
-                    return Ok((structure, ev_analysis, bands_dir));
+                    return Ok((coords, ev_analysis, bands_dir));
                 },
                 EvLoopStatus::ItsBadGuys(msg) => {
                     bail!("{}", msg);
@@ -122,14 +128,16 @@ impl TrialDir {
         &self,
         settings: &Settings,
         pot: &PotentialBuilder,
-        structure: ElementStructure,
+        coords: Coords,
+        meta: HList1<
+            &[Element],
+        >,
         ev_analysis: &GammaSystemAnalysis,
         evals: &[f64],
         evecs: &Basis3,
-    ) -> FailResult<(ElementStructure, DidEvChasing)>
+    ) -> FailResult<(Coords, DidEvChasing)>
     {Ok({
         use super::acoustic_search::ModeKind;
-        let structure = structure;
         let bad_evs: Vec<_> = {
             let classifications = ev_analysis.ev_classifications.as_ref().expect("(bug) always computed!");
             izip!(1.., evals, &evecs.0, &classifications.0)
@@ -141,13 +149,14 @@ impl TrialDir {
         };
 
         match bad_evs.len() {
-            0 => (structure, DidEvChasing(false)),
+            0 => (coords, DidEvChasing(false)),
             n => {
                 trace!("Chasing {} bad eigenvectors...", n);
                 let structure = do_eigenvector_chase(
                     pot,
                     &settings.ev_chase,
-                    structure,
+                    coords,
+                    meta.sculpt().0,
                     &bad_evs[..],
                 )?;
                 (structure, DidEvChasing(true))
@@ -212,41 +221,48 @@ impl EvLoopFsm {
 fn do_relax(
     pot: &PotentialBuilder,
     cg_settings: &cfg::Acgsd,
-    structure: ElementStructure,
-) -> FailResult<ElementStructure>
+    coords: Coords,
+    meta: HList1<
+        &[Element],
+    >,
+) -> FailResult<Coords>
 {Ok({
-    let mut flat_diff_fn = pot.threaded(true).initialize_flat_diff_fn(structure.clone())?;
+    let mut flat_diff_fn = pot.threaded(true).initialize_flat_diff_fn(::compat(&coords, meta.sculpt().0))?;
     let relaxed_flat = ::rsp2_minimize::acgsd(
         cg_settings,
-        structure.to_carts().flat(),
+        coords.to_carts().flat(),
         &mut *flat_diff_fn,
     ).unwrap().position;
-    structure.with_carts(relaxed_flat.nest().to_vec())
+    coords.with_carts(relaxed_flat.nest().to_vec())
 })}
 
 fn do_eigenvector_chase(
     pot: &PotentialBuilder,
     chase_settings: &cfg::EigenvectorChase,
-    mut structure: ElementStructure,
+    mut coords: Coords,
+    meta: HList1<
+        &[Element],
+    >,
     bad_evecs: &[(String, &[V3])],
-) -> FailResult<ElementStructure>
+) -> FailResult<Coords>
 {Ok({
     match chase_settings {
         cfg::EigenvectorChase::OneByOne => {
             for (name, evec) in bad_evecs {
-                let (alpha, new_structure) = do_minimize_along_evec(pot, structure, &evec[..])?;
+                let (alpha, new_coords) = do_minimize_along_evec(pot, coords, meta, &evec[..])?;
                 info!("Optimized along {}, a = {:e}", name, alpha);
 
-                structure = new_structure;
+                coords = new_coords;
             }
-            structure
+            coords
         },
         cfg::EigenvectorChase::Acgsd(cg_settings) => {
             let evecs: Vec<_> = bad_evecs.iter().map(|&(_, ev)| ev).collect();
             do_cg_along_evecs(
                 pot,
                 cg_settings,
-                structure,
+                coords,
+                meta.sculpt().0,
                 &evecs[..],
             )?
         },
@@ -256,29 +272,35 @@ fn do_eigenvector_chase(
 fn do_cg_along_evecs<V, I>(
     pot: &PotentialBuilder,
     cg_settings: &cfg::Acgsd,
-    structure: ElementStructure,
+    coords: Coords,
+    meta: HList1<
+        &[Element],
+    >,
     evecs: I,
-) -> FailResult<ElementStructure>
+) -> FailResult<Coords>
 where
     V: AsRef<[V3]>,
     I: IntoIterator<Item=V>,
 {Ok({
     let evecs: Vec<_> = evecs.into_iter().collect();
     let refs: Vec<_> = evecs.iter().map(|x| x.as_ref()).collect();
-    _do_cg_along_evecs(pot, cg_settings, structure, &refs)?
+    _do_cg_along_evecs(pot, cg_settings, coords, meta, &refs)?
 })}
 
 fn _do_cg_along_evecs(
     pot: &PotentialBuilder,
     cg_settings: &cfg::Acgsd,
-    structure: ElementStructure,
+    coords: Coords,
+    meta: HList1<
+        &[Element],
+    >,
     evecs: &[&[V3]],
-) -> FailResult<ElementStructure>
+) -> FailResult<Coords>
 {Ok({
     let flat_evecs: Vec<_> = evecs.iter().map(|ev| ev.flat()).collect();
-    let init_pos = structure.to_carts();
+    let init_pos = coords.to_carts();
 
-    let mut flat_diff_fn = pot.threaded(true).initialize_flat_diff_fn(structure.clone())?;
+    let mut flat_diff_fn = pot.threaded(true).initialize_flat_diff_fn(::compat(&coords, meta.sculpt().0))?;
     let relaxed_coeffs = ::rsp2_minimize::acgsd(
         cg_settings,
         &vec![0.0; evecs.len()],
@@ -286,20 +308,22 @@ fn _do_cg_along_evecs(
     ).unwrap().position;
 
     let final_flat_pos = flat_constrained_position(init_pos.flat(), &relaxed_coeffs, &flat_evecs);
-    structure.with_carts(final_flat_pos.nest().to_vec())
+    coords.with_carts(final_flat_pos.nest().to_vec())
 })}
 
 fn do_minimize_along_evec(
     pot: &PotentialBuilder,
-    structure: ElementStructure,
+    from_coords: Coords,
+    meta: HList1<
+        &[Element],
+    >,
     evec: &[V3],
-) -> FailResult<(f64, ElementStructure)>
+) -> FailResult<(f64, Coords)>
 {Ok({
-    let mut diff_fn = pot.threaded(true).initialize_flat_diff_fn(structure.clone())?;
+    let mut diff_fn = pot.threaded(true).initialize_flat_diff_fn(::compat(&from_coords, meta.sculpt().0))?;
 
-    let from_structure = structure;
     let direction = &evec[..];
-    let from_pos = from_structure.to_carts();
+    let from_pos = from_coords.to_carts();
     let pos_at_alpha = |alpha| {
         let V(pos) = v(from_pos.flat()) + alpha * v(direction.flat());
         pos
@@ -311,28 +335,31 @@ fn do_minimize_along_evec(
     })??.alpha;
     let pos = pos_at_alpha(alpha);
 
-    (alpha, from_structure.with_carts(pos.nest().to_vec()))
+    (alpha, from_coords.with_carts(pos.nest().to_vec()))
 })}
 
 fn warn_on_improvable_lattice_params(
     pot: &PotentialBuilder,
-    structure: &ElementStructure,
+    coords: &Coords,
+    meta: HList1<
+        &[Element],
+    >,
 ) -> FailResult<()>
 {Ok({
     const SCALE_AMT: f64 = 1e-6;
-    let mut diff_fn = pot.initialize_diff_fn(structure.clone())?;
-    let center_value = diff_fn.compute_value(structure)?;
+    let mut diff_fn = pot.initialize_diff_fn(::compat(coords, meta.sculpt().0))?;
+    let center_value = diff_fn.compute_value(&::compat(coords, meta.sculpt().0))?;
 
     let shrink_value = {
-        let mut structure = structure.clone();
-        structure.scale_vecs(&[1.0 - SCALE_AMT, 1.0 - SCALE_AMT, 1.0]);
-        diff_fn.compute_value(&structure)?
+        let mut coords = coords.clone();
+        coords.scale_vecs(&[1.0 - SCALE_AMT, 1.0 - SCALE_AMT, 1.0]);
+        diff_fn.compute_value(&::compat(&coords, meta.sculpt().0))?
     };
 
     let enlarge_value = {
-        let mut structure = structure.clone();
-        structure.scale_vecs(&[1.0 + SCALE_AMT, 1.0 + SCALE_AMT, 1.0]);
-        diff_fn.compute_value(&structure)?
+        let mut coords = coords.clone();
+        coords.scale_vecs(&[1.0 + SCALE_AMT, 1.0 + SCALE_AMT, 1.0]);
+        diff_fn.compute_value(&::compat(&coords, meta.sculpt().0))?
     };
 
     if shrink_value.min(enlarge_value) < center_value {

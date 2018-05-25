@@ -237,11 +237,11 @@ pub fn bond_test() {
         let input = PathFile::new(matches.expect_value_of("input"))?;
         let filetype = OptionalFileType::or_guess(filetype, &input);
 
-        let (structure, _, _) = ::cmd::read_optimizable_structure(None, filetype, &input)?;
-        let structure = structure.construct(); // reckless
+        let (coords, _, _, _) = ::cmd::read_optimizable_structure(None, filetype, &input)?;
+        let coords = coords.construct(); // reckless
 
-        let bonds = ::math::bonds::FracBonds::from_brute_force_very_dumb(&structure, 1.8)?;
-        let bonds = bonds.to_cart_bonds(&structure);
+        let bonds = ::math::bonds::FracBonds::from_brute_force_very_dumb(&coords, 1.8)?;
+        let bonds = bonds.to_cart_bonds(&coords);
         ::serde_json::to_writer(::std::io::stdout(), &bonds)?;
         println!(); // flush, dammit
         Ok(())
