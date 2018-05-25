@@ -24,8 +24,9 @@ serde_yaml = "0.7"
 rsp2-structure = { path = "../../structure" }
 rsp2-array-types = { path = "../../util/array-types" }
 rsp2-array-utils = { path = "../../util/array" }
+rsp2-soa-ops = { path = "../../util/soa-ops" }
 rsp2-util-macros = { path = "../../util/macros" }
 
 [features]
-nightly = ["beta", "rsp2-array-types/nightly", "rsp2-array-utils/nightly", "rsp2-structure/nightly", "rsp2-util-macros/nightly"]
-beta = ["rsp2-array-types/beta", "rsp2-array-utils/beta", "rsp2-structure/beta", "rsp2-util-macros/beta"]
+nightly = ["beta", "rsp2-array-types/nightly", "rsp2-array-utils/nightly", "rsp2-soa-ops/nightly", "rsp2-structure/nightly", "rsp2-util-macros/nightly"]
+beta = ["rsp2-array-types/beta", "rsp2-array-utils/beta", "rsp2-soa-ops/beta", "rsp2-structure/beta", "rsp2-util-macros/beta"]

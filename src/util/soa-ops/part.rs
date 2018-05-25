@@ -125,6 +125,33 @@ impl<L> Part<L> {
         unsafe { mem::transmute::<Vec<Option<&L>>, Vec<&L>>(temp) }
     }
 
+    pub fn owned_key_vec(&self) -> Vec<L>
+    where L: Clone,
+    { self.key_vec().into_iter().cloned().collect() }
+
+    /// Get the permutation that would restore the original order of the data,
+    /// if one were to simply concatenate the partitioned structures produced
+    /// by applying this `Part`.
+    pub fn restoring_perm(&self) -> Perm
+    {
+        // get the composite perm that produces the concatenated order from the original
+        // (note: not the same as `composite_perm_for_part_lifo` because concatenation
+        //        produces the fifo order)
+        let mut perm_vec = vec![];
+        for (_, ref piece) in &self.part {
+            // (due to the convention that the order within a part matches the original order,
+            //  we must sort the indices in each part)
+            // (FIXME: maybe they should be stored as already sorted in the Part, since
+            //         the order of indices in Part's partitions never matters anyways?)
+            let mut sorted_piece = piece.clone();
+            sorted_piece.sort();
+            perm_vec.extend(sorted_piece);
+        }
+
+        // invert to restore the original order
+        Perm::from_raw_inv(perm_vec).expect("BUG")
+    }
+
     fn validate_part(part: &Parted<L, Vec<usize>>, index_limit: usize) -> bool
     {
         let slices: Vec<_> = part.iter().map(|(_, v)| &v[..]).collect();
@@ -239,6 +266,7 @@ where
 #[deny(dead_code)]
 mod tests {
     use super::*;
+    use ::rand::Rng;
 
     // FIXME: I don't see any tests where two labels have the same value...
 
@@ -297,6 +325,20 @@ mod tests {
             Vec::<()>::new().into_partitions(&part),
             vec![],
         );
+
+        // an empty partition in a non-empty Part
+        let vec = vec!['a', 'b', 'c', 'd', 'e', 'f'];
+        let part = Part::new(vec![
+            (0, vec![1, 5]),
+            (1, vec![]),
+            (2, vec![4, 0, 2, 3]),
+        ]).unwrap();
+        let expected = vec![
+            (0, vec!['b', 'f']),
+            (1, vec![]),
+            (2, vec!['a', 'c', 'd', 'e']),
+        ];
+        assert_eq!(vec.into_partitions(&part), expected);
     }
 
     #[test]
@@ -345,5 +387,40 @@ mod tests {
             assert_eq!(&*drop_history.borrow(), &vec!['a', 'b', 'c', 'd', 'e', 'f']);
         }
         assert_eq!(&*drop_history.borrow(), &vec!['a', 'b', 'c', 'd', 'e', 'f']);
+    }
+
+    fn random_part(len: usize) -> Part<usize> {
+        let mut remaining: Vec<_> = Perm::random(len).into_vec();
+        let mut part = vec![];
+        while !remaining.is_empty() {
+            let label = part.len();
+
+            let n = ::rand::thread_rng().gen_range(0, usize::min(4, remaining.len() + 1));
+            let start = remaining.len() - n;
+            part.push((label, remaining.drain(start..).collect()))
+        }
+        Part::new(part).unwrap()
+    }
+
+    #[test]
+    fn restoring_perm() {
+        assert_eq!(
+            Part::<()>::new(vec![]).unwrap().restoring_perm(),
+            Perm::eye(0),
+        );
+
+        let original: Vec<_> = "abcdefghijklmnop".chars().collect();
+        for _ in 0..4 {
+            let part = random_part(original.len());
+
+            let restored = {
+                original.clone()
+                    .into_unlabeled_partitions(&part)
+                    .collect::<Vec<_>>()
+                    .concat()
+                    .permuted_by(&part.restoring_perm())
+            };
+            assert_eq!(original, restored, "{:?}", part);
+        }
     }
 }

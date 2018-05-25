@@ -1,4 +1,4 @@
-pub(crate) mod layer;
+pub mod layer;
 pub(crate) mod supercell;
 
 // these are allow(unused) because they contain

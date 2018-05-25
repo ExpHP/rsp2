@@ -37,7 +37,6 @@ use ::FailResult;
 use ::math::basis::{Basis3, Ket3};
 
 use ::rsp2_newtype_indices::cast_index;
-use ::rsp2_array_types::M33;
 use ::slice_of_array::prelude::*;
 
 use ::std::process;
@@ -118,6 +117,7 @@ struct Matrix<'a> {
     pub row_ptr: &'a [usize],
 }
 
+#[allow(dead_code)]
 #[derive(Serialize)]
 enum Which {
     #[serde(rename = "LM")] LargestMagnitude,
@@ -127,6 +127,7 @@ enum Which {
     #[serde(rename = "BE")] HalfAndHalf,
 }
 
+#[allow(dead_code)]
 #[derive(Serialize)]
 enum ShiftInvertMode {
     /// `w'[i] = 1 / (w[i] - sigma)`

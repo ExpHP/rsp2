@@ -41,6 +41,8 @@ pub mod supercell {
 
 pub use ::algo::find_perm;
 
+pub use ::algo::layer;
+
 mod core;
 mod algo;
 mod oper;
@@ -56,8 +58,6 @@ pub use ::core::structure::{Structure, Coords, ElementStructure};
 pub use ::core::structure::NonEquivalentLattice;
 
 pub use ::element::Element;
-
-pub use algo::layer::{find_layers, Layers, LayersPerUnitCell};
 
 // yuck. would rather not expose this yet
 pub use ::oper::symmops::{FracRot, FracTrans, FracOp};

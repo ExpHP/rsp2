@@ -6,7 +6,8 @@
 
 use ::FailResult;
 use ::rsp2_structure::{Structure, ElementStructure, consts};
-use ::rsp2_structure::{Layers, Element};
+use ::rsp2_structure::{Element};
+use ::rsp2_structure::layer::Layers;
 use ::rsp2_tasks_config as cfg;
 #[allow(unused)] // rustc bug
 use ::rsp2_array_types::{V3, Unvee};
@@ -616,7 +617,7 @@ mod lammps {
             //       the potential, but IMO it's just cleaner if we don't need to.
             fn find_layers<M>(&self, structure: &Structure<M>) -> Layers
             {
-                ::rsp2_structure::find_layers(&structure, &V3([0, 0, 1]), 0.25)
+                ::rsp2_structure::layer::find_layers(&structure, V3([0, 0, 1]), 0.25)
                     .unwrap_or_else(|e| {
                         panic!("Failure to determine layers when using kolmogorov/crespi/z: {}", e);
                     })

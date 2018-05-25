@@ -1,3 +1,4 @@
+extern crate rsp2_soa_ops;
 extern crate rsp2_structure;
 extern crate rsp2_array_utils;
 extern crate rsp2_array_types;
@@ -18,3 +19,4 @@ pub fn FailOk<T>(x: T) -> Result<T, ::failure::Error> { Ok(x) }
 pub mod poscar;
 pub mod xyz;
 pub mod layers_yaml;
+pub mod assemble;

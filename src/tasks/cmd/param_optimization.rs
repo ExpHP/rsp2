@@ -1,10 +1,10 @@
-use ::{FailResult, FailOk};
+use ::{FailResult};
 use ::cmd::potential::{PotentialBuilder, DiffFn};
 
 use ::rsp2_minimize::exact_ls::{Value, Golden};
 use ::rsp2_structure::{Lattice, Structure, CoordsKind};
-use ::rsp2_soa_ops::{Perm, Permute};
-use ::rsp2_structure_io::layers_yaml::Assemble;
+use ::rsp2_structure::layer::{LayersPerUnitCell, require_simple_axis_normal};
+use ::rsp2_structure_io::assemble::{Assemble, RawAssemble};
 use ::rsp2_array_types::{V3};
 use ::rsp2_tasks_config as cfg;
 
@@ -14,23 +14,15 @@ pub(crate) fn optimize_layer_parameters<M: Clone + 'static>(
     mut structure_builder: ScalableStructure<M>,
 ) -> FailResult<ScalableStructure<M>>
 {Ok({
-
-    let cfg::ScaleRanges {
-        scalables: ref scalable_cfgs,
-        warn_threshold,
-        fail,
-        repeat_count,
-    } = *settings;
-
     // Gather a bunch of setter functions and search ranges
     let scalables = {
         let mut scalables = vec![];
-        for cfg in scalable_cfgs {
+        for cfg in &settings.scalables {
             add_scalables(
                 cfg,
                 &structure_builder,
                 |s| scalables.push(s),
-            );
+            )?;
         }
         scalables
     };
@@ -53,11 +45,11 @@ pub(crate) fn optimize_layer_parameters<M: Clone + 'static>(
     // In future iterations, parameters other than the one currently being
     // relaxed may be set to different, better values, which may in turn
     // cause different values to be chosen for the earlier parameters.
-    for _ in 0..repeat_count {
-        for &Scalable { ref name, spec, ref setter } in &scalables {
+    for _ in 0..settings.repeat_count {
+        for &Scalable { ref name, ref spec, ref setter } in &scalables {
             trace!("Optimizing {}", name);
 
-            let best = match spec {
+            let best = match *spec {
                 cfg::ScalableRange::Exact { value } => value,
                 cfg::ScalableRange::Search { guess: _, range } => {
                     let best = Golden::new()
@@ -76,15 +68,25 @@ pub(crate) fn optimize_layer_parameters<M: Clone + 'static>(
                         // note: result is Result<Result<_, E>, GoldenSearchError>
                         })??; // ?!??!!!?
 
-                    if let Some(thresh) = warn_threshold {
+                    if let Some(thresh) = settings.warn_threshold {
+                        macro_rules! tell {
+                            ($($t:tt)*) => {
+                                if settings.fail { error!($($t)*); }
+                                else { warn!($($t)*); }
+                            }
+                        }
+
                         // use signed differences so that all values outside violate the threshold
                         let lo = range.0.min(range.1);
                         let hi = range.0.max(range.1);
                         if (best - range.0).min(range.1 - best) / (range.1 - range.0) < thresh {
-                            warn!("Relaxed value of '{}' is suspiciously close to limits!", name);
-                            warn!("  lo: {:e}", lo);
-                            warn!(" val: {:e}", best);
-                            warn!("  hi: {:e}", hi);
+                            tell!("Relaxed value of '{}' is suspiciously close to limits!", name);
+                            tell!("  lo: {:e}", lo);
+                            tell!(" val: {:e}", best);
+                            tell!("  hi: {:e}", hi);
+                            if settings.fail {
+                                bail!("Parameter optimization failed with 'fail = true'");
+                            }
                         }
                     }
 
@@ -109,12 +111,6 @@ struct Scalable<M> {
 pub enum ScalableStructure<M> {
     KnownLayers {
         layer_builder: Assemble,
-
-        // permutation that restores the true order of the atoms
-        // from the output of Assemble.
-        perm_from_assembled: Perm,
-
-        // composite meta, after the perm has already been applied
         meta: Vec<M>,
     },
     UnknownLayers {
@@ -125,33 +121,10 @@ pub enum ScalableStructure<M> {
     },
 }
 
-impl<M: Clone> ScalableStructure<M> {
-    fn construct(&self) -> Structure<M> {
-        match self {
-            &ScalableStructure::KnownLayers {
-                ref layer_builder, ref perm_from_assembled, ref meta,
-            } => {
-                layer_builder.assemble()
-                    .permuted_by(perm_from_assembled)
-                    .with_metadata(meta.to_vec())
-            },
-            &ScalableStructure::UnknownLayers {
-                ref scales, ref lattice, ref fracs, ref meta,
-            } => {
-                Structure::new(
-                    &Lattice::diagonal(scales) * lattice,
-                    CoordsKind::Fracs(fracs.to_vec()),
-                    meta.to_vec(),
-                )
-            },
-        }
-    }
-}
-
 fn add_scalables<M>(
     cfg: &cfg::Scalable,
     structure: &ScalableStructure<M>,
-    emit: impl FnMut(Scalable<M>),
+    mut emit: impl FnMut(Scalable<M>),
 ) -> FailResult<()> {
     // validate
     match (cfg, structure) {
@@ -173,6 +146,8 @@ fn add_scalables<M>(
             &cfg::Scalable::LayerSeps { .. },
             &ScalableStructure::UnknownLayers { .. },
         ) => bail!("cannot scale layer separations when layers have not been determined"),
+
+        _ => {},
     }
 
     // obtain data to be used by some scalables
@@ -189,7 +164,7 @@ fn add_scalables<M>(
             emit(Scalable {
                 // FIXME these should get unique names
                 name: format!("lattice param"),
-                setter: Box::new(|s, val| {
+                setter: Box::new(move |s, val| {
                     let scales = match s {
                         ScalableStructure::KnownLayers { layer_builder, .. } => &mut layer_builder.scale,
                         ScalableStructure::UnknownLayers { scales, .. } => scales,
@@ -227,7 +202,7 @@ fn add_scalables<M>(
             for k in 0..n_layer_seps {
                 emit(Scalable {
                     name: format!("layer separation {}", k),
-                    setter: Box::new(|s, val| match s {
+                    setter: Box::new(move |s, val| match s {
                         ScalableStructure::UnknownLayers { .. } => unreachable!(),
                         ScalableStructure::KnownLayers { layer_builder, .. } => {
                             layer_builder.layer_seps()[k] = val;
@@ -239,4 +214,83 @@ fn add_scalables<M>(
         },
     }
     Ok(())
+}
+
+
+impl<M: Clone> ScalableStructure<M> {
+    pub fn construct(&self) -> Structure<M> {
+        match self {
+            &ScalableStructure::KnownLayers {
+                ref layer_builder, ref meta,
+            } => {
+                layer_builder.assemble().with_metadata(meta.to_vec())
+            },
+
+            &ScalableStructure::UnknownLayers {
+                ref scales, ref lattice, ref fracs, ref meta,
+            } => {
+                Structure::new(
+                    &Lattice::diagonal(scales) * lattice,
+                    CoordsKind::Fracs(fracs.to_vec()),
+                    meta.to_vec(),
+                )
+            },
+        }
+    }
+
+    pub fn from_unlayered(structure: Structure<M>) -> Self {
+        let scales = [1.0; 3];
+        let fracs = structure.to_fracs();
+        let lattice = structure.lattice().clone();
+        let meta = structure.metadata().to_vec();
+        ScalableStructure::UnknownLayers { scales, fracs, lattice, meta }
+    }
+
+    pub fn from_layer_search_results(
+        structure: Structure<M>,
+        cfg: &cfg::LayerSearch,
+        layers: &LayersPerUnitCell,
+    ) -> Self {
+        let mut gaps = layers.gaps.clone();
+        assert!(
+            // LayersPerUnitCell has some important invariants that prevent us
+            // from being able to reorder its layers to move the vacuum separation
+            // to the end.  It will need to already be there, or the positions will
+            // have to be translated. (or LayersPerUnitCell will need to lose some
+            // of its invariants)
+            gaps.iter().all(|&x| x <= gaps.last().unwrap() * 1.25),
+            "This currently only supports vacuum sep being the last gap.",
+        );
+        let initial_vacuum_sep = gaps.pop().unwrap();
+        let initial_layer_seps = gaps;
+
+        let lattice = structure.lattice().clone();
+        let meta = structure.metadata().to_vec();
+        let axis = require_simple_axis_normal(V3(cfg.normal), &lattice).unwrap();
+
+        let (mut fracs_in_plane, mut carts_along_normal) = (vec![], vec![]);
+        for layer_structure in layers.partition_into_contiguous_layers(V3(cfg.normal), structure) {
+            let mut fracs = layer_structure.to_fracs();
+            for v in &mut fracs {
+                v[axis] = 0.0;
+            }
+            fracs_in_plane.push(fracs);
+
+            let carts = layer_structure.to_carts().into_iter().map(|v| v[axis]).collect();
+            carts_along_normal.push(carts);
+        }
+
+        let layer_builder = Assemble::from_raw(RawAssemble {
+            normal_axis: cfg.normal.iter().position(|&x| x == 1).unwrap(),
+            lattice,
+            fracs_in_plane,
+            carts_along_normal,
+            initial_vacuum_sep,
+            initial_layer_seps,
+            initial_scale: Some([1.0; 3]),
+            part: Some(layers.get_part()),
+            check_intralayer_distance: Some(cfg.threshold),
+        }).unwrap();
+        ScalableStructure::KnownLayers { layer_builder, meta }
+    }
 }

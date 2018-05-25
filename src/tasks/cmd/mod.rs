@@ -6,6 +6,7 @@ use self::potential::{PotentialBuilder, DiffFn};
 mod potential;
 
 use self::ev_analyses::GammaSystemAnalysis;
+use self::param_optimization::ScalableStructure;
 mod ev_analyses;
 
 use self::trial::TrialDir;
@@ -32,7 +33,8 @@ use ::rsp2_slice_math::{vnorm};
 use ::slice_of_array::prelude::*;
 use ::rsp2_array_utils::arr_from_fn;
 use ::rsp2_array_types::{V3, M33, Unvee};
-use ::rsp2_structure::{Coords, ElementStructure, Lattice};
+use ::rsp2_structure::{Coords, Element, ElementStructure, Lattice};
+use ::rsp2_structure::layer::LayersPerUnitCell;
 use ::phonopy::Builder as PhonopyBuilder;
 use ::math::bands::ScMatrix;
 use ::rsp2_structure_io::poscar;
@@ -66,13 +68,20 @@ impl TrialDir {
         cli: CliArgs,
     ) -> FailResult<()>
     {Ok({
-        let pot = PotentialBuilder::from_config(&settings.threading, &settings.potential.kind);
+        let pot = PotentialBuilder::from_config(&settings.threading, &settings.potential);
 
-        let (original_structure, atom_layers, layer_sc_mats) = read_structure_file(
-            Some(settings), file_format, input, Some(&*pot),
-        )?;
+        let (optimizable_structure, atom_layers, layer_sc_mats) = {
+            read_optimizable_structure(settings.layer_search.as_ref(), file_format, input)?
+        };
+        let original_structure = {
+            ::cmd::param_optimization::optimize_layer_parameters(
+                &settings.scale_ranges,
+                &pot,
+                optimizable_structure,
+            )?.construct()
+        };
 
-        self.write_poscar("initial.vasp", "Initial structure", &original_structure)?;
+        self.write_poscar("initial.vasp", "Initial structure (after lattice optimization)", &original_structure)?;
         let phonopy = phonopy_builder_from_settings(&settings.phonons, original_structure.lattice());
 
         let (structure, ev_analysis, final_bands_dir) = self.do_main_ev_loop(
@@ -536,7 +545,7 @@ impl TrialDir {
     {Ok({
         use ::rsp2_structure_io::poscar;
 
-        let pot = PotentialBuilder::from_config(&settings.threading, &settings.potential.kind);
+        let pot = PotentialBuilder::from_config(&settings.threading, &settings.potential);
 
         let structure = poscar::load(self.read_file("./final.vasp")?)?;
         let phonopy = phonopy_builder_from_settings(&settings.phonons, structure.lattice());
@@ -563,7 +572,7 @@ impl TrialDir {
     {Ok({
         use ::rsp2_structure_io::poscar;
 
-        let pot = PotentialBuilder::from_config(&settings.threading, &settings.potential.kind);
+        let pot = PotentialBuilder::from_config(&settings.threading, &settings.potential);
 
         let structure = poscar::load(self.read_file("./final.vasp")?)?;
         let phonopy = phonopy_builder_from_settings(&settings.phonons, structure.lattice());
@@ -743,37 +752,39 @@ pub(crate) fn run_dynmat_test(phonopy_dir: &PathDir) -> FailResult<()>
 
 //=================================================================
 
-pub(crate) fn read_structure_file(
-    // FIXME this option is dumb; basically, it's so that code can use this function
-    //       even without needing an entire settings struct.
-    settings: Option<&Settings>,
+// Reads a POSCAR or layers.yaml into an intermediate form which can have its
+// parameters optimized before producing a structure. (it also returns some other
+// layer-related data).
+//
+// Be aware that layers.yaml files usually *require* optimization.
+//
+// A POSCAR will have its layers searched if the relevant config section is provided.
+pub(crate) fn read_optimizable_structure(
+    layer_search: Option<&cfg::LayerSearch>,
     file_format: StructureFileType,
     input: &PathFile,
-    // will be used to optimize parameters for layers.yaml if provided.
-    // will be ignored for poscars.
-    // FIXME: that's really inconsistent and dumb.
-    //        (a function like this really shouldn't do ANY optimization,
-    //         but I don't see any other place to do it without mega refactoring...)
-    pot: Option<&PotentialBuilder>,
-) -> FailResult<(ElementStructure, Option<Vec<usize>>, Option<Vec<ScMatrix>>)> {
-    let (original_structure, atom_layers, layer_sc_mats);
+) -> FailResult<(ScalableStructure<Element>, Option<Vec<usize>>, Option<Vec<ScMatrix>>)> {
+    let (output, atom_layers, layer_sc_mats);
     match file_format {
         StructureFileType::Poscar => {
-            original_structure = poscar::load(input.read()?)?;
-            atom_layers = None;
-            layer_sc_mats = None;
+            let structure = poscar::load(input.read()?)?;
+
+            if let Some(cfg) = layer_search {
+                let layers = perform_layer_search(cfg, &structure)?;
+                output = ScalableStructure::from_layer_search_results(structure, cfg, &layers);
+                atom_layers = Some(layers.by_atom());
+                layer_sc_mats = None;
+            } else {
+                output = ScalableStructure::from_unlayered(structure);
+                atom_layers = None;
+                layer_sc_mats = None;
+            }
         },
         StructureFileType::LayersYaml => {
             use ::rsp2_structure_io::layers_yaml::load;
             use ::rsp2_structure_io::layers_yaml::load_layer_sc_info;
 
-            let mut layer_builder = load(input.read()?)?;
-            if let (Some(settings), Some(pot)) = (settings, pot) {
-                layer_builder = self::relaxation::optimize_layer_parameters(
-                    &settings.scale_ranges, pot, layer_builder,
-                )?;
-            }
-            original_structure = carbon(layer_builder.assemble());
+            let layer_builder = load(input.read()?)?;
 
             layer_sc_mats = Some({
                 load_layer_sc_info(input.read()?)?
@@ -782,22 +793,38 @@ pub(crate) fn read_structure_file(
                     .collect_vec()
             });
 
-            // FIXME: This is entirely unnecessary. We just read layers.yaml; we should
-            //        be able to get the layer assignments without a search like this!
-            atom_layers = Some({
-                trace!("Finding layers");
-                let layers =
-                    ::rsp2_structure::find_layers(&original_structure, &V3([0, 0, 1]), 0.25)?
-                        .per_unit_cell().expect("Structure is not layered?");
+            atom_layers = Some(layer_builder.atom_layers());
+            let meta = vec![CARBON; layer_builder.num_atoms()];
 
-                if let Some(settings) = settings {
-                    if let Some(expected) = settings.layers {
-                        assert_eq!(expected, layers.len() as u32);
-                    }
-                }
-                layers.by_atom()
-            });
+            output = ScalableStructure::KnownLayers { layer_builder, meta };
         },
     }
-    Ok((original_structure, atom_layers, layer_sc_mats))
+    Ok((output, atom_layers, layer_sc_mats))
 }
+
+pub(crate) fn perform_layer_search(
+    cfg: &cfg::LayerSearch,
+    coords: &Coords,
+) -> FailResult<LayersPerUnitCell>
+{Ok({
+    trace!("Finding layers...");
+    let &cfg::LayerSearch {
+        normal, threshold,
+        count: expected_count,
+    } = cfg;
+
+    let layers = {
+        ::rsp2_structure::layer::find_layers(coords, V3(normal), threshold)?
+            .per_unit_cell()
+            .expect("Structure is not layered?")
+    };
+
+    if let Some(expected) = expected_count {
+        assert_eq!(
+            layers.len() as u32, expected,
+            "Layer count discovered does not match expected 'count' in config!"
+        );
+    }
+
+    layers
+})}

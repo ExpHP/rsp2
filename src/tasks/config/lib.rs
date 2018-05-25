@@ -20,42 +20,69 @@ extern crate serde_yaml;
 extern crate serde;
 extern crate serde_ignored;
 
+extern crate failure;
+
 extern crate rsp2_minimize;
 
 #[macro_use]
 extern crate log;
 
 use ::std::io::Read;
+use ::failure::Error;
 pub use ::rsp2_minimize::acgsd::Settings as Acgsd;
 
 /// Provides an alternative to serde_yaml::from_reader where all of the
 /// expensive codegen has already been performed in this crate.
 pub trait YamlRead: for <'de> ::serde::Deserialize<'de> {
-    fn from_reader(mut r: impl Read) -> Result<Self, ::serde_yaml::Error>
+    fn from_reader(mut r: impl Read) -> Result<Self, Error>
     { YamlRead::from_dyn_reader(&mut r) }
 
-    fn from_dyn_reader(r: &mut Read) -> Result<Self, ::serde_yaml::Error> {
+    fn from_dyn_reader(r: &mut Read) -> Result<Self, Error> {
         // serde_ignored needs a Deserializer.
         // unlike serde_json, serde_yaml doesn't seem to expose a Deserializer that is
         // directly constructable from a Read... but it does impl Deserialize for Value.
-        Self::from_value(value_from_dyn_reader(r)?)
+        //
+        // However, on top of that, deserializing a Value through serde_ignored makes
+        // one lose all of the detail from the error messages. So...
+        //
+        // First, parse to a form that we can read from multiple times.
+        let mut s = String::new();
+        r.read_to_string(&mut s)?;
+
+        // try deserializing from Value, printing warnings on unused keys.
+        // (if value_from_dyn_reader fails, that error should be fine)
+        let value = value_from_str(&s)?;
+
+        match Self::__serde_ignored__from_value(value) {
+            Ok(out) => Ok(out),
+            Err(_) => {
+                // That error message was surely garbage. Let's re-parse again
+                // from the string, without serde_ignored:
+                Self::__serde_yaml__from_str(&s)?;
+                unreachable!();
+            }
+        }
     }
 
-    fn from_value(value: ::serde_yaml::Value) -> Result<Self, ::serde_yaml::Error>;
+    // trait-provided function definitions seem to be lazily monomorphized, so we
+    // must put the meat of what we need monomorphized directly into the impls
+    fn __serde_ignored__from_value(value: ::serde_yaml::Value) -> Result<Self, Error>;
+    fn __serde_yaml__from_str(s: &str) -> Result<Self, Error>;
 }
 
 macro_rules! derive_yaml_read {
     ($Type:ty) => {
         impl YamlRead for $Type {
-            // NOTE: Moving this body into a default fn definition on the trait
-            //       appears to make codegen lazy for some reason (compilation
-            //       of this crate becomes suspiciously quick).
-            //       Hence we generate these identical bodies in a macro.
-            fn from_value(value: ::serde_yaml::Value) -> Result<$Type, ::serde_yaml::Error> {
+            fn __serde_ignored__from_value(value: ::serde_yaml::Value) -> Result<$Type, Error> {
                 ::serde_ignored::deserialize(
                     value,
                     |path| warn!("Unused config item (possible typo?): {}", path),
-                )
+                ).map_err(Into::into)
+            }
+
+            fn __serde_yaml__from_str(s: &str) -> Result<$Type, Error> {
+                ::serde_yaml::from_str(s)
+                    .map_err(Into::into)
             }
         }
     };
@@ -64,8 +91,8 @@ macro_rules! derive_yaml_read {
 derive_yaml_read!{::serde_yaml::Value}
 
 // (this also exists solely for codegen reasons)
-fn value_from_dyn_reader(r: &mut Read) -> Result<::serde_yaml::Value, ::serde_yaml::Error>
-{ ::serde_yaml::from_reader(r) }
+fn value_from_str(r: &str) -> Result<::serde_yaml::Value, Error>
+{ ::serde_yaml::from_str(r).map_err(Into::into) }
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
@@ -87,6 +114,11 @@ pub struct Settings {
     pub phonons: Phonons,
 
     pub ev_chase: EigenvectorChase,
+
+    /// `None` disables layer search.
+    /// (layer_search is also ignored if layers.yaml is provided)
+    #[serde(default)]
+    pub layer_search: Option<LayerSearch>,
 
     /// `None` disables bond graph.
     #[serde(default)]
@@ -128,9 +160,11 @@ fn _scale_ranges__fail() -> bool { false }
 
 #[derive(Debug, Clone, PartialEq)]
 #[derive(Serialize, Deserialize)]
-//#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "kebab-case")]
 pub enum Scalable {
     /// Uniformly scale one or more lattice vectors.
+    #[serde(rename = "parameter")]
+    #[serde(rename_all = "kebab-case")]
     Param {
         axis_mask: [MaskBit; 3],
         #[serde(flatten)]
@@ -145,12 +179,14 @@ pub enum Scalable {
     ///
     /// There are also conditions where the separation obtained from this method
     /// is "good enough" that CG can be trusted to take care of the rest.
+    #[serde(rename_all = "kebab-case")]
     UniformLayerSep {
         #[serde(flatten)]
         range: ScalableRange,
     },
 
     /// Optimize each layer separation individually. Can be costly.
+    #[serde(rename_all = "kebab-case")]
     LayerSeps {
         #[serde(flatten)]
         range: ScalableRange,
@@ -183,6 +219,7 @@ impl<'de> serde::Deserialize<'de> for MaskBit {
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
+#[serde(untagged)]
 pub enum ScalableRange {
     // NOTE: This enum gets `serde(flatten)`ed into its container. Beware field-name clashes.
     #[serde(rename_all = "kebab-case")]

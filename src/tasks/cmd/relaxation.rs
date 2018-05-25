@@ -16,7 +16,6 @@ use ::rsp2_slice_math::{v, V, vdot};
 use ::slice_of_array::prelude::*;
 use ::rsp2_array_types::{V3};
 use ::rsp2_structure::{ElementStructure};
-use ::rsp2_structure_io::layers_yaml::Assemble;
 use ::phonopy::Builder as PhonopyBuilder;
 use ::math::bands::ScMatrix;
 

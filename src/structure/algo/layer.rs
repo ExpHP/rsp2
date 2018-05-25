@@ -1,6 +1,6 @@
 use ::failure::Error;
-use ::{Structure, Lattice};
-use ::rsp2_soa_ops::{Permute, Perm};
+use ::{Structure, Coords, Lattice};
+use ::rsp2_soa_ops::{Permute, Perm, Part, Partition};
 
 use ::std::mem;
 use ::itertools::Itertools;
@@ -99,7 +99,7 @@ impl LayersPerUnitCell {
 ///
 /// Normal is in fractional coords, and is currently limited such
 /// that it must be one of the lattice vectors.
-pub fn find_layers<M>(structure: &Structure<M>, normal: &V3<i32>, threshold: f64)
+pub fn find_layers(structure: &Coords, normal: V3<i32>, threshold: f64)
 -> Result<Layers, Error>
 {
     find_layers_impl(
@@ -110,56 +110,29 @@ pub fn find_layers<M>(structure: &Structure<M>, normal: &V3<i32>, threshold: f64
     )
 }
 
-// monomorphic for less codegen
-fn find_layers_impl(fracs: &[V3<f64>], lattice: &Lattice, normal: &V3<i32>, cart_threshold: f64)
+fn find_layers_impl(fracs: &[V3<f64>], lattice: &Lattice, normal: V3<i32>, cart_threshold: f64)
 -> Result<Layers, Error>
 {Ok({
     if fracs.len() == 0 {
         return Ok(Layers::NoAtoms);
     }
 
-    let axis = {
-        let mut sorted = *normal;
-        sorted.sort_unstable();
-        ensure!(sorted == V3([0, 0, 1]),
-            "unsupported layer normal: {:?}", normal);
-
-        normal.iter().position(|&x| x == 1).unwrap()
-    };
-
-    // FIXME: On second thought I think this is incorrect.
-    //        Our requirement should not be that the normal is a
-    //        lattice vector; but rather, that two of the lattice
-    //        vectors lie within the plane.
-    //
-    //        So let's make sure that is the case:
-    { // Safety HACK!
-        let norms = lattice.norms();
-        let vecs = lattice.vectors();
-        for k in 0..3 {
-            if k != axis {
-                let cos = dot(&vecs[k], &vecs[axis]) / (norms[k] * norms[axis]);
-                ensure!(cos.abs() < 1e-7,
-                    "For your safety, assign_layers is currently limited to \
-                    lattices where the normal is perpendicular to the other two \
-                    lattice vectors.");
-            }
-        }
-    }
-
-    // --(original (incorrect) text)--
     // NOTE: the validity of the following algorithm is
-    //       predicated on the normal pointing precisely along
-    //       a lattice vector.  This ensures that there's no
-    //       funny business where the projected distance along the
-    //       axis could suddenly change as a particle crosses a
-    //       periodic surface while traveling within a layer.
+    //       predicated on two things:
     //
-    //       Some other directions with integer coordinates
-    //       could be handled in the future by a unimodular
-    //       transform to make that direction become one of the
-    //       lattice vectors....In theory.
-    // --(end original text)--
+    //  * The normal points precisely along a lattice vector.
+    //    (This requirement can perhaps be eased through the use of
+    //    unimodular transforms.)
+    //
+    //  * The normal must be orthogonal to the other lattice vectors.
+    //
+    // This ensures that there's no funny business where the projected
+    // distance along the axis could suddenly change as a particle crosses
+    // a periodic surface while traveling within a layer.
+    //
+    // Fail if these conditions are not met.
+    let axis = require_simple_axis_normal(normal, lattice)?;
+
 
     // Transform into units used by the bulk of the algorithm:
     let periodic_length = lattice.norms()[axis];
@@ -273,6 +246,35 @@ fn assign_layers_impl_frac_1d(
     Layers::PerUnitCell(LayersPerUnitCell { groups, gaps: layer_seps })
 })}
 
+
+// -------------------------------------------------------------
+
+pub fn require_simple_axis_normal(normal: V3<i32>, lattice: &Lattice) -> Result<usize, Error> {
+    let axis = {
+        let mut sorted = normal;
+        sorted.sort_unstable();
+        ensure!(sorted == V3([0, 0, 1]),
+            "unsupported layer normal: {:?}", normal);
+
+        normal.iter().position(|&x| x == 1).unwrap()
+    };
+
+    let norms = lattice.norms();
+    let vecs = lattice.vectors();
+    for k in 0..3 {
+        if k != axis {
+            let cos = dot(&vecs[k], &vecs[axis]) / (norms[k] * norms[axis]);
+            ensure!(cos.abs() < 1e-7,
+                "For your safety, assign_layers is currently limited to \
+                lattices where the normal is perpendicular to the other two \
+                lattice vectors.");
+        }
+    }
+    Ok(axis)
+}
+
+// -------------------------------------------------------------
+
 impl Permute for Layers {
     fn permuted_by(self, perm: &Perm) -> Self {
         match self {
@@ -301,6 +303,82 @@ impl Permute for LayersPerUnitCell {
         LayersPerUnitCell { groups, gaps }
     }
 }
+
+// -------------------------------------------------------------
+
+impl LayersPerUnitCell {
+    pub fn get_part(&self) -> Part<usize> {
+        let parted_indices = self.groups.iter().cloned().enumerate().collect();
+        Part::new(parted_indices).unwrap()
+    }
+
+    /// Partition into structures where each layer's structure has contiguous
+    /// cartesian coordinates along the normal axis. (be aware this means that images
+    /// will be taken!)
+    pub fn partition_into_contiguous_layers<M>(
+        &self,
+        normal: V3<i32>,
+        mut structure: Structure<M>,
+    ) -> Vec<Structure<M>> {
+        let axis = {
+            require_simple_axis_normal(normal, structure.lattice())
+                .expect("method has not been updated to support other normal vectors")
+        };
+
+        { // scope fracs_mut()
+            let fracs = structure.fracs_mut();
+
+            // reduce into first unit cell to make most layers contiguous
+            for v in &mut fracs[..] {
+                // (note: this might produce exactly 1.0)
+                v[axis] -= f64::floor(v[axis]);
+            }
+
+            // Due to the type "invariants," (scare quotes due to public fields)
+            // only the first layer is capable of crossing the periodic boundary,
+            // and all misplaced images must be at the beginning.  Ideally, if we
+            // looked at successive differences within the layer, we would see a
+            // bunch of small positive values with a single large negative value.
+            //
+            // (however, we can't say this must be EXACTLY true, because `structure`
+            //  might have gone through some small numerical changes in the time
+            //  between the LayersPerUnitCell was computed and this method was called.
+            //  We'll have to settle for "approximately" true.)
+            let first_group = &self.groups[0];
+            let diffs = {
+                first_group.windows(2)
+                    .map(|w| fracs[w[1]][axis] - fracs[w[0]][axis])
+                    .collect::<Vec<_>>()
+            };
+            use ::std::f64::INFINITY;
+            let min_diff = diffs.iter().cloned().fold(INFINITY, f64::min);
+            let min_diff_pos = diffs.iter().position(|&x| x == min_diff).unwrap();
+
+            // (min_diff is the index of the atom *before* the big negative difference
+            //  meaning it is the last one we want to touch)
+            for &atom in &first_group[..=min_diff_pos] {
+                fracs[atom][axis] -= 1.0;
+            }
+
+            // sanity check.  All remaining diffs should be "pretty much nonnegative".
+            let new_min = {
+                first_group.windows(2)
+                    .map(|w| fracs[w[1]][axis] - fracs[w[0]][axis])
+                    .fold(INFINITY, f64::min)
+            };
+            assert!(
+                -1e-1 < new_min,
+                "(BUG) either a bug occurred in partition_into_contiguous_layers, \
+                or it was given a bad structure. (new_diff = {})", new_min);
+        } // scope fracs_mut()
+
+        let part = self.get_part();
+        let vec = structure.into_unlabeled_partitions(&part).collect::<Vec<_>>();
+        vec
+    }
+}
+
+// -------------------------------------------------------------
 
 #[cfg(test)]
 #[deny(unused)]

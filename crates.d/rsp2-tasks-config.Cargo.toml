@@ -11,6 +11,7 @@ path = "lib.rs"
 !!rsp2-minimize
 
 !!log
+!!failure
 !!serde
 !!serde-derive
 !!serde-yaml
