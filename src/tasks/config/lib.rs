@@ -348,6 +348,24 @@ pub enum EigenvectorChase {
 pub struct Phonons {
     pub symmetry_tolerance: f64,
     pub displacement_distance: f64,
+
+    /// Supercell used for force constants.
+    ///
+    /// Ideally, this should be large enough for the following to be true:
+    ///
+    /// * Given an atom with index `p` in the primitive cell...
+    /// * ... and an atom with index `s` in the supercell...
+    /// * ... `p` must interact with at most one image of `s` under the superlattice.
+    ///
+    /// The primary role of the supercell is to help ensure that multiple, distinct force
+    /// terms are computed when a primitive atom `p` interacts with multiple images of a
+    /// primitive atom `q` under the primitive lattice. (each image will have a different
+    /// phase factor in the dynamical matrix at nonzero `Q` points, and therefore must be
+    /// individually accounted for in the force constants)
+    ///
+    /// Strictly speaking, no supercell should be required for computing the dynamical
+    /// matrix at Gamma, even for small primitive cells. (If one is required to get the
+    /// right eigensolutions at gamma, it might indicate a bug in rsp2's potentials)
     pub supercell: SupercellSpec,
 }
 

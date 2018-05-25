@@ -37,7 +37,9 @@ ev-chase: # one-by-one
     alpha-guess-first: 1e-2
 threading: "lammps"
 phonons:
-  supercell: {target: [35, 35, 0]}
+  # no supercell is required for gamma dynamical matrix
+  #supercell: {target: [35, 35, 0]}
+  supercell: {target: [0, 0, 0]}
   symmetry-tolerance: 1e-2
   displacement-distance: 1e-4
 layer-gamma-threshold: 0.2

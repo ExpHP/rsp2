@@ -281,7 +281,7 @@ impl<M: Clone> ScalableStructure<M> {
         }
 
         let layer_builder = Assemble::from_raw(RawAssemble {
-            normal_axis: cfg.normal.iter().position(|&x| x == 1).unwrap(),
+            normal_axis: axis,
             lattice,
             fracs_in_plane,
             carts_along_normal,
