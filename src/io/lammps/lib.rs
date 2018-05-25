@@ -39,7 +39,7 @@ impl fmt::Display for LammpsError {
     }
 }
 
-use ::low_level::ComputeStyle;
+use ::low_level::{ComputeStyle, Skews};
 pub use ::low_level::Severity;
 use low_level::LammpsOwner;
 mod low_level;
@@ -70,6 +70,8 @@ pub struct Lammps<P: Potential> {
     /// The currently computed structure, encapsulated in a helper type
     /// that tracks dirtiness and helps us decide when we need to call lammps
     structure: MaybeDirty<Structure<P::Meta>>,
+
+    auto_adjust_lattice: bool,
 
     // These store data about the structure given to Builder::build
     // which must remain constant in all calls to `compute_*`.
@@ -171,6 +173,7 @@ impl<T> MaybeDirty<T> {
 pub struct Builder {
     append_log: Option<PathBuf>,
     threaded: bool,
+    auto_adjust_lattice: bool,
 }
 
 impl Default for Builder {
@@ -183,7 +186,18 @@ impl Builder {
     { Builder {
         append_log: None,
         threaded: true,
+        auto_adjust_lattice: true,
     }}
+
+    /// Toggles extremely small corrections automatically made to the lattice.
+    ///
+    /// By default, corrections of up to a single ULP per lattice element (i.e. next
+    /// or previous representable float) will be made to the lattice before it is
+    /// communicated to lammps, to help meet its draconian requirements on skew.
+    /// (Lammps requires that off-diagonals do not exceed 0.5 times their diagonal
+    ///  elements, and there is no fuzz to this check)
+    pub fn auto_adjust_lattice(&mut self, value: bool) -> &mut Self
+    { self.auto_adjust_lattice = value; self }
 
     pub fn append_log(&mut self, path: impl AsRef<Path>) -> &mut Self
     { self.append_log = Some(path.as_ref().to_owned()); self }
@@ -475,6 +489,7 @@ impl<P: Potential> Lammps<P>
             potential,
             original_init_info,
             original_num_atoms,
+            auto_adjust_lattice: builder.auto_adjust_lattice,
         }
     })}
 
@@ -664,108 +679,33 @@ impl<P: Potential> Lammps<P> {
 
     fn send_lmp_lattice(&mut self) -> FailResult<()>
     {Ok({
+        let [
+            [xx, _0, _1],
+            [xy, yy, _2],
+            [xz, yz, zz],
+        ] = self.structure.get().lattice().matrix().unvee();
 
-        // From the documentation on 'change_box command':
-        //
-        //     Because the keywords used in this command are applied one at a time
-        //     to the simulation box and the atoms in it, care must be taken with
-        //     triclinic cells to avoid exceeding the limits on skew after each
-        //     transformation in the sequence. If skew is exceeded before the final
-        //     transformation this can be avoided by changing the order of the sequence,
-        //     or breaking the transformation into two or more smaller transformations.
-        //
-        // There is nothing I can really say here that would not come across
-        // as terribly, terribly rude. - ML
+        assert_eq!(0f64, _0, "non-triangular lattices not yet supported");
+        assert_eq!(0f64, _1, "non-triangular lattices not yet supported");
+        assert_eq!(0f64, _2, "non-triangular lattices not yet supported");
 
-        let cur = self.structure.get().lattice().matrix();
-        assert_eq!(0f64, cur[0][1], "non-triangular lattices not yet supported");
-        assert_eq!(0f64, cur[0][2], "non-triangular lattices not yet supported");
-        assert_eq!(0f64, cur[1][2], "non-triangular lattices not yet supported");
-
-        #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-        enum Elem { Diagonal(&'static str), OffDiag(&'static str) }
-        impl Elem {
-            // tests whether a change to a given lattice matrix element
-            //  could possibly cause us to crash if performed too soon.
-            // This simple scheme allows us to handle MOST cases.
-            pub fn should_defer(&self, old: f64, new: f64) -> bool
-            { match *self {
-                Elem::Diagonal(_) => new < old,
-                Elem::OffDiag(_) => old.abs() < new.abs(),
-            }}
-
-            pub fn format(&self, value: f64) -> String
-            { match *self {
-                Elem::Diagonal(name) => format!("{} final 0 {}", name, value),
-                Elem::OffDiag(name) => format!("{} final {}", name, value),
-            }}
+        let mut diag = [xx, yy, zz];
+        let mut skews = Skews { xy, yz, xz };
+        if self.auto_adjust_lattice {
+            auto_adjust_lattice(&mut diag, &mut skews);
         }
 
-        // NOTE: The order that these are declared are the order they will
-        //       be set when no previous lattice has been sent.
-        //       This order is safe for the garbage lattice with zero skew.
-        let elems = &[
-            (Elem::Diagonal("x"), (0, 0)),
-            (Elem::Diagonal("y"), (1, 1)),
-            (Elem::Diagonal("z"), (2, 2)),
-            (Elem::OffDiag("xy"), (1, 0)),
-            (Elem::OffDiag("xz"), (2, 0)),
-            (Elem::OffDiag("yz"), (2, 1)),
-        ];
+        // safe because we initialized the lattice the hard way during initialization,
+        // so surely `domain->set_initial_box()` must have been called...
+        unsafe { self.ptr.borrow_mut().reset_box([0.0, 0.0, 0.0], diag, skews)? }
 
-        // Tragically, because we need to recall the last matrix that was set
-        //  in order to determine what operations would cause lammps to crash,
-        // we do need to match on whether or not a lattice has been saved,
-        // which is exactly the sort of thing that MaybeDirty was supposed to
-        // help prevent against.
-        match self.structure.last_clean() {
-            None => {
-                let commands: Vec<_> =
-                    elems.iter().map(|&(elem, (r, c))| {
-                        format!("change_box all {}", elem.format(cur[r][c]))
-                    }).collect();
-                self.ptr.borrow_mut().commands(&commands)?;
-            },
-
-            Some(last) => {
-                let last = last.lattice().matrix();
-                // Look for cases that would defeat our simple ordering scheme.
-                // (these are cases where both a diagonal and an off-diagonal would
-                //   be classified as "defer until later", which is not enough information)
-                // An example would be simultaneously skewing and shrinking a box.
-                for r in 0..3 {
-                    for c in 0..3 {
-                        if Elem::Diagonal("").should_defer(cur[c][c], last[c][c]) &&
-                            Elem::OffDiag("").should_defer(cur[r][c], last[r][c])
-                        {
-                            bail!("Tragically, you cannot simultaneously decrease a lattice \
-                                diagonal element while increasing one of its off-diagonals. \
-                                I'm sorry. You just can't.");
-                        }
-                    }
-                }
-
-                let mut do_early = vec![];
-                let mut do_later = vec![];
-                elems.iter().for_each(|&(elem, (r, c))| {
-                    match elem.should_defer(last[r][c], cur[r][c]) {
-                        true => { do_later.push((elem, (r, c))); },
-                        false => { do_early.push((elem, (r, c))); },
-                    }
-                });
-
-                let commands: Vec<_> =
-                    None.into_iter()
-                    .chain(do_early)
-                    .chain(do_later)
-                    .map(|(elem, (r, c))| {
-                        format!("change_box all {}", elem.format(cur[r][c]))
-                    })
-                    .collect();
-
-                self.ptr.borrow_mut().commands(&commands)?
-            },
-        }
+        // "Is this box to your liking, sire?"
+        self.ptr.borrow_mut().commands(&[
+            // These should have no effect, but they give LAMMPS a chance to look at the
+            // box and throw an exception if it doesn't like what it sees.
+            format!("change_box all x final 0 {}", diag[0]),
+            format!("change_box all xy final {}", skews.xy),
+        ])?;
     })}
 
     // Some of these properties probably could be allowed to change,
@@ -796,6 +736,34 @@ impl<P: Potential> Lammps<P> {
         check("masses have", original_masses, &masses)?;
         check("pair potential commands have", original_pair_commands, &pair_commands)?;
     })}
+}
+
+fn auto_adjust_lattice(diag: &mut [f64; 3], skews: &mut Skews) {
+    fn do_element(d: &mut f64, s: &mut f64) {
+        if 2.0 * s.abs() > d.abs() {
+            // shrink skew by 1 ULP
+            *s = s.signum() * next_after(s.abs(), 0.0);
+        }
+        if 2.0 * s.abs() > d.abs() {
+            // that wasn't enough?
+            // then increase diag by 1 ULP
+            *d = d.signum() * next_after(d.abs(), ::std::f64::INFINITY);
+        }
+    }
+
+    // (actually, xx might change by up to two ULPs)
+    do_element(&mut diag[0], &mut skews.xy);
+    do_element(&mut diag[0], &mut skews.xz);
+    do_element(&mut diag[1], &mut skews.yz);
+}
+
+use ::std::os::raw::c_double;
+#[link_name = "m"]
+extern {
+    fn nextafter(from: c_double, to: c_double) -> c_double;
+}
+fn next_after(from: f64, to: f64) -> f64 {
+    unsafe { nextafter(from, to) }
 }
 
 //-------------------------------------------

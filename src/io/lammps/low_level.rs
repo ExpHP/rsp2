@@ -187,6 +187,44 @@ impl LammpsOwner {
         self.assert_no_error();
         out
     }
+
+    // Set the lattice.
+    //
+    // * Their documentation says "assumes `domain->set_initial_box()` has been invoked previously".
+    //   (basically, this means we must call the `create_box` command.)
+    // * Because their implementation does not trap for exceptions, it clearly
+    //   accepts boxes that would not otherwise be allowed by lammps.
+    //   I don't know if violation of these invariants can trigger UB, but again,
+    //   we might as well just assume the worst.
+    //
+    pub unsafe fn reset_box(
+        &mut self,
+        mut low: [f64; 3],
+        mut high: [f64; 3],
+        skews: Skews,
+    ) -> FailResult<()>
+    {Ok({
+        let Skews { xy, yz, xz } = skews;
+        ::lammps_sys::lammps_reset_box(
+            self.ptr,
+            low.as_mut_ptr(),
+            high.as_mut_ptr(),
+            xy, yz, xz,
+        );
+
+        // NOTE: the version of the source I'm looking at does not trap for C++ exceptions,
+        //       so this will never trigger, except perhaps in future versions of lammps...
+        self.pop_error_as_result()?;
+    })}
+}
+
+// (struct with named fields to create fewer independent places where
+//  things could be written in the wrong order)
+#[derive(Debug, Copy, Clone)]
+pub(crate) struct Skews {
+    pub(crate) xy: f64,
+    pub(crate) yz: f64,
+    pub(crate) xz: f64,
 }
 
 //------------------------------
@@ -254,9 +292,9 @@ impl LammpsOwner {
 }
 
 //------------------------------
-// scatter/gather
-impl LammpsOwner {
 
+/// # Scatter/gather
+impl LammpsOwner {
     // Gather an integer property across all atoms.
     //
     // unsafe because an incorrect 'count' or a non-integer field may cause an out-of-bounds read.
@@ -372,7 +410,6 @@ impl LammpsOwner {
         assert!(data[0].bit_eq(&expected), "detected failure in LAMMPS scatter_atoms or gather_atoms");
     })}
 
-
     // unsafe because an incorrect 'ty' or 'T' may cause an out-of-bounds write.
     //
     // NOTE: if the operation fails on the LAMMPS side of things, this variant will
@@ -399,10 +436,12 @@ impl LammpsOwner {
         // * None so far.
         self.pop_error_as_result()?;
     })}
+}
 
-    //------------------------------
-    // computes
+//------------------------------
 
+/// # Computes
+impl LammpsOwner {
     // Read a scalar compute, possibly computing it in the process.
     //
     // NOTE: There are warnings in extract_compute about making sure it is valid
