@@ -1,5 +1,14 @@
-use std::ops::Deref;
+use ::std::ops::Deref;
+use ::std::path::Path;
+
 use ::shared::util;
+
+extern crate rsp2_integration_test;
+use self::rsp2_integration_test::CheckFile;
+extern crate failure;
+use self::failure::Error;
+extern crate path_abs;
+use self::path_abs::{FileRead};
 
 #[derive(Debug, PartialEq)]
 #[derive(Deserialize)]
@@ -37,6 +46,7 @@ pub struct RamanJson {
 
 impl Frequencies {
     pub fn check_against(&self, expected: &Self, tol: FrequencyTolerances) {
+        // Acoustic mode frequencies; magnitude is irrelevant as long as it is not large.
         assert!(expected.0[..3].iter().all(|x| x.abs() < tol.max_acoustic), "bad expected acoustics!");
         assert!(self.0[..3].iter().all(|x| x.abs() < tol.max_acoustic), "bad acoustics!");
 
@@ -77,8 +87,14 @@ impl MaybeZerolike {
     }
 }
 
-impl RamanJson {
-    pub fn check_against(&self, expected: &RamanJson, tol: RamanJsonTolerances) {
+impl CheckFile for RamanJson {
+    type OtherArgs = RamanJsonTolerances;
+
+    fn read_file(path: &Path) -> Result<Self, Error> {
+        Ok(::serde_json::from_reader(FileRead::read(path)?)?)
+    }
+
+    fn check_against(&self, expected: &RamanJson, tol: RamanJsonTolerances) {
         self.frequency.check_against(&expected.frequency, tol.frequency);
         for &(actual, expected) in &[
             (&self.average_3d, &expected.average_3d),

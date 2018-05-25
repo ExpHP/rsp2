@@ -28,8 +28,14 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 !!path-abs
 !!serde
 !!serde-derive
+!!pretty-assertions
 
 [features]
+# Used by integration tests to make them show nice diffs using pretty_assertions.
+#
+# see doc/updating-tests.md for more details
+test-diff=["rsp2-integration-test/test-diff"]
+
 !!NIGHTLY-FEATURE-LINE
 
 !!MAYBE-ITS-A-WORKSPACE

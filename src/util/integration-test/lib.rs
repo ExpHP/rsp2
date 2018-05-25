@@ -4,12 +4,17 @@
 extern crate rsp2_fs_util as fsx;
 extern crate failure;
 extern crate path_abs;
+#[cfg(feature = "test-diff")]
+#[macro_use]
+extern crate pretty_assertions;
 
 use self::fsx::TempDir;
 use self::path_abs::{PathDir, FileWrite, FileRead};
 use self::failure::Error;
 
+use ::std::fmt::Debug;
 use ::std::fs::File;
+use ::std::path::Path;
 use ::std::ffi::{OsStr, OsString};
 use ::std::process::Command;
 pub type Result<T> = ::std::result::Result<T, Error>;
@@ -99,6 +104,25 @@ impl CliTest {
         self
     }
 
+    /// `check` with a standard trait-based implementation.
+    #[cfg_attr(feature = "nightly", must_use)]
+    pub fn check_file<T: CheckFile>(
+        self,
+        path_in_trial: &Path,
+        expected_path: &Path,
+        other: T::OtherArgs,
+    ) -> Self {
+        let path_in_trial = path_in_trial.to_owned();
+        let expected_path = expected_path.to_owned();
+        let checker = move |dir: &PathDir| {
+            let actual = T::read_file(&dir.join(&path_in_trial))?;
+            let expected = T::read_file(&expected_path)?;
+            check_against_with_diff(&actual, &expected, other.clone());
+            Ok(())
+        };
+        self.check(checker)
+    }
+
     fn disarm(self) { ::std::mem::forget(self) }
     fn into_inner(mut self) -> CliTestInner {
         let inner = self.inner.take().unwrap();
@@ -106,7 +130,6 @@ impl CliTest {
         inner
     }
 
-    #[cfg_attr(feature = "nightly", must_use)]
     pub fn run(self) -> Result<()> {
         let inner = self.into_inner();
 
@@ -148,4 +171,42 @@ impl CliTest {
 #[cfg(not(feature = "nightly"))]
 fn cli_test_must_be_run() {
     CliTest::cargo_binary("lol");
+}
+
+pub trait CheckFile: Sized + Debug + PartialEq + ::std::panic::RefUnwindSafe {
+    // (Clone because checkers are Fn (can't dynamically call FnOnce) and the
+    //  standard checker needs it)
+    type OtherArgs: ::std::panic::UnwindSafe + Clone + 'static;
+
+    fn read_file(path: &Path) -> Result<Self>;
+    fn check_against(&self, expected: &Self, other_args: Self::OtherArgs);
+}
+
+#[cfg(feature = "test-diff")]
+fn check_against_with_diff<T: CheckFile>(a: &T, b: &T, other: T::OtherArgs) {
+    // Let check_against use things like `assert_close!` that might panic.
+    let result = ::std::panic::catch_unwind(move || a.check_against(b, other));
+
+    // If it did panic, throw that panic away and get a colorful character diff
+    // on the Debug output from pretty_assertions.  This can help one get a quick
+    // overview of how many decimal places are accurate throughout the entire file.
+    if let Err(_) = result {
+        let mention_save_tmp = match ::std::env::var("RSP2_SAVETEMP") {
+            Err(::std::env::VarError::NotPresent) => {
+                "  If the change looks reasonable, use RSP2_SAVETEMP=some-location \
+                to recover the failed tempdir and copy the new file over into tests/resources."
+            },
+            _ => "",
+        };
+        assert_eq!(
+            a, b,
+            "Showing diff from pretty_assertion.{}", mention_save_tmp,
+        );
+        panic!("check_against failed but assert_eq succeeded?!");
+    }
+}
+
+#[cfg(not(feature = "test-diff"))]
+fn check_against_with_diff<T: CheckFile>(a: &T, b: &T, other: T::OtherArgs) {
+    a.check_against(b, other)
 }
