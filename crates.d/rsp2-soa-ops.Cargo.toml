@@ -10,6 +10,7 @@ path = "lib.rs"
 [dependencies]
 !!failure
 !!rand
+!!frunk
 
 [features]
 !!NIGHTLY-FEATURE-LINE

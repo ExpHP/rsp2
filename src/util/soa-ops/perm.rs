@@ -1,4 +1,5 @@
 use ::std::fmt;
+use ::frunk::{HCons, HNil};
 
 /// Represents a reordering operation on atoms.
 ///
@@ -445,6 +446,24 @@ impl Permute for PermVec {
 impl Permute for Perm {
     fn permuted_by(self, other: &Perm) -> Perm
     { self.then(other) }
+}
+
+// combinators
+impl Permute for HNil {
+    fn permuted_by(self, _: &Perm) -> HNil
+    { HNil }
+}
+
+impl<A, B> Permute for HCons<A, B>
+where
+    A: Permute,
+    B: Permute,
+{
+    fn permuted_by(self, perm: &Perm) -> HCons<A, B>
+    { HCons {
+        head: self.head.permuted_by(perm),
+        tail: self.tail.permuted_by(perm),
+    }}
 }
 
 #[cfg(test)]

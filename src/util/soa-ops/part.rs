@@ -1,5 +1,6 @@
 use ::{Perm, Permute};
 use ::std::iter::FusedIterator;
+use ::frunk::{HNil, HCons};
 
 /// Type of "a thing that has been partitioned."
 ///
@@ -261,6 +262,26 @@ where
         Box::new(::util::zip_eq(a_parted, b_parted))
     }
 }
+
+impl<'iter> Partition<'iter> for HNil {
+    fn into_unlabeled_partitions<L>(self, part: &'iter Part<L>) -> Unlabeled<'iter, Self>
+    {Box::new({
+        part.region_keys().map(|_| HNil)
+    })}
+}
+
+impl<'iter, A, B> Partition<'iter> for HCons<A, B>
+where
+    A: Partition<'iter> + 'iter,
+    B: Partition<'iter> + 'iter,
+{
+    fn into_unlabeled_partitions<L>(self, part: &'iter Part<L>) -> Unlabeled<'iter, Self>
+    {Box::new({
+        self.pop().into_unlabeled_partitions(part)
+            .map(|(head, tail)| HCons { head, tail })
+    })}
+}
+
 
 #[cfg(test)]
 #[deny(dead_code)]
