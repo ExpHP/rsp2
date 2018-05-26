@@ -409,7 +409,7 @@ mod tests {
         // deliberately test using exact equality; the periodic length
         // is 1.0 so there should be no rounding difficulties.
         assert_eq!(
-            super::find_layers_impl(&fracs, &lattice, &V3([0, 0, 1]), 0.15).unwrap(),
+            super::find_layers_impl(&fracs, &lattice, V3([0, 0, 1]), 0.15).unwrap(),
             Layers::PerUnitCell(LayersPerUnitCell {
                 groups: vec![vec![0, 1]],
                 gaps: vec![1.0], // <-- field of greatest interest
@@ -446,7 +446,7 @@ mod tests {
         ]);
 
         fn check(
-            (fracs, lattice, normal, cart_tol): (&[V3], &Lattice, &V3<i32>, f64),
+            (fracs, lattice, normal, cart_tol): (&[V3], &Lattice, V3<i32>, f64),
             expected_layers: Layers,
             expected_by_atom: Vec<usize>,
         ) {
@@ -477,7 +477,7 @@ mod tests {
         //        case is actually testing.
 
         check(
-            (&fracs, &lattice, &V3([0, 1, 0]), cart_tol),
+            (&fracs, &lattice, V3([0, 1, 0]), cart_tol),
             Layers::PerUnitCell(LayersPerUnitCell {
                 groups: vec![vec![0, 1, 2], vec![3, 4]],
                 gaps: scale(vec![0.4, 0.3], ylen),
@@ -489,7 +489,7 @@ mod tests {
         let (fracs, perm) = shuffle(&fracs);
 
         check(
-            (&fracs, &lattice, &V3([0, 1, 0]), cart_tol),
+            (&fracs, &lattice, V3([0, 1, 0]), cart_tol),
             Layers::PerUnitCell(LayersPerUnitCell {
                 groups: vec![vec![0, 1, 2], vec![3, 4]],
                 gaps: scale(vec![0.4, 0.3], ylen),
@@ -499,7 +499,7 @@ mod tests {
 
         // try a smaller tolerance
         check(
-            (&fracs, &lattice, &V3([0, 1, 0]), smaller_tol),
+            (&fracs, &lattice, V3([0, 1, 0]), smaller_tol),
             Layers::PerUnitCell(LayersPerUnitCell {
                 groups: vec![vec![0], vec![1], vec![2], vec![3], vec![4]],
                 gaps: scale(vec![0.1, 0.1, 0.4, 0.1, 0.3], ylen),
@@ -516,7 +516,7 @@ mod tests {
         perm.append_mut(&Perm::eye(2));
 
         check(
-            (&fracs, &lattice, &V3([0, 1, 0]), cart_tol),
+            (&fracs, &lattice, V3([0, 1, 0]), cart_tol),
             Layers::PerUnitCell(LayersPerUnitCell {
                 groups: vec![
                     vec![
@@ -535,7 +535,7 @@ mod tests {
         perm.append_mut(&Perm::eye(1));
 
         check(
-            (&fracs, &lattice, &V3([0, 1, 0]), cart_tol),
+            (&fracs, &lattice, V3([0, 1, 0]), cart_tol),
             Layers::PerUnitCell(LayersPerUnitCell {
                 groups: vec![
                     vec![
@@ -558,7 +558,7 @@ mod tests {
         perm.append_mut(&Perm::eye(2));
 
         check(
-            (&fracs, &lattice, &V3([0, 1, 0]), cart_tol),
+            (&fracs, &lattice, V3([0, 1, 0]), cart_tol),
             Layers::NoDistinctLayers {
                 sorted_indices: vec![
                     6 /* y = 0.0 */, 0 /* y = 0.1 */, 1 /* y = 0.2 */,
