@@ -93,6 +93,11 @@ impl<M> Structure<M> {
     }
 }
 
+impl<M> Structure<M> {
+    pub fn into_parts(self) -> (Coords, Vec<M>)
+    { (self.coords, self.meta) }
+}
+
 //---------------------------------------
 
 /// # Simple data access

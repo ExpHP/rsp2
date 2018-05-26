@@ -46,7 +46,7 @@ mod low_level;
 
 use ::std::path::{Path, PathBuf};
 use ::slice_of_array::prelude::*;
-use ::rsp2_structure::{Structure, Lattice};
+use ::rsp2_structure::{Coords, Lattice};
 
 pub struct Lammps<P: Potential> {
     /// Put Lammps behind a RefCell so we can paper over things like `get_natoms(&mut self)`
@@ -69,7 +69,7 @@ pub struct Lammps<P: Potential> {
 
     /// The currently computed structure, encapsulated in a helper type
     /// that tracks dirtiness and helps us decide when we need to call lammps
-    structure: MaybeDirty<Structure<P::Meta>>,
+    structure: MaybeDirty<(Coords, P::Meta)>,
 
     auto_adjust_lattice: bool,
 
@@ -208,7 +208,7 @@ impl Builder {
     /// Call out to the LAMMPS C API to create an instance of Lammps,
     /// and configure it according to this builder.
     ///
-    /// # The `initial_structure` argument
+    /// # The "initial structure" arguments
     ///
     /// It may seem unusual that both `build` and the `Lammps::compute_*` methods
     /// require a structure.  The reason is because certain API calls made during
@@ -225,9 +225,9 @@ impl Builder {
     /// The `compute_*` methods on `Lammps` will check these properties on every
     /// computed structure, and will fail if they disagree with the structure
     /// that was initially provided to `build`.
-    pub fn build<P>(&self, potential: P, initial_structure: Structure<P::Meta>) -> FailResult<Lammps<P>>
+    pub fn build<P>(&self, potential: P, initial_coords: Coords, initial_meta: P::Meta) -> FailResult<Lammps<P>>
     where P: Potential,
-    { Lammps::from_builder(self, potential, initial_structure) }
+    { Lammps::from_builder(self, potential, initial_coords, initial_meta) }
 }
 
 /// Initialize LAMMPS, do nothing of particular value, and exit.
@@ -288,7 +288,7 @@ pub trait Potential {
     /// This method will be called once on the structure used to build a Lammps
     /// (to generate the initialization commands), as well as before each computation
     /// (to verify that the necessary commands have not changed).
-    fn init_info(&self, structure: &Structure<Self::Meta>) -> InitInfo;
+    fn init_info(&self, coords: &Coords, meta: &Self::Meta) -> InitInfo;
 
     /// Assign atom types to each atom.
     ///
@@ -297,27 +297,27 @@ pub trait Potential {
     /// ways. For many potentials, the atom types will simply map to elemental
     /// species; but for a potential like 'kolmogorov/crespi/z', atom types must be
     /// carefully assigned to prevent interactions between non-adjacent layers.
-    fn atom_types(&self, structure: &Structure<Self::Meta>) -> Vec<AtomType>;
+    fn atom_types(&self, coords: &Coords, meta: &Self::Meta) -> Vec<AtomType>;
 }
 
 impl<'a, M: Clone> Potential for Box<Potential<Meta=M> + 'a> {
     type Meta = M;
 
-    fn init_info(&self, structure: &Structure<Self::Meta>) -> InitInfo
-    { (&**self).init_info(structure) }
+    fn init_info(&self, coords: &Coords, meta: &Self::Meta) -> InitInfo
+    { (&**self).init_info(coords, meta) }
 
-    fn atom_types(&self, structure: &Structure<Self::Meta>) -> Vec<AtomType>
-    { (&**self).atom_types(structure) }
+    fn atom_types(&self, coords: &Coords, meta: &Self::Meta) -> Vec<AtomType>
+    { (&**self).atom_types(coords, meta) }
 }
 
 impl<'a, M: Clone> Potential for &'a (Potential<Meta=M> + 'a) {
     type Meta = M;
 
-    fn init_info(&self, structure: &Structure<Self::Meta>) -> InitInfo
-    { (&**self).init_info(structure) }
+    fn init_info(&self, coords: &Coords, meta: &Self::Meta) -> InitInfo
+    { (&**self).init_info(coords, meta) }
 
-    fn atom_types(&self, structure: &Structure<Self::Meta>) -> Vec<AtomType>
-    { (&**self).atom_types(structure) }
+    fn atom_types(&self, coords: &Coords, meta: &Self::Meta) -> Vec<AtomType>
+    { (&**self).atom_types(coords, meta) }
 }
 
 /// Data describing the commands which need to be sent to lammps to initialize
@@ -477,15 +477,15 @@ impl<'a, D: fmt::Display> fmt::Display for JoinDisplay<'a, D> {
 impl<P: Potential> Lammps<P>
 {
     // implementation of Builder::Build
-    fn from_builder(builder: &Builder, potential: P, structure: Structure<P::Meta>) -> FailResult<Self>
+    fn from_builder(builder: &Builder, potential: P, coords: Coords, meta: P::Meta) -> FailResult<Self>
     {Ok({
-        let original_num_atoms = structure.num_atoms();
-        let original_init_info = potential.init_info(&structure);
+        let original_num_atoms = coords.num_atoms();
+        let original_init_info = potential.init_info(&coords, &meta);
 
         let ptr = Self::_from_builder(builder, original_num_atoms, &original_init_info)?;
         Lammps {
             ptr: ::std::cell::RefCell::new(ptr),
-            structure: MaybeDirty::new_dirty(structure),
+            structure: MaybeDirty::new_dirty((coords, meta)),
             potential,
             original_init_info,
             original_num_atoms,
@@ -508,8 +508,7 @@ impl<P: Potential> Lammps<P>
             "-log", "none", // logs opened from CLI are truncated, but we want to append
         ])?;
 
-        if let Some(log_file) = &builder.append_log
-        {
+        if let Some(log_file) = &builder.append_log {
             // Append a header to the log file as a feeble attempt to help delimit individual
             // runs (even though it will still get messy for parallel runs).
             //
@@ -598,19 +597,19 @@ impl<P: Potential> Lammps<P>
 // propagated to LAMMPS, so long as `update_computation` is able to correctly
 // detect when the new values differ from the old.
 impl<P: Potential> Lammps<P> {
-    pub fn set_structure(&mut self, new: Structure<P::Meta>) -> FailResult<()>
+    pub fn set_structure(&mut self, new: Coords, meta: P::Meta) -> FailResult<()>
     {Ok({
-        *self.structure.get_mut() = new;
+        *self.structure.get_mut() = (new, meta);
     })}
 
     pub fn set_carts(&mut self, new: &[V3]) -> FailResult<()>
     {Ok({
-        self.structure.get_mut().set_carts(new.to_vec());
+        self.structure.get_mut().0.set_carts(new.to_vec());
     })}
 
     pub fn set_lattice(&mut self, new: Lattice) -> FailResult<()>
     {Ok({
-        self.structure.get_mut().set_lattice(&new);
+        self.structure.get_mut().0.set_lattice(&new);
     })}
 }
 
@@ -626,9 +625,12 @@ impl<P: Potential> Lammps<P> {
     fn update_computation(&mut self) -> FailResult<()>
     {Ok({
         if self.structure.is_dirty() {
-            self.structure.get_mut().ensure_carts();
+            self.structure.get_mut().0.ensure_carts();
 
-            self.check_data_set_in_stone(self.structure.get())?;
+            {
+                let (coords, meta) = self.structure.get();
+                self.check_data_set_in_stone(coords, meta)?;
+            }
 
             // Only send data that has changed from the cache.
             // This is done because it appears that lammps does some form of
@@ -642,15 +644,15 @@ impl<P: Potential> Lammps<P> {
             // NOTE: we end up calling Potential::atom_types() more often than
             //       I would have liked (considering that it might e.g. run an
             //       algorithm to assign layer numbers to all atoms), but w/e.
-            if self.structure.is_function_dirty(|s| self.potential.atom_types(s)) {
+            if self.structure.is_function_dirty(|&(ref c, ref m)| self.potential.atom_types(c, m)) {
                 self.send_lmp_types()?;
             }
 
-            if self.structure.is_projection_dirty(|s| s.lattice()) {
+            if self.structure.is_projection_dirty(|&(ref c, _)| c.lattice()) {
                 self.send_lmp_lattice()?;
             }
 
-            if self.structure.is_projection_dirty(|s| s.as_carts_cached().unwrap()) {
+            if self.structure.is_projection_dirty(|&(ref c, _)| c.as_carts_cached().unwrap()) {
                 self.send_lmp_carts()?;
             }
 
@@ -661,17 +663,20 @@ impl<P: Potential> Lammps<P> {
 
     fn send_lmp_types(&mut self) -> FailResult<()>
     {Ok({
-        let meta = self.potential.atom_types(self.structure.get());
-        assert_eq!(meta.len(), self.ptr.borrow_mut().get_natoms());
+        let types = {
+            let (coords, meta) = self.structure.get();
+            self.potential.atom_types(coords, meta)
+        };
+        assert_eq!(types.len(), self.ptr.borrow_mut().get_natoms());
 
-        let meta = meta.into_iter().map(AtomType::value).collect::<Vec<_>>();
+        let types = types.into_iter().map(AtomType::value).collect::<Vec<_>>();
 
-        unsafe { self.ptr.borrow_mut().scatter_atoms_i("type", &meta) }?;
+        unsafe { self.ptr.borrow_mut().scatter_atoms_i("type", &types) }?;
     })}
 
     fn send_lmp_carts(&mut self) -> FailResult<()>
     {Ok({
-        let carts = self.structure.get().to_carts();
+        let carts = self.structure.get().0.to_carts();
         assert_eq!(carts.len(), self.ptr.borrow_mut().get_natoms());
 
         unsafe { self.ptr.borrow_mut().scatter_atoms_f("x", carts.unvee_ref().flat()) }?;
@@ -683,7 +688,7 @@ impl<P: Potential> Lammps<P> {
             [xx, _0, _1],
             [xy, yy, _2],
             [xz, yz, zz],
-        ] = self.structure.get().lattice().matrix().unvee();
+        ] = self.structure.get().0.lattice().matrix().unvee();
 
         assert_eq!(0f64, _0, "non-triangular lattices not yet supported");
         assert_eq!(0f64, _1, "non-triangular lattices not yet supported");
@@ -711,7 +716,7 @@ impl<P: Potential> Lammps<P> {
     // Some of these properties probably could be allowed to change,
     // but it's not important enough for me to look into them right now,
     // so we simply check that they don't change.
-    fn check_data_set_in_stone(&self, structure: &Structure<P::Meta>) -> FailResult<()>
+    fn check_data_set_in_stone(&self, coords: &Coords, meta: &P::Meta) -> FailResult<()>
     {Ok({
         fn check<D>(msg: &'static str, was: D, now: D) -> FailResult<()>
         where D: fmt::Debug + PartialEq,
@@ -721,7 +726,7 @@ impl<P: Potential> Lammps<P> {
                 format!("{} changed since build()\n was: {:?}\n now: {:?}", msg, was, now));
             Ok(())
         }
-        let InitInfo { masses, pair_commands } = self.potential.init_info(structure);
+        let InitInfo { masses, pair_commands } = self.potential.init_info(coords, meta);
         let Lammps {
             original_num_atoms,
             original_init_info: InitInfo {
@@ -732,7 +737,7 @@ impl<P: Potential> Lammps<P> {
         } = *self;
 
         check("number of atom types has", original_masses.len(), masses.len())?;
-        check("number of atoms has", original_num_atoms, structure.num_atoms())?;
+        check("number of atoms has", original_num_atoms, coords.num_atoms())?;
         check("masses have", original_masses, &masses)?;
         check("pair potential commands have", original_pair_commands, &pair_commands)?;
     })}
@@ -824,10 +829,10 @@ pub mod potential {
     impl Potential for None {
         type Meta = ();
 
-        fn atom_types(&self, structure: &Structure<()>) -> Vec<AtomType>
-        { vec![AtomType::new(1); structure.num_atoms()]}
+        fn atom_types(&self, coords: &Coords, (): &()) -> Vec<AtomType>
+        { vec![AtomType::new(1); coords.num_atoms()]}
 
-        fn init_info(&self, _: &Structure<()>) -> InitInfo
+        fn init_info(&self, _: &Coords, (): &()) -> InitInfo
         { InitInfo {
             masses: vec![1.0],
             pair_commands: vec![PairCommand::pair_style("none")],
@@ -848,12 +853,11 @@ mod tests {
     fn arbitrary_initialized_lammps() -> Lammps<potential::None>
     {
         use ::rsp2_structure::CoordsKind;
-        let structure = Structure::new(
+        let coords = Coords::new(
             Lattice::eye(),
             CoordsKind::Fracs(vec![V3([0.0; 3])]),
-            vec![()],
         );
-        Builder::new().build(Default::default(), structure).unwrap()
+        Builder::new().build(Default::default(), coords, ()).unwrap()
     }
 
     macro_rules! assert_matches {

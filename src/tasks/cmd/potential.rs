@@ -5,7 +5,7 @@
 // (which are decisions that `rsp2_lammps_wrap` has largely chosen to defer)
 
 use ::FailResult;
-use ::rsp2_structure::{Structure, ElementStructure, consts};
+use ::rsp2_structure::{Structure, consts};
 use ::rsp2_structure::{Element};
 use ::rsp2_structure::layer::Layers;
 use ::rsp2_tasks_config as cfg;
@@ -14,6 +14,7 @@ use ::rsp2_array_types::{V3, Unvee};
 #[allow(unused)] // rustc bug
 use ::slice_of_array::prelude::*;
 use ::std::collections::BTreeMap;
+use rsp2_structure::Coords;
 
 const DEFAULT_KC_Z_CUTOFF: f64 = 14.0; // (Angstrom?)
 const DEFAULT_KC_Z_MAX_LAYER_SEP: f64 = 4.5; // Angstrom
@@ -466,8 +467,7 @@ mod lammps {
         }
     }
 
-    impl<P: LammpsPotential + Clone + Send + Sync + 'static> Builder<P>
-    where P::Meta: Clone,
+    impl<M: Clone + 'static, P: LammpsPotential<Meta=Vec<M>> + Clone + Send + Sync + 'static> Builder<P>
     {
         /// Initialize Lammps to make a DiffFn.
         ///
@@ -475,15 +475,16 @@ mod lammps {
         ///
         /// Some data may be pre-allocated or precomputed based on the input structure,
         /// so the resulting DiffFn may not support arbitrary structures as input.
-        pub(crate) fn diff_fn(&self, structure: Structure<P::Meta>) -> FailResult<Box<DiffFn<P::Meta>>>
+        pub(crate) fn diff_fn(&self, structure: Structure<M>) -> FailResult<Box<DiffFn<M>>>
         {
             // a DiffFn 'lambda' whose type will be erased
-            struct MyDiffFn<M: Clone>(::rsp2_lammps_wrap::Lammps<Box<LammpsPotential<Meta=M>>>);
-            impl<M: Clone> DiffFn<M> for MyDiffFn<M> {
-                fn compute(&mut self, structure: &Structure<M>) -> FailResult<(f64, Vec<V3>)> {
+            struct MyDiffFn<Mm: Clone>(::rsp2_lammps_wrap::Lammps<Box<LammpsPotential<Meta=Vec<Mm>>>>);
+            impl<Mm: Clone> DiffFn<Mm> for MyDiffFn<Mm> {
+                fn compute(&mut self, structure: &Structure<Mm>) -> FailResult<(f64, Vec<V3>)> {
                     let lmp = &mut self.0;
 
-                    lmp.set_structure(structure.clone())?;
+                    let (coords, meta) = structure.clone().into_parts();
+                    lmp.set_structure(coords, meta)?;
                     let value = lmp.compute_value()?;
                     let grad = lmp.compute_grad()?;
                     Ok((value, grad))
@@ -491,23 +492,23 @@ mod lammps {
             }
 
             let lammps_pot = Box::new(self.potential.clone()) as Box<LammpsPotential<Meta=P::Meta>>;
-            let lmp = self.inner.build(lammps_pot, structure)?;
-            Ok(Box::new(MyDiffFn::<P::Meta>(lmp)) as Box<_>)
+            let (coords, meta) = structure.into_parts();
+            let lmp = self.inner.build(lammps_pot, coords, meta)?;
+            Ok(Box::new(MyDiffFn::<M>(lmp)) as Box<_>)
         }
     }
 
-    impl<P: Clone + LammpsPotential + Send + Sync + 'static> PotentialBuilder<P::Meta> for Builder<P>
-    where P::Meta: Clone,
+    impl<M: Clone + 'static, P: Clone + LammpsPotential<Meta=Vec<M>> + Send + Sync + 'static> PotentialBuilder<M> for Builder<P>
     {
-        fn threaded(&self, threaded: bool) -> Box<PotentialBuilder<P::Meta>>
+        fn threaded(&self, threaded: bool) -> Box<PotentialBuilder<M>>
         { Box::new(<Builder<_>>::threaded(self, threaded)) }
 
-        fn initialize_diff_fn(&self, structure: Structure<P::Meta>) -> FailResult<Box<DiffFn<P::Meta>>>
+        fn initialize_diff_fn(&self, structure: Structure<M>) -> FailResult<Box<DiffFn<M>>>
         { self.diff_fn(structure) }
     }
 
     impl_dyn_clone_detail!{
-        impl[M: Clone, P: Clone + LammpsPotential<Meta=M> + Send + Sync + 'static]
+        impl[M: Clone + 'static, P: Clone + LammpsPotential<Meta=Vec<M>> + Send + Sync + 'static]
         DynCloneDetail<M> for Builder<P> { ... }
     }
 
@@ -548,16 +549,16 @@ mod lammps {
         }
 
         impl LammpsPotential for Airebo {
-            type Meta = Element;
+            type Meta = Vec<Element>;
 
-            fn atom_types(&self, structure: &ElementStructure) -> Vec<AtomType>
-            { structure.metadata().iter().map(|elem| match elem.symbol() {
+            fn atom_types(&self, _: &Coords, elements: &Vec<Element>) -> Vec<AtomType>
+            { elements.iter().map(|elem| match elem.symbol() {
                 "H" => AtomType::new(1),
                 "C" => AtomType::new(2),
                 sym => panic!("Unexpected element in Airebo: {}", sym),
             }).collect() }
 
-            fn init_info(&self, _: &ElementStructure) -> InitInfo
+            fn init_info(&self, _: &Coords, _: &Vec<Element>) -> InitInfo
             {
                 InitInfo {
                     masses: vec![::common::element_mass(consts::HYDROGEN),
@@ -612,10 +613,7 @@ mod lammps {
         impl KolmogorovCrespiZ {
             // NOTE: This ends up getting called stupidly often, but I don't think
             //       it is expensive enough to be a real cause for concern.
-            //
-            //       If we *really* wanted to, we could store precomputed layers in
-            //       the potential, but IMO it's just cleaner if we don't need to.
-            fn find_layers<M>(&self, structure: &Structure<M>) -> Layers
+            fn find_layers(&self, structure: &Coords) -> Layers
             {
                 ::rsp2_structure::layer::find_layers(&structure, V3([0, 0, 1]), 0.25)
                     .unwrap_or_else(|e| {
@@ -631,19 +629,19 @@ mod lammps {
         }
 
         impl LammpsPotential for KolmogorovCrespiZ {
-            type Meta = Element;
+            type Meta = Vec<Element>;
 
-            fn atom_types(&self, structure: &ElementStructure) -> Vec<AtomType>
+            fn atom_types(&self, coords: &Coords, elements: &Vec<Element>) -> Vec<AtomType>
             {
-                self.find_layers(structure)
+                self.find_layers(coords)
                     .by_atom().into_iter()
                     .map(|x| AtomType::from_index(x))
                     .collect()
             }
 
-            fn init_info(&self, structure: &ElementStructure) -> InitInfo
+            fn init_info(&self, coords: &Coords, elements: &Vec<Element>) -> InitInfo
             {
-                let layers = match self.find_layers(structure).per_unit_cell() {
+                let layers = match self.find_layers(coords).per_unit_cell() {
                     None => panic!("kolmogorov/crespi/z is only supported for layered materials"),
                     Some(layers) => layers,
                 };
