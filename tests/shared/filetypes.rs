@@ -15,7 +15,7 @@ use self::path_abs::{FileRead};
 pub struct Frequencies(pub Vec<f64>);
 impl Deref for Frequencies {
     type Target = Vec<f64>;
-    fn deref(&self) -> &Self::Target { &self.0}
+    fn deref(&self) -> &Self::Target { &self.0 }
 }
 
 // for "keyword arguments"
@@ -73,8 +73,8 @@ pub struct MaybeZerolikeTolerances {
 impl MaybeZerolike {
     pub fn check_against(&self, expected: &Self, tol: MaybeZerolikeTolerances) {
         if !tol.negative_ok {
-            assert!(expected.0 > 0.0, "expected is negative! ({})", expected.0);
-            assert!(self.0 > 0.0, "value is negative! ({})", self.0);
+            assert!(expected.0 >= 0.0, "expected is negative! ({})", expected.0);
+            assert!(self.0 >= 0.0, "value is negative! ({})", self.0);
         }
 
         // Succeed if either of the following are true:
