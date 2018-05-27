@@ -54,7 +54,7 @@ mod element;
 
 pub use ::core::lattice::Lattice;
 pub use ::core::coords::CoordsKind;
-pub use ::core::structure::{Structure, Coords, ElementStructure};
+pub use ::core::structure::Coords;
 pub use ::core::structure::NonEquivalentLattice;
 
 pub use ::element::Element;

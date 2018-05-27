@@ -1,4 +1,4 @@
-use ::{Lattice, CoordsKind, Element};
+use ::{Lattice, CoordsKind};
 use ::rsp2_soa_ops::{Perm, Permute};
 use ::rsp2_soa_ops::{Part, Partition, Unlabeled};
 use ::rsp2_array_types::{M33, V3, Unvee};
@@ -9,139 +9,62 @@ use ::rsp2_array_types::{M33, V3, Unvee};
 /// fractional and cartesian representations, as it contains all of the
 /// necessary information to convert between them.
 ///
+/// # Site metadata
+///
+/// **tl;dr:** You don't need it, and `Coords` (along with every API it touches)
+/// is better off for not having it.
+///
+/// rsp2 used to have a `Structure<M>` type that additionally held a `Vec<M>`
+/// for site metadata. In the end, this was finally removed because it was found
+/// to cause more problems than it solves.  Many kinds of site data couldn't be
+/// shoehorned into the metadata because it led to unnatural representations
+/// (such as `Vec<Option<L>>` for something that is `Option<Vec<L>>` in spirit),
+/// and for this reason most code just used `Structure<Element>` or `Structure<()>`
+/// (which eventually led to the introduction of `Coords`).
+///
+/// A `Structure<M>` type that holds an `M` (for e.g. `M = (Vec<Element>, Vec<Mass>)`)
+/// is *possible,* but also an *obscene* design effort r.e. ownership issues, if you
+/// want something suitable for use in low-level computational code. (which `Coords`
+/// aims to be).
+///
+/// A `Structure` that just holds `Vec<Element>` solves nothing yet would demand
+/// support from all `Coord`-based APIs.
+///
+/// While rsp2 has no standard solution to this problem, it is recommended
+/// that low-level code (computations, file IO) simply take slices of the
+/// data it needs and produce `Vec`s.  The highest-level application code
+/// in rsp2 uses HLists of `Rc<[T]>` with just a small number of utility
+/// extension traits to meet almost all of its needs.
+///
+/// (or at least, such was true when I wrote this)
+///
 /// [`CoordsKind`]: ../struct.CoordsKind.html
 /// [`Lattice`]: ../struct.Lattice.html
 #[derive(Debug,Clone,PartialEq)]
-pub struct Coords<V = Vec<V3>> {
+pub struct Coords {
     pub(crate) lattice: Lattice,
-    pub(crate) coords: CoordsKind<V>,
+    pub(crate) coords: CoordsKind,
 }
-
-/// [`Coords`] with metadata.
-///
-/// Currently the metadata story is pretty weak and hardly resembles
-/// any sort of final design.  You should let the `M` type contain all
-/// of the information you need, and then when certain functions request
-/// a certain `M` type, use `map_metadata_to` to extract that information.
-/// (FIXME: That was the original intent, at least, but anyone looking at
-///  `rsp2_tasks` can clearly see that that is not how it is actually used!)
-///
-/// All methods of `Coords` are also available on `Structure`.
-///
-/// [`Coords`]: ../struct.Coords.html
-#[derive(Debug,Clone,PartialEq)]
-pub struct Structure<M> {
-    pub(crate) coords: Coords,
-    pub(crate) meta: Vec<M>,
-}
-
-/// A Structure whose only metadata is atomic numbers.
-pub type ElementStructure = Structure<Element>;
-
-//--------------------------------------------------------------------------------------------------
-
-// NOTE: Not 100% certain about this being a good idea.
-//
-//       The point of this is to allow methods that take `&Coords` to also
-//       accept `&Structure<M>` (through deref coercions). This seems like a
-//       potentially bad idea, but I couldn't think of any legitimate scenario
-//       in which it would be a potential footgun.
-//
-//       Historically, rsp2 used `Structure<()>` where it now uses `Coords`,
-//       so this conversion works well conceptually in many parts of the code.
-//
-//       I don't want a method like `as_coords` because it would add to the
-//       confusion over the difference between `Coords` and `CoordsKind`, both of
-//       which are referred to as simply `coords` in method names.
-//       Maybe I should rename one of them to `Positions` or `Sites` or something...
-impl<M> ::std::ops::Deref for Structure<M> {
-    type Target = Coords;
-
-    #[inline(always)]
-    fn deref(&self) -> &Coords { &self.coords }
-}
-
-// no DerefMut; I fear that the coordinates of a structure might get accidentally
-// permuted independently of the metadata if we did that.
 
 //--------------------------------------------------------------------------------------------------
 
 /// # Construction
 impl Coords {
-    /// Create a structure with no metadata; just coordinates.
+    /// Create coordinates.
     #[inline]
     pub fn new(lattice: Lattice, coords: CoordsKind) -> Self {
         Self { lattice, coords }
     }
 }
 
-/// # Construction
-impl<M> Structure<M> {
-    pub fn new(lattice: Lattice, coords: CoordsKind, meta: impl IntoIterator<Item=M>) -> Self
-    {
-        let meta: Vec<_> = meta.into_iter().collect();
-        assert_eq!(coords.len(), meta.len());
-        let coords = Coords { lattice, coords };
-        Self { coords, meta }
-    }
-
-    pub fn from_coords(coords: Coords, meta: impl IntoIterator<Item=M>) -> Self
-    {
-        let meta: Vec<_> = meta.into_iter().collect();
-        assert_eq!(coords.num_atoms(), meta.len());
-        Self { coords, meta }
-    }
-}
-
-// compatibility helpers while Structure is being eliminated from the codebase
-impl<M> Structure<M> {
-    pub fn into_parts(self) -> (Coords, Vec<M>)
-    { (self.coords, self.meta) }
-
-    pub fn borrow_coords(&self) -> &Coords
-    { &self.coords }
-}
-
 //---------------------------------------
 
 /// # Simple data access
 impl Coords {
+    /// Alias for `num_atoms`.
+    #[inline] pub fn len(&self) -> usize { self.coords.len() }
     #[inline] pub fn num_atoms(&self) -> usize { self.coords.len() }
     #[inline] pub fn lattice(&self) -> &Lattice { &self.lattice }
-}
-
-// Structure gets these through Deref
-
-//---------------------------------------
-
-/// # Chainable metadata modification
-impl Coords {
-    /// Add the given vector as metadata. Zero-cost.
-    pub fn with_metadata<M>(self, meta: Vec<M>) -> Structure<M>
-    { Structure::from_coords(self, meta) }
-
-    /// Add a constant value as metadata.
-    pub fn with_uniform_metadata<M: Clone>(self, meta: M) -> Structure<M>
-    {
-        let meta = vec![meta; self.coords.len()];
-        Structure::from_coords(self, meta)
-    }
-}
-
-/// # Chainable metadata modification
-impl<M> Structure<M> {
-    /// Drop the metadata.
-    #[inline(always)]
-    pub fn without_metadata(self) -> Coords { self.coords }
-
-    /// Use the given vector as the metadata.
-    /// No cost other than the destruction of the old metadata.
-    pub fn with_metadata<M2>(self, meta: Vec<M2>) -> Structure<M2>
-    {
-        assert_eq!(meta.len(), self.meta.len());
-        let Structure { coords, .. } = self;
-        Structure { coords, meta }
-    }
 }
 
 //---------------------------------------
@@ -162,15 +85,6 @@ impl Coords {
     }
 }
 
-// note: don't use macros, for Go To Definition's sake
-/// # Functions for rescaling the structure.
-///
-/// These functions preserve fractional position while changing the lattice.
-impl<M> Structure<M> {
-    pub fn set_lattice(&mut self, lattice: &Lattice) { self.coords.set_lattice(lattice) }
-    pub fn scale_vecs(&mut self, scale: &[f64; 3]) { self.coords.scale_vecs(scale) }
-}
-
 //---------------------------------------
 
 /// # Reading coordinates
@@ -188,8 +102,6 @@ impl Coords {
     #[inline] pub fn as_carts_cached(&self) -> Option<&[V3]> { self.coords.as_carts_opt() }
     #[inline] pub fn as_fracs_cached(&self) -> Option<&[V3]> { self.coords.as_fracs_opt() }
 }
-
-// Structure gets these through Deref
 
 //---------------------------------------
 
@@ -221,16 +133,6 @@ impl Coords {
     }
     pub fn set_carts(&mut self, carts: Vec<V3>) { self.set_coords(CoordsKind::Carts(carts)); }
     pub fn set_fracs(&mut self, fracs: Vec<V3>) { self.set_coords(CoordsKind::Fracs(fracs)); }
-}
-
-// note: don't use macros, for Go To Definition's sake
-/// # Modifying coordinates
-impl<M> Structure<M> {
-    #[inline(always)] pub fn carts_mut(&mut self) -> &mut [V3] { self.coords.carts_mut() }
-    #[inline(always)] pub fn fracs_mut(&mut self) -> &mut [V3] { self.coords.fracs_mut() }
-    #[inline(always)] pub fn set_coords(&mut self, coords: CoordsKind) { self.coords.set_coords(coords) }
-    #[inline(always)] pub fn set_carts(&mut self, carts: Vec<V3>) { self.coords.set_carts(carts) }
-    #[inline(always)] pub fn set_fracs(&mut self, fracs: Vec<V3>) { self.coords.set_fracs(fracs) }
 }
 
 //---------------------------------------
@@ -268,26 +170,10 @@ impl Coords {
     }
 }
 
-// note: don't use macros, for Go To Definition's sake
-/// # Populating caches
-impl<M> Structure<M> {
-    #[inline(always)] pub fn ensure_carts(&mut self) { self.coords.ensure_carts() }
-    #[inline(always)] pub fn ensure_fracs(&mut self) { self.coords.ensure_fracs() }
-}
-
 //---------------------------------------
 
 /// # Chainable modification
 impl Coords {
-    /// # Panics
-    /// Panics if the length does not match.
-    pub fn with_coords(mut self, coords: CoordsKind) -> Self { self.set_coords(coords); self }
-    pub fn with_carts(mut self, carts: Vec<V3>) -> Self { self.set_carts(carts); self }
-    pub fn with_fracs(mut self, fracs: Vec<V3>) -> Self { self.set_fracs(fracs); self }
-}
-
-/// # Chainable modification
-impl<M> Structure<M> {
     /// # Panics
     /// Panics if the length does not match.
     pub fn with_coords(mut self, coords: CoordsKind) -> Self { self.set_coords(coords); self }
@@ -314,14 +200,6 @@ impl Coords {
         self.ensure_only_fracs();
         self.lattice = self.lattice.transformed_by(m);
     }
-}
-
-// note: don't use macros, for Go To Definition's sake
-/// # Spatial operations
-impl<M> Structure<M> {
-    #[inline(always)] pub fn translate_frac(&mut self, v: &V3) { self.coords.translate_frac(v) }
-    #[inline(always)] pub fn translate_cart(&mut self, v: &V3) { self.coords.translate_cart(v) }
-    #[inline(always)] pub fn transform(&mut self, m: &M33) { self.coords.transform(m) }
 }
 
 //---------------------------------------
@@ -379,9 +257,9 @@ impl Coords {
                 Ok(m) => m,
                 Err(_) => {
                     throw!(NonEquivalentLattice {
-                    backtrace: ::failure::Backtrace::new(),
-                    a_binv: unimodular.matrix().into_array(),
-                })
+                        backtrace: ::failure::Backtrace::new(),
+                        a_binv: unimodular.matrix().into_array(),
+                    })
                 },
             };
             self.apply_unimodular(&unimodular);
@@ -399,26 +277,18 @@ impl Coords {
     }
 }
 
-// note: don't use macros, for Go To Definition's sake
-/// # Transformations between equivalent cells
-impl<M> Structure<M> {
-    #[inline(always)] pub fn apply_unimodular(&mut self, m: &M33<i32>) { self.coords.apply_unimodular(m) }
-    #[inline(always)] pub fn use_equivalent_cell(&mut self, tol: f64, target_lattice: &Lattice) -> Result<(), NonEquivalentLattice> { self.coords.use_equivalent_cell(tol, target_lattice) }
-    #[inline(always)] pub fn reduce_positions(&mut self) { self.coords.reduce_positions() }
-}
-
 //---------------------------------------
 
 /// # Structure matching
 impl Coords {
-    /// Get the permutation that, when applied to this structure, makes the
-    /// coords match another.
+    /// Get the permutation that, when applied to this structure, makes it
+    /// match the target (when reduced under the lattice).
     ///
     /// The existing implementation is pretty strict.  I mean, structure matching
     /// is *kind of a tricky problem.*
-    pub fn perm_to_match_coords(
+    pub fn perm_to_match(
         &self,
-        other: &Coords,
+        target: &Coords,
         tol: f64,
     ) -> Result<Perm, ::algo::find_perm::PositionMatchError>
     {
@@ -426,85 +296,24 @@ impl Coords {
         // NOTE: maybe this test on the lattice should use a larger or smaller
         //        tolerance than the perm search. Haven't thought it through
         // (include abs; arbitrary lattices may have near-zero cancellations)
-        assert_eq!(self.num_atoms(), other.num_atoms());
+        assert_eq!(self.num_atoms(), target.num_atoms());
         assert_close!(rel=tol, abs=tol,
             self.lattice().matrix().unvee(),
-            other.lattice().matrix().unvee(),
+            target.lattice().matrix().unvee(),
         );
         let meta = vec![(); self.coords.len()];
         ::algo::find_perm::brute_force_with_sort_trick(
             self.lattice(),
             &meta,
             &self.to_fracs(),
-            &other.to_fracs(),
+            &target.to_fracs(),
             tol,
         )
     }
 }
 
 //--------------------------------------------------------------------------------------------------
-// methods on Structure only
-
-/// # Working with metadata
-impl<M> Structure<M> {
-    // FIXME bad idea for stable interface, but good enough for now
-    pub fn metadata(&self) -> &[M] { &self.meta }
-
-    pub fn try_map_metadata_into<M2, E>(
-        self,
-        f: impl FnMut(M) -> Result<M2, E>,
-    ) -> Result<Structure<M2>, E> {
-        Ok({
-            let Structure { coords, meta } = self;
-            let meta = meta.into_iter().map(f).collect::<Result<_, E>>()?;
-            Structure { coords, meta }
-        })
-    }
-
-    pub fn map_metadata_into<M2>(
-        self,
-        f: impl FnMut(M) -> M2,
-    ) -> Structure<M2> {
-        let Structure { coords, meta } = self;
-        let meta = meta.into_iter().map(f).collect();
-        Structure { coords, meta }
-    }
-
-    // This variant can be useful when using the by-value variant
-    // would require the user to clone() first, needlessly
-    // cloning the old metadata.
-    pub fn map_metadata_to<M2>(
-        &self,
-        f: impl FnMut(&M) -> M2,
-    ) -> Structure<M2> {
-        let coords = self.coords.clone();
-        let meta = self.meta.iter().map(f).collect();
-        Structure { coords, meta }
-    }
-
-    /// Store new metadata in-place.
-    pub fn set_metadata(&mut self, meta: impl IntoIterator<Item=M>)
-    {
-        let old = self.meta.len();
-        self.meta.clear();
-        self.meta.extend(meta.into_iter());
-        assert_eq!(self.meta.len(), old);
-    }
-
-    #[inline(always)] pub fn as_coords(&self) -> &Coords { self }
-}
-
-//--------------------------------------------------------------------------------------------------
 // trait impls
-
-impl<M> Permute for Structure<M> {
-    fn permuted_by(self, perm: &Perm) -> Self
-    {
-        let coords = self.coords.permuted_by(perm);
-        let meta = self.meta.permuted_by(perm);
-        Structure { coords, meta }
-    }
-}
 
 impl Permute for Coords {
     fn permuted_by(self, perm: &Perm) -> Self
@@ -512,17 +321,6 @@ impl Permute for Coords {
         let lattice = self.lattice;
         let coords = self.coords.permuted_by(perm);
         Coords { lattice, coords }
-    }
-}
-
-impl<'iter, M: 'iter> Partition<'iter> for Structure<M> {
-    fn into_unlabeled_partitions<L>(self, part: &'iter Part<L>) -> Unlabeled<'iter, Self>
-    {
-        let Structure { coords, meta } = self;
-        Box::new({
-            (coords, meta).into_unlabeled_partitions(part)
-                .map(|(coords, meta)| Structure { coords, meta })
-        })
     }
 }
 
@@ -552,7 +350,6 @@ mod compiletest {
     #[test]
     fn structure_is_send_and_sync() {
         assert_send_sync::<Coords>();
-        assert_send_sync::<Structure<()>>();
     }
 
     #[test]
@@ -566,11 +363,6 @@ mod compiletest {
         let lattice = Lattice::diagonal(&[2.0, 1.0, 1.0]);
         let coords = Coords::new(lattice, coords);
 
-        // Structure has all of those dumb trivially-forwarded methods,
-        // creating even more room for potential typos.
-        // We must test them just as thoroughly.
-        let structure = coords.clone().with_uniform_metadata(());
-
         const ORIG_FRACS: [V3; 1] = [V3([0.5, 0.0, 0.0])];
         const ORIG_CARTS: [V3; 1] = [V3([1.0, 0.0, 0.0])];
 
@@ -578,12 +370,9 @@ mod compiletest {
         // (we won't be changing any of the actual coordinates until near
         //  the very end of the test)
         let mut coords = coords;
-        let mut structure = structure;
 
         assert_eq!(coords.to_carts(), ORIG_CARTS.to_vec());
         assert_eq!(coords.to_fracs(), ORIG_FRACS.to_vec());
-        assert_eq!(structure.to_carts(), ORIG_CARTS.to_vec());
-        assert_eq!(structure.to_fracs(), ORIG_FRACS.to_vec());
 
         // `*_mut` is the perfect opportunity to indirectly test `ensure_only_*`,
         // because there is simply no way that these methods can preserve the
@@ -595,22 +384,10 @@ mod compiletest {
         assert_eq!(coords.as_fracs_cached(), Some(&ORIG_FRACS[..]));
         assert_eq!(coords.as_carts_cached(), None);
 
-        assert_eq!(structure.carts_mut(), &mut ORIG_CARTS);
-        assert_eq!(structure.as_carts_cached(), Some(&ORIG_CARTS[..]));
-        assert_eq!(structure.as_fracs_cached(), None);
-        assert_eq!(structure.fracs_mut(), &mut ORIG_FRACS);
-        assert_eq!(structure.as_fracs_cached(), Some(&ORIG_FRACS[..]));
-        assert_eq!(structure.as_carts_cached(), None);
-
         coords.ensure_carts();
         assert_eq!(coords.as_carts_cached(), Some(&ORIG_CARTS[..]));
         coords.ensure_fracs();
         assert_eq!(coords.as_fracs_cached(), Some(&ORIG_FRACS[..]));
-
-        structure.ensure_carts();
-        assert_eq!(structure.as_carts_cached(), Some(&ORIG_CARTS[..]));
-        structure.ensure_fracs();
-        assert_eq!(structure.as_fracs_cached(), Some(&ORIG_FRACS[..]));
 
         // these last few will temporarily change the coordinates.
         // We'll put them back each time in the second step.
@@ -621,26 +398,12 @@ mod compiletest {
         assert_eq!(coords.to_carts(), vec![[1.0, 0.0, 0.0]].envee());
         assert_eq!(coords.to_fracs(), vec![[0.5, 0.0, 0.0]].envee());
 
-        structure.set_carts(vec![[2.0, 0.0, 0.0]].envee());
-        assert_eq!(structure.to_carts(), vec![[2.0, 0.0, 0.0]].envee());
-        assert_eq!(structure.to_fracs(), vec![[1.0, 0.0, 0.0]].envee());
-        structure.set_fracs(vec![[0.5, 0.0, 0.0]].envee());
-        assert_eq!(structure.to_carts(), vec![[1.0, 0.0, 0.0]].envee());
-        assert_eq!(structure.to_fracs(), vec![[0.5, 0.0, 0.0]].envee());
-
         let coords = coords.with_carts(vec![[2.0, 0.0, 0.0]].envee());
         assert_eq!(coords.to_carts(), vec![[2.0, 0.0, 0.0]].envee());
         assert_eq!(coords.to_fracs(), vec![[1.0, 0.0, 0.0]].envee());
         let coords = coords.with_fracs(vec![[0.5, 0.0, 0.0]].envee());
         assert_eq!(coords.to_carts(), vec![[1.0, 0.0, 0.0]].envee());
         assert_eq!(coords.to_fracs(), vec![[0.5, 0.0, 0.0]].envee());
-
-        let structure = structure.with_carts(vec![[2.0, 0.0, 0.0]].envee());
-        assert_eq!(structure.to_carts(), vec![[2.0, 0.0, 0.0]].envee());
-        assert_eq!(structure.to_fracs(), vec![[1.0, 0.0, 0.0]].envee());
-        let structure = structure.with_fracs(vec![[0.5, 0.0, 0.0]].envee());
-        assert_eq!(structure.to_carts(), vec![[1.0, 0.0, 0.0]].envee());
-        assert_eq!(structure.to_fracs(), vec![[0.5, 0.0, 0.0]].envee());
 
         let mut coords = coords;
         coords.translate_cart(&V3([1.0, 0.0, 0.0]));
@@ -650,14 +413,5 @@ mod compiletest {
         assert_eq!(coords.to_carts(), vec![[1.0, 0.0, 0.0]].envee());
         assert_eq!(coords.to_fracs(), vec![[0.5, 0.0, 0.0]].envee());
         let _ = coords;
-
-        let mut structure = structure;
-        structure.translate_cart(&V3([1.0, 0.0, 0.0]));
-        assert_eq!(structure.to_carts(), vec![[2.0, 0.0, 0.0]].envee());
-        assert_eq!(structure.to_fracs(), vec![[1.0, 0.0, 0.0]].envee());
-        structure.translate_frac(&V3([-0.5, 0.0, 0.0]));
-        assert_eq!(structure.to_carts(), vec![[1.0, 0.0, 0.0]].envee());
-        assert_eq!(structure.to_fracs(), vec![[0.5, 0.0, 0.0]].envee());
-        let _ = structure;
     }
 }

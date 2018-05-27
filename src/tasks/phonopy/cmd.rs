@@ -540,7 +540,7 @@ impl<P: AsPath> DirWithDisps<P> {
         {
             let (phonopy_super_coords, phonopy_super_meta) = self.superstructure();
 
-            perm_from_phonopy = phonopy_super_coords.perm_to_match_coords(&our_super_coords, 1e-10)?;
+            perm_from_phonopy = phonopy_super_coords.perm_to_match(&our_super_coords, 1e-10)?;
 
             // make phonopy match us
             let phonopy_super_coords = phonopy_super_coords.clone().permuted_by(&perm_from_phonopy);

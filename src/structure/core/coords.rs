@@ -8,8 +8,12 @@ use ::rsp2_array_types::{V3, M33};
 ///
 /// This allows a function to support either cartesian coordinates,
 /// or fractional coordinates with respect to some lattice.
-// NOTE: The type parameter here is a necessary step towards the HList
-//       structure types, so that views of them can be constructed.
+//
+// NOTE: The type parameter here was originally introduced as a step towards
+//       an HList-based Structure type. While those plans have been scrapped,
+//       the type parameter itself is still ever-so-slightly useful because it
+//       lets you do `CoordsKind::Carts(&v[..]).to_fracs(lattice)` without
+//       having to allocate an intermediate vec for the carts.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CoordsKind<V = Vec<V3>> {
     /// Data that is expressed in a Euclidean basis.

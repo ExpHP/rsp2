@@ -69,8 +69,6 @@ fn dumb_validate_equivalent(
     }
 }
 
-// NOTE: Takes Coords as a speedbump to prevent accidental use
-//       with inappropriate metadata.
 /// Compute permutations for all operators in a spacegroup.
 pub fn of_spacegroup_for_general(
     // NOTE: This really does require data from both the primitive and supercell.
@@ -89,8 +87,6 @@ pub fn of_spacegroup_for_general(
     of_spacegroup_for_general_with_meta(coords, &dummy_meta, prim_ops, prim_lattice, tol)
 }
 
-// NOTE: Takes Coords as a speedbump to prevent accidental use
-//       with inappropriate metadata.
 /// Compute permutations for all operators in a spacegroup.
 pub fn of_spacegroup_for_primitive(
     prim_coords: &Coords,
