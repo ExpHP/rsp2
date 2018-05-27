@@ -561,8 +561,10 @@ mod lammps {
             fn init_info(&self, _: &Coords, _: &Vec<Element>) -> InitInfo
             {
                 InitInfo {
-                    masses: vec![::common::element_mass(consts::HYDROGEN),
-                                 ::common::element_mass(consts::CARBON)],
+                    masses: vec![
+                        ::common::element_mass(consts::HYDROGEN).unwrap(),
+                        ::common::element_mass(consts::CARBON).unwrap(),
+                    ],
                     pair_commands: match *self {
                         Airebo::Airebo { lj_sigma, lj_enabled, torsion_enabled } => vec![
                             PairCommand::pair_style("airebo/omp")
@@ -646,7 +648,7 @@ mod lammps {
                     Some(layers) => layers,
                 };
 
-                let masses = vec![::common::element_mass(consts::CARBON); layers.len()];
+                let masses = vec![::common::element_mass(consts::CARBON).unwrap(); layers.len()];
 
                 let interacting_pairs: Vec<_> = {
                     let gaps: Vec<_> = layers.gaps.iter().map(|&x| self.classify_gap(x)).collect();

@@ -28,6 +28,7 @@ extern crate rsp2_minimize;
 extern crate log;
 
 use ::std::io::Read;
+use ::std::collections::HashMap;
 use ::failure::Error;
 pub use ::rsp2_minimize::acgsd::Settings as Acgsd;
 
@@ -126,6 +127,9 @@ pub struct Settings {
 
     // FIXME move
     pub layer_gamma_threshold: f64,
+
+    #[serde(default)]
+    pub masses: Option<Masses>,
 
     #[serde(default)]
     pub ev_loop: EvLoop,
@@ -453,7 +457,9 @@ fn _ev_loop__min_positive_iter() -> u32 { 3 }
 fn _ev_loop__max_iter() -> u32 { 15 }
 fn _ev_loop__fail() -> bool { true }
 
-
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
+pub struct Masses(pub HashMap<String, f64>);
 
 // --------------------------------------------------------
 

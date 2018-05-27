@@ -122,7 +122,7 @@ impl Builder {
             .conf(
                 "MASS",
                 structure.metadata().iter()
-                    .map(|&s| ::common::element_mass(s))
+                    .map(|&s| ::common::element_mass(s).unwrap())
                     .join(" ")
             )
     }

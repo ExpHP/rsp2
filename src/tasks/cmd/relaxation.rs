@@ -6,20 +6,19 @@ use super::{write_eigen_info_for_humans, write_eigen_info_for_machines};
 
 use ::{FailResult, FailOk};
 use ::rsp2_tasks_config::{self as cfg, Settings};
+use ::meta::prelude::*;
+use ::meta::{Mass, Element};
 use ::traits::{AsPath};
 use ::phonopy::{DirWithBands};
 use ::hlist_aliases::*;
-use ::meta::prelude::*;
-
 use ::math::basis::Basis3;
-
-use ::rsp2_slice_math::{v, V, vdot};
+use ::math::bands::ScMatrix;
+use ::phonopy::Builder as PhonopyBuilder;
 
 use ::slice_of_array::prelude::*;
+use ::rsp2_slice_math::{v, V, vdot};
 use ::rsp2_array_types::{V3};
-use ::rsp2_structure::{Coords, Element};
-use ::phonopy::Builder as PhonopyBuilder;
-use ::math::bands::ScMatrix;
+use ::rsp2_structure::{Coords};
 use ::std::rc::Rc;
 
 impl TrialDir {
@@ -34,8 +33,9 @@ impl TrialDir {
         layer_sc_mats: &Option<Vec<ScMatrix>>,
         phonopy: &PhonopyBuilder,
         original_coords: Coords,
-        meta: HList1<
+        meta: HList2<
             Rc<[Element]>,
+            Rc<[Mass]>,
         >,
     ) -> FailResult<(Coords, GammaSystemAnalysis, DirWithBands<Box<AsPath>>)>
     {
@@ -67,7 +67,7 @@ impl TrialDir {
                 let masses = {
                     let elements: Rc<[Element]> = meta.pick();
                     elements.iter()
-                        .map(|&s| ::common::element_mass(s))
+                        .map(|&s| ::common::element_mass(s).unwrap())
                         .collect()
                 };
 

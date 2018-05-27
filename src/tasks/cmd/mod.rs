@@ -23,6 +23,7 @@ use ::traits::{AsPath};
 use ::phonopy::{DirWithBands, DirWithDisps, DirWithForces, DirWithSymmetry};
 
 use ::meta::prelude::*;
+use ::meta::{Element, Mass};
 use ::util::ext_traits::{OptionResultExt, PathNiceExt};
 use ::math::basis::Basis3;
 use ::math::bonds::{FracBonds};
@@ -34,7 +35,7 @@ use ::rsp2_slice_math::{vnorm};
 use ::slice_of_array::prelude::*;
 use ::rsp2_array_utils::arr_from_fn;
 use ::rsp2_array_types::{V3, M33, Unvee};
-use ::rsp2_structure::{Coords, Element, ElementStructure, Lattice};
+use ::rsp2_structure::{Coords, ElementStructure, Lattice};
 use ::rsp2_structure::layer::LayersPerUnitCell;
 use ::phonopy::Builder as PhonopyBuilder;
 use ::math::bands::ScMatrix;
@@ -77,7 +78,9 @@ impl TrialDir {
         let (optimizable_coords, atom_elements, atom_layers, layer_sc_mats) = {
             read_optimizable_structure(settings.layer_search.as_ref(), file_format, input)?
         };
-        let meta = hlist![atom_elements];
+        let atom_masses = masses_by_config(settings.masses.as_ref(), atom_elements.clone())?;
+        let meta = hlist![atom_elements, atom_masses];
+
         let original_coords = {
             ::cmd::param_optimization::optimize_layer_parameters(
                 &settings.scale_ranges,
@@ -179,9 +182,9 @@ impl TrialDir {
         aux_info: aux_info::Info,
         phonopy: &PhonopyBuilder,
         coords: &Coords,
-        meta: HList1<
+        meta: HList2<
             Rc<[Element]>,
-            //Rc<[Mass]>,
+            Rc<[Mass]>,
         >,
     ) -> FailResult<(DirWithBands<Box<AsPath>>, Vec<f64>, Basis3, GammaSystemAnalysis)>
     {Ok({
@@ -235,9 +238,9 @@ fn do_diagonalize(
     threading: &cfg::Threading,
     phonopy: &PhonopyBuilder,
     coords: &Coords,
-    meta: HList1<
+    meta: HList2<
         Rc<[Element]>,
-        //Rc<[Mass]>,
+        Rc<[Mass]>,
     >,
     save_bands: Option<&PathArc>,
     points: &[V3],
@@ -564,14 +567,12 @@ impl TrialDir {
         settings: &Settings,
     ) -> FailResult<()>
     {Ok({
-        use ::rsp2_structure_io::poscar;
-
         let pot = PotentialBuilder::from_config(&settings.threading, &settings.potential);
 
-        let structure = poscar::load(self.read_file("./final.vasp")?)?;
-        let phonopy = phonopy_builder_from_settings(&settings.phonons, structure.lattice());
+        let (coords, meta) = read_poscar(settings.masses.as_ref(), self.read_file("./final.vasp")?)?;
+        let phonopy = phonopy_builder_from_settings(&settings.phonons, coords.lattice());
         do_diagonalize(
-            &*pot, &settings.threading, &phonopy, &structure, hlist![structure.metadata().into()],
+            &*pot, &settings.threading, &phonopy, &coords, meta.sift(),
             Some(&self.save_bands_dir()),
             &[Q_GAMMA, Q_K],
         )?;
@@ -591,18 +592,16 @@ impl TrialDir {
         settings: &Settings,
     ) -> FailResult<()>
     {Ok({
-        use ::rsp2_structure_io::poscar;
-
         let pot = PotentialBuilder::from_config(&settings.threading, &settings.potential);
 
-        let structure = poscar::load(self.read_file("./final.vasp")?)?;
-        let phonopy = phonopy_builder_from_settings(&settings.phonons, structure.lattice());
+        let (coords, meta) = read_poscar(settings.masses.as_ref(), self.read_file("./final.vasp")?)?;
+        let phonopy = phonopy_builder_from_settings(&settings.phonons, coords.lattice());
 
         let aux_info = self.load_analysis_aux_info()?;
 
         let save_bands = None;
         let (_, _, _, ev_analysis) = self.do_post_relaxation_computations(
-            settings, save_bands, &*pot, aux_info, &phonopy, &structure, hlist![structure.metadata().into()],
+            settings, save_bands, &*pot, aux_info, &phonopy, &coords, meta.sift(),
         )?;
 
         self.write_ev_analysis_output_files(settings, &*pot, &ev_analysis)?;
@@ -709,7 +708,7 @@ pub(crate) fn run_dynmat_test(phonopy_dir: &PathDir) -> FailResult<()>
         let masses: Vec<_> = {
             prim_structure.metadata().iter()
                 .map(|&s| ::common::element_mass(s))
-                .collect()
+                .collect::<Result<_, _>>().unwrap()
         };
         trace!("Computing dynamical matrix...");
         let our_dynamical_matrix = force_constants.gamma_dynmat(&sc, &masses).hermitianize();
@@ -851,4 +850,35 @@ pub(crate) fn perform_layer_search(
     }
 
     layers
+})}
+
+
+fn read_poscar(
+    cfg_masses: Option<&cfg::Masses>,
+    r: impl ::std::io::Read,
+) -> FailResult<(Coords, HList2<Rc<[Element]>, Rc<[Mass]>>)> {
+    let structure = ::rsp2_structure_io::poscar::load(r)?;
+    let elements: Rc<[Element]> = structure.metadata().into();
+    let masses = masses_by_config(cfg_masses, elements.clone())?;
+    Ok((structure.without_metadata(), hlist![elements, masses]))
+}
+
+fn masses_by_config(
+    cfg_masses: Option<&cfg::Masses>,
+    elements: Rc<[Element]>,
+) -> FailResult<Rc<[Mass]>>
+{Ok({
+    elements.iter().cloned()
+        .map(|element| match cfg_masses {
+            Some(cfg::Masses(map)) => {
+                map.get(element.symbol())
+                    .cloned()
+                    .map(Mass)
+                    .ok_or_else(|| {
+                        format_err!("No mass in config for element {}", element.symbol())
+                    })
+            },
+            None => ::common::element_mass(element).map(Mass),
+        })
+        .collect::<Result<Vec<_>, _>>()?.into()
 })}
