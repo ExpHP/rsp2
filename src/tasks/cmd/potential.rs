@@ -1,20 +1,23 @@
 // The purpose of this module is to wrap `rsp2_lammps_wrap` with code specific to
-// the potentials we care about using, and to support ElementStructure.
+// the potentials we care about using, and to support our metadata scheme.
 //
 // This is where we decide e.g. atom type assignments and `pair_coeff` commands.
 // (which are decisions that `rsp2_lammps_wrap` has largely chosen to defer)
 
 use ::FailResult;
-use ::rsp2_structure::{Structure, consts};
-use ::rsp2_structure::{Element};
+use ::hlist_aliases::*;
+use ::meta::Element;
+#[allow(unused)] // rustc bug
+use ::meta::prelude::*;
+use ::rsp2_structure::{Coords, consts};
 use ::rsp2_structure::layer::Layers;
 use ::rsp2_tasks_config as cfg;
 #[allow(unused)] // rustc bug
 use ::rsp2_array_types::{V3, Unvee};
 #[allow(unused)] // rustc bug
 use ::slice_of_array::prelude::*;
+use ::std::rc::Rc;
 use ::std::collections::BTreeMap;
-use rsp2_structure::Coords;
 
 const DEFAULT_KC_Z_CUTOFF: f64 = 14.0; // (Angstrom?)
 const DEFAULT_KC_Z_MAX_LAYER_SEP: f64 = 4.5; // Angstrom
@@ -22,6 +25,14 @@ const DEFAULT_KC_Z_MAX_LAYER_SEP: f64 = 4.5; // Angstrom
 const DEFAULT_AIREBO_LJ_SIGMA:    f64 = 3.0; // (cutoff, x3.4 A)
 const DEFAULT_AIREBO_LJ_ENABLED:      bool = true;
 const DEFAULT_AIREBO_TORSION_ENABLED: bool = false;
+
+/// Metadata type shared by all potentials usable in the main code.
+///
+/// (all potentials usable in the main code must use a single metadata
+///  type by necessity, due to the use of dynamic polymorphism)
+pub type CommonMeta = HList1<
+    Rc<[Element]>,
+>;
 
 /// Trait alias for a function producing flat potential and gradient,
 /// for compatibility with `rsp2_minimize`.
@@ -33,7 +44,7 @@ impl<F> FlatDiffFn for F where F: FnMut(&[f64]) -> FailResult<(f64, Vec<f64>)> {
 pub type DynFlatDiffFn<'a> = FlatDiffFn<Output=FailResult<(f64, Vec<f64>)>> + 'a;
 
 /// This is what gets passed around by very high level code to represent a
-/// potential function in very high-level code. Basically:
+/// potential function. Basically:
 ///
 /// * Configuration is read to produce one of these.
 ///   A trait is used instead of an enum to increase the flexibility of the
@@ -55,7 +66,7 @@ pub type DynFlatDiffFn<'a> = FlatDiffFn<Output=FailResult<(f64, Vec<f64>)>> + 'a
 /// It is a generic type parameter because some implementation may benefit
 /// from using their own type (using an adapter to expose a PotentialBuilder
 /// implementation with the default metadata type).
-pub trait PotentialBuilder<Meta = Element>
+pub trait PotentialBuilder<Meta = HList1<Rc<[Element]>>>
     : Send + Sync
     // 'static just makes the signatures of the trait easier.
     //
@@ -84,7 +95,7 @@ pub trait PotentialBuilder<Meta = Element>
     /// **NOTE:** This takes a structure for historic (read: dumb) reasons.  Hopefully it can
     /// be removed soon. For now, just make sure to give it something with the same chemical
     /// composition, number of atoms, and lattice type as the structures you'll be computing.
-    fn initialize_diff_fn(&self, structure: Structure<Meta>) -> FailResult<Box<DiffFn<Meta>>>;
+    fn initialize_diff_fn(&self, coords: &Coords, meta: Meta) -> FailResult<Box<DiffFn<Meta>>>;
 
     /// Convenience method to get a function suitable for `rsp2_minimize`.
     ///
@@ -94,15 +105,15 @@ pub trait PotentialBuilder<Meta = Element>
     /// Because Boxes don't implement `Fn` traits for technical reasons,
     /// you will likely need to write `&mut *flat_diff_fn` in order to get
     /// a `&mut DynFlatDiffFn`.
-    fn initialize_flat_diff_fn(&self, structure: Structure<Meta>) -> FailResult<Box<DynFlatDiffFn<'static>>>
+    fn initialize_flat_diff_fn(&self, init_coords: &Coords, meta: Meta) -> FailResult<Box<DynFlatDiffFn<'static>>>
     where Meta: Clone + 'static
     {
-        let mut diff_fn = self.initialize_diff_fn(structure.clone())?;
-        let mut structure = structure;
+        let mut diff_fn = self.initialize_diff_fn(init_coords, meta.clone())?;
+        let mut coords = init_coords.clone();
         Ok(Box::new(move |pos: &[f64]| Ok({
-            structure.set_carts(pos.nest().to_vec());
+            coords.set_carts(pos.nest().to_vec());
 
-            let (value, grad) = diff_fn.compute(&structure)?;
+            let (value, grad) = diff_fn.compute(&coords, meta.clone())?;
             (value, grad.unvee().flat().to_vec())
         })))
     }
@@ -116,8 +127,8 @@ pub trait PotentialBuilder<Meta = Element>
     /// Usage: `pot.one_off().compute(&structure)`
     ///
     /// This is provided because otherwise, you end up needing to write stuff
-    /// like `pot.initialize_diff_fn(structure.clone()).compute(&structure)`, which
-    /// is both confusing and awkward.
+    /// like `pot.initialize_diff_fn(&coords, meta.sift()).compute(&coords, meta.sift())`,
+    /// which is both confusing and awkward.
     fn one_off(&self) -> OneOff<'_, Meta>
     where Meta: Clone,
     { OneOff(self._as_ref_dyn()) }
@@ -164,12 +175,12 @@ where Meta: Clone + 'static,
     fn threaded(&self, threaded: bool) -> Box<PotentialBuilder<Meta>>
     { (**self).threaded(threaded) }
 
-    fn initialize_diff_fn(&self, structure: Structure<Meta>) -> FailResult<Box<DiffFn<Meta>>>
-    { (**self).initialize_diff_fn(structure) }
+    fn initialize_diff_fn(&self, coords: &Coords, meta: Meta) -> FailResult<Box<DiffFn<Meta>>>
+    { (**self).initialize_diff_fn(coords, meta) }
 
-    fn initialize_flat_diff_fn(&self, structure: Structure<Meta>) -> FailResult<Box<DynFlatDiffFn<'static>>>
+    fn initialize_flat_diff_fn(&self, coords: &Coords, meta: Meta) -> FailResult<Box<DynFlatDiffFn<'static>>>
     where Meta: Clone + 'static
-    { (**self).initialize_flat_diff_fn(structure) }
+    { (**self).initialize_flat_diff_fn(coords, meta) }
 
     fn one_off(&self) -> OneOff<'_, Meta>
     where Meta: Clone,
@@ -182,7 +193,7 @@ impl_dyn_clone_detail!{
 
 //-------------------------------------
 
-/// This is `FnMut(ElementStructure) -> FailResult<(f64, Vec<V3>)>` with convenience methods.
+/// This is `FnMut(&Coords, Meta) -> FailResult<(f64, Vec<V3>)>` with convenience methods.
 ///
 /// A `DiffFn` may contain pre-computed or cached data that is only valid for
 /// certain structures.  Most code that handles `DiffFns` must handle them
@@ -192,20 +203,20 @@ impl_dyn_clone_detail!{
 /// (...not a huge deal since all uses and all implementations are local to this crate)
 pub trait DiffFn<Meta> {
     /// Compute the value and gradient.
-    fn compute(&mut self, structure: &Structure<Meta>) -> FailResult<(f64, Vec<V3>)>;
+    fn compute(&mut self, coords: &Coords, meta: Meta) -> FailResult<(f64, Vec<V3>)>;
 
     /// Convenience method to compute the potential.
-    fn compute_value(&mut self, structure: &Structure<Meta>) -> FailResult<f64>
-    { Ok(self.compute(structure)?.0) }
+    fn compute_value(&mut self, coords: &Coords, meta: Meta) -> FailResult<f64>
+    { Ok(self.compute(coords, meta)?.0) }
 
     /// Convenience method to compute the gradient.
-    fn compute_grad(&mut self, structure: &Structure<Meta>) -> FailResult<Vec<V3>>
-    { Ok(self.compute(structure)?.1) }
+    fn compute_grad(&mut self, coords: &Coords, meta: Meta) -> FailResult<Vec<V3>>
+    { Ok(self.compute(coords, meta)?.1) }
 
     /// Convenience method to compute the force.
-    fn compute_force(&mut self, structure: &Structure<Meta>) -> FailResult<Vec<V3>>
+    fn compute_force(&mut self, coords: &Coords, meta: Meta) -> FailResult<Vec<V3>>
     {
-        let mut force = self.compute_grad(structure)?;
+        let mut force = self.compute_grad(coords, meta)?;
         for v in &mut force { *v = -*v; }
         Ok(force)
     }
@@ -215,17 +226,22 @@ pub trait DiffFn<Meta> {
     /// Some potentials may assume that `original` has zero force.
     ///
     /// The default implementation works from the dense representation of the forces.
-    fn compute_force_set(&mut self, original: &Structure<Meta>, displacement: (usize, V3)) -> FailResult<BTreeMap<usize, V3>>
+    fn compute_force_set(
+        &mut self,
+        original_coords: &Coords,
+        meta: Meta,
+        displacement: (usize, V3),
+    ) -> FailResult<BTreeMap<usize, V3>>
     where Meta: Clone,
     {
-        let mut structure = original.clone();
+        let mut coords = original_coords.clone();
         // FIXME maybe ensure_only_carts() should be exposed.
-        let _ = structure.carts_mut(); // prevent numerical differences from change in representation
+        let _ = coords.carts_mut(); // prevent numerical differences from change in representation
 
         // FIXME this is going to get recomputed frequently unless we change the signature.
-        let original_force = self.compute_force(&structure)?;
-        structure.carts_mut()[displacement.0] += displacement.1;
-        let displaced_force = self.compute_force(&structure)?;
+        let original_force = self.compute_force(&coords, meta.clone())?;
+        coords.carts_mut()[displacement.0] += displacement.1;
+        let displaced_force = self.compute_force(&coords, meta)?;
 
         let diffs = {
             zip_eq!(original_force, displaced_force).enumerate()
@@ -234,35 +250,31 @@ pub trait DiffFn<Meta> {
                 .filter(|(_, (old, new))| old != new)
                 .map(|(atom, (old, new))| (atom, new - old))
 
-                // this one is a closer approximation of phonopy
+                // this one is a closer approximation of phonopy, producing a dense matrix with
+                // just the new forces (assuming the old ones are zero)
 //                .map(|(atom, (_old, new))| (atom, new))
         };
         Ok(diffs.collect())
-//        Ok(::math::dynmat::ForceSets::from_displacement(
-//            structure.num_atoms(),
-//            displacement,
-//            diffs,
-//        ))
     }
 }
 
 // necessary for combinators like sum
 impl<'d, Meta> DiffFn<Meta> for Box<DiffFn<Meta> + 'd> {
     /// Compute the value and gradient.
-    fn compute(&mut self, structure: &Structure<Meta>) -> FailResult<(f64, Vec<V3>)>
-    { (**self).compute(structure) }
+    fn compute(&mut self, coords: &Coords, meta: Meta) -> FailResult<(f64, Vec<V3>)>
+    { (**self).compute(coords, meta) }
 
     /// Convenience method to compute the potential.
-    fn compute_value(&mut self, structure: &Structure<Meta>) -> FailResult<f64>
-    { (**self).compute_value(structure) }
+    fn compute_value(&mut self, coords: &Coords, meta: Meta) -> FailResult<f64>
+    { (**self).compute_value(coords, meta) }
 
     /// Convenience method to compute the gradient.
-    fn compute_grad(&mut self, structure: &Structure<Meta>) -> FailResult<Vec<V3>>
-    { (**self).compute_grad(structure) }
+    fn compute_grad(&mut self, coords: &Coords, meta: Meta) -> FailResult<Vec<V3>>
+    { (**self).compute_grad(coords, meta) }
 
     /// Convenience method to compute the force.
-    fn compute_force(&mut self, structure: &Structure<Meta>) -> FailResult<Vec<V3>>
-    { (**self).compute_force(structure) }
+    fn compute_force(&mut self, coords: &Coords, meta: Meta) -> FailResult<Vec<V3>>
+    { (**self).compute_force(coords, meta) }
 }
 
 //-------------------------------------
@@ -270,8 +282,8 @@ impl<'d, Meta> DiffFn<Meta> for Box<DiffFn<Meta> + 'd> {
 /// See `PotentialBuilder::one_off` for more information.
 pub struct OneOff<'a, M: 'a>(&'a PotentialBuilder<M>);
 impl<'a, M: Clone + 'static> DiffFn<M> for OneOff<'a, M> {
-    fn compute(&mut self, structure: &Structure<M>) -> FailResult<(f64, Vec<V3>)> {
-        self.0.initialize_diff_fn(structure.clone())?.compute(structure)
+    fn compute(&mut self, coords: &Coords, meta: M) -> FailResult<(f64, Vec<V3>)> {
+        self.0.initialize_diff_fn(coords, meta.clone())?.compute(coords, meta)
     }
 }
 
@@ -329,10 +341,10 @@ mod helper {
         fn threaded(&self, threaded: bool) -> Box<PotentialBuilder<M>>
         { Box::new(Sum(self.0.threaded(threaded), self.1.threaded(threaded))) }
 
-        fn initialize_diff_fn(&self, structure: Structure<M>) -> FailResult<Box<DiffFn<M>>>
+        fn initialize_diff_fn(&self, coords: &Coords, meta: M) -> FailResult<Box<DiffFn<M>>>
         {
-            let a_diff_fn = self.0.initialize_diff_fn(structure.clone())?;
-            let b_diff_fn = self.1.initialize_diff_fn(structure.clone())?;
+            let a_diff_fn = self.0.initialize_diff_fn(coords, meta.clone())?;
+            let b_diff_fn = self.1.initialize_diff_fn(coords, meta.clone())?;
             Ok(Box::new(Sum(a_diff_fn, b_diff_fn)))
         }
     }
@@ -347,12 +359,13 @@ mod helper {
 
     impl<M, A, B> DiffFn<M> for Sum<A, B>
     where
+        M: Clone,
         A: DiffFn<M>,
         B: DiffFn<M>,
     {
-        fn compute(&mut self, structure: &Structure<M>) -> FailResult<(f64, Vec<V3>)> {
-            let (a_value, a_grad) = self.0.compute(structure)?;
-            let (b_value, b_grad) = self.1.compute(structure)?;
+        fn compute(&mut self, coords: &Coords, meta: M) -> FailResult<(f64, Vec<V3>)> {
+            let (a_value, a_grad) = self.0.compute(coords, meta.clone())?;
+            let (b_value, b_grad) = self.1.compute(coords, meta.clone())?;
             let value = a_value + b_value;
 
             let mut grad = a_grad;
@@ -378,19 +391,30 @@ mod homestyle {
     #[derive(Debug, Clone)]
     pub struct KolmogorovCrespiZ(pub(super) cfg::PotentialKolmogorovCrespiZNew);
 
-    impl PotentialBuilder<Element> for KolmogorovCrespiZ {
-        fn initialize_diff_fn(&self, structure: Structure<Element>) -> FailResult<Box<DiffFn<Element>>>
+    impl PotentialBuilder<CommonMeta> for KolmogorovCrespiZ {
+        fn initialize_diff_fn(&self, coords: &Coords, meta: CommonMeta) -> FailResult<Box<DiffFn<CommonMeta>>>
         {
+            fn fn_body(me: &KolmogorovCrespiZ, coords: &Coords, _: CommonMeta) -> FailResult<Box<DiffFn<CommonMeta>>> {
+                let cfg::PotentialKolmogorovCrespiZNew { cutoff_begin } = me.0;
+                let mut params = ::math::crespi::Params::default();
+                if let Some(cutoff_begin) = cutoff_begin {
+                    params.cutoff_begin = cutoff_begin;
+                }
+                let bonds = FracBonds::from_brute_force_very_dumb(&coords, params.cutoff_end() * 1.001)?;
+                Ok(Box::new(Diff { params, bonds }))
+            }
+
             struct Diff {
                 params: ::math::crespi::Params,
                 bonds: FracBonds,
             }
-            impl DiffFn<Element> for Diff {
-                fn compute(&mut self, structure: &Structure<Element>) -> FailResult<(f64, Vec<V3>)> {
-                    let bonds = self.bonds.to_cart_bonds(structure);
+
+            impl DiffFn<CommonMeta> for Diff {
+                fn compute(&mut self, coords: &Coords, _: CommonMeta) -> FailResult<(f64, Vec<V3>)> {
+                    let bonds = self.bonds.to_cart_bonds(coords);
 
                     let mut value = 0.0;
-                    let mut grad = vec![V3::zero(); structure.num_atoms()];
+                    let mut grad = vec![V3::zero(); coords.num_atoms()];
                     for CartBond { from: _, to, cart_vector } in &bonds {
                         let ::math::crespi::Output {
                             value: part_value,
@@ -405,18 +429,12 @@ mod homestyle {
                 }
             }
 
-            let cfg::PotentialKolmogorovCrespiZNew { cutoff_begin } = self.0;
-            let mut params = ::math::crespi::Params::default();
-            if let Some(cutoff_begin) = cutoff_begin {
-                params.cutoff_begin = cutoff_begin;
-            }
-            let bonds = FracBonds::from_brute_force_very_dumb(&structure, params.cutoff_end() * 1.001)?;
-            Ok(Box::new(Diff { params, bonds }))
+            fn_body(self, coords, meta)
         }
     }
 
     impl_dyn_clone_detail!{
-        impl[] DynCloneDetail<Element> for KolmogorovCrespiZ { ... }
+        impl[] DynCloneDetail<CommonMeta> for KolmogorovCrespiZ { ... }
     }
 }
 
@@ -467,7 +485,7 @@ mod lammps {
         }
     }
 
-    impl<M: Clone + 'static, P: LammpsPotential<Meta=Vec<M>> + Clone + Send + Sync + 'static> Builder<P>
+    impl<M: Clone + 'static, P: LammpsPotential<Meta=M> + Clone + Send + Sync + 'static> Builder<P>
     {
         /// Initialize Lammps to make a DiffFn.
         ///
@@ -475,16 +493,15 @@ mod lammps {
         ///
         /// Some data may be pre-allocated or precomputed based on the input structure,
         /// so the resulting DiffFn may not support arbitrary structures as input.
-        pub(crate) fn diff_fn(&self, structure: Structure<M>) -> FailResult<Box<DiffFn<M>>>
+        pub(crate) fn lammps_diff_fn(&self, coords: &Coords, meta: M) -> FailResult<Box<DiffFn<M>>>
         {
             // a DiffFn 'lambda' whose type will be erased
-            struct MyDiffFn<Mm: Clone>(::rsp2_lammps_wrap::Lammps<Box<LammpsPotential<Meta=Vec<Mm>>>>);
+            struct MyDiffFn<Mm: Clone>(::rsp2_lammps_wrap::Lammps<Box<LammpsPotential<Meta=Mm>>>);
             impl<Mm: Clone> DiffFn<Mm> for MyDiffFn<Mm> {
-                fn compute(&mut self, structure: &Structure<Mm>) -> FailResult<(f64, Vec<V3>)> {
+                fn compute(&mut self, coords: &Coords, meta: Mm) -> FailResult<(f64, Vec<V3>)> {
                     let lmp = &mut self.0;
 
-                    let (coords, meta) = structure.clone().into_parts();
-                    lmp.set_structure(coords, meta)?;
+                    lmp.set_structure(coords.clone(), meta)?;
                     let value = lmp.compute_value()?;
                     let grad = lmp.compute_grad()?;
                     Ok((value, grad))
@@ -492,23 +509,22 @@ mod lammps {
             }
 
             let lammps_pot = Box::new(self.potential.clone()) as Box<LammpsPotential<Meta=P::Meta>>;
-            let (coords, meta) = structure.into_parts();
-            let lmp = self.inner.build(lammps_pot, coords, meta)?;
+            let lmp = self.inner.build(lammps_pot, coords.clone(), meta)?;
             Ok(Box::new(MyDiffFn::<M>(lmp)) as Box<_>)
         }
     }
 
-    impl<M: Clone + 'static, P: Clone + LammpsPotential<Meta=Vec<M>> + Send + Sync + 'static> PotentialBuilder<M> for Builder<P>
+    impl<M: Clone + 'static, P: Clone + LammpsPotential<Meta=M> + Send + Sync + 'static> PotentialBuilder<M> for Builder<P>
     {
         fn threaded(&self, threaded: bool) -> Box<PotentialBuilder<M>>
         { Box::new(<Builder<_>>::threaded(self, threaded)) }
 
-        fn initialize_diff_fn(&self, structure: Structure<M>) -> FailResult<Box<DiffFn<M>>>
-        { self.diff_fn(structure) }
+        fn initialize_diff_fn(&self, coords: &Coords, meta: M) -> FailResult<Box<DiffFn<M>>>
+        { self.lammps_diff_fn(coords, meta) }
     }
 
     impl_dyn_clone_detail!{
-        impl[M: Clone + 'static, P: Clone + LammpsPotential<Meta=Vec<M>> + Send + Sync + 'static]
+        impl[M: Clone + 'static, P: Clone + LammpsPotential<Meta=M> + Send + Sync + 'static]
         DynCloneDetail<M> for Builder<P> { ... }
     }
 
@@ -549,16 +565,19 @@ mod lammps {
         }
 
         impl LammpsPotential for Airebo {
-            type Meta = Vec<Element>;
+            type Meta = CommonMeta;
 
-            fn atom_types(&self, _: &Coords, elements: &Vec<Element>) -> Vec<AtomType>
-            { elements.iter().map(|elem| match elem.symbol() {
-                "H" => AtomType::new(1),
-                "C" => AtomType::new(2),
-                sym => panic!("Unexpected element in Airebo: {}", sym),
-            }).collect() }
+            fn atom_types(&self, _: &Coords, meta: &CommonMeta) -> Vec<AtomType>
+            {
+                let elements: Rc<[Element]> = meta.pick();
+                elements.iter().map(|elem| match elem.symbol() {
+                    "H" => AtomType::new(1),
+                    "C" => AtomType::new(2),
+                    sym => panic!("Unexpected element in Airebo: {}", sym),
+                }).collect()
+            }
 
-            fn init_info(&self, _: &Coords, _: &Vec<Element>) -> InitInfo
+            fn init_info(&self, _: &Coords, _: &CommonMeta) -> InitInfo
             {
                 InitInfo {
                     masses: vec![
@@ -631,9 +650,9 @@ mod lammps {
         }
 
         impl LammpsPotential for KolmogorovCrespiZ {
-            type Meta = Vec<Element>;
+            type Meta = CommonMeta;
 
-            fn atom_types(&self, coords: &Coords, _: &Vec<Element>) -> Vec<AtomType>
+            fn atom_types(&self, coords: &Coords, _: &CommonMeta) -> Vec<AtomType>
             {
                 self.find_layers(coords)
                     .by_atom().into_iter()
@@ -641,7 +660,7 @@ mod lammps {
                     .collect()
             }
 
-            fn init_info(&self, coords: &Coords, _: &Vec<Element>) -> InitInfo
+            fn init_info(&self, coords: &Coords, _: &CommonMeta) -> InitInfo
             {
                 let layers = match self.find_layers(coords).per_unit_cell() {
                     None => panic!("kolmogorov/crespi/z is only supported for layered materials"),
@@ -801,12 +820,12 @@ pub mod test {
     pub struct Zero;
 
     impl<Meta: Clone> PotentialBuilder<Meta> for Zero {
-        fn initialize_diff_fn<'a>(&self, _: Structure<Meta>) -> FailResult<Box<DiffFn<Meta>>>
+        fn initialize_diff_fn<'a>(&self, _: &Coords, _: Meta) -> FailResult<Box<DiffFn<Meta>>>
         {
             struct Diff;
             impl<M> DiffFn<M> for Diff {
-                fn compute(&mut self, structure: &Structure<M>) -> FailResult<(f64, Vec<V3>)> {
-                    Ok((0.0, vec![V3([0.0; 3]); structure.num_atoms()]))
+                fn compute(&mut self, coords: &Coords, _: M) -> FailResult<(f64, Vec<V3>)> {
+                    Ok((0.0, vec![V3([0.0; 3]); coords.num_atoms()]))
                 }
             }
             Ok(Box::new(Diff) as Box<_>)
@@ -832,7 +851,7 @@ pub mod test {
 
     /// ConvergeTowards can also serve as its own PotentialBuilder.
     impl<Meta: Clone> PotentialBuilder<Meta> for ConvergeTowards {
-        fn initialize_diff_fn(&self, _: Structure<Meta>) -> FailResult<Box<DiffFn<Meta>>>
+        fn initialize_diff_fn(&self, _: &Coords, _: Meta) -> FailResult<Box<DiffFn<Meta>>>
         { Ok(Box::new(self.clone()) as Box<_>) }
     }
 
@@ -841,16 +860,16 @@ pub mod test {
     }
 
     impl<M> DiffFn<M> for ConvergeTowards {
-        fn compute(&mut self, structure: &Structure<M>) -> FailResult<(f64, Vec<V3>)> {
-            (&*self).compute(structure)
+        fn compute(&mut self, coords: &Coords, meta: M) -> FailResult<(f64, Vec<V3>)> {
+            (&*self).compute(coords, meta)
         }
     }
 
     // ConvergeTowards does not get mutated
     impl<'a, M> DiffFn<M> for &'a ConvergeTowards {
-        fn compute(&mut self, structure: &Structure<M>) -> FailResult<(f64, Vec<V3>)> {
-            assert_eq!(structure.num_atoms(), self.target.num_atoms());
-            assert_close!(abs=1e-8, structure.lattice(), self.target.lattice());
+        fn compute(&mut self, input_coords: &Coords, _: M) -> FailResult<(f64, Vec<V3>)> {
+            assert_eq!(input_coords.num_atoms(), self.target.num_atoms());
+            assert_close!(abs=1e-8, input_coords.lattice(), self.target.lattice());
 
             // Each position in `structure` experiences a force generated only by the
             // corresponding position in `target`.
@@ -864,7 +883,7 @@ pub mod test {
             // and derivatives that are continuous everywhere.
             use ::std::f64::consts::PI;
 
-            let cur_fracs = structure.to_fracs();
+            let cur_fracs = input_coords.to_fracs();
             let target_fracs = self.target.to_fracs();
             let args_by_coord = {
                 zip_eq!(&cur_fracs, target_fracs)
@@ -900,7 +919,7 @@ pub mod test {
             };
 
             // Partial derivatives transform like reciprocal coords.
-            let recip = structure.lattice().reciprocal();
+            let recip = input_coords.lattice().reciprocal();
             let cart_grad = frac_grad.map(|v| v * &recip).collect::<Vec<_>>();
             Ok((value, cart_grad))
         }
@@ -913,14 +932,17 @@ pub mod test {
     pub struct Chainify;
 
     impl<Meta: Clone> PotentialBuilder<Meta> for Chainify {
-        fn initialize_diff_fn(&self, structure: Structure<Meta>) -> FailResult<Box<DiffFn<Meta>>>
+        fn initialize_diff_fn(&self, initial_coords: &Coords, _: Meta) -> FailResult<Box<DiffFn<Meta>>>
         {
-            let na = structure.num_atoms();
-            let fracs = (0..na).map(|i| {
-                V3([i as f64 / na as f64, 0.5, 0.5])
-            }).collect();
-            let coords = CoordsKind::Fracs(fracs);
-            let target = Coords::new(structure.lattice().clone(), coords);
+            let na = initial_coords.num_atoms();
+            let target = Coords::new(
+                initial_coords.lattice().clone(),
+                CoordsKind::Fracs({
+                    (0..na)
+                        .map(|i| V3([i as f64 / na as f64, 0.5, 0.5]))
+                        .collect()
+                }),
+            );
             Ok(Box::new(ConvergeTowards::new(target)) as Box<_>)
         }
     }
@@ -969,9 +991,8 @@ pub mod test {
                 [ 0.4, 1.1, 7.8],
             ];
 
-            let meta = vec![(); start_coords.len()];
             let target = Coords::new(lattice.clone(), target_coords.clone());
-            let start = Structure::new(lattice.clone(), start_coords.clone(), meta.clone());
+            let start = Coords::new(lattice.clone(), start_coords.clone());
 
             let diff_fn = ConvergeTowards::new(target);
             let cg_settings = &from_json!{{
@@ -979,7 +1000,7 @@ pub mod test {
                 "alpha-guess-first": 0.1,
             }};
 
-            let mut flat_diff_fn = diff_fn.initialize_flat_diff_fn(start.clone()).unwrap();
+            let mut flat_diff_fn = diff_fn.initialize_flat_diff_fn(&start, ()).unwrap();
             let flat_diff_fn = &mut *flat_diff_fn;
 
             let data = ::rsp2_minimize::acgsd(

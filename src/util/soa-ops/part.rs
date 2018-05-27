@@ -183,8 +183,7 @@ where T: ExactSizeIterator + DoubleEndedIterator + FusedIterator {}
 /// Trait for applying a `Part` to a `Vec` (or similar type), breaking it into pieces.
 ///
 /// By making this a trait, it can be implemented on types like rsp2's own
-/// `Structure<M>` (which at its core is fundamentally just an structure of
-/// arrays), or anything else that contains data per-atom (such as eigenvectors).
+/// `Coords` or anything else that contains data per-atom (such as eigenvectors).
 ///
 /// The lifetime argument ensures that the iterator returned by `into_unlabeled_partitions`
 /// does not outlive either Self or the partition; this allows the iterator to capture self

@@ -35,7 +35,7 @@ use ::rsp2_slice_math::{vnorm};
 use ::slice_of_array::prelude::*;
 use ::rsp2_array_utils::arr_from_fn;
 use ::rsp2_array_types::{V3, M33, Unvee};
-use ::rsp2_structure::{Coords, ElementStructure, Lattice};
+use ::rsp2_structure::{Coords, Lattice};
 use ::rsp2_structure::layer::LayersPerUnitCell;
 use ::phonopy::Builder as PhonopyBuilder;
 use ::math::bands::ScMatrix;
@@ -317,7 +317,7 @@ impl TrialDir {
                 let meta = hlist![elements];
 
                 let na = coords.num_atoms() as f64;
-                pot.one_off().compute_value(&::compat(&coords, meta.sift()))? / na
+                pot.one_off().compute_value(&coords, meta.sift())? / na
             });
             let f_path = |s: &AsPath| FailOk(f(Poscar::from_reader(self.read_file(s)?)?)?);
 
@@ -359,12 +359,12 @@ fn do_force_sets_at_disps<P: AsPath + Send + Sync>(
 
     let counter = ::util::AtomicCounter::new();
     let num_displacements = disp_dir.displacements().len();
-    let compute = move |structure: &ElementStructure| FailOk({
+    let compute = move |coords: &Coords, meta: HList2<Rc<[Element]>, Rc<[Mass]>>| FailOk({
         let i = counter.inc();
         eprint!("\rdisp {} of {}", i + 1, num_displacements);
         ::std::io::stderr().flush().unwrap();
 
-        pot.one_off().compute_force(structure)?
+        pot.one_off().compute_force(coords, meta.sift())?
     });
 
     let force_sets = match threading {
@@ -372,7 +372,7 @@ fn do_force_sets_at_disps<P: AsPath + Send + Sync>(
         &cfg::Threading::Serial => {
             let (_, meta) = disp_dir.superstructure();
             disp_dir.displaced_coord_sets()
-                .map(|coords| compute(&::compat(&coords, meta.sift())))
+                .map(|coords| compute(&coords, meta.sift()))
                 .collect::<FailResult<Vec<_>>>()?
         },
         &cfg::Threading::Rayon => {
@@ -381,7 +381,7 @@ fn do_force_sets_at_disps<P: AsPath + Send + Sync>(
             disp_dir.displaced_coord_sets()
                 .collect::<Vec<_>>()
                 .into_par_iter()
-                .map(|coords| compute(&::compat(&coords, get_meta().sift())))
+                .map(|coords| compute(&coords, get_meta().sift()))
                 .collect::<FailResult<Vec<_>>>()?
         },
     };
@@ -397,13 +397,6 @@ fn do_force_sets_at_disps<P: AsPath + Send + Sync>(
 #[allow(unused)] const Q_GAMMA: V3 = V3([0.0, 0.0, 0.0]);
 #[allow(unused)] const Q_K: V3 = V3([1f64/3.0, 1.0/3.0, 0.0]);
 #[allow(unused)] const Q_K_PRIME: V3 = V3([2.0 / 3f64, 2.0 / 3f64, 0.0]);
-
-#[allow(unused)]
-fn carbon(coords: Coords) -> ElementStructure
-{
-    // I want it PAINTED BLACK!
-    coords.with_uniform_metadata(CARBON)
-}
 
 //=================================================================
 
@@ -512,10 +505,10 @@ impl TrialDir {
                         eprint!("\rdatapoint {:>6} of {}", i, w * h);
                         PotentialBuilder::from_config(&settings.threading, &settings.potential)
                             .one_off()
-                            .compute_grad(&::compat(
+                            .compute_grad(
                                 &coords.clone().with_carts(pos.to_vec()),
                                 get_meta().sift(),
-                            ))?
+                            )?
                     })}
                 }
             )?

@@ -68,7 +68,7 @@ pub(crate) fn optimize_layer_parameters(
                             //
                             //        (maybe I had issues with "lost atoms" errors or something)
                             pot.one_off()
-                                .compute_value(&::compat(&coords_builder.construct(), meta.sift()))
+                                .compute_value(&coords_builder.construct(), meta.sift())
                                 .map(Value)
 
                         // note: result is Result<Result<_, E>, GoldenSearchError>

@@ -200,14 +200,3 @@ mod hlist_aliases {
     pub type HList3<A, B, C> = HCons<A, HList2<B, C>>;
     pub type HList4<A, B, C, D> = HCons<A, HList3<B, C, D>>;
 }
-
-pub(crate) use self::_compat::{compat};
-mod _compat {
-    use ::hlist_aliases::*;
-    use ::rsp2_structure::{Coords, Element, ElementStructure};
-    use ::std::rc::Rc;
-
-    pub fn compat(coords: &Coords, meta: HList1<Rc<[Element]>>) -> ElementStructure {
-        coords.clone().with_metadata(meta.head.to_vec())
-    }
-}

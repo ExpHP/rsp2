@@ -229,7 +229,7 @@ fn do_relax(
     >,
 ) -> FailResult<Coords>
 {Ok({
-    let mut flat_diff_fn = pot.threaded(true).initialize_flat_diff_fn(::compat(&coords, meta.sift()))?;
+    let mut flat_diff_fn = pot.threaded(true).initialize_flat_diff_fn(&coords, meta.sift())?;
     let relaxed_flat = ::rsp2_minimize::acgsd(
         cg_settings,
         coords.to_carts().flat(),
@@ -302,7 +302,7 @@ fn _do_cg_along_evecs(
     let flat_evecs: Vec<_> = evecs.iter().map(|ev| ev.flat()).collect();
     let init_pos = coords.to_carts();
 
-    let mut flat_diff_fn = pot.threaded(true).initialize_flat_diff_fn(::compat(&coords, meta.sift()))?;
+    let mut flat_diff_fn = pot.threaded(true).initialize_flat_diff_fn(&coords, meta.sift())?;
     let relaxed_coeffs = ::rsp2_minimize::acgsd(
         cg_settings,
         &vec![0.0; evecs.len()],
@@ -322,7 +322,7 @@ fn do_minimize_along_evec(
     evec: &[V3],
 ) -> FailResult<(f64, Coords)>
 {Ok({
-    let mut diff_fn = pot.threaded(true).initialize_flat_diff_fn(::compat(&from_coords, meta.sift()))?;
+    let mut diff_fn = pot.threaded(true).initialize_flat_diff_fn(&from_coords, meta.sift())?;
 
     let direction = &evec[..];
     let from_pos = from_coords.to_carts();
@@ -349,19 +349,19 @@ fn warn_on_improvable_lattice_params(
 ) -> FailResult<()>
 {Ok({
     const SCALE_AMT: f64 = 1e-6;
-    let mut diff_fn = pot.initialize_diff_fn(::compat(coords, meta.sift()))?;
-    let center_value = diff_fn.compute_value(&::compat(coords, meta.sift()))?;
+    let mut diff_fn = pot.initialize_diff_fn(coords, meta.sift())?;
+    let center_value = diff_fn.compute_value(coords, meta.sift())?;
 
     let shrink_value = {
         let mut coords = coords.clone();
         coords.scale_vecs(&[1.0 - SCALE_AMT, 1.0 - SCALE_AMT, 1.0]);
-        diff_fn.compute_value(&::compat(&coords, meta.sift()))?
+        diff_fn.compute_value(&coords, meta.sift())?
     };
 
     let enlarge_value = {
         let mut coords = coords.clone();
         coords.scale_vecs(&[1.0 + SCALE_AMT, 1.0 + SCALE_AMT, 1.0]);
-        diff_fn.compute_value(&::compat(&coords, meta.sift()))?
+        diff_fn.compute_value(&coords, meta.sift())?
     };
 
     if shrink_value.min(enlarge_value) < center_value {
