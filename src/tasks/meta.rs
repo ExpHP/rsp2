@@ -26,12 +26,13 @@ derive_newtype_display!{ Mass }
 
 pub use ::rsp2_structure::Element;
 
-
-
 pub mod prelude {
     pub use super::MetaSift;
     pub use super::MetaPick;
+    pub use super::MetaSendable;
 }
+
+//----------------------------------------------------------------------------------
 
 /// Get a subset of a metadata list by type, in any order.
 ///
@@ -43,9 +44,9 @@ pub trait MetaSift<Targets, Indices> {
 }
 
 impl<List, Targets, Indices> MetaSift<Targets, Indices> for List
-    where
-        List: Clone,
-        List: ::frunk::hlist::Sculptor<Targets, Indices>,
+where
+    List: Clone,
+    List: ::frunk::hlist::Sculptor<Targets, Indices>,
 {
     fn sift(&self) -> Targets
     { self.clone().sculpt().0 }
@@ -61,10 +62,53 @@ pub trait MetaPick<Target, Index> {
 }
 
 impl<List, Target, Index> MetaPick<Target, Index> for List
-    where
-        Self: ::frunk::hlist::Selector<Target, Index>,
-        Target: Clone,
+where
+    Self: ::frunk::hlist::Selector<Target, Index>,
+    Target: Clone,
 {
     fn pick(&self) -> Target
     { self.get().clone() }
+}
+
+//----------------------------------------------------------------------------------
+
+/// Workaround to use metadata where thread safety is required.
+///
+/// Basically, metadata is not threadsafe due to heavy use of Rc.
+/// This makes a sendable function that produces a copy of Self
+/// each time it is called.
+pub trait MetaSendable: Sized {
+    fn sendable<'a>(&'a self) -> Box<Fn() -> Self + Send + Sync + 'a>;
+}
+
+impl<T: Clone + Sync> MetaSendable for ::std::rc::Rc<[T]> {
+    fn sendable<'a>(&'a self) -> Box<Fn() -> Self + Send + Sync + 'a> {
+        let send = &self[..];
+        Box::new(move || send.into())
+    }
+}
+
+impl<V: MetaSendable> MetaSendable for Option<V> {
+    fn sendable<'a>(&'a self) -> Box<Fn() -> Self + Send + Sync + 'a> {
+        let get = self.as_ref().map(|x| x.sendable());
+        Box::new(move || get.as_ref().map(|f| f()))
+    }
+}
+
+impl<A, B> MetaSendable for ::frunk::HCons<A, B>
+where
+    A: MetaSendable,
+    B: MetaSendable,
+{
+    fn sendable<'a>(&'a self) -> Box<Fn() -> Self + Send + Sync + 'a> {
+        let get_a = self.head.sendable();
+        let get_b = self.tail.sendable();
+        Box::new(move || hlist![get_a(), ...get_b()])
+    }
+}
+
+impl MetaSendable for ::frunk::HNil {
+    fn sendable<'a>(&'a self) -> Box<Fn() -> Self + Send + Sync + 'a> {
+        Box::new(|| ::frunk::HNil)
+    }
 }

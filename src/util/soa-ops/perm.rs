@@ -466,6 +466,19 @@ where
     }}
 }
 
+// rsp2-tasks needs this
+impl<T: Clone> Permute for ::std::rc::Rc<[T]> {
+    fn permuted_by(self, perm: &Perm) -> Self
+    {
+        // this could be done with less copying...
+        // (though it absolutely has to make at least one full copy)
+        let vec = self.to_vec();
+        let vec = vec.permuted_by(perm);
+        let slice = vec.into_boxed_slice();
+        slice.into()
+    }
+}
+
 #[cfg(test)]
 #[deny(unused)]
 mod tests {

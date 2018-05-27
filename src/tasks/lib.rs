@@ -201,31 +201,13 @@ mod hlist_aliases {
     pub type HList4<A, B, C, D> = HCons<A, HList3<B, C, D>>;
 }
 
-pub(crate) use self::_compat::{compat, compat_sc, compat_read_poscar};
+pub(crate) use self::_compat::{compat};
 mod _compat {
-    use ::FailResult;
     use ::hlist_aliases::*;
-    use ::rsp2_structure::{Coords, Element, ElementStructure, Structure};
-    use ::rsp2_structure::supercell::{SupercellToken, self};
+    use ::rsp2_structure::{Coords, Element, ElementStructure};
     use ::std::rc::Rc;
-    use ::traits::AsPath;
-    use ::traits::Load;
-    use ::rsp2_structure_io::Poscar;
 
     pub fn compat(coords: &Coords, meta: HList1<Rc<[Element]>>) -> ElementStructure {
         coords.clone().with_metadata(meta.head.to_vec())
-    }
-
-    pub fn compat_sc<M: Clone>(dims: [u32; 3], structure: Structure<M>) -> (Structure<M>, SupercellToken) {
-        let (coords, meta) = structure.into_parts();
-        let (super_coords, sc) = supercell::diagonal(dims).build(&coords);
-        let super_meta = sc.replicate(&meta);
-        let super_structure = super_coords.with_metadata(super_meta);
-        (super_structure, sc)
-    }
-
-    pub fn compat_read_poscar(path: impl AsPath) -> FailResult<ElementStructure> {
-        let Poscar { coords, elements, .. } = Poscar::load(path)?;
-        Ok(coords.with_metadata(elements))
     }
 }

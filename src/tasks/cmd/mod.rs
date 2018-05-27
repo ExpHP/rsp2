@@ -358,9 +358,10 @@ fn do_force_sets_at_disps<P: AsPath + Send + Sync>(
     trace!("Computing forces at displacements");
 
     let counter = ::util::AtomicCounter::new();
+    let num_displacements = disp_dir.displacements().len();
     let compute = move |structure: &ElementStructure| FailOk({
         let i = counter.inc();
-        eprint!("\rdisp {} of {}", i + 1, disp_dir.displacements().len());
+        eprint!("\rdisp {} of {}", i + 1, num_displacements);
         ::std::io::stderr().flush().unwrap();
 
         pot.one_off().compute_force(structure)?
@@ -369,11 +370,19 @@ fn do_force_sets_at_disps<P: AsPath + Send + Sync>(
     let force_sets = match threading {
         &cfg::Threading::Lammps |
         &cfg::Threading::Serial => {
-            disp_dir.displaced_structures().map(|s| compute(&s)).collect::<FailResult<Vec<_>>>()?
+            let (_, meta) = disp_dir.superstructure();
+            disp_dir.displaced_coord_sets()
+                .map(|coords| compute(&::compat(&coords, meta.sift())))
+                .collect::<FailResult<Vec<_>>>()?
         },
         &cfg::Threading::Rayon => {
-            let structures = disp_dir.displaced_structures().collect::<Vec<_>>();
-            structures.into_par_iter().map(|s| compute(&s)).collect::<FailResult<Vec<_>>>()?
+            let (_, meta) = disp_dir.superstructure();
+            let get_meta = meta.sendable();
+            disp_dir.displaced_coord_sets()
+                .collect::<Vec<_>>()
+                .into_par_iter()
+                .map(|coords| compute(&::compat(&coords, get_meta().sift())))
+                .collect::<FailResult<Vec<_>>>()?
         },
     };
     eprintln!();
@@ -456,7 +465,7 @@ impl TrialDir {
             },
         };
 
-        let structure = bands_dir.structure()?;
+        let (coords, meta) = bands_dir.structure()?;
         let (evals, evecs) = bands_dir.eigensystem_at(Q_GAMMA)?;
 
         let plot_ev_indices = {
@@ -488,12 +497,13 @@ impl TrialDir {
         let data = {
             ::cmd::integrate_2d::integrate_two_eigenvectors(
                 (w, h),
-                &structure.to_carts(),
+                &coords.to_carts(),
                 (xmin..xmax, ymin..ymax),
                 (&get_real_ev(plot_ev_indices.0), &get_real_ev(plot_ev_indices.1)),
                 {
                     use ::std::sync::atomic::{AtomicUsize, Ordering};
                     let counter = AtomicUsize::new(0);
+                    let get_meta = meta.sendable();
 
                     move |pos| {FailOk({
                         let i = counter.fetch_add(1, Ordering::SeqCst);
@@ -502,7 +512,10 @@ impl TrialDir {
                         eprint!("\rdatapoint {:>6} of {}", i, w * h);
                         PotentialBuilder::from_config(&settings.threading, &settings.potential)
                             .one_off()
-                            .compute_grad(&structure.clone().with_carts(pos.to_vec()))?
+                            .compute_grad(&::compat(
+                                &coords.clone().with_carts(pos.to_vec()),
+                                get_meta().sift(),
+                            ))?
                     })}
                 }
             )?
@@ -638,16 +651,16 @@ pub(crate) fn run_dynmat_test(phonopy_dir: &PathDir) -> FailResult<()>
     let forces_dir = DirWithForces::from_existing(phonopy_dir)?;
     let disp_dir = DirWithDisps::from_existing(phonopy_dir)?;
     let ::phonopy::Rsp2StyleDisplacements {
-        superstructure, sc, prim_displacements, perm_from_phonopy,
+        super_coords, sc, prim_displacements, perm_from_phonopy, ..
     } = disp_dir.rsp2_style_displacements()?;
 
-    let prim_structure = symmetry_dir.structure()?;
+    let (prim_coords, prim_meta) = symmetry_dir.structure()?;
     let space_group = symmetry_dir.frac_ops()?;
-    let prim_lattice = prim_structure.lattice().clone();
+    let prim_lattice = prim_coords.lattice().clone();
 
     let space_group_deperms: Vec<_> = {
         ::rsp2_structure::find_perm::of_spacegroup_for_general(
-            &superstructure,
+            &super_coords,
             &space_group,
             &prim_lattice,
             1e-1, // FIXME should be slightly larger than configured tol,
@@ -713,14 +726,8 @@ pub(crate) fn run_dynmat_test(phonopy_dir: &PathDir) -> FailResult<()>
     }
 
     {
-        // HACK
-        let masses: Vec<_> = {
-            prim_structure.metadata().iter()
-                .map(|&s| ::common::element_mass(s))
-                .collect::<Result<_, _>>().unwrap()
-        };
         trace!("Computing dynamical matrix...");
-        let our_dynamical_matrix = force_constants.gamma_dynmat(&sc, &masses).hermitianize();
+        let our_dynamical_matrix = force_constants.gamma_dynmat(&sc, prim_meta.pick()).hermitianize();
         trace!("Done computing dynamical matrix.");
         println!("{:?}", our_dynamical_matrix.0.to_coo().map(|c| c.0).into_dense());
 
