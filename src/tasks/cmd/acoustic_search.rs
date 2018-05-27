@@ -12,7 +12,8 @@ use ::slice_of_array::prelude::*;
 use ::rsp2_structure::{Coords, Element};
 use ::hlist_aliases::*;
 
-use std::fmt;
+use ::std::fmt;
+use ::std::rc::Rc;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum ModeKind {
@@ -78,7 +79,7 @@ pub(crate) fn perform_acoustic_search(
     eigenvectors: &Basis3,
     coords: &Coords,
     meta: HList1<
-        &[Element],
+        Rc<[Element]>,
     >,
     settings: &cfg::AcousticSearch,
 ) -> FailResult<Vec<ModeKind>>

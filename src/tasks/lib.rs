@@ -73,6 +73,7 @@ mod cmd;
 mod phonopy;
 mod math;
 mod ui;
+mod meta;
 
 pub mod entry_points;
 
@@ -189,6 +190,7 @@ mod common {
     }
 }
 
+#[allow(unused)]
 mod hlist_aliases {
     use ::frunk::{HNil, HCons};
     pub type HList0 = HNil;
@@ -202,8 +204,9 @@ use self::_compat::compat;
 mod _compat {
     use ::hlist_aliases::*;
     use ::rsp2_structure::{Coords, Element, ElementStructure};
+    use ::std::rc::Rc;
 
-    pub fn compat(coords: &Coords, meta: HList1<&[Element]>) -> ElementStructure {
-        coords.clone().with_metadata(meta.head.to_owned())
+    pub fn compat(coords: &Coords, meta: HList1<Rc<[Element]>>) -> ElementStructure {
+        coords.clone().with_metadata(meta.head.to_vec())
     }
 }

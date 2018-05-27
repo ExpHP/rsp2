@@ -9,6 +9,7 @@ use ::rsp2_tasks_config::{self as cfg, Settings};
 use ::traits::{AsPath};
 use ::phonopy::{DirWithBands};
 use ::hlist_aliases::*;
+use ::meta::prelude::*;
 
 use ::math::basis::Basis3;
 
@@ -19,6 +20,7 @@ use ::rsp2_array_types::{V3};
 use ::rsp2_structure::{Coords, Element};
 use ::phonopy::Builder as PhonopyBuilder;
 use ::math::bands::ScMatrix;
+use ::std::rc::Rc;
 
 impl TrialDir {
     /// NOTE: This writes to fixed filepaths in the trial directory
@@ -33,7 +35,7 @@ impl TrialDir {
         phonopy: &PhonopyBuilder,
         original_coords: Coords,
         meta: HList1<
-            &[Element],
+            Rc<[Element]>,
         >,
     ) -> FailResult<(Coords, GammaSystemAnalysis, DirWithBands<Box<AsPath>>)>
     {
@@ -48,14 +50,14 @@ impl TrialDir {
             trace!("============================");
             trace!("Begin relaxation # {}", iteration);
 
-            let coords = do_relax(pot, &settings.cg, coords, meta.sculpt().0)?;
+            let coords = do_relax(pot, &settings.cg, coords, meta.sift())?;
 
             trace!("============================");
 
             self.write_poscar(
                 &format!("structure-{:02}.1.vasp", iteration),
                 &format!("Structure after CG round {}", iteration),
-                &coords, meta.sculpt().0,
+                &coords, meta.sift(),
             )?;
 
             let aux_info = {
@@ -63,7 +65,7 @@ impl TrialDir {
 
                 // HACK
                 let masses = {
-                    let hlist_pat![elements] = meta;
+                    let elements: Rc<[Element]> = meta.pick();
                     elements.iter()
                         .map(|&s| ::common::element_mass(s))
                         .collect()
@@ -86,7 +88,7 @@ impl TrialDir {
 
                 self.do_post_relaxation_computations(
                     settings, save_bands.as_ref(), pot, aux_info, phonopy,
-                    &coords, meta,
+                    &coords, meta.sift(),
                 )?
             };
 
@@ -97,16 +99,16 @@ impl TrialDir {
             }
 
             let (coords, did_chasing) = self.maybe_do_ev_chasing(
-                settings, pot, coords, meta, &ev_analysis, &evals, &evecs,
+                settings, pot, coords, meta.sift(), &ev_analysis, &evals, &evecs,
             )?;
 
             self.write_poscar(
                 &format!("structure-{:02}.2.vasp", iteration),
                 &format!("Structure after eigenmode-chasing round {}", iteration),
-                &coords, meta.sculpt().0,
+                &coords, meta.sift(),
             )?;
 
-            warn_on_improvable_lattice_params(pot, &coords, meta.sculpt().0)?;
+            warn_on_improvable_lattice_params(pot, &coords, meta.sift())?;
 
             match loop_state.step(did_chasing) {
                 EvLoopStatus::KeepGoing => {
@@ -130,7 +132,7 @@ impl TrialDir {
         pot: &PotentialBuilder,
         coords: Coords,
         meta: HList1<
-            &[Element],
+            Rc<[Element]>,
         >,
         ev_analysis: &GammaSystemAnalysis,
         evals: &[f64],
@@ -156,7 +158,7 @@ impl TrialDir {
                     pot,
                     &settings.ev_chase,
                     coords,
-                    meta.sculpt().0,
+                    meta.sift(),
                     &bad_evs[..],
                 )?;
                 (structure, DidEvChasing(true))
@@ -223,11 +225,11 @@ fn do_relax(
     cg_settings: &cfg::Acgsd,
     coords: Coords,
     meta: HList1<
-        &[Element],
+        Rc<[Element]>,
     >,
 ) -> FailResult<Coords>
 {Ok({
-    let mut flat_diff_fn = pot.threaded(true).initialize_flat_diff_fn(::compat(&coords, meta.sculpt().0))?;
+    let mut flat_diff_fn = pot.threaded(true).initialize_flat_diff_fn(::compat(&coords, meta.sift()))?;
     let relaxed_flat = ::rsp2_minimize::acgsd(
         cg_settings,
         coords.to_carts().flat(),
@@ -241,7 +243,7 @@ fn do_eigenvector_chase(
     chase_settings: &cfg::EigenvectorChase,
     mut coords: Coords,
     meta: HList1<
-        &[Element],
+        Rc<[Element]>,
     >,
     bad_evecs: &[(String, &[V3])],
 ) -> FailResult<Coords>
@@ -249,7 +251,7 @@ fn do_eigenvector_chase(
     match chase_settings {
         cfg::EigenvectorChase::OneByOne => {
             for (name, evec) in bad_evecs {
-                let (alpha, new_coords) = do_minimize_along_evec(pot, coords, meta, &evec[..])?;
+                let (alpha, new_coords) = do_minimize_along_evec(pot, coords, meta.sift(), &evec[..])?;
                 info!("Optimized along {}, a = {:e}", name, alpha);
 
                 coords = new_coords;
@@ -262,7 +264,7 @@ fn do_eigenvector_chase(
                 pot,
                 cg_settings,
                 coords,
-                meta.sculpt().0,
+                meta.sift(),
                 &evecs[..],
             )?
         },
@@ -274,7 +276,7 @@ fn do_cg_along_evecs<V, I>(
     cg_settings: &cfg::Acgsd,
     coords: Coords,
     meta: HList1<
-        &[Element],
+        Rc<[Element]>,
     >,
     evecs: I,
 ) -> FailResult<Coords>
@@ -292,7 +294,7 @@ fn _do_cg_along_evecs(
     cg_settings: &cfg::Acgsd,
     coords: Coords,
     meta: HList1<
-        &[Element],
+        Rc<[Element]>,
     >,
     evecs: &[&[V3]],
 ) -> FailResult<Coords>
@@ -300,7 +302,7 @@ fn _do_cg_along_evecs(
     let flat_evecs: Vec<_> = evecs.iter().map(|ev| ev.flat()).collect();
     let init_pos = coords.to_carts();
 
-    let mut flat_diff_fn = pot.threaded(true).initialize_flat_diff_fn(::compat(&coords, meta.sculpt().0))?;
+    let mut flat_diff_fn = pot.threaded(true).initialize_flat_diff_fn(::compat(&coords, meta.sift()))?;
     let relaxed_coeffs = ::rsp2_minimize::acgsd(
         cg_settings,
         &vec![0.0; evecs.len()],
@@ -315,12 +317,12 @@ fn do_minimize_along_evec(
     pot: &PotentialBuilder,
     from_coords: Coords,
     meta: HList1<
-        &[Element],
+        Rc<[Element]>,
     >,
     evec: &[V3],
 ) -> FailResult<(f64, Coords)>
 {Ok({
-    let mut diff_fn = pot.threaded(true).initialize_flat_diff_fn(::compat(&from_coords, meta.sculpt().0))?;
+    let mut diff_fn = pot.threaded(true).initialize_flat_diff_fn(::compat(&from_coords, meta.sift()))?;
 
     let direction = &evec[..];
     let from_pos = from_coords.to_carts();
@@ -342,24 +344,24 @@ fn warn_on_improvable_lattice_params(
     pot: &PotentialBuilder,
     coords: &Coords,
     meta: HList1<
-        &[Element],
+        Rc<[Element]>,
     >,
 ) -> FailResult<()>
 {Ok({
     const SCALE_AMT: f64 = 1e-6;
-    let mut diff_fn = pot.initialize_diff_fn(::compat(coords, meta.sculpt().0))?;
-    let center_value = diff_fn.compute_value(&::compat(coords, meta.sculpt().0))?;
+    let mut diff_fn = pot.initialize_diff_fn(::compat(coords, meta.sift()))?;
+    let center_value = diff_fn.compute_value(&::compat(coords, meta.sift()))?;
 
     let shrink_value = {
         let mut coords = coords.clone();
         coords.scale_vecs(&[1.0 - SCALE_AMT, 1.0 - SCALE_AMT, 1.0]);
-        diff_fn.compute_value(&::compat(&coords, meta.sculpt().0))?
+        diff_fn.compute_value(&::compat(&coords, meta.sift()))?
     };
 
     let enlarge_value = {
         let mut coords = coords.clone();
         coords.scale_vecs(&[1.0 + SCALE_AMT, 1.0 + SCALE_AMT, 1.0]);
-        diff_fn.compute_value(&::compat(&coords, meta.sculpt().0))?
+        diff_fn.compute_value(&::compat(&coords, meta.sift()))?
     };
 
     if shrink_value.min(enlarge_value) < center_value {
@@ -427,8 +429,5 @@ fn dot_vec_mat_dumb(vec: &[f64], mat: &[&[f64]]) -> Vec<f64>
 
 fn dot_mat_vec_dumb(mat: &[&[f64]], vec: &[f64]) -> Vec<f64>
 { mat.iter().map(|row| vdot(vec, row)).collect() }
-
-//-----------------------------------------------------------------------------
-
 
 //-----------------------------------------------------------------------------

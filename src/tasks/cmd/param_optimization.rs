@@ -1,6 +1,7 @@
 use ::{FailResult};
 use ::cmd::potential::{PotentialBuilder, DiffFn};
 use ::hlist_aliases::*;
+use ::meta::prelude::*;
 
 use ::rsp2_minimize::exact_ls::{Value, Golden};
 use ::rsp2_structure::{Lattice, CoordsKind, Element, Coords};
@@ -8,13 +9,14 @@ use ::rsp2_structure::layer::{LayersPerUnitCell, require_simple_axis_normal};
 use ::rsp2_structure_io::assemble::{Assemble, RawAssemble};
 use ::rsp2_array_types::{V3};
 use ::rsp2_tasks_config as cfg;
+use ::std::rc::Rc;
 
 pub(crate) fn optimize_layer_parameters(
     settings: &cfg::ScaleRanges,
     pot: &PotentialBuilder,
     mut coords_builder: ScalableCoords,
     meta: HList1<
-        &[Element],
+        Rc<[Element]>,
     >,
 ) -> FailResult<ScalableCoords>
 {Ok({
@@ -66,7 +68,7 @@ pub(crate) fn optimize_layer_parameters(
                             //
                             //        (maybe I had issues with "lost atoms" errors or something)
                             pot.one_off()
-                                .compute_value(&::compat(&coords_builder.construct(), meta.sculpt().0))
+                                .compute_value(&::compat(&coords_builder.construct(), meta.sift()))
                                 .map(Value)
 
                         // note: result is Result<Result<_, E>, GoldenSearchError>

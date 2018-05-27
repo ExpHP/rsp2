@@ -22,6 +22,7 @@ use ::rsp2_tasks_config::{self as cfg, Settings, NormalizationMode, SupercellSpe
 use ::traits::{AsPath};
 use ::phonopy::{DirWithBands, DirWithDisps, DirWithForces, DirWithSymmetry};
 
+use ::meta::prelude::*;
 use ::util::ext_traits::{OptionResultExt, PathNiceExt};
 use ::math::basis::Basis3;
 use ::math::bonds::{FracBonds};
@@ -42,6 +43,7 @@ use ::rsp2_structure_io::poscar;
 use ::rsp2_fs_util::{rm_rf};
 
 use ::std::io::{Write};
+use ::std::rc::Rc;
 
 use ::itertools::Itertools;
 
@@ -75,29 +77,29 @@ impl TrialDir {
         let (optimizable_coords, atom_elements, atom_layers, layer_sc_mats) = {
             read_optimizable_structure(settings.layer_search.as_ref(), file_format, input)?
         };
-        let meta = hlist![&atom_elements[..]];
+        let meta = hlist![atom_elements];
         let original_coords = {
             ::cmd::param_optimization::optimize_layer_parameters(
                 &settings.scale_ranges,
                 &pot,
                 optimizable_coords,
-                meta.sculpt().0,
+                meta.sift(),
             )?.construct()
         };
 
         self.write_poscar(
             "initial.vasp", "Initial structure (after lattice optimization)",
-            &original_coords, meta.sculpt().0,
+            &original_coords, meta.sift(),
         )?;
         let phonopy = phonopy_builder_from_settings(&settings.phonons, original_coords.lattice());
 
         let (coords, ev_analysis, final_bands_dir) = self.do_main_ev_loop(
             settings, &cli, &*pot, &atom_layers, &layer_sc_mats,
-            &phonopy, original_coords, meta.sculpt().0,
+            &phonopy, original_coords, meta.sift(),
         )?;
         let _do_not_drop_the_bands_dir = final_bands_dir;
 
-        self.write_poscar("final.vasp", "Final structure", &coords, meta.sculpt().0)?;
+        self.write_poscar("final.vasp", "Final structure", &coords, meta.sift())?;
 
         write_eigen_info_for_machines(&ev_analysis, self.create_file("eigenvalues.final")?)?;
 
@@ -158,7 +160,7 @@ impl TrialDir {
         headline: &str,
         coords: &Coords,
         meta: HList1<
-            &[Element],
+            Rc<[Element]>,
         >,
     ) -> FailResult<()>
     {Ok({
@@ -178,14 +180,14 @@ impl TrialDir {
         phonopy: &PhonopyBuilder,
         coords: &Coords,
         meta: HList1<
-            &[Element],
-            //&[Mass],
+            Rc<[Element]>,
+            //Rc<[Mass]>,
         >,
     ) -> FailResult<(DirWithBands<Box<AsPath>>, Vec<f64>, Basis3, GammaSystemAnalysis)>
     {Ok({
 
         let bands_dir = do_diagonalize(
-            pot, &settings.threading, phonopy, coords, meta, save_bands, &[Q_GAMMA],
+            pot, &settings.threading, phonopy, coords, meta.sift(), save_bands, &[Q_GAMMA],
         )?;
         let (evals, evecs) = bands_dir.eigensystem_at(Q_GAMMA)?;
 
@@ -206,11 +208,11 @@ impl TrialDir {
             use self::ev_analyses::*;
 
             let classifications = acoustic_search::perform_acoustic_search(
-                pot, &evals, &evecs, &coords, meta, &settings.acoustic_search,
+                pot, &evals, &evecs, &coords, meta.sift(), &settings.acoustic_search,
             )?;
 
             let aux_info::Info { atom_layers, atom_masses, layer_sc_mats } = aux_info;
-            let hlist_pat![atom_elements] = meta;
+            let atom_elements: Rc<[Element]> = meta.pick();
 
             gamma_system_analysis::Input {
                 atom_masses,
@@ -234,14 +236,14 @@ fn do_diagonalize(
     phonopy: &PhonopyBuilder,
     coords: &Coords,
     meta: HList1<
-        &[Element],
-        //&[Mass],
+        Rc<[Element]>,
+        //Rc<[Mass]>,
     >,
     save_bands: Option<&PathArc>,
     points: &[V3],
 ) -> FailResult<DirWithBands<Box<AsPath>>>
 {Ok({
-    let disp_dir = phonopy.displacements(&::compat(coords, meta.sculpt().0))?;
+    let disp_dir = phonopy.displacements(&::compat(coords, meta.sift()))?;
     let force_sets = do_force_sets_at_disps(pot, &threading, &disp_dir)?;
 
     let bands_dir = disp_dir
@@ -569,7 +571,7 @@ impl TrialDir {
         let structure = poscar::load(self.read_file("./final.vasp")?)?;
         let phonopy = phonopy_builder_from_settings(&settings.phonons, structure.lattice());
         do_diagonalize(
-            &*pot, &settings.threading, &phonopy, &structure, hlist![structure.metadata()],
+            &*pot, &settings.threading, &phonopy, &structure, hlist![structure.metadata().into()],
             Some(&self.save_bands_dir()),
             &[Q_GAMMA, Q_K],
         )?;
@@ -600,7 +602,7 @@ impl TrialDir {
 
         let save_bands = None;
         let (_, _, _, ev_analysis) = self.do_post_relaxation_computations(
-            settings, save_bands, &*pot, aux_info, &phonopy, &structure, hlist![structure.metadata()],
+            settings, save_bands, &*pot, aux_info, &phonopy, &structure, hlist![structure.metadata().into()],
         )?;
 
         self.write_ev_analysis_output_files(settings, &*pot, &ev_analysis)?;
@@ -782,7 +784,7 @@ pub(crate) fn read_optimizable_structure(
     layer_search: Option<&cfg::LayerSearch>,
     file_format: StructureFileType,
     input: &PathFile,
-) -> FailResult<(ScalableCoords, Vec<Element>, Option<Vec<usize>>, Option<Vec<ScMatrix>>)> {
+) -> FailResult<(ScalableCoords, Rc<[Element]>, Option<Vec<usize>>, Option<Vec<ScMatrix>>)> {
     let (output, atom_elements, atom_layers, layer_sc_mats);
     match file_format {
         StructureFileType::Poscar => {
@@ -820,6 +822,7 @@ pub(crate) fn read_optimizable_structure(
             output = ScalableCoords::KnownLayers { layer_builder };
         },
     }
+    let atom_elements = atom_elements.into();
     Ok((output, atom_elements, atom_layers, layer_sc_mats))
 }
 

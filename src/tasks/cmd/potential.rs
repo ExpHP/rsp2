@@ -631,7 +631,7 @@ mod lammps {
         impl LammpsPotential for KolmogorovCrespiZ {
             type Meta = Vec<Element>;
 
-            fn atom_types(&self, coords: &Coords, elements: &Vec<Element>) -> Vec<AtomType>
+            fn atom_types(&self, coords: &Coords, _: &Vec<Element>) -> Vec<AtomType>
             {
                 self.find_layers(coords)
                     .by_atom().into_iter()
@@ -639,7 +639,7 @@ mod lammps {
                     .collect()
             }
 
-            fn init_info(&self, coords: &Coords, elements: &Vec<Element>) -> InitInfo
+            fn init_info(&self, coords: &Coords, _: &Vec<Element>) -> InitInfo
             {
                 let layers = match self.find_layers(coords).per_unit_cell() {
                     None => panic!("kolmogorov/crespi/z is only supported for layered materials"),
