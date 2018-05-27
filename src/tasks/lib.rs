@@ -77,12 +77,13 @@ mod meta;
 
 pub mod entry_points;
 
-use errors::{FailResult, IoResult, FailOk};
+pub type FailResult<T> = Result<T, ::failure::Error>;
+#[allow(bad_style)]
+pub fn FailOk<T>(x: T) -> FailResult<T> { Ok(x) }
+pub use ::std::io::Result as IoResult;
+
 mod errors {
     use std::fmt;
-    pub type FailResult<T> = Result<T, ::failure::Error>;
-    #[allow(bad_style)]
-    pub fn FailOk<T>(x: T) -> FailResult<T> { Ok(x) }
 
     #[derive(Debug, Clone)]
     pub struct DisplayPathArcNice(pub ::path_abs::PathArc);
@@ -93,7 +94,6 @@ mod errors {
         }
     }
 
-    pub use ::std::io::Result as IoResult;
 }
 
 /// This module only exists to have its name appear in logs.

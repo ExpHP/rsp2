@@ -1,4 +1,4 @@
-use ::errors::FailResult;
+use ::FailResult;
 
 use ::clap;
 use ::cmd::trial::{TrialDir, NewTrialDirArgs};
@@ -11,7 +11,7 @@ use ::ui::cli_deserialize::CliDeserialize;
 use ::util::ext_traits::{ArgMatchesExt};
 
 fn wrap_result_main<F>(main: F)
-    where F: FnOnce() -> FailResult<()>,
+where F: FnOnce() -> FailResult<()>,
 {
     main().unwrap_or_else(|e| {
         for cause in e.causes() {
