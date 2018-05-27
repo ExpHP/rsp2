@@ -5,6 +5,7 @@
 
 use ::std::collections::HashMap;
 use ::std::fmt;
+use ::failure::Backtrace;
 
 // member is private because I'm hoping there's some way
 // (possibly insane) to get the nonzero optimization for
@@ -19,6 +20,23 @@ pub struct Element(u16);
 
 const MAX_ATOMIC_NUMBER: u32 = 999;
 
+#[derive(Debug, Fail)]
+#[fail(display = "Unable to parse {}: {:?}", kind, text)]
+pub struct ElementParseError {
+    text: String,
+    kind: &'static str, // "element", "element symbol", "element name"
+    backtrace: Backtrace,
+}
+
+impl ElementParseError {
+    fn new(kind: &'static str, s: &str) -> Self
+    { ElementParseError {
+        text: s.to_string(),
+        kind: kind,
+        backtrace: Backtrace::new(),
+    }}
+}
+
 impl Element {
     pub fn from_atomic_number(n: u32) -> Option<Self>
     {
@@ -26,11 +44,11 @@ impl Element {
         else { None }
     }
 
-    pub fn from_symbol(s: &str) -> Option<Self>
+    pub fn from_symbol(s: &str) -> Result<Self, ElementParseError>
     {
-        SHORT_TO_NUMBER.get(s).cloned()
-            .map(Into::into)
-            .and_then(Element::from_atomic_number)
+        let &n = SHORT_TO_NUMBER.get(s).ok_or_else(|| ElementParseError::new("element symbol", s))?;
+        let elem = Element::from_atomic_number(n.into()).unwrap();
+        Ok(elem)
     }
 
     pub fn atomic_number(&self) -> u32

@@ -126,11 +126,8 @@ fn load_txt(f: &mut BufRead) -> FailResult<Poscar>
             symbols
         });
         group_symbols.into_iter()
-            .map(|sym| match Element::from_symbol(&sym) {
-                None => bail!("Unknown element: '{}'", sym),
-                Some(e) => Ok(e),
-            })
-            .collect::<FailResult<Vec<Element>>>()?
+            .map(|sym| Element::from_symbol(&sym))
+            .collect::<Result<Vec<Element>, _>>()?
     };
 
     // FIXME use Poscar method once available

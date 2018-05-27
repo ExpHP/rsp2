@@ -28,7 +28,7 @@ use ::std::path::{Path, PathBuf};
 use ::rsp2_fs_util::{TempDir};
 
 use ::rsp2_fs_util::{open, create, copy, hard_link};
-use ::rsp2_structure::{ElementStructure, Element};
+use ::rsp2_structure::{ElementStructure};
 use ::rsp2_structure::{FracRot, FracTrans, FracOp};
 use ::rsp2_structure::supercell::{SupercellToken};
 use ::rsp2_soa_ops::{Permute, Perm};
@@ -373,14 +373,9 @@ impl<P: AsPath> DirWithDisps<P> {
 
         trace!("Parsing disp.yaml...");
         let DispYaml {
-            displacements, structure: superstructure
+            displacements, coords: super_coords, elements: super_elements, ..
         } = Load::load(dir.as_path().join("disp.yaml"))?;
-        let superstructure = superstructure.try_map_metadata_into(|d| {
-            match Element::from_symbol(&d.symbol[..]) {
-                Some(e) => Ok(e),
-                None => bail!("invalid symbol in disp.yaml: {:?}", d.symbol),
-            }
-        })?;
+        let superstructure = super_coords.with_metadata(super_elements);
 
         DirWithDisps { dir, superstructure, displacements }
     })}
@@ -418,7 +413,16 @@ impl<P: AsPath> DirWithDisps<P> {
         use ::rsp2_phonopy_io::disp_yaml::apply_displacement;
         self.displacements
             .iter()
-            .map(move |&disp| apply_displacement(&self.superstructure, disp))
+//            .map(move |&disp| {
+//                apply_displacement(&self.superstructure, disp)
+//            })
+            // FIXME un-compat this
+            .map(move |&disp| {
+                let old_coords = self.superstructure.borrow_coords();
+                let meta = hlist![self.superstructure.metadata().into()];
+                let new_coords = apply_displacement(old_coords, disp);
+                ::compat(&new_coords, meta)
+            })
     })}
 
     /// Write FORCE_SETS to create a `DirWithForces`

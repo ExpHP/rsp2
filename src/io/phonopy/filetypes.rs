@@ -2,7 +2,7 @@ use ::FailResult;
 use ::std::io::prelude::*;
 use ::std::collections::HashMap;
 
-use ::rsp2_structure::Structure;
+use ::rsp2_structure::{Coords, Element};
 use ::rsp2_array_types::{V3, M33};
 
 // why is this pub(crate)? I don't remember...
@@ -37,25 +37,23 @@ pub mod disp_yaml {
 
     /// A parsed disp.yaml
     pub struct DispYaml {
-        pub structure: Structure<Meta>,
+        pub coords: Coords,
+        // note: these used to be exposed as Strings, but I can't for the
+        //       life of me remember why. Was it just to "decrease coupling?"
+        //       (that ship has sailed with exposing Coords)
+        pub elements: Vec<Element>,
+        pub masses: Vec<f64>,
         pub displacements: Displacements,
     }
 
-    /// Atomic metadata from disp.yaml
-    pub struct Meta {
-        pub symbol: String,
-        pub mass: f64,
-    }
-
     // helper for generating displaced structures
-    pub fn apply_displacement<M: Clone>(
-        structure: &Structure<M>,
+    pub fn apply_displacement(
+        coords: &Coords,
         (atom, disp): (usize, V3),
-    ) -> Structure<M>
-    {
-        let mut structure = structure.clone();
-        structure.carts_mut()[atom] += disp;
-        structure
+    ) -> Coords {
+        let mut coords = coords.clone();
+        coords.carts_mut()[atom] += disp;
+        coords
     }
 
     pub fn read(mut r: impl Read) -> FailResult<DispYaml>
@@ -69,13 +67,14 @@ pub mod disp_yaml {
 
         let RawDispYaml { displacements, lattice, points } = ::serde_yaml::from_reader(r)?;
 
-        let (carts, meta): (_, Vec<_>) =
-            points.into_iter()
-                .map(|Point { symbol, coordinates, mass }|
-                    (coordinates, Meta { symbol, mass }))
-                .unzip();
+        let (mut fracs, mut elements, mut masses) = (vec![], vec![], vec![]);
+        for Point { symbol, coordinates, mass } in points {
+            fracs.push(coordinates);
+            elements.push(Element::from_symbol(&symbol)?);
+            masses.push(mass);
+        };
 
-        let structure = Structure::new(Lattice::new(&lattice), CoordsKind::Fracs(carts), meta);
+        let coords = Coords::new(Lattice::new(&lattice), CoordsKind::Fracs(fracs));
 
         let displacements =
             displacements.into_iter()
@@ -83,7 +82,7 @@ pub mod disp_yaml {
                 .map(|Displacement { atom, displacement, .. }| ((atom - 1) as usize, displacement))
                 .collect();
 
-        Ok(DispYaml { structure, displacements })
+        Ok(DispYaml { coords, elements, masses, displacements })
     }
 }
 
