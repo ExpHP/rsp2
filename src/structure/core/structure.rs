@@ -93,9 +93,13 @@ impl<M> Structure<M> {
     }
 }
 
+// compatibility helpers while Structure is being eliminated from the codebase
 impl<M> Structure<M> {
     pub fn into_parts(self) -> (Coords, Vec<M>)
     { (self.coords, self.meta) }
+
+    pub fn borrow_coords(&self) -> &Coords
+    { &self.coords }
 }
 
 //---------------------------------------

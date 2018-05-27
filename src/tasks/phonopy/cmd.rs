@@ -22,18 +22,18 @@ use super::{Conf, DispYaml, SymmetryYaml, QPositions, Args, ForceSets};
 use ::traits::{AsPath, HasTempDir, Save, Load};
 use ::math::basis::Basis3;
 
-use ::rsp2_structure_io::poscar;
 use ::std::io::prelude::*;
 use ::std::process::Command;
 use ::std::path::{Path, PathBuf};
 use ::rsp2_fs_util::{TempDir};
 
-use ::rsp2_fs_util::{open, create, open_text, copy, hard_link};
+use ::rsp2_fs_util::{open, create, copy, hard_link};
 use ::rsp2_structure::{ElementStructure, Element};
 use ::rsp2_structure::{FracRot, FracTrans, FracOp};
 use ::rsp2_structure::supercell::{SupercellToken};
 use ::rsp2_soa_ops::{Permute, Perm};
 
+use ::rsp2_structure_io::Poscar;
 use ::rsp2_phonopy_io::npy;
 
 use ::rsp2_array_types::{V3, Unvee};
@@ -148,7 +148,11 @@ impl Builder {
 
             let extra_args = self.args_from_settings();
             self.conf.save(dir.join(FNAME_CONF_DISPS))?;
-            poscar::dump(create(dir.join("POSCAR"))?, "blah", &structure)?;
+            Poscar {
+                comment: "blah",
+                coords: structure.borrow_coords(),
+                elements: structure.metadata(),
+            }.save(dir.join("POSCAR"))?;
             extra_args.save(dir.join(FNAME_SETTINGS_ARGS))?;
 
             {
@@ -214,7 +218,11 @@ phonopy \
 
             self.conf.save(tmp.join(FNAME_CONF_SYMMETRY))?;
 
-            poscar::dump(create(tmp.join("POSCAR"))?, "cell checked for symmetry", &structure)?;
+            Poscar {
+                comment: "cell checked for symmetry",
+                coords: structure.borrow_coords(),
+                elements: structure.metadata(),
+            }.save(tmp.join("POSCAR"))?;
 
             trace!("Calling phonopy for symmetry...");
             check_status(Command::new("phonopy")
@@ -230,7 +238,7 @@ phonopy \
             // check if input structure was primitive;
             // this is a hard requirement due to the integer representation of FracOp.
             {
-                let prim = poscar::load(open(tmp.join("PPOSCAR"))?)?;
+                let Poscar { coords: prim, .. } = Poscar::load(tmp.join("PPOSCAR"))?;
 
                 let ratio = structure.lattice().volume() / prim.lattice().volume();
                 let ratio = round_checked(ratio, 1e-4)?;
@@ -281,11 +289,11 @@ impl<P: AsPath> DirWithSymmetry<P> {
 
     /// Input structure. (the one you provided while creating this)
     pub fn structure(&self) -> FailResult<ElementStructure>
-    { Ok(poscar::load(open_text(self.path().join("POSCAR"))?)?) }
+    { ::compat_read_poscar(self.path().join("POSCAR")) }
 
     /// Read PPOSCAR.
     pub fn phonopy_primitive_structure(&self) -> FailResult<ElementStructure>
-    { Ok(poscar::load(open_text(self.path().join("PPOSCAR"))?)?) }
+    { ::compat_read_poscar(self.path().join("PPOSCAR")) }
 
     fn symmetry_yaml(&self) -> FailResult<SymmetryYaml>
     { Ok(SymmetryYaml::load(self.path().join(FNAME_OUT_SYMMETRY))?) }
@@ -378,7 +386,7 @@ impl<P: AsPath> DirWithDisps<P> {
     })}
 
     fn primitive_structure(&self) -> FailResult<ElementStructure>
-    { Ok(poscar::load(open_text(self.path().join("POSCAR"))?)?) }
+    { ::compat_read_poscar(self.path().join("POSCAR")) }
 
     /// Get the structure from `disp.yaml`.
     ///
@@ -604,7 +612,7 @@ impl<P: AsPath> DirWithForces<P> {
 
     #[allow(unused)]
     pub fn structure(&self) -> FailResult<ElementStructure>
-    { Ok(poscar::load(open_text(self.path().join("POSCAR"))?)?) }
+    { ::compat_read_poscar(self.path().join("POSCAR")) }
 
     /// Read FORCE_SETS.
     ///
@@ -796,7 +804,7 @@ impl<P: AsPath> DirWithBands<P> {
     })}
 
     pub fn structure(&self) -> FailResult<ElementStructure>
-    { Ok(poscar::load(open_text(self.path().join("POSCAR"))?)?) }
+    { ::compat_read_poscar(self.path().join("POSCAR")) }
 
     pub fn q_positions(&self) -> FailResult<Vec<V3>>
     { Ok(QPositions::load(self.path().join("q-positions.json"))?.0) }

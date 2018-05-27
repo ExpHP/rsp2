@@ -39,7 +39,6 @@ use ::rsp2_structure::{Coords, ElementStructure, Lattice};
 use ::rsp2_structure::layer::LayersPerUnitCell;
 use ::phonopy::Builder as PhonopyBuilder;
 use ::math::bands::ScMatrix;
-use ::rsp2_structure_io::poscar;
 
 use ::rsp2_fs_util::{rm_rf};
 
@@ -167,11 +166,17 @@ impl TrialDir {
         >,
     ) -> FailResult<()>
     {Ok({
-        use ::rsp2_structure_io::poscar;
+        use ::rsp2_structure_io::Poscar;
+
+        let elements: Rc<[Element]> = meta.pick();
+
         let file = self.create_file(filename)?;
         trace!("Writing '{}'", file.path().nice());
-        let structure = coords.clone().with_metadata(meta.head.to_vec());
-        poscar::dump(file, headline, &structure)?;
+        Poscar {
+            comment: headline,
+            coords: coords,
+            elements: elements,
+        }.to_writer(file)?
     })}
 
     fn do_post_relaxation_computations(
@@ -291,7 +296,7 @@ impl TrialDir {
         ev_analysis: &GammaSystemAnalysis,
     ) -> FailResult<()> {Ok({
         use ::ui::cfg_merging::{make_nested_mapping, no_summary, merge_summaries};
-        use ::rsp2_structure_io::poscar;
+        use ::rsp2_structure_io::Poscar;
 
         #[derive(Serialize)]
         struct EnergyPerAtom {
@@ -306,11 +311,15 @@ impl TrialDir {
         let mut out = vec![];
         out.push(ev_analysis.make_summary(settings));
         out.push({
-            let f = |structure: &ElementStructure| FailOk({
-                let na = structure.num_atoms() as f64;
-                pot.one_off().compute_value(structure)? / na
+            let f = |poscar: Poscar| FailOk({
+                let Poscar { coords, elements, .. } = poscar;
+                let elements: Rc<[Element]> = elements.into();
+                let meta = hlist![elements];
+
+                let na = coords.num_atoms() as f64;
+                pot.one_off().compute_value(&::compat(&coords, meta.sift()))? / na
             });
-            let f_path = |s: &AsPath| FailOk(f(&poscar::load(self.read_file(s)?)?)?);
+            let f_path = |s: &AsPath| FailOk(f(Poscar::from_reader(self.read_file(s)?)?)?);
 
             let initial = f_path(&"initial.vasp")?;
             let final_ = f_path(&"final.vasp")?;
@@ -787,14 +796,19 @@ pub(crate) fn read_optimizable_structure(
     let (output, atom_elements, atom_layers, layer_sc_mats);
     match file_format {
         StructureFileType::Poscar => {
-            let structure = poscar::load(input.read()?)?;
-            atom_elements = structure.metadata().to_vec();
-            let coords = structure.without_metadata();
+            use ::rsp2_structure_io::Poscar;
+
+            let Poscar { coords, elements, .. } = Poscar::from_reader(input.read()?)?;
+
+            atom_elements = elements.into();
 
             if let Some(cfg) = layer_search {
                 let layers = perform_layer_search(cfg, &coords)?;
                 output = ScalableCoords::from_layer_search_results(coords, cfg, &layers);
                 atom_layers = Some(layers.by_atom());
+                // We could do a primitive cell search, but anything using our results would have
+                //  trouble interpreting our results if we chose a different cell from expected.
+                // Thus, anything using sc matrices requires them to be supplied in advance.
                 layer_sc_mats = None;
             } else {
                 output = ScalableCoords::from_unlayered(coords);
@@ -857,10 +871,12 @@ fn read_poscar(
     cfg_masses: Option<&cfg::Masses>,
     r: impl ::std::io::Read,
 ) -> FailResult<(Coords, HList2<Rc<[Element]>, Rc<[Mass]>>)> {
-    let structure = ::rsp2_structure_io::poscar::load(r)?;
-    let elements: Rc<[Element]> = structure.metadata().into();
+    use ::rsp2_structure_io::Poscar;
+
+    let Poscar { coords, elements, .. } = Poscar::from_reader(r)?;
+    let elements: Rc<[Element]> = elements.into();
     let masses = masses_by_config(cfg_masses, elements.clone())?;
-    Ok((structure.without_metadata(), hlist![elements, masses]))
+    Ok((coords, hlist![elements, masses]))
 }
 
 fn masses_by_config(

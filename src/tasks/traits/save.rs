@@ -1,8 +1,13 @@
-use ::traits::AsPath;
 use ::FailResult;
-
+use ::traits::AsPath;
+use ::meta::Element;
 use ::traits::IsNewtype;
+
+use ::rsp2_structure::Coords;
+use ::rsp2_structure_io::Poscar;
 use ::path_abs::{FileRead, FileWrite};
+use ::std::borrow::Borrow;
+use ::std::io::BufReader;
 
 /// Uniform-ish "load a file" API for use by the highest level code (cmd).
 /// Kinda technical debt now.
@@ -16,9 +21,7 @@ use ::path_abs::{FileRead, FileWrite};
 ///
 /// I'm not sure whether it has been successful at this role. It has only made
 /// `phonopy::cmd` a tad cleaner, and there's a decent number of things that simply
-/// cannot use it, such as POSCAR files (because the values that are read/written
-/// are asymmetric, and it's not nice to have to clone a structure into a wrapper
-/// type just to be written).
+/// cannot use it, where the input/output types are asymmetric.
 ///
 /// ...as for now, it is what it is.
 pub trait Load: Sized {
@@ -61,4 +64,22 @@ impl<T> Save for Json<T> where T: ::serde::Serialize {
 impl<T> Save for Yaml<T> where T: ::serde::Serialize {
     fn save(&self, path: impl AsPath) -> FailResult<()>
     {Ok(::serde_yaml::to_writer(FileWrite::create(path.as_path())?, &self.0)?)}
+}
+
+impl<Comment, Coord, Elements> Save for Poscar<Comment, Coord, Elements>
+where
+    Comment: AsRef<str>,
+    Coord: Borrow<Coords>,
+    Elements: AsRef<[Element]>,
+{
+    fn save(&self, path: impl AsPath) -> FailResult<()>
+    { Ok(self.to_writer(FileWrite::create(path.as_path())?)?) }
+}
+
+impl Load for Poscar {
+    fn load(path: impl AsPath) -> FailResult<Poscar>
+    {
+        let file = BufReader::new(FileRead::read(path.as_path())?);
+        Ok(Poscar::from_buf_reader(file)?)
+    }
 }

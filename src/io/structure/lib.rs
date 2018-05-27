@@ -16,7 +16,11 @@ pub type FailResult<T> = Result<T, ::failure::Error>;
 #[allow(bad_style)]
 pub fn FailOk<T>(x: T) -> Result<T, ::failure::Error> { Ok(x) }
 
-pub mod poscar;
-pub mod xyz;
+pub use poscar::Poscar;
+mod poscar;
+
+pub use xyz::Xyz;
+mod xyz;
+
 pub mod layers_yaml;
 pub mod assemble;

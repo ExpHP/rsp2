@@ -2,35 +2,82 @@
 use ::FailResult;
 
 use ::std::io::prelude::*;
+use ::std::borrow::Borrow;
 use ::itertools::Itertools;
 
-use ::rsp2_structure::{Element, ElementStructure};
-use ::rsp2_structure::{Lattice, CoordsKind};
+use ::rsp2_structure::{Element, Coords as Coords, Lattice, CoordsKind};
 use ::rsp2_array_types::{Envee, Unvee};
 
-use ::vasp_poscar::{Poscar, RawPoscar, ScaleLine};
+use ::vasp_poscar as imp;
 
-/// Writes a POSCAR to an open file.
-pub fn dump(
-    mut w: impl Write,
+//--------------------------------------------------------------------------------------
+// public API
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Poscar<
+    Comment = String,
+    Coord = Coords,
+    Elements = Vec<Element>,
+> {
+    pub comment: Comment,
+    pub coords: Coord,
+    pub elements: Elements,
+}
+
+impl<Comment, Coord, Elements> Poscar<Comment, Coord, Elements>
+where
+    Comment: AsRef<str>,
+    Coord: Borrow<Coords>,
+    Elements: AsRef<[Element]>,
+{
+    /// Writes a POSCAR to an open file.
+    pub fn to_writer(&self, mut w: impl Write) -> FailResult<()> {
+        dump(&mut w, self.comment.as_ref(), self.coords.borrow(), self.elements.as_ref())
+    }
+}
+
+impl Poscar {
+    // FIXME This probably shouldn't exist.
+    /// Reads a POSCAR from an open file.
+    ///
+    /// This forcibly reads to EOF because it must construct a BufReader.
+    pub fn from_reader(mut f: impl Read) -> FailResult<Self> {
+        let out = load_txt(&mut ::std::io::BufReader::new(&mut f))?;
+        f.read_to_end(&mut vec![])?;
+        Ok(out)
+    }
+
+    /// Reads a POSCAR from an open file.
+    pub fn from_buf_reader(f: impl BufRead) -> FailResult<Self> {
+        load_txt(&mut ::std::io::BufReader::new(f))
+    }
+}
+
+//--------------------------------------------------------------------------------------
+// implementation
+
+// monomorphic
+fn dump(
+    w: &mut Write,
     title: &str,
-    structure: &ElementStructure,
+    coords: &Coords,
+    elements: &[Element],
 ) -> FailResult<()>
 {
     // FIXME replace with e.g. Poscar::set_site_symbols when available
     let mut group_counts = vec![];
     let mut group_symbols = vec![];
-    for (key, group) in &structure.metadata().iter().group_by(|typ| *typ) {
+    for (key, group) in &elements.iter().group_by(|typ| *typ) {
         group_counts.push(group.count());
         group_symbols.push(key.symbol().into());
     }
 
     // FIXME use Poscar builder when available
-    let poscar = RawPoscar {
+    let poscar = imp::RawPoscar {
         comment: title.into(),
-        scale: ScaleLine::Factor(1.0),
-        lattice_vectors: structure.lattice().matrix().into_array(),
-        positions: ::vasp_poscar::Coords::Cart(structure.to_carts().unvee()),
+        scale: imp::ScaleLine::Factor(1.0),
+        lattice_vectors: coords.lattice().matrix().into_array(),
+        positions: ::vasp_poscar::Coords::Cart(coords.to_carts().unvee()),
         group_symbols: Some(group_symbols),
         group_counts,
         velocities: None,
@@ -44,23 +91,12 @@ pub fn dump(
     Ok(())
 }
 
-// FIXME This probably shouldn't exist.
 /// Reads a POSCAR from an open file.
-///
-/// This forcibly reads to EOF because it must construct a BufReader.
-pub fn load(mut f: impl Read) -> FailResult<ElementStructure>
-{
-    let out = load_txt(::std::io::BufReader::new(&mut f))?;
-    f.read_to_end(&mut vec![])?;
-    Ok(out)
-}
-
-/// Reads a POSCAR from an open file.
-pub fn load_txt(f: impl BufRead) -> FailResult<ElementStructure>
+fn load_txt(f: &mut BufRead) -> FailResult<Poscar>
 {
     use vasp_poscar::failure::ResultExt;
-    let poscar = Poscar::from_reader(f).compat()?;
-    let RawPoscar {
+    let poscar = imp::Poscar::from_reader(f).compat()?;
+    let imp::RawPoscar {
         scale, lattice_vectors, positions,
         group_symbols, group_counts, comment,
         ..
@@ -68,11 +104,11 @@ pub fn load_txt(f: impl BufRead) -> FailResult<ElementStructure>
 
     // FIXME use Poscar::scaled_lattice_vectors() once it is available
     // FIXME use Poscar::scaled_cart_positions() once it is available
-    assert_eq!(scale, ScaleLine::Factor(1.0));
+    assert_eq!(scale, imp::ScaleLine::Factor(1.0));
     let lattice = Lattice::from(&lattice_vectors);
     let coords = match positions {
-        ::vasp_poscar::Coords::Cart(p) => CoordsKind::Carts(p.envee()),
-        ::vasp_poscar::Coords::Frac(p) => CoordsKind::Fracs(p.envee()),
+        imp::Coords::Cart(p) => CoordsKind::Carts(p.envee()),
+        imp::Coords::Frac(p) => CoordsKind::Fracs(p.envee()),
     };
 
     let group_elems = {
@@ -103,5 +139,6 @@ pub fn load_txt(f: impl BufRead) -> FailResult<ElementStructure>
         .collect::<Vec<_>>();
 
     assert_eq!(elements.len(), coords.len());
-    Ok(ElementStructure::new(lattice, coords, elements))
+    let coords = Coords::new(lattice, coords);
+    Ok(Poscar { comment, coords, elements })
 }
