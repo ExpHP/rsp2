@@ -21,15 +21,18 @@ use super::{MissingFileError, PhonopyFailed};
 use super::{Conf, DispYaml, SymmetryYaml, QPositions, Args, ForceSets};
 use ::traits::{AsPath, HasTempDir, Save, Load};
 use ::math::basis::Basis3;
+use ::meta::{Mass, Element};
+use ::meta::prelude::*;
+use ::hlist_aliases::*;
 
 use ::std::io::prelude::*;
+use ::std::rc::Rc;
 use ::std::process::Command;
 use ::std::path::{Path, PathBuf};
 use ::rsp2_fs_util::{TempDir};
 
 use ::rsp2_fs_util::{open, create, copy, hard_link};
-use ::rsp2_structure::{ElementStructure};
-use ::rsp2_structure::{FracRot, FracTrans, FracOp};
+use ::rsp2_structure::{Coords, ElementStructure, FracRot, FracTrans, FracOp};
 use ::rsp2_structure::supercell::{SupercellToken};
 use ::rsp2_soa_ops::{Permute, Perm};
 
@@ -113,7 +116,7 @@ impl Builder {
 }
 
 impl Builder {
-    fn finalize_config(&self, structure: &ElementStructure) -> Self
+    fn finalize_config(&self, elements: Rc<[Element]>) -> Self
     {
         use ::itertools::Itertools;
 
@@ -121,24 +124,26 @@ impl Builder {
         self.clone()
             .conf(
                 "MASS",
-                structure.metadata().iter()
+                elements.iter()
                     .map(|&s| ::common::element_mass(s).unwrap())
-                    .join(" ")
+                    .join(" "),
             )
     }
 
     pub fn displacements(
         &self,
-        structure: &ElementStructure,
+        coords: &Coords,
+        meta: HList1<Rc<[Element]>>,
     ) -> FailResult<DirWithDisps<TempDir>>
     {
-        self.finalize_config(structure)
-            ._displacements(structure)
+        self.finalize_config(meta.pick())
+            ._displacements(coords, meta.sift())
     }
 
     fn _displacements(
         &self,
-        structure: &ElementStructure,
+        coords: &Coords,
+        meta: HList1<Rc<[Element]>>,
     ) -> FailResult<DirWithDisps<TempDir>>
     {Ok({
         let dir = TempDir::new("rsp2")?;
@@ -149,9 +154,7 @@ impl Builder {
             let extra_args = self.args_from_settings();
             self.conf.save(dir.join(FNAME_CONF_DISPS))?;
             Poscar {
-                comment: "blah",
-                coords: structure.borrow_coords(),
-                elements: structure.metadata(),
+                comment: "blah", coords, elements: meta.pick(),
             }.save(dir.join("POSCAR"))?;
             extra_args.save(dir.join(FNAME_SETTINGS_ARGS))?;
 
@@ -199,16 +202,26 @@ phonopy \
     #[allow(unused)]
     pub fn symmetry(
         &self,
-        structure: &ElementStructure,
+        coords: &Coords,
+        meta: HList1<
+            Rc<[Element]>,
+        >,
     ) -> FailResult<DirWithSymmetry<TempDir>>
     {
-        self.finalize_config(structure)
-            ._symmetry(structure)
+        // NOTE: not actually sure whether it's worth having this depend
+        //       on mass. (suppose you were to have a bunch of gold atoms,
+        //       one of which has a different mass. Would phonopy realize
+        //       that this atom should not be symmetric with any other?)
+        self.finalize_config(meta.pick())
+            ._symmetry(coords, meta.sift())
     }
 
     fn _symmetry(
         &self,
-        structure: &ElementStructure,
+        coords: &Coords,
+        meta: HList1<
+            Rc<[Element]>,
+        >,
     ) -> FailResult<DirWithSymmetry<TempDir>>
     {
         let tmp = TempDir::new("rsp2")?;
@@ -219,9 +232,7 @@ phonopy \
             self.conf.save(tmp.join(FNAME_CONF_SYMMETRY))?;
 
             Poscar {
-                comment: "cell checked for symmetry",
-                coords: structure.borrow_coords(),
-                elements: structure.metadata(),
+                comment: "cell checked for symmetry", coords, elements: meta.pick(),
             }.save(tmp.join("POSCAR"))?;
 
             trace!("Calling phonopy for symmetry...");
@@ -240,7 +251,7 @@ phonopy \
             {
                 let Poscar { coords: prim, .. } = Poscar::load(tmp.join("PPOSCAR"))?;
 
-                let ratio = structure.lattice().volume() / prim.lattice().volume();
+                let ratio = coords.lattice().volume() / prim.lattice().volume();
                 let ratio = round_checked(ratio, 1e-4)?;
 
                 // sorry, supercells are just not supported... yet.

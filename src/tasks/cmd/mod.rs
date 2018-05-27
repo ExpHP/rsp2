@@ -251,7 +251,7 @@ fn do_diagonalize(
     points: &[V3],
 ) -> FailResult<DirWithBands<Box<AsPath>>>
 {Ok({
-    let disp_dir = phonopy.displacements(&::compat(coords, meta.sift()))?;
+    let disp_dir = phonopy.displacements(coords, meta.sift())?;
     let force_sets = do_force_sets_at_disps(pot, &threading, &disp_dir)?;
 
     let bands_dir = disp_dir
