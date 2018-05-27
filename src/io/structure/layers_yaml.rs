@@ -207,18 +207,18 @@ fn assemble_from_cereal(cereal: self::cereal::Root) -> FailResult<Assemble>
         //       to get the integer sc matrices, and somehow verify that the 'repeat' field
         //       is correct.  Or just ignore the 'repeat' field and do HNF reduction to find
         //       a set of periods (but that feels wasteful).
-        let (structure, _) = ::rsp2_structure::supercell::diagonal(layer.repeat).build(structure);
+        let (superstructure, _) = ::rsp2_structure::supercell::diagonal(layer.repeat).build(&structure);
 
         // put them in frac coords for the full lattice
-        let mut structure = Coords::new(
+        let mut superstructure = Coords::new(
             Lattice::new(&full_lattice),
-            CoordsKind::Carts(structure.to_carts()),
+            CoordsKind::Carts(superstructure.to_carts()),
         );
         // FIXME this reduction is just a bandaid for the above-mentioned issue.
         //       (taking unique positions in the diagonal layer supercells and mapping
         //        them into the cell that we generally use for the structure)
-        structure.reduce_positions();
-        fracs_in_plane.push(structure.to_fracs());
+        superstructure.reduce_positions();
+        fracs_in_plane.push(superstructure.to_fracs());
     }
 
     let carts_along_normal = {

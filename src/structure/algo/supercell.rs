@@ -1,4 +1,4 @@
-use ::{Structure, Lattice, CoordsKind, Coords};
+use ::{Lattice, CoordsKind, Coords};
 
 use ::rsp2_soa_ops::{Perm};
 use ::rsp2_array_utils::{arr_from_fn, try_arr_from_fn};
@@ -45,49 +45,8 @@ impl Builder {
         self.offset = center - natural_center; self
     }
 
-    pub fn build<S>(&self, structure: S) -> (S, SupercellToken)
-    where
-        S: Supercellable,
-        S::Meta: Clone,
-    {
-        let (supercell, sc_token) = self.build_with(structure, |meta, _| meta.clone());
-        (S::from_structure(supercell), sc_token)
-    }
-
-    pub fn build_with<S, M2, F>(&self, structure: S, make_meta: F) -> (Structure<M2>, SupercellToken)
-    where
-        S: Supercellable,
-        F: FnMut(&S::Meta, [u32; 3]) -> M2,
-    {
-        let structure = structure.into_structure();
-        diagonal_with(self.clone(), structure, make_meta)
-    }
-}
-
-/// Compatability shim from Coords to old CoordStructure, which supercell
-/// is still based around.
-pub trait Supercellable {
-    type Meta;
-
-    fn into_structure(self) -> Structure<Self::Meta>;
-    fn from_structure(structure: Structure<Self::Meta>) -> Self;
-}
-
-impl<M> Supercellable for Structure<M> {
-    type Meta = M;
-
-    fn into_structure(self) -> Structure<Self::Meta> { self }
-    fn from_structure(structure: Structure<Self::Meta>) -> Self { structure }
-}
-
-impl Supercellable for Coords {
-    type Meta = ();
-
-    fn into_structure(self) -> Structure<Self::Meta> {
-        self.with_uniform_metadata(())
-    }
-    fn from_structure(structure: Structure<Self::Meta>) -> Self {
-        structure.coords
+    pub fn build(&self, coords: &Coords) -> (Coords, SupercellToken) {
+        _make_supercell(self.clone(), coords)
     }
 }
 
@@ -104,42 +63,31 @@ impl Builder {
 
 // ---------------------------------------------------------------
 
-fn diagonal_with<M, M2, F>(builder: Builder, structure: Structure<M>, mut make_meta: F)
--> (Structure<M2>, SupercellToken)
-where F: FnMut(&M, [u32; 3]) -> M2,
+// !!! This function affects the supercell convention !!! (SUPERCELL-CONV)
+// When modifying it, you must modify all functions that have this label.
+fn _make_supercell(builder: Builder, coords: &Coords) -> (Coords, SupercellToken)
 {
-    let Structure { coords, meta } = structure;
     let Coords { lattice, coords } = coords;
 
     // construct a SupercellToken ASAP so that we know the rest of the code
     // works for general supercell matrices
     let sc = builder.into_sc_token(coords.len());
 
-    let sc_carts = image_lattice_vecs(sc.periods, sc.offset, &lattice);
+    let image_offset_carts = image_lattice_vecs(sc.periods, sc.offset, lattice);
+
     let mut new_carts = Vec::with_capacity(sc.num_supercell_atoms());
-    for atom_cart in coords.into_carts(&lattice) {
+    for atom_cart in coords.to_carts(&lattice) {
         let old_len = new_carts.len();
-        new_carts.extend_from_slice(&sc_carts);
+        new_carts.extend_from_slice(&image_offset_carts);
         ::util::translate_mut_n3_3(&mut new_carts[old_len..], &atom_cart);
     }
 
-    let sc_idx = image_cells(sc.periods);
-    let mut new_meta = Vec::with_capacity(sc.num_supercell_atoms());
-    for m in meta {
-        for &idx in &sc_idx {
-            new_meta.push(make_meta(&m, idx));
-        }
-    }
+    let coords = Coords::new(
+        &sc.integer_lattice * lattice,
+        CoordsKind::Carts(new_carts),
+    );
 
-    let structure = Structure {
-        coords: Coords {
-            lattice: &sc.integer_lattice * &lattice,
-            coords: CoordsKind::Carts(new_carts),
-        },
-        meta: new_meta,
-    };
-
-    (structure, sc)
+    (coords, sc)
 }
 
 /// Contains enough information to deconstruct a supercell produced by this library.
@@ -186,9 +134,9 @@ pub struct BigDisplacement {
     magnitude: f64,
 }
 
-pub type OwnedMetas<'a,T> = ::std::vec::Drain<'a,T>;
-impl SupercellToken {
+pub type OwnedMetas<'a, T> = ::std::vec::Drain<'a, T>;
 
+impl SupercellToken {
     #[inline]
     pub fn periods(&self) -> [u32; 3] {
         self.periods
@@ -210,42 +158,26 @@ impl SupercellToken {
         self.num_cells() * self.num_primitive_atoms()
     }
 
-    // !!! This function affects the supercell convention !!! (SUPERCELL-CONV)
-    // When modifying it, you must modify all functions that have this label.
-    //
     /// Takes data for each atom of the primitive cell and expands it to the
     /// size of the supercell.
     #[inline]
     pub fn replicate<M>(&self, vec: &[M]) -> Vec<M>
     where M: Clone
+    { self.replicate_with(vec, |m, _| m.clone()) }
+
+    // !!! This function affects the supercell convention !!! (SUPERCELL-CONV)
+    // When modifying it, you must modify all functions that have this label.
+    pub fn replicate_with<M, M2, F>(&self, vec: &[M], mut make_meta: F) -> Vec<M2>
+    where F: FnMut(&M, [u32; 3]) -> M2,
     {
-        let mut out = Vec::with_capacity(vec.len() * self.num_cells());
+        let sc_idx = image_cells(self.periods);
+        let mut out = Vec::with_capacity(self.num_supercell_atoms());
         for m in vec {
-            let new_len = out.len() + self.num_cells();
-            out.resize(new_len, m.clone());
+            for &idx in &sc_idx {
+                out.push(make_meta(m, idx));
+            }
         }
         out
-    }
-
-    /// Recover a primitive cell by averaging positions from a supercell.
-    ///
-    /// Uses metadata from the first image of each atom.
-    ///
-    /// May fail if any of the following have occurred since the token was created:
-    /// * Addition or deletion of atoms
-    /// * Reordering of atoms
-    /// * Wrapping of positions (FIXME unnecessary limitation)
-    /// * Images of an atom did not move by equal amounts (within `validation_radius`)
-    #[inline]
-    pub fn deconstruct<S>(&self, validation_radius: f64, structure: S)
-    -> Result<S, BigDisplacement>
-    where
-        S: Supercellable,
-    {
-        self.deconstruct_with(
-            validation_radius,
-            structure,
-            |mut metas| metas.next().unwrap())
     }
 
     // !!! This function affects the supercell convention !!! (SUPERCELL-CONV)
@@ -253,34 +185,22 @@ impl SupercellToken {
     //
     /// Recover a primitive cell by averaging positions from a supercell.
     ///
-    /// `fold_meta` is called on the images of each primitive atom.
-    /// The primitive atoms are done in an arbitrary order.
-    ///
     /// May fail if any of the following have occurred since the token was created:
     /// * Addition or deletion of atoms
     /// * Reordering of atoms
     /// * Wrapping of positions (FIXME unnecessary limitation)
     /// * Images of an atom did not move by equal amounts (within `validation_radius`)
-    pub fn deconstruct_with<S, S2, F>(
-        &self,
-        validation_radius: f64,
-        structure: S2,
-        mut fold_meta: F,
-    ) -> Result<S, BigDisplacement>
-    where
-        S: Supercellable,
-        S2: Supercellable,
-        F: FnMut(OwnedMetas<S2::Meta>) -> S::Meta,
+    #[inline]
+    pub fn deconstruct(&self, validation_radius: f64, coords: Coords)
+    -> Result<Coords, BigDisplacement>
     {
-        let structure = structure.into_structure();
         assert_eq!(
-            structure.num_atoms(), self.num_supercell_atoms(),
+            coords.num_atoms(), self.num_supercell_atoms(),
             "wrong # of atoms in supercell",
         );
 
         let num_cells = self.num_cells();
         let SupercellToken { periods, offset, ref integer_lattice, num_primitive_atoms } = *self;
-        let Structure { coords, meta } = structure;
         let Coords { lattice, coords } = coords;
 
         let primitive_lattice = integer_lattice.inverse_matrix() * &lattice;
@@ -331,25 +251,58 @@ impl SupercellToken {
             out_carts.into_iter().rev().collect()
         };
 
-        let out_meta = {
-            let mut meta = meta;
-            let mut out_meta = Vec::with_capacity(num_primitive_atoms);
-            while !meta.is_empty() {
-                // Fold all images of a single atom
-                let new_len = meta.len() - num_cells;
-                out_meta.push(fold_meta(meta.drain(new_len..)));
-            }
-            // Atoms were done in reverse order
-            out_meta.into_iter().rev().collect()
-        };
+        Ok(Coords::new(
+            primitive_lattice,
+            CoordsKind::Carts(out_carts),
+        ))
+    }
 
-        Ok(S::from_structure(Structure {
-            coords: Coords {
-                lattice: primitive_lattice,
-                coords: CoordsKind::Carts(out_carts),
-            },
-            meta: out_meta,
-        }))
+    /// The equivalent of `deconstruct` for site metadata.
+    ///
+    /// Uses metadata from the first image of each atom. See `collapse_with` for
+    /// more control.
+    #[inline]
+    pub fn collapse<M>(&self, meta: Vec<M>) -> Vec<M>
+    { self.collapse_with(meta, |mut metas, _| metas.next().unwrap()) }
+
+    /// The equivalent of `deconstruct` for site metadata.
+    ///
+    /// `fold_meta` is called on the images of each primitive atom,
+    /// along with their cell indices in a parallel slice.
+    /// The primitive atoms are done in an arbitrary order.
+    pub fn collapse_with<M, M2, F>(
+        &self,
+        meta: Vec<M>,
+        mut fold_meta: F,
+    ) -> Vec<M2>
+    where F: FnMut(OwnedMetas<M>, &[[u32; 3]]) -> M2,
+    { self.try_collapse_with(meta, |m, i| Ok::<_, ()>(fold_meta(m, i))).expect("BUG!") }
+
+    // !!! This function affects the supercell convention !!! (SUPERCELL-CONV)
+    // When modifying it, you must modify all functions that have this label.
+    //
+    /// `fold_meta` is called on the images of each primitive atom,
+    /// along with their cell indices in a parallel slice.
+    /// The primitive atoms are done in an arbitrary order.
+    ///
+    /// Variant of `collapse_with` for fallible functions.
+    pub fn try_collapse_with<E, M, M2, F>(
+        &self,
+        meta: Vec<M>,
+        mut fold_meta: F,
+    ) -> Result<Vec<M2>, E>
+    where F: FnMut(OwnedMetas<M>, &[[u32; 3]]) -> Result<M2, E>,
+    {
+        let sc_idx = image_cells(self.periods);
+        let mut meta = meta;
+        let mut out_meta = Vec::with_capacity(self.num_primitive_atoms());
+        while !meta.is_empty() {
+            // Fold all images of a single atom
+            let new_len = meta.len() - self.num_cells();
+            out_meta.push(fold_meta(meta.drain(new_len..), &sc_idx)?);
+        }
+        // Atoms were done in reverse order
+        Ok(out_meta.into_iter().rev().collect())
     }
 
     fn check_cell(&self, cell: [u32; 3]) {
@@ -504,7 +457,7 @@ fn image_lattice_vecs(periods: [u32; 3], offset: V3<i32>, lattice: &Lattice) -> 
 #[deny(unused)]
 mod tests {
     use ::rsp2_soa_ops::{Permute, Perm};
-    use ::{Coords, CoordsKind, Structure, Lattice};
+    use ::{Coords, CoordsKind, Lattice};
     use ::rsp2_array_types::{V3, Envee};
 
     use ::rand::Rng;
@@ -514,7 +467,7 @@ mod tests {
         let coords = CoordsKind::Fracs(vec![[0.0, 0.0, 0.0]].envee());
 
         let original = Coords::new(Lattice::eye(), coords);
-        let (supercell, sc_token) = ::supercell::diagonal([2, 2, 2]).build(original.clone());
+        let (supercell, sc_token) = ::supercell::diagonal([2, 2, 2]).build(&original);
 
         assert_eq!(supercell.num_atoms(), 8);
         assert_eq!(supercell.lattice(), &Lattice::cubic(2.0));
@@ -546,7 +499,7 @@ mod tests {
         ].envee());
 
         let original = Coords::new(lattice, coords);
-        let (supercell, sc_token) = ::supercell::diagonal([4, 2, 2]).build(original.clone());
+        let (supercell, sc_token) = ::supercell::diagonal([4, 2, 2]).build(&original);
         let deconstructed = sc_token.deconstruct(1e-10, supercell.clone()).unwrap();
 
         assert_eq!(original.to_carts(), deconstructed.to_carts());
@@ -577,7 +530,7 @@ mod tests {
         let original = Coords::new(lattice, coords);
         let (supercell, sc_token) = {
             ::supercell::centered_diagonal([0, 2, 1])
-                .build(original.clone())
+                .build(&original)
         };
         let deconstructed = sc_token.deconstruct(1e-10, supercell.clone()).unwrap();
 
@@ -625,20 +578,21 @@ mod tests {
         }
 
         // make a superstructure whose metadata uniquely labels the sites.
-        let coords = CoordsKind::Carts(vec![
-            // something with an exact representation
-            [0.0, 0.0, 0.0],
-            [0.5, 0.5, 0.5],
-        ].envee());
-        let lattice = Lattice::eye();
-        let structure = Structure::new(lattice, coords, vec![0, 1]);
-        let (superstructure, sc_token) = {
-            // supercell is chosen to give exact floating representation.
-            // some dimensions are larger than 2 to ensure that there exist translational
-            //  symmetries that are not equal to their own inverses.
-            ::supercell::diagonal([8, 2, 4])
-                .build_with(structure, |&atom, cell| Label { atom, cell })
-        };
+        let prim_coords = Coords::new(
+            Lattice::eye(),
+            CoordsKind::Carts(vec![
+                // something with an exact representation
+                [0.0, 0.0, 0.0],
+                [0.5, 0.5, 0.5],
+            ].envee()),
+        );
+        let prim_meta = vec![0, 1];
+
+        // supercell is chosen to give exact floating representation.
+        // some dimensions are larger than 2 to ensure that there exist translational
+        //  symmetries that are not equal to their own inverses.
+        let (super_coords, sc) = ::supercell::diagonal([8, 2, 4]).build(&prim_coords);
+        let super_meta = sc.replicate_with(&prim_meta, |&atom, cell| Label { atom, cell });
 
         for _ in 0..10 {
             let lattice_point = {
@@ -647,38 +601,37 @@ mod tests {
             };
 
             // translating the superstructure by a primitive cell lattice point...
-            let translated = {
-                let mut s = superstructure.clone();
+            let translated_coords = {
+                let mut s = super_coords.clone();
                 // (this is deliberately cartesian because we want to use a lattice point
                 //  of the primitive lattice, not the superlattice.
                 //  This works because the primitive lattice was set to be the identity matrix)
                 s.translate_cart(&lattice_point.map(|x| x as f64));
                 s
             };
+            let translated_meta = super_meta.clone();
 
             // ...should be equivalent to applying the depermutation to the metadata...
-            let depermuted = {
-                let mut s = superstructure.clone();
-                let deperm = sc_token.lattice_point_translation_deperm(lattice_point);
-                let permuted_meta = s.metadata().to_vec().permuted_by(&deperm);
-                s.set_metadata(permuted_meta);
-                s
+            let depermuted_coords = super_coords.clone();
+            let depermuted_meta = {
+                let deperm = sc.lattice_point_translation_deperm(lattice_point);
+                super_meta.clone().permuted_by(&deperm)
             };
 
             // ...when comparing positions for the same label, reduced into the supercell.
-            let canonicalized_coords = |mut structure: Structure<_>| {
-                let sorting_perm = Perm::argsort(structure.metadata());
-                structure = structure.permuted_by(&sorting_perm);
-                structure.reduce_positions();
-                structure.to_carts()
+            let canonicalized_coords = |mut coords: Coords, mut meta: Vec<_>| {
+                let sorting_perm = Perm::argsort(&meta);
+                meta = meta.permuted_by(&sorting_perm);
+                coords = coords.permuted_by(&sorting_perm);
+                coords.reduce_positions();
+                (coords.to_carts(), meta)
             };
             assert_eq!(
-                canonicalized_coords(translated),
-                canonicalized_coords(depermuted),
+                canonicalized_coords(translated_coords, translated_meta),
+                canonicalized_coords(depermuted_coords, depermuted_meta),
             );
         }
     }
-
 
     #[test]
     fn conversion_methods_are_consistent() {
@@ -695,7 +648,7 @@ mod tests {
                 0|1 => V3::zero(),
                 _ => V3::from_fn(|_| rng.gen_range(-10, 10 + 1)),
             };
-            let (_, sc_token) = ::supercell::diagonal(dims).center(center).build(coords);
+            let (_, sc_token) = ::supercell::diagonal(dims).center(center).build(&coords);
 
             let lattice_points = sc_token.atom_lattice_points();
             let cells = sc_token.atom_cells();

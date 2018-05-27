@@ -201,13 +201,22 @@ mod hlist_aliases {
     pub type HList4<A, B, C, D> = HCons<A, HList3<B, C, D>>;
 }
 
-use self::_compat::compat;
+pub(crate) use self::_compat::{compat, compat_sc};
 mod _compat {
     use ::hlist_aliases::*;
-    use ::rsp2_structure::{Coords, Element, ElementStructure};
+    use ::rsp2_structure::{Coords, Element, ElementStructure, Structure};
+    use ::rsp2_structure::supercell::{SupercellToken, self};
     use ::std::rc::Rc;
 
     pub fn compat(coords: &Coords, meta: HList1<Rc<[Element]>>) -> ElementStructure {
         coords.clone().with_metadata(meta.head.to_vec())
+    }
+
+    pub fn compat_sc<M: Clone>(dims: [u32; 3], structure: Structure<M>) -> (Structure<M>, SupercellToken) {
+        let (coords, meta) = structure.into_parts();
+        let (super_coords, sc) = supercell::diagonal(dims).build(&coords);
+        let super_meta = sc.replicate(&meta);
+        let super_structure = super_coords.with_metadata(super_meta);
+        (super_structure, sc)
     }
 }

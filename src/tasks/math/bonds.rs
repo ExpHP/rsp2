@@ -110,23 +110,23 @@ impl CartBonds {
 
 impl FracBonds {
     pub fn from_brute_force_very_dumb(
-        structure: &Coords,
+        coords: &Coords,
         range: f64,
     ) -> FailResult<Self> {
 
         // Construct a supercell large enough to contain all atoms that interact with an atom
         // in the centermost unit cell.
-        let sc_builder = sufficiently_large_centered_supercell(structure.lattice(), range)?;
-        let (superstructure, sc_info) = sc_builder.build(structure.clone());
-        let centermost_cell = sc_info.lattice_point_from_cell(sc_info.center_cell());
+        let sc_builder = sufficiently_large_centered_supercell(coords.lattice(), range)?;
+        let (superstructure, sc) = sc_builder.build(coords);
+        let centermost_cell = sc.lattice_point_from_cell(sc.center_cell());
 
         let mut from = vec![];
         let mut to = vec![];
         let mut image_diff = vec![];
 
         let carts = superstructure.to_carts();
-        let cells = sc_info.atom_lattice_points();
-        let sites = sc_info.atom_primitive_atoms();
+        let cells = sc.atom_lattice_points();
+        let sites = sc.atom_primitive_atoms();
 
         for (&cell_from, &site_from, &cart_from) in izip!(&cells, &sites, &carts) {
             if cell_from != centermost_cell {
@@ -146,7 +146,7 @@ impl FracBonds {
             }
         }
         assert_ne!(from.len(), 0, "(BUG) nothing in center cell?");
-        let num_atoms = structure.num_atoms();
+        let num_atoms = coords.num_atoms();
         Ok(FracBonds { num_atoms, from, to, image_diff })
     }
 

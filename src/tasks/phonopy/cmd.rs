@@ -31,7 +31,7 @@ use ::rsp2_fs_util::{TempDir};
 use ::rsp2_fs_util::{open, create, open_text, copy, hard_link};
 use ::rsp2_structure::{ElementStructure, Element};
 use ::rsp2_structure::{FracRot, FracTrans, FracOp};
-use ::rsp2_structure::supercell::{self, SupercellToken};
+use ::rsp2_structure::supercell::{SupercellToken};
 use ::rsp2_soa_ops::{Permute, Perm};
 
 use ::rsp2_phonopy_io::npy;
@@ -504,7 +504,7 @@ impl<P: AsPath> DirWithDisps<P> {
             get_sc_dim(&conf)?.ok_or_else(|| format_err!("DIM is required"))?
         };
 
-        let (our_superstructure, sc_token) = supercell::diagonal(sc_dims).build(prim_structure);
+        let (our_superstructure, sc_token) = ::compat_sc(sc_dims, prim_structure);
         let phonopy_superstructure = self.superstructure();
 
         // make phonopy match us

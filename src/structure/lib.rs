@@ -65,4 +65,3 @@ pub use ::oper::symmops::{FracRot, FracTrans, FracOp};
 pub use ::algo::find_perm::dumb_symmetry_test;
 
 pub use element::consts as consts;
-
