@@ -9,6 +9,8 @@ use ::hlist_aliases::*;
 use ::meta::{Mass, Element};
 #[allow(unused)] // rustc bug
 use ::meta::prelude::*;
+#[allow(unused)] // rustc bug
+use ::rsp2_soa_ops::{Part, Partition};
 use ::rsp2_structure::{Coords, consts};
 use ::rsp2_structure::layer::Layers;
 use ::rsp2_tasks_config as cfg;
@@ -578,28 +580,54 @@ mod lammps {
                 }).collect()
             }
 
-            fn init_info(&self, _: &Coords, _: &CommonMeta) -> InitInfo
-            {
-                InitInfo {
-                    masses: vec![
-                        ::common::element_mass(consts::HYDROGEN).unwrap(),
-                        ::common::element_mass(consts::CARBON).unwrap(),
+            fn init_info(&self, _: &Coords, meta: &CommonMeta) -> InitInfo {
+                let elements: Rc<[Element]> = meta.pick();
+                let masses: Rc<[Mass]> = meta.pick();
+
+                let only_unique_mass = |target_elem| {
+                    let iter = {
+                        zip_eq!(&elements[..], &masses[..])
+                            .filter(|&(&elem, _)| elem == target_elem)
+                            .map(|(_, &mass)| mass)
+                    };
+
+                    match only_unique_value(iter) {
+                        OnlyUniqueResult::Ok(Mass(mass)) => mass,
+                        OnlyUniqueResult::NoValues => {
+                            // It is unlikely that this value will ever come into play (atoms of
+                            // this element would need to be introduced afterwards), and if their
+                            // mass does not match the value supplied here it will fail.
+                            //
+                            // For now I think I'd rather have it universally fail in such cases,
+                            // forcing us to update this code and add a way to read the values from
+                            // config here if this situation arises.
+                            f64::from_bits(0xdeadbeef) // absurd value
+                        },
+                        OnlyUniqueResult::Conflict(_, _) => {
+                            panic!("different masses for same element not yet supported by Airebo");
+                        },
+                    }
+                };
+
+                let masses = vec![
+                    only_unique_mass(consts::HYDROGEN),
+                    only_unique_mass(consts::CARBON),
+                ];
+                let pair_commands = match *self {
+                    Airebo::Airebo { lj_sigma, lj_enabled, torsion_enabled } => vec![
+                        PairCommand::pair_style("airebo/omp")
+                            .arg(lj_sigma)
+                            .arg(boole(lj_enabled))
+                            .arg(boole(torsion_enabled))
+                            ,
+                        PairCommand::pair_coeff(.., ..).args(&["CH.airebo", "H", "C"]),
                     ],
-                    pair_commands: match *self {
-                        Airebo::Airebo { lj_sigma, lj_enabled, torsion_enabled } => vec![
-                            PairCommand::pair_style("airebo/omp")
-                                .arg(lj_sigma)
-                                .arg(boole(lj_enabled))
-                                .arg(boole(torsion_enabled))
-                                ,
-                            PairCommand::pair_coeff(.., ..).args(&["CH.airebo", "H", "C"]),
-                        ],
-                        Airebo::Rebo => vec![
-                            PairCommand::pair_style("rebo/omp"),
-                            PairCommand::pair_coeff(.., ..).args(&["CH.airebo", "H", "C"]),
-                        ],
-                    },
-                }
+                    Airebo::Rebo => vec![
+                        PairCommand::pair_style("rebo/omp"),
+                        PairCommand::pair_coeff(.., ..).args(&["CH.airebo", "H", "C"]),
+                    ],
+                };
+                InitInfo { masses, pair_commands }
             }
         }
 
@@ -653,6 +681,13 @@ mod lammps {
         impl LammpsPotential for KolmogorovCrespiZ {
             type Meta = CommonMeta;
 
+            // FIXME: We should use layers from metadata, now that they can be
+            //        carried around more naturally, but:
+            //
+            //        * We need a way to verify that the layers were taken
+            //          specifically along the Z axis.
+            //        * We need a way to identify the vacuum separation gap.
+            //
             fn atom_types(&self, coords: &Coords, _: &CommonMeta) -> Vec<AtomType>
             {
                 self.find_layers(coords)
@@ -661,14 +696,39 @@ mod lammps {
                     .collect()
             }
 
-            fn init_info(&self, coords: &Coords, _: &CommonMeta) -> InitInfo
+            fn init_info(&self, coords: &Coords, meta: &CommonMeta) -> InitInfo
             {
+                let elements: Rc<[Element]> = meta.pick();
+                let masses: Rc<[Mass]> = meta.pick();
+
                 let layers = match self.find_layers(coords).per_unit_cell() {
                     None => panic!("kolmogorov/crespi/z is only supported for layered materials"),
                     Some(layers) => layers,
                 };
 
-                let masses = vec![::common::element_mass(consts::CARBON).unwrap(); layers.len()];
+                {
+                    // stupid limitation of current design.  To fix it we really just need
+                    // to add an extra atom type.
+                    assert!(
+                        elements.iter().cloned().all(|x| x == consts::CARBON),
+                        "KCZ does not yet support the inclusion of non-carbon elements"
+                    );
+                }
+
+                let masses: Vec<f64> = {
+                    let layer_part = Part::from_ord_keys(layers.by_atom());
+                    let m = masses.to_vec()
+                        .into_unlabeled_partitions(&layer_part)
+                        .map(|layer_masses| match only_unique_value(layer_masses) {
+                            OnlyUniqueResult::Ok(Mass(x)) => x,
+                            OnlyUniqueResult::Conflict(_, _) => {
+                                panic!("KCZ does not support multiple masses within a layer");
+                            }
+                            OnlyUniqueResult::NoValues => unreachable!(),
+                        })
+                        .collect();
+                    m
+                };
 
                 let interacting_pairs: Vec<_> = {
                     let gaps: Vec<_> = layers.gaps.iter().map(|&x| self.classify_gap(x)).collect();
@@ -712,14 +772,6 @@ mod lammps {
                 // internally sets the type to '-1' and this is NEVER CHECKED, IF YOU USE IT
                 // THEN IT JUST SEGFAULTS, WTF, WHY ON EARTH WOULD YOU ASSIGN A SPECIAL VALUE
                 // FOR SOME CASE AND THEN NEVER ACTUALLY CHECK FOR IT!? WHY!? WHY!? WHYYYY!?!
-                //                                       - ML
-                //
-                // TODO: Should maybe factor out some Hybrid: Potential that takes
-                //       care of this nonsense, and put it in rsp2_lammps_wrap sometime.
-                //       Then again, it seems like a dangerous abstraction, considering
-                //       that the syntax for 'pair_style hybrid' obviously has massive
-                //       room for ambiguity (which of course, the Lammps documentation
-                //       does not acknowledge, because physicists are blind I guess).
                 //                                       - ML
                 for (cmd_n, &(i, j)) in interacting_pairs.iter().enumerate() {
                     let cmd = PairCommand::pair_coeff(i, j);
@@ -805,6 +857,26 @@ mod lammps {
             assert_eq!(f_ok(&[I, I, I]), vec![pair(1, 2), pair(1, 3), pair(2, 3)]);
             assert_eq!(f_ok(&[I, I, V]), vec![pair(1, 2), pair(2, 3)]);
             assert_eq!(f_ok(&[I, I, I, I]), vec![pair(1, 2), pair(1, 4), pair(2, 3), pair(3, 4)]);
+        }
+    }
+
+    // util for compressing atom type properties
+    enum OnlyUniqueResult<T> {
+        Ok(T),
+        Conflict(T, T),
+        NoValues,
+    }
+    fn only_unique_value<T: PartialEq>(iter: impl IntoIterator<Item=T>) -> OnlyUniqueResult<T> {
+        let mut iter = iter.into_iter();
+        if let Some(first) = iter.next() {
+            for x in iter {
+                if x != first {
+                    return OnlyUniqueResult::Conflict(first, x);
+                }
+            }
+            OnlyUniqueResult::Ok(first)
+        } else {
+            OnlyUniqueResult::NoValues
         }
     }
 }

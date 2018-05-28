@@ -859,7 +859,7 @@ fn masses_by_config(
                         format_err!("No mass in config for element {}", element.symbol())
                     })
             },
-            None => ::common::element_mass(element).map(Mass),
+            None => ::common::default_element_mass(element).map(Mass),
         })
         .collect::<Result<Vec<_>, _>>()?.into()
 })}
