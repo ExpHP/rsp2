@@ -70,9 +70,12 @@ const PY_CALL_EIGSH: &'static str = indoc!(r#"
 
     import time
 
-    print("json.load go", file=sys.stderr); sys.stderr.flush(); time.sleep(0)
+    # (you can add calls to this if you want to do some "println profiling".
+    #  rsp2 will timestamp the lines as they are received)
+    def info(s):
+        print(s, file=sys.stderr); sys.stderr.flush(); time.sleep(0)
+
     d = json.load(sys.stdin)
-    print("json.load og", file=sys.stderr); sys.stderr.flush(); time.sleep(0)
     kw = d.pop('kw')
     m = d.pop('matrix')
     assert not d
@@ -89,9 +92,7 @@ const PY_CALL_EIGSH: &'static str = indoc!(r#"
         shape=tuple(3*x for x in m['dim']),
     ).tocsc()
 
-    print("eig go", file=sys.stderr); sys.stderr.flush(); time.sleep(0)
     (vals, vecs) = scipy.sparse.linalg.eigsh(m, **kw)
-    print("eig og", file=sys.stderr); sys.stderr.flush(); time.sleep(0)
 
     real = vecs.real.T.tolist()
     imag = vecs.imag.T.tolist()
@@ -261,11 +262,8 @@ where
 
     let stderr_worker = ::stderr::log_worker(child_stderr);
 
-    trace!("serializing...");
     ::serde_json::to_writer(child_stdin, stdin_data)?;
-    trace!("waiting for results...");
     let stdout = ::serde_json::from_reader(child_stdout)?;
-    trace!("done deserializing...");
 
     if !child.wait()?.success() {
         bail!("an error occurred in a python script");

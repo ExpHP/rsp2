@@ -687,32 +687,17 @@ pub(crate) fn run_dynmat_test(phonopy_dir: &PathDir) -> FailResult<()>
             .map(|oper| oper.to_rot().cart(&prim_lattice))
             .collect()
     };
-    let perm_to_phonopy = perm_from_phonopy.inverted();
 
-    let frac_rots = space_group.iter().map(|oper| oper.to_rot().matrix()).collect::<Vec<_>>();
     trace!("Computing designated rows of force constants...");
     let force_constants = ::math::dynmat::ForceConstants::like_phonopy(
         &prim_displacements,
         &original_force_sets,
-        &frac_rots,
         &cart_rots,
         &space_group_deperms,
         &sc,
-        &perm_to_phonopy,
     ).unwrap();
     trace!("Done computing designated rows of force constants.");
 
-//        let force_sets = {
-//            ::math::dynmat::ForceSets::concat_from({
-//                ::util::zip_eq(&space_group, &space_group_deperms)
-//                    .map(|(oper, deperm): (&::rsp2_structure::FracOp, _)| {
-//                        let cart_rot = oper.to_rot().cart(prim_structure.lattice());
-//                        original_force_sets.derive_from_symmetry(&sc, &cart_rot, deperm)
-//                    })
-//            }).expect("(BUG) no displacements?")
-//        };
-
-//        let force_constants = force_sets.solve_force_constants(&sc, &perm_to_phonopy, &superstructure.to_carts())?;
     {
         // let dense = force_constants.permuted_by(&perm_to_phonopy).to_dense_matrix();
         // println!("{:?}", dense); // FINALLY: THE MOMENT OF TRUTH

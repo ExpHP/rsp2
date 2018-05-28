@@ -4,7 +4,6 @@
 //
 // Basically, everything in this crate is purely ad-hoc.
 
-#![recursion_limit="256"] // for error chain...
 #![deny(unused_must_use)]
 
 extern crate rsp2_tasks_config;

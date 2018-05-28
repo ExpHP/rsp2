@@ -2,8 +2,7 @@
 // TODO:
 // Required bits of cleanup here:
 //
-// * Rip out JaySon (debug output)
-
+// * breakitup
 
 use ::FailResult;
 use ::meta::Mass;
@@ -60,11 +59,9 @@ impl ForceConstants {
         // sites may appear in this list. (this requirement is checked)
         prim_displacements: &[(usize, V3)], // [displacement] -> (prim_displaced, cart_disp)
         force_sets: &[BTreeMap<usize, V3>], // [displacement][affected] -> cart_force
-        frac_rots: &[M33<i32>], // HACK
         cart_rots: &[M33],                  // [sg_index] -> matrix
         super_deperms: &[Perm],             // [sg_index] -> perm
         sc: &SupercellToken,
-        perm_HACK_to_phonopy: &Perm,
     ) -> FailResult<ForceConstants>
     {
         // wrap data with information about index type
@@ -94,8 +91,6 @@ impl ForceConstants {
             sc, primitive_atoms, lattice_points, displacements, force_sets,
             cart_rots, super_deperms,
             designated_lattice_point,
-
-            frac_rots, perm_HACK_to_phonopy,
         }.like_phonopy()
     }
 }
@@ -116,39 +111,10 @@ struct Context<'ctx> {
     // We only bother populating the rows of the force constants matrix
     // that correspond to displaced atoms in a single image of the primitive cell.
     designated_lattice_point: V3<i32>,
-
-    // Debug crap
-    frac_rots: &'ctx [M33<i32>],
-    perm_HACK_to_phonopy: &'ctx Perm,
 }
-
-// debug info
-// FIXME remove
-#[derive(Serialize)]
-struct JaySon(Vec<JaySonItem>);
-#[derive(Serialize)]
-struct JaySonItem {
-    displaced: usize,
-    displacements: Vec<JaySonDisplacement>,
-    original_forces: Vec<Vec<V3>>,
-    pseudoinverse: Vec<Vec<f64>>,
-    forces: Vec<JaySonForce>,
-}
-#[derive(Serialize)]
-struct JaySonDisplacement {
-    oper: M33<i32>,
-    cartoper: M33,
-    vector: V3,
-}
-#[derive(Serialize)]
-struct JaySonForce {
-    affected: usize,
-    vectors: Vec<V3>,
-}
-
 
 impl<'ctx> Context<'ctx> {
-    // FIXME break up (this will be easier to do once we get rid of JaySon)
+    // FIXME break up
     fn like_phonopy(
         &self,
     ) -> FailResult<ForceConstants> {
@@ -223,8 +189,6 @@ impl<'ctx> Context<'ctx> {
             })).collect()
         };
 
-        let mut jay_son = JaySon(vec![]);
-
         let mut computed_rows: BTreeMap<PrimI, BTreeMap<SuperI, M33>> = Default::default();
 
         // Populate the rows belonging to symmetry star representatives.
@@ -233,7 +197,6 @@ impl<'ctx> Context<'ctx> {
                 representative,
                 displacements: ref disp_indices,
             } = *data;
-            let displaced_atom = self.atom_from_lattice_point(representative, self.designated_lattice_point);
 
             // Expand the available data using symmetry to ensure we have enough
             // independent equations for pseudoinversion.
@@ -246,32 +209,22 @@ impl<'ctx> Context<'ctx> {
             let (
                 row_displacements,
                 row_forces,
-                jay_son_displacements,
-                jay_son_original_forces,
             ) = self.build_all_equations_for_representative_row(
                 representative,
                 &disp_indices,
                 &prim_data[representative].opers_from_rep,
             );
 
-            let jay_son_displaced = self.perm_HACK_to_phonopy.permute_index(displaced_atom.index());
-
             use rsp2_linalg::{CMatrix, dot, left_pseudoinverse};
 
             // all forces we just computed use the same displacements,
             // so we only need to compute a single pseudoinverse
             let pseudoinverse: CMatrix = left_pseudoinverse((&row_displacements.raw[..]).into())?;
-            let jay_son_pseudoinverse = {
-                (0..pseudoinverse.rows()).map(|r| (0..pseudoinverse.cols()).map(|c| pseudoinverse[(r, c)]).collect()).collect()
-            };
-
-            let mut jay_son_forces = vec![];
 
             let force_constants_row: BTreeMap<SuperI, M33> = {
                 row_forces.into_iter()
                     // solve for the fcs
                     .map(|(atom, force_vec)| {
-                        jay_son_forces.push(JaySonForce { affected: self.perm_HACK_to_phonopy.permute_index(atom.index()), vectors: force_vec.raw.clone() });
                         let forces: CMatrix = force_vec.raw.into();
                         let phi: CMatrix = dot(&*pseudoinverse, &*forces).into();
                         let phi: M33 = -M3(phi.c_order_data().nest::<V3>().to_array());
@@ -282,14 +235,6 @@ impl<'ctx> Context<'ctx> {
 
             computed_rows.insert(representative, force_constants_row)
                 .expect_none("(BUG) computed same row of FCs twice!?");
-
-            jay_son.0.push(JaySonItem {
-                displaced: jay_son_displaced,
-                displacements: jay_son_displacements,
-                original_forces: jay_son_original_forces,
-                forces: jay_son_forces,
-                pseudoinverse: jay_son_pseudoinverse,
-            });
         } // for star
 
         for (prim, data) in prim_data.into_iter_enumerated() {
@@ -311,8 +256,6 @@ impl<'ctx> Context<'ctx> {
                 },
             };
         }
-        //
-//        trace!("{}", ::serde_json::to_string(&jay_son).unwrap());
 
         assert!(computed_rows.keys().cloned().eq(self.prim_indices()));
         let matrix = {
@@ -351,9 +294,6 @@ impl<'ctx> Context<'ctx> {
     ) -> (
         Indexed<EqnI, Vec<V3>>,
         BTreeMap<SuperI, Indexed<EqnI, Vec<V3>>>,
-        // FIXME REMOVE JaySon stuff
-        Vec<JaySonDisplacement>,
-        Vec<Vec<V3>>,
     ) {
         assert!(
             disp_indices.len() <= 6,
@@ -366,8 +306,6 @@ impl<'ctx> Context<'ctx> {
         // a force set is somehow not symmetric (in which case some rotations will have a different
         // set of affected atoms than others)
         let mut all_sparse_forces = BTreeMap::<SuperI, BTreeMap<EqnI, V3>>::new();
-        let mut jay_son_original_forces = vec![];
-        let mut jay_son_displacements = vec![];
 
         for &oper in invariant_opers {
 
@@ -381,23 +319,7 @@ impl<'ctx> Context<'ctx> {
             for &disp in disp_indices {
                 assert_eq!(self.displacements[disp].0, displaced_prim, "(BUG) disp for wrong atom");
 
-                jay_son_original_forces.push({
-                    let mut out = vec![V3::zero(); self.sc.num_supercell_atoms()];
-                    for (&key, &thing) in &self.force_sets[disp] {
-                        out[self.perm_HACK_to_phonopy.permute_index(key.index())] = thing;
-                    }
-                    out
-                });
-
-                let eqn_i = {
-                    let new_displacement = rotate_vector(self.displacements[disp].1);
-                    jay_son_displacements.push(JaySonDisplacement {
-                        oper: self.frac_rots[oper.index()],
-                        cartoper: self.cart_rots[oper],
-                        vector: new_displacement,
-                    });
-                    all_displacements.push(new_displacement)
-                };
+                let eqn_i = all_displacements.push(rotate_vector(self.displacements[disp].1));
 
                 for (&affected_atom, &cart_force) in &self.force_sets[disp] {
                     let new_affected_atom = rotate_and_translate_atom(affected_atom);
@@ -438,7 +360,7 @@ impl<'ctx> Context<'ctx> {
                     (atom, force_vec)
                 }).collect()
         };
-        (all_displacements, all_forces, jay_son_displacements, jay_son_original_forces)
+        (all_displacements, all_forces)
     }
 
     fn derive_row_by_symmetry(
