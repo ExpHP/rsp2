@@ -667,8 +667,9 @@ pub(crate) fn run_dynmat_test(phonopy_dir: &PathDir) -> FailResult<()>
             .collect()
     };
 
+
     trace!("Computing designated rows of force constants...");
-    let force_constants = ::math::dynmat::ForceConstants::like_phonopy(
+    let force_constants = ::math::dynmat::ForceConstants::compute(
         &prim_displacements,
         &original_force_sets,
         &cart_rots,
@@ -678,8 +679,8 @@ pub(crate) fn run_dynmat_test(phonopy_dir: &PathDir) -> FailResult<()>
     trace!("Done computing designated rows of force constants.");
 
     {
-        // let dense = force_constants.permuted_by(&perm_to_phonopy).to_dense_matrix();
-        // println!("{:?}", dense); // FINALLY: THE MOMENT OF TRUTH
+//        let dense = force_constants.permuted_by(&perm_to_phonopy).to_dense_matrix();
+//        println!("{:?}", dense); // FINALLY: THE MOMENT OF TRUTH
     }
 
     {
@@ -688,10 +689,9 @@ pub(crate) fn run_dynmat_test(phonopy_dir: &PathDir) -> FailResult<()>
         trace!("Done computing dynamical matrix.");
         println!("{:?}", our_dynamical_matrix.0.to_coo().map(|c| c.0).into_dense());
 
-
         trace!("Computing eigensolutions...");
-        let (low, _low_basis) = our_dynamical_matrix.compute_most_negative_eigensolutions(30)?;
-        let (high, _high_basis) = our_dynamical_matrix.compute_most_extreme_eigensolutions(30)?;
+        let (low, _low_basis) = our_dynamical_matrix.compute_most_negative_eigensolutions(3)?;
+        let (high, _high_basis) = our_dynamical_matrix.compute_most_extreme_eigensolutions(3)?;
         trace!("Done computing eigensolutions...");
 
         println!("{:?}", low);

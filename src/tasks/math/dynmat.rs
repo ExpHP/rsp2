@@ -46,7 +46,7 @@ impl ForceConstants {
     //
     // The produced ForceConstants only include the rows in the 'designated cell.'
     // (the only rows that are required to produce a dynamical matrix)
-    pub(crate) fn like_phonopy(
+    pub fn compute(
         // Displacements, using primitive cell indices.
         //
         // For each symmetry star of sites in the primitive cell, only one of those
@@ -54,7 +54,7 @@ impl ForceConstants {
         prim_displacements: &[(usize, V3)], // [displacement] -> (prim_displaced, cart_disp)
         force_sets: &[BTreeMap<usize, V3>], // [displacement][affected] -> cart_force
         cart_rots: &[M33],                  // [sg_index] -> matrix
-        super_deperms: &[Perm],             // [sg_index] -> perm
+        super_deperms: &[Perm],             // [sg_index] -> permutation on supercell
         sc: &SupercellToken,
     ) -> FailResult<ForceConstants>
     {
@@ -534,22 +534,13 @@ impl ForceConstants {
 
     // HACK
     fn from_dense_matrix(mat: Vec<Vec<M33>>) -> ForceConstants {
-        let nrows = mat.len();
-        let ncols = mat.get(0).expect("cant sparsify matrix with no rows").len();
-        let dim = (nrows, ncols);
-
-        let (mut row, mut col, mut val) = (vec![], vec![], vec![]);
-        for (r, row_vec) in mat.into_iter().enumerate() {
-            assert_eq!(row_vec.len(), ncols);
-            for (c, m) in row_vec.into_iter().enumerate() {
-                if m != M33::zero() {
-                    row.push(SuperI(r));
-                    col.push(SuperI(c));
-                    val.push(m);
-                }
-            }
-        }
+        let RawCoo { dim, row, col, val } = RawCoo::<_, SuperI, SuperI>::from_dense(mat);
         ForceConstants(RawCoo { dim, row, col, val })
+    }
+
+    // HACK
+    pub fn to_dense_matrix(&self) -> Vec<Vec<M33>> {
+        self.0.to_dense()
     }
 
     // note: other K points will require cartesian coords for the right phase factors

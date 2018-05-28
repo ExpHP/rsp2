@@ -152,6 +152,28 @@ impl<T, R: Idx, C: Idx> RawCoo<T, R, C> {
         self.into_indexed_dense_with(zero, add_assign)
             .into_iter().map(|v| v.raw).collect()
     }
+
+    pub fn from_dense(mat: Vec<Vec<T>>) -> Self
+    where
+        T: Zero,
+    {
+        let nrows = mat.len();
+        let ncols = mat.get(0).expect("cant sparsify matrix with no rows").len();
+        let dim = (nrows, ncols);
+
+        let (mut row, mut col, mut val) = (vec![], vec![], vec![]);
+        for (r, row_vec) in mat.into_iter().enumerate() {
+            assert_eq!(row_vec.len(), ncols);
+            for (c, x) in row_vec.into_iter().enumerate() {
+                if !x.is_zero() {
+                    row.push(R::new(r));
+                    col.push(C::new(c));
+                    val.push(x);
+                }
+            }
+        }
+        RawCoo { dim, row, col, val }
+    }
 }
 
 #[allow(unused)]

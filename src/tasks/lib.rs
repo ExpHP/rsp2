@@ -72,7 +72,7 @@ mod cmd;
 mod phonopy;
 mod math;
 mod ui;
-mod meta;
+pub mod meta;
 
 pub mod entry_points;
 
@@ -199,4 +199,9 @@ mod hlist_aliases {
     pub type HList2<A, B> = HCons<A, HList1<B>>;
     pub type HList3<A, B, C> = HCons<A, HList2<B, C>>;
     pub type HList4<A, B, C, D> = HCons<A, HList3<B, C, D>>;
+}
+
+pub mod exposed_for_testing {
+    pub use ::math::dynmat::ForceConstants;
+    pub use ::meta;
 }
