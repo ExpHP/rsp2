@@ -296,7 +296,6 @@ impl TrialDir {
         ev_analysis: &GammaSystemAnalysis,
     ) -> FailResult<()> {Ok({
         use ::ui::cfg_merging::{make_nested_mapping, no_summary, merge_summaries};
-        use ::rsp2_structure_io::Poscar;
 
         #[derive(Serialize)]
         struct EnergyPerAtom {
@@ -311,15 +310,11 @@ impl TrialDir {
         let mut out = vec![];
         out.push(ev_analysis.make_summary(settings));
         out.push({
-            let f = |poscar: Poscar| FailOk({
-                let Poscar { coords, elements, .. } = poscar;
-                let elements: Rc<[Element]> = elements.into();
-                let meta = hlist![elements];
-
+            let f = |(coords, meta): (Coords, ::frunk::HCons<_, _>)| FailOk({
                 let na = coords.num_atoms() as f64;
                 pot.one_off().compute_value(&coords, meta.sift())? / na
             });
-            let f_path = |s: &AsPath| FailOk(f(Poscar::from_reader(self.read_file(s)?)?)?);
+            let f_path = |s: &AsPath| FailOk(f(read_poscar(settings.masses.as_ref(), self.read_file(s)?)?)?);
 
             let initial = f_path(&"initial.vasp")?;
             let final_ = f_path(&"final.vasp")?;
@@ -629,15 +624,6 @@ impl TrialDir {
 pub(crate) fn run_dynmat_test(phonopy_dir: &PathDir) -> FailResult<()>
 {Ok({
     ::cmd::scipy_eigsh::check_scipy_availability()?;
-//        let pot = PotentialBuilder::from_config(&settings.threading, &settings.potential.kind);
-
-//        let (prim_structure, _atom_layers, _layer_sc_mats) = read_structure_file(
-//            Some(settings), file_format, input, Some(&*pot),
-//        )?;
-
-//        self.write_poscar("initial.vasp", "Initial structure", &prim_structure)?;
-//        let phonopy = phonopy_builder_from_settings(&settings.phonons, prim_structure.lattice());
-//        let disp_dir = phonopy.displacements(&prim_structure)?;
 
     // Make a supercell, and determine how our ordering of the supercell differs from phonopy.
     let symmetry_dir = DirWithSymmetry::from_existing(phonopy_dir)?;
@@ -661,14 +647,6 @@ pub(crate) fn run_dynmat_test(phonopy_dir: &PathDir) -> FailResult<()>
         )?.into_iter().map(|p| p.inverted()).collect()
     };
 
-//        let original_force_sets: Vec<_> = {
-//            let mut diff_fn = pot.initialize_diff_fn(superstructure.clone())?;
-////            ::math::dynmat::ForceSets::concat_from({
-//                displacements.iter()
-//                    .map(|&displacement| diff_fn.compute_force_set(&superstructure, displacement))
-//                    .collect::<FailResult<Vec<_>>>()?
-////            }).expect("(BUG) no displacements?")
-//        };
     let original_force_sets: Vec<_> = {
         let ::phonopy::ForceSets {
             force_sets: phonopy_force_sets, ..
@@ -851,7 +829,6 @@ pub(crate) fn perform_layer_search(
     layers
 })}
 
-
 fn read_poscar(
     cfg_masses: Option<&cfg::Masses>,
     r: impl ::std::io::Read,
@@ -864,6 +841,9 @@ fn read_poscar(
     Ok((coords, hlist![elements, masses]))
 }
 
+/// Implements the behavior of the `"masses"` config section.
+///
+/// When the section is omitted, default masses are used.
 fn masses_by_config(
     cfg_masses: Option<&cfg::Masses>,
     elements: Rc<[Element]>,

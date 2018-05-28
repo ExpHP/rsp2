@@ -2,6 +2,8 @@
 use ::FailResult;
 use super::potential::{PotentialBuilder};
 
+use ::meta::prelude::*;
+use ::meta::{Mass, Element};
 use ::rsp2_tasks_config as cfg;
 
 use ::math::basis::Basis3;
@@ -9,7 +11,7 @@ use ::math::basis::Basis3;
 use ::rsp2_slice_math::{v, V, vdot, vnormalize, BadNorm};
 
 use ::slice_of_array::prelude::*;
-use ::rsp2_structure::{Coords, Element};
+use ::rsp2_structure::{Coords};
 use ::hlist_aliases::*;
 
 use ::std::fmt;
@@ -78,8 +80,9 @@ pub(crate) fn perform_acoustic_search(
     eigenvalues: &[f64],
     eigenvectors: &Basis3,
     coords: &Coords,
-    meta: HList1<
+    meta: HList2<
         Rc<[Element]>,
+        Rc<[Mass]>,
     >,
     settings: &cfg::AcousticSearch,
 ) -> FailResult<Vec<ModeKind>>
@@ -120,7 +123,7 @@ pub(crate) fn perform_acoustic_search(
     }
 
     // look at the negative eigenvectors for rotations and true imaginary modes
-    let mut diff_at_pos = pot.threaded(true).initialize_flat_diff_fn(coords, meta.sculpt().0)?;
+    let mut diff_at_pos = pot.threaded(true).initialize_flat_diff_fn(coords, meta.sift())?;
 
     let pos_0 = coords.to_carts();
     let grad_0 = diff_at_pos(pos_0.flat())?.1;

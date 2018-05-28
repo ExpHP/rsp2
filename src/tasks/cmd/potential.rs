@@ -6,7 +6,7 @@
 
 use ::FailResult;
 use ::hlist_aliases::*;
-use ::meta::Element;
+use ::meta::{Mass, Element};
 #[allow(unused)] // rustc bug
 use ::meta::prelude::*;
 use ::rsp2_structure::{Coords, consts};
@@ -30,8 +30,9 @@ const DEFAULT_AIREBO_TORSION_ENABLED: bool = false;
 ///
 /// (all potentials usable in the main code must use a single metadata
 ///  type by necessity, due to the use of dynamic polymorphism)
-pub type CommonMeta = HList1<
+pub type CommonMeta = HList2<
     Rc<[Element]>,
+    Rc<[Mass]>,
 >;
 
 /// Trait alias for a function producing flat potential and gradient,
@@ -66,7 +67,7 @@ pub type DynFlatDiffFn<'a> = FlatDiffFn<Output=FailResult<(f64, Vec<f64>)>> + 'a
 /// It is a generic type parameter because some implementation may benefit
 /// from using their own type (using an adapter to expose a PotentialBuilder
 /// implementation with the default metadata type).
-pub trait PotentialBuilder<Meta = HList1<Rc<[Element]>>>
+pub trait PotentialBuilder<Meta = CommonMeta>
     : Send + Sync
     // 'static just makes the signatures of the trait easier.
     //

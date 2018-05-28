@@ -495,7 +495,6 @@ impl<P: AsPath> DirWithDisps<P> {
     })}
 }
 
-
 /// Like Gramma used to make.
 pub struct Rsp2StyleDisplacements {
     /// A supercell following rsp2's conventions (not phonopy's)
@@ -530,8 +529,6 @@ impl<P: AsPath> DirWithDisps<P> {
             |x: Rc<[_]>| -> Rc<[_]> { sc.replicate(&x[..]).into() },
             |x: Rc<[_]>| -> Rc<[_]> { sc.replicate(&x[..]).into() },
         ]);
-
-
 
         // cmon, big money, big money....
         // if these assertions always succeed, it will save us a

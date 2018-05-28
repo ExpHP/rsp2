@@ -131,8 +131,9 @@ impl TrialDir {
         settings: &Settings,
         pot: &PotentialBuilder,
         coords: Coords,
-        meta: HList1<
+        meta: HList2<
             Rc<[Element]>,
+            Rc<[Mass]>,
         >,
         ev_analysis: &GammaSystemAnalysis,
         evals: &[f64],
@@ -224,8 +225,9 @@ fn do_relax(
     pot: &PotentialBuilder,
     cg_settings: &cfg::Acgsd,
     coords: Coords,
-    meta: HList1<
+    meta: HList2<
         Rc<[Element]>,
+        Rc<[Mass]>,
     >,
 ) -> FailResult<Coords>
 {Ok({
@@ -242,8 +244,9 @@ fn do_eigenvector_chase(
     pot: &PotentialBuilder,
     chase_settings: &cfg::EigenvectorChase,
     mut coords: Coords,
-    meta: HList1<
+    meta: HList2<
         Rc<[Element]>,
+        Rc<[Mass]>,
     >,
     bad_evecs: &[(String, &[V3])],
 ) -> FailResult<Coords>
@@ -275,8 +278,9 @@ fn do_cg_along_evecs<V, I>(
     pot: &PotentialBuilder,
     cg_settings: &cfg::Acgsd,
     coords: Coords,
-    meta: HList1<
+    meta: HList2<
         Rc<[Element]>,
+        Rc<[Mass]>,
     >,
     evecs: I,
 ) -> FailResult<Coords>
@@ -293,8 +297,9 @@ fn _do_cg_along_evecs(
     pot: &PotentialBuilder,
     cg_settings: &cfg::Acgsd,
     coords: Coords,
-    meta: HList1<
+    meta: HList2<
         Rc<[Element]>,
+        Rc<[Mass]>,
     >,
     evecs: &[&[V3]],
 ) -> FailResult<Coords>
@@ -316,8 +321,9 @@ fn _do_cg_along_evecs(
 fn do_minimize_along_evec(
     pot: &PotentialBuilder,
     from_coords: Coords,
-    meta: HList1<
+    meta: HList2<
         Rc<[Element]>,
+        Rc<[Mass]>,
     >,
     evec: &[V3],
 ) -> FailResult<(f64, Coords)>
@@ -343,8 +349,9 @@ fn do_minimize_along_evec(
 fn warn_on_improvable_lattice_params(
     pot: &PotentialBuilder,
     coords: &Coords,
-    meta: HList1<
+    meta: HList2<
         Rc<[Element]>,
+        Rc<[Mass]>,
     >,
 ) -> FailResult<()>
 {Ok({
