@@ -1,9 +1,3 @@
-
-// TODO:
-// Required bits of cleanup here:
-//
-// * breakitup
-
 use ::FailResult;
 use ::meta::Mass;
 use ::rsp2_array_types::{V3, M33, M3};
@@ -91,7 +85,7 @@ impl ForceConstants {
             sc, primitive_atoms, lattice_points, displacements, force_sets,
             cart_rots, super_deperms,
             designated_lattice_point,
-        }.like_phonopy()
+        }.compute_force_constants()
     }
 }
 
@@ -114,18 +108,50 @@ struct Context<'ctx> {
 }
 
 impl<'ctx> Context<'ctx> {
-    // FIXME break up
-    fn like_phonopy(
+    fn compute_force_constants(
         &self,
     ) -> FailResult<ForceConstants> {
+        let (star_data, prim_data) = self.compute_symmetry_info();
 
-        #[derive(Debug, Clone)]
-        struct StarData {
-            representative: PrimI,
-            // operators that map the representative atom into this position.
-            displacements: Vec<DispI>,
-        }
+        let representative_rows = self.compute_representative_rows(&star_data, &prim_data)?;
 
+        let all_rows = self.derive_rows_by_symmetry(&star_data, &prim_data, representative_rows);
+
+        let matrix = {
+            let dim = (self.sc.num_supercell_atoms(), self.sc.num_supercell_atoms());
+            let map = {
+                all_rows.into_iter_enumerated()
+                    .map(|(prim, row_map)| (self.designated_super(prim), row_map))
+                    .collect()
+            };
+            sparse::RawBee { dim, map }.into_coo()
+        };
+        Ok(ForceConstants(matrix))
+    }
+}
+
+
+//--------------------------------------------------
+// data computed early on
+
+// ad-hoc struct with data that is computed for each symmetry star
+#[derive(Debug, Clone)]
+struct StarData {
+    representative: PrimI,
+    // operators that map the representative atom into this position.
+    displacements: Vec<DispI>,
+}
+
+// ad-hoc struct relating each primitive atom to its site-symmetry representative.
+#[derive(Debug, Clone)]
+struct PrimData {
+    star: StarI,
+    // operators that move the star's representative into this primitive site.
+    opers_from_rep: Vec<OperI>,
+}
+
+impl<'ctx> Context<'ctx> {
+    fn compute_symmetry_info(&self) -> (Indexed<StarI, Vec<StarData>>, Indexed<PrimI, Vec<PrimData>>) {
         // Gather displacements for each star of sites.
         //
         // The non-equivalent atoms were discovered by phonopy and taken into account
@@ -151,14 +177,7 @@ impl<'ctx> Context<'ctx> {
                 .collect()
         };
 
-        // Find relationships between each primitive site and their site-symmetry representatives.
-        #[derive(Debug, Clone)]
-        struct PrimData {
-            star: StarI,
-            // operators that move the star's representative into this primitive site.
-            opers_from_rep: Vec<OperI>,
-        }
-
+        // Gather data relating each primitive atom to its site-symmetry representative.
         let prim_data: Indexed<PrimI, Vec<PrimData>> = {
             let mut data = Indexed::<PrimI, _>::from_elem_n(None, self.sc.num_primitive_atoms());
             for (star, star_data) in star_data.iter_enumerated() {
@@ -188,10 +207,16 @@ impl<'ctx> Context<'ctx> {
                 );
             })).collect()
         };
+        (star_data, prim_data)
+    }
 
+    // Computes the rows of the FC matrix belonging to symmetry star representatives.
+    fn compute_representative_rows(
+        &self,
+        star_data: &Indexed<StarI, [StarData]>,
+        prim_data: &Indexed<PrimI, [PrimData]>,
+    ) -> FailResult<BTreeMap<PrimI, BTreeMap<SuperI, M3<V3<f64>>>>> {
         let mut computed_rows: BTreeMap<PrimI, BTreeMap<SuperI, M33>> = Default::default();
-
-        // Populate the rows belonging to symmetry star representatives.
         for (star, data) in star_data.iter_enumerated() {
             let StarData {
                 representative,
@@ -236,38 +261,7 @@ impl<'ctx> Context<'ctx> {
             computed_rows.insert(representative, force_constants_row)
                 .expect_none("(BUG) computed same row of FCs twice!?");
         } // for star
-
-        for (prim, data) in prim_data.into_iter_enumerated() {
-            let PrimData { star, opers_from_rep } = data;
-            match computed_rows.contains_key(&prim) {
-                true => continue,
-                false => {
-                    let representative = star_data[star].representative;
-                    let &oper = opers_from_rep.get(0).expect("(BUG!) was checked earlier");
-                    let new_row = self.derive_row_by_symmetry(
-                        representative,
-                        &computed_rows[&representative],
-                        prim,
-                        oper,
-                    );
-
-                    computed_rows.insert(prim, new_row)
-                        .expect_none("(BUG) computed same row of FCs twice!?");
-                },
-            };
-        }
-
-        assert!(computed_rows.keys().cloned().eq(self.prim_indices()));
-        let matrix = {
-            let dim = (self.sc.num_supercell_atoms(), self.sc.num_supercell_atoms());
-            let map = {
-                computed_rows.into_iter()
-                    .map(|(prim, row_map)| (self.designated_super(prim), row_map))
-                    .collect()
-            };
-            sparse::RawBee { dim, map }.into_coo()
-        };
-        Ok(ForceConstants(matrix))
+        Ok(computed_rows)
     }
 
     /// Use symmetry to expand the number of displacement-force equations for
@@ -363,45 +357,56 @@ impl<'ctx> Context<'ctx> {
         (all_displacements, all_forces)
     }
 
-    fn derive_row_by_symmetry(
+    // Input: Rows for each symmetry-star representative.
+    // Output: Rows for every primitive atom.
+    fn derive_rows_by_symmetry(
         &self,
-        // Index and data of a finished row in the force constants table
-        finished_prim: PrimI,
-        finished_row: &BTreeMap<SuperI, M33>,
-        // The row to be computed. (for sanity checks)
-        todo_prim: PrimI,
-        // An arbitrarily chosen operator that maps `finished_prim` to `todo_prim`
-        // in the primitive structure.
-        oper: OperI,
-    ) -> BTreeMap<SuperI, M33>
+        star_data: &Indexed<StarI, [StarData]>,
+        prim_data: &Indexed<PrimI, [PrimData]>,
+        computed_rows: BTreeMap<PrimI, BTreeMap<SuperI, M3<V3<f64>>>>,
+    ) -> Indexed<PrimI, Vec<BTreeMap<SuperI, M3<V3<f64>>>>>
     {
-        // Visualize the operation described in the documentation of `get_corrected_rotate`.
-        //
-        // Performing this operation on a set of data would permute all indices according to the
-        // deperm returned by `get_corrected_rotate`, and would rotate all displacements and forces
-        // by the rotation part of the operator.  How does this impact the force constants?
-        //
-        // Clearly, the columns will be permuted by the deperm:
-        let (rotated_prim, apply_deperm) = self.get_corrected_rotate(oper, finished_prim);
-        assert_eq!(rotated_prim, todo_prim, "(BUG) oper produced different row?!");
+        prim_data.iter_enumerated().map(|(prim, data)| {
+            let &PrimData { star, ref opers_from_rep } = data;
+            let representative = star_data[star].representative;
+            if computed_rows.contains_key(&prim) {
+                assert_eq!(prim, representative, "(BUG!) bad input to derive_rows_by_symmetry");
+                computed_rows[&prim].clone()
+            } else {
+                assert_ne!(prim, representative, "(BUG!) bad input to derive_rows_by_symmetry");
 
-        // But their contents will also be transformed by the rotation.
-        //
-        // Consider that the new force and displacement are each obtained by rotating the old
-        // vectors by R, and substitute into the force constants equation. (`F = - U Phi`,
-        // recalling that rsp2 prefers a row-vector-centric formalism for everything except
-        // spatial transformation operators like R)
-        //
-        // The result:      Phi_new = R.T.inv() Phi_old R.T
-        // or equivalently: Phi_new = R Phi_old R.T
-        let cart_rot = self.cart_rots[oper];
+                // any operator will do; all should produce the same data.
+                let &oper = opers_from_rep.get(0).expect("(BUG!) was checked earlier");
+                // Visualize the operation described in the documentation of `get_corrected_rotate`.
+                //
+                // Performing this operation on a set of data would permute all indices according to the
+                // deperm returned by `get_corrected_rotate`, and would rotate all displacements and forces
+                // by the rotation part of the operator.  How does this impact the force constants?
+                //
+                // Clearly, the columns will be permuted by the deperm:
+                let (rotated_prim, apply_deperm) = self.get_corrected_rotate(oper, representative);
+                assert_eq!(rotated_prim, prim, "(BUG) oper produced different row?!");
 
-        finished_row.iter()
-            .map(|(&affected, fc_matrix)| {
-                let affected = apply_deperm(affected);
-                let fc_matrix = cart_rot * fc_matrix * cart_rot.t();
-                (affected, fc_matrix)
-            }).collect()
+                // But their contents will also be transformed by the rotation.
+                //
+                // Consider that the new force and displacement are each obtained by rotating the old
+                // vectors by R, and substitute into the force constants equation. (`F = - U Phi`,
+                // recalling that rsp2 prefers a row-vector-centric formalism for everything except
+                // spatial transformation operators like R)
+                //
+                // The result:      Phi_new = R.T.inv() Phi_old R.T
+                // or equivalently: Phi_new = R Phi_old R.T
+                let cart_rot = self.cart_rots[oper];
+
+                computed_rows[&representative].iter()
+                    .map(|(&affected, fc_matrix)| {
+                        let affected = apply_deperm(affected);
+                        let fc_matrix = cart_rot * fc_matrix * cart_rot.t();
+                        (affected, fc_matrix)
+                    })
+                    .collect()
+            }
+        }).collect()
     }
 
     // Get a depermutation that applies a spacegroup operator to force sets
@@ -461,8 +466,6 @@ impl<'ctx> Context<'ctx> {
     // helpers that wrap methods with newtyped indices
 
     fn oper_indices(&self) -> impl Iterator<Item=OperI> { self.super_deperms.indices() }
-    fn prim_indices(&self) -> impl Iterator<Item=PrimI>
-    { (0..self.sc.num_primitive_atoms()).map(PrimI::new) }
 
     // depermutations in the form of a function that maps sparse indices
     fn rotate_atom(&self, oper: OperI, atom: SuperI) -> SuperI {
