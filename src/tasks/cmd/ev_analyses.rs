@@ -1,5 +1,6 @@
 
 use ::FailResult;
+use ::meta::{Element};
 use ::ui::color::{ColorByRange, PaintAs, NullPainter};
 use ::ui::cfg_merging::{no_summary, merge_summaries, make_nested_mapping};
 use ::math::basis::Basis3;
@@ -8,7 +9,7 @@ use ::math::bands::{GammaUnfolder, ScMatrix};
 use ::itertools::Itertools;
 use ::rsp2_tasks_config::Settings;
 
-use ::rsp2_structure::{Coords, Element};
+use ::rsp2_structure::{Coords};
 #[allow(unused)] // compiler bug
 use ::rsp2_soa_ops::{Part, Partition};
 
@@ -27,7 +28,7 @@ use super::acoustic_search;
 #[derive(Debug, Clone)]                         pub struct AtomCoordinates(pub Coords);
 #[derive(Debug, Clone, Serialize, Deserialize)] pub struct AtomLayers(pub Vec<usize>);
 #[derive(Debug, Clone)]                         pub struct AtomElements(pub Vec<Element>);
-#[derive(Debug, Clone, Serialize, Deserialize)] pub struct AtomMasses(pub Vec<f64>);
+#[derive(Debug, Clone)]                         pub struct AtomMasses(pub Vec<f64>);
 #[derive(Debug, Clone, Serialize, Deserialize)] pub struct LayerScMatrices(pub Vec<ScMatrix>);
 #[derive(Debug, Clone)]                         pub struct EvClassifications(pub Vec<acoustic_search::ModeKind>);
 #[derive(Debug, Clone)]                         pub struct EvFrequencies(pub Vec<f64>);

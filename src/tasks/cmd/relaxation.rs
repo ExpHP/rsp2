@@ -63,18 +63,9 @@ impl TrialDir {
             let aux_info = {
                 use super::ev_analyses::*;
 
-                // HACK
-                let masses = {
-                    let elements: Rc<[Element]> = meta.pick();
-                    elements.iter()
-                        .map(|&s| ::common::element_mass(s).unwrap())
-                        .collect()
-                };
-
                 super::aux_info::Info {
                     atom_layers:   atom_layers.clone().map(AtomLayers),
                     layer_sc_mats: layer_sc_mats.clone().map(LayerScMatrices),
-                    atom_masses:   Some(AtomMasses(masses)),
                 }
             };
 

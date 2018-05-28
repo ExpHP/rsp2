@@ -219,13 +219,15 @@ impl TrialDir {
                 pot, &evals, &evecs, &coords, meta.sift(), &settings.acoustic_search,
             )?;
 
-            let aux_info::Info { atom_layers, atom_masses, layer_sc_mats } = aux_info;
+            let aux_info::Info { atom_layers, layer_sc_mats } = aux_info;
             let atom_elements: Rc<[Element]> = meta.pick();
+            let atom_masses: Rc<[Mass]> = meta.pick();
+            let atom_masses: Vec<f64> = atom_masses.iter().map(|&Mass(x)| x).collect();
 
             gamma_system_analysis::Input {
-                atom_masses,
                 atom_layers,
                 layer_sc_mats,
+                atom_masses:        Some(AtomMasses(atom_masses)),
                 ev_classifications: Some(EvClassifications(classifications)),
                 atom_elements:      Some(AtomElements(atom_elements.to_vec())),
                 atom_coords:        Some(AtomCoordinates(coords.clone())),
@@ -419,7 +421,6 @@ mod aux_info {
     #[derive(Clone, Deserialize, Serialize)]
     pub struct Info {
         pub atom_layers:   Option<AtomLayers>,
-        pub atom_masses:   Option<AtomMasses>,
         pub layer_sc_mats: Option<LayerScMatrices>,
     }
 }

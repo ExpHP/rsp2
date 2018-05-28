@@ -179,11 +179,6 @@ mod common {
     use ::FailResult;
     use ::rsp2_structure::{Element, consts};
 
-    // FIXME: only here so I can remove usages one by one
-    #[deprecated]
-    pub fn element_mass(elem: Element) -> FailResult<f64>
-    { default_element_mass(elem) }
-
     pub fn default_element_mass(elem: Element) -> FailResult<f64>
     {Ok({
         match elem {
