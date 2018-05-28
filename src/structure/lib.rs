@@ -12,7 +12,10 @@ extern crate slice_of_array;
 #[macro_use] extern crate itertools;
 #[macro_use] extern crate failure;
 #[macro_use] extern crate lazy_static;
+extern crate serde;
+#[macro_use] extern crate serde_derive;
 #[cfg(test)] extern crate rand;
+#[cfg(test)] extern crate serde_json;
 
 // FIXME copied from failure 1.0 prerelease; remove once actually released
 macro_rules! throw {

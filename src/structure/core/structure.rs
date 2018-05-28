@@ -40,9 +40,11 @@ use ::rsp2_array_types::{M33, V3, Unvee};
 ///
 /// [`CoordsKind`]: ../struct.CoordsKind.html
 /// [`Lattice`]: ../struct.Lattice.html
-#[derive(Debug,Clone,PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize)]
 pub struct Coords {
     pub(crate) lattice: Lattice,
+    #[serde(flatten)]
     pub(crate) coords: CoordsKind,
 }
 
@@ -413,5 +415,25 @@ mod compiletest {
         assert_eq!(coords.to_carts(), vec![[1.0, 0.0, 0.0]].envee());
         assert_eq!(coords.to_fracs(), vec![[0.5, 0.0, 0.0]].envee());
         let _ = coords;
+    }
+
+    #[test]
+    fn serde() {
+        let de: Coords = ::serde_json::from_str(r#"{
+            "lattice": [[2.4192432809928756, 0.0, 0.0],
+                        [-1.2096216404964375, 2.095126139274645, 0.0],
+                        [0, 0, 10]],
+            "carts": [[0, 0, 5],
+                      [1.2096216404964375, 0.6983753797582153, 5]]
+        }"#).unwrap();
+        assert_eq!(de.lattice().matrix().unvee(), [
+            [2.4192432809928756, 0.0, 0.0],
+            [-1.2096216404964375, 2.095126139274645, 0.0],
+            [0.0, 0.0, 10.0],
+        ]);
+        assert_eq!(de.to_carts().unvee(), vec![
+            [0.0, 0.0, 5.0],
+            [1.2096216404964375, 0.6983753797582153, 5.0],
+        ]);
     }
 }

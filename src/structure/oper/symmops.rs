@@ -107,9 +107,13 @@ impl FracRot {
     /// The input should be a matrix `R` such that `X R^T ~ X`,
     /// where the rows of `X` are fractional positions.
     pub fn new(mat: &M33<i32>) -> FracRot
-    {
-        assert_eq!(mat.det().abs(), 1);
-        FracRot { t: mat.t() }
+    { Self::opt_new(mat).expect("matrix not unimodular") }
+
+    fn opt_new(mat: &M33<i32>) -> Option<FracRot> {
+        match mat.det().abs() {
+            1 => Some(FracRot { t: mat.t() }),
+            _ => None,
+        }
     }
 
     fn from_float_t(float_t: &M33<f64>) -> Result<FracRot, ::IntPrecisionError>
@@ -162,6 +166,14 @@ impl FracRot {
 impl FracTrans {
     pub fn eye() -> Self
     { FracTrans(V3([0, 0, 0])) }
+
+    fn opt_from_raw(raw: V3<i32>) -> Option<Self>
+    {
+        match raw.iter().all(|&x| 0 <= x && x < 12) {
+            true => Some(FracTrans(raw)),
+            false => None,
+        }
+    }
 
     pub fn from_floats(xs: V3) -> Result<FracTrans, ::IntPrecisionError>
     { xs.try_map(|x| ::util::Tol(1e-4).unfloat(x * 12.0)).map(FracTrans).map(Self::reduce) }
@@ -267,6 +279,116 @@ impl FracOp {
         let mut out = self.to_rot().transform_prim(fracs);
         self.to_trans().transform_prim_mut(&mut out);
         out
+    }
+}
+
+mod serde_impls {
+    use super::*;
+    use ::serde::{Serialize, Serializer, Deserialize, Deserializer};
+    use ::serde::de::Error;
+
+    #[derive(Serialize, Deserialize)]
+    pub struct RawFracOp {
+        rot: FracRot,
+        trans: FracTrans,
+    }
+
+    impl Serialize for FracRot {
+        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            let raw: M33<i32> = self.matrix();
+            raw.serialize(serializer)
+        }
+    }
+
+    impl Serialize for FracTrans {
+        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            let raw: V3<i32> = self.0;
+            raw.serialize(serializer)
+        }
+    }
+
+    impl Serialize for FracOp {
+        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            RawFracOp {
+                rot: self.to_rot(),
+                trans: self.to_trans(),
+            }.serialize(serializer)
+        }
+    }
+
+    impl<'de> Deserialize<'de> for FracRot {
+        fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            let raw = M33::<i32>::deserialize(deserializer)?;
+            FracRot::opt_new(&raw)
+                .ok_or_else(|| D::Error::custom("matrix not unimodular"))
+        }
+    }
+
+    impl<'de> Deserialize<'de> for FracTrans {
+        fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            let raw = V3::<i32>::deserialize(deserializer)?;
+            FracTrans::opt_from_raw(raw)
+                .ok_or_else(|| D::Error::custom("frac translation out of range"))
+        }
+    }
+
+    impl<'de> Deserialize<'de> for FracOp {
+        fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            let RawFracOp { rot, trans } = RawFracOp::deserialize(deserializer)?;
+            Ok(FracOp::new(&rot, &trans))
+        }
+    }
+
+    #[cfg(test)]
+    fn check_round_trip<T>(x: &T)
+    where T: ::std::fmt::Debug + PartialEq + Serialize + for<'de> Deserialize<'de>,
+    {
+        let ser = ::serde_json::to_string(&x).unwrap();
+        let de: T = ::serde_json::from_str(&ser).unwrap();
+        assert_eq!(x, &de);
+    }
+
+    #[test]
+    fn round_trip() {
+        let r = FracRot::from(&[
+            [-1, 1, 0],
+            [-1, 0, 0],
+            [ 0, 0, 1],
+        ]);
+        let t = FracTrans::from_floats(V3([0.0, 1.0/3.0, 1.0/6.0])).unwrap();
+        check_round_trip(&r);
+        check_round_trip(&t);
+        check_round_trip(&FracOp::new(&r, &t));
+    }
+
+    #[test]
+    #[should_panic(expected = "out of range")]
+    fn bad_trans() {
+        let _: FracTrans = ::serde_json::from_str("[0, -4, 0]").unwrap();
+    }
+
+    #[test]
+    #[should_panic(expected = "unimodular")]
+    fn bad_rot() {
+        let _: FracRot = ::serde_json::from_str("[[-1, 1, 0], [-2, 0, 0], [0, 0, 1]]").unwrap();
+    }
+
+    #[test]
+    #[should_panic(expected = "out of range")]
+    fn bad_trans_in_op() {
+        let _: FracOp = ::serde_json::from_str(r#"{
+            "rot": [[-1, 1, 0], [-1, 0, 0], [ 0, 0, 1]],
+            "trans": [0, -4, 0]
+        }"#).unwrap();
+    }
+
+    #[test]
+    #[should_panic(expected = "unimodular")]
+    fn bad_rot_in_op() {
+        let _: FracOp = ::serde_json::from_str(r#"{
+            "rot": [[-1, 1, 0], [-2, 0, 0], [ 0, 0, 1]],
+            "trans": [0, 3, 6]
+        }"#).unwrap();
     }
 }
 

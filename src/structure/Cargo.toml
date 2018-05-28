@@ -24,7 +24,11 @@ ordered-float = "0.5"
 itertools = "0.7"
 lazy_static = "0.2"
 log = "0.3"
+serde = "1.0.47"
+serde_derive = "1.0.47"
 
+# test deps
+serde_json = "1"
 rand = "0.3"
 
 [features]

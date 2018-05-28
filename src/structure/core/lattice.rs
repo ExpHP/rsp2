@@ -1,6 +1,7 @@
 use ::rsp2_array_utils::{map_arr};
 use ::std::ops::{Mul, Div};
 use ::std::sync::Arc;
+use ::serde::{Serialize, Serializer, Deserialize, Deserializer};
 
 use ::rsp2_array_types::{V3, M33, M3, mat, inv};
 use ::rsp2_assert_close::{CheckClose, Tolerances, CheckCloseError};
@@ -253,13 +254,25 @@ impl<'b> Div<&'b Lattice> for V3 {
     }
 }
 
-
 impl CheckClose for Lattice {
     type Scalar = f64;
 
     fn check_close(&self, other: &Lattice, tol: Tolerances) -> Result<(), CheckCloseError> {
         use ::rsp2_array_types::Unvee;
         self.matrix().unvee().check_close(&other.matrix().unvee(), tol)
+    }
+}
+
+impl Serialize for Lattice {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.matrix().serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for Lattice {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = M33::<f64>::deserialize(deserializer)?;
+        Ok(Lattice::new(&raw))
     }
 }
 

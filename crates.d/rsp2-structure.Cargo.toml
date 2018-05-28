@@ -19,7 +19,11 @@ path = "lib.rs"
 !!itertools
 !!lazy-static
 !!log
+!!serde
+!!serde-derive
 
+# test deps
+!!serde-json
 !!rand
 
 [features]

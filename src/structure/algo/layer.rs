@@ -228,7 +228,7 @@ fn assign_layers_impl_frac_1d(
                     // Put the new indices first so that they're in contiguous order.
                     cur_group.extend(first_group.drain(..));
 
-                    assert_eq!(mem::replace(first_group, cur_group), vec![]);
+                    assert_eq!(mem::replace(first_group, cur_group), Vec::<usize>::new());
                 },
             }
         } else {
