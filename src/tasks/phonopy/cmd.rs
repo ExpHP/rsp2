@@ -993,7 +993,7 @@ pub fn cache_link(src: impl AsPath, dest: impl AsPath) -> FailResult<()>
             // if the file already existed, the link will have failed.
             // Check this before continuing because we don't want to
             //   potentially overwrite a link with a copy.
-            if dest.exists() {
+            if dest.is_file() { // true for files and symlinks to files
                 return Ok(());
             }
 
@@ -1004,6 +1004,11 @@ pub fn cache_link(src: impl AsPath, dest: impl AsPath) -> FailResult<()>
 }
 
 // Like `cache_link` except it fails if the destination exists.
+//
+// FIXME: (2018-05-27)  Uhhhhhhmm. That description is misleading. The implementation
+//                      clearly clobbers existing destination files with `copy`.
+//                      (but between the description and the implementation, I cannot
+//                       recall which was the original intent!)
 pub fn copy_or_link(src: impl AsPath, dest: impl AsPath) -> FailResult<()>
 {
     let (src, dest) = (src.as_path(), dest.as_path());

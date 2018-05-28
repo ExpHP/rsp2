@@ -189,6 +189,8 @@ mod common {
     })}
 }
 
+// Although frunk has the variadic HList![] type macro, IntelliJ Rust can't handle it,
+// with recent versions of the plugin painting large swathes of code in red syntax errors.
 #[allow(unused)]
 mod hlist_aliases {
     use ::frunk::{HNil, HCons};
