@@ -115,34 +115,41 @@ impl Builder {
 }
 
 impl Builder {
-    fn finalize_config(&self, elements: Rc<[Element]>) -> Self
+    /// Make last-second adjustments to the config that are only possible once
+    /// the structure and metadata are known.
+    fn finalize_config(&self, meta: HList1<Rc<[Mass]>>) -> Self
     {
-        // FIXME: Mass hack
-        self.clone()
-            .conf(
-                "MASS",
-                elements.iter()
-                    .map(|&s| ::common::element_mass(s).unwrap())
-                    .join(" "),
-            )
+        let masses: Rc<[Mass]> = meta.pick();
+        self.clone().conf("MASS", masses.iter().join(" "))
     }
 
     pub fn displacements(
         &self,
         coords: &Coords,
-        meta: HList1<Rc<[Element]>>,
+        meta: HList2<
+            Rc<[Element]>,
+            Rc<[Mass]>,
+        >,
     ) -> FailResult<DirWithDisps<TempDir>>
     {
-        self.finalize_config(meta.pick())
+        self.finalize_config(meta.sift())
             ._displacements(coords, meta.sift())
     }
 
+    // this pattern of having a second impl method is to simulate rebinding
+    // the output of `finalize_config` to `self`. (otherwise, we'd be forced
+    // to have a `self: &Self` in scope with the incorrect config, which would
+    // be a massive footgun)
     fn _displacements(
         &self,
         coords: &Coords,
-        meta: HList1<Rc<[Element]>>,
+        meta: HList2<
+            Rc<[Element]>,
+            Rc<[Mass]>,
+        >,
     ) -> FailResult<DirWithDisps<TempDir>>
     {Ok({
+        let elements: Rc<[Element]> = meta.pick();
         let dir = TempDir::new("rsp2")?;
         {
             let dir = dir.path();
@@ -151,7 +158,7 @@ impl Builder {
             let extra_args = self.args_from_settings();
             self.conf.save(dir.join(FNAME_CONF_DISPS))?;
             Poscar {
-                comment: "blah", coords, elements: meta.pick(),
+                comment: "blah", coords, elements,
             }.save(dir.join("POSCAR"))?;
             extra_args.save(dir.join(FNAME_SETTINGS_ARGS))?;
 
@@ -200,8 +207,9 @@ phonopy \
     pub fn symmetry(
         &self,
         coords: &Coords,
-        meta: HList1<
+        meta: HList2<
             Rc<[Element]>,
+            Rc<[Mass]>,
         >,
     ) -> FailResult<DirWithSymmetry<TempDir>>
     {
@@ -209,7 +217,7 @@ phonopy \
         //       on mass. (suppose you were to have a bunch of gold atoms,
         //       one of which has a different mass. Would phonopy realize
         //       that this atom should not be symmetric with any other?)
-        self.finalize_config(meta.pick())
+        self.finalize_config(meta.sift())
             ._symmetry(coords, meta.sift())
     }
 
