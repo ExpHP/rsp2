@@ -86,6 +86,7 @@ as_path_impl!{
     (by Deref) [P: AsPath + ?Sized] ::std::sync::Arc<P>;
     (by Deref) ['p, P: AsPath + ToOwned + ?Sized] ::std::borrow::Cow<'p, P>;
     (by Deref) [] ::path_abs::PathArc;
+    (by Deref) [] ::path_abs::PathAbs;
     (by Deref) [] ::path_abs::PathFile;
     (by Deref) [] ::path_abs::PathDir;
 }

@@ -32,7 +32,7 @@ use ::util::ext_traits::{OptionResultExt, PathNiceExt};
 use ::math::basis::Basis3;
 use ::math::bonds::{FracBonds};
 
-use ::path_abs::{PathArc, PathFile, PathDir};
+use ::path_abs::{PathAbs, PathArc, PathFile, PathDir};
 use ::rsp2_structure::consts::CARBON;
 use ::rsp2_slice_math::{vnorm};
 
@@ -73,7 +73,7 @@ impl TrialDir {
         self,
         settings: &Settings,
         file_format: StructureFileType,
-        input: &PathFile,
+        input: &PathAbs,
         cli: CliArgs,
     ) -> FailResult<()>
     {Ok({

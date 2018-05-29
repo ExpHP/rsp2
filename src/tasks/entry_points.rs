@@ -3,7 +3,7 @@ use ::FailResult;
 use ::clap;
 use ::cmd::trial::{TrialDir, NewTrialDirArgs};
 use ::cmd::StructureFileType;
-use ::path_abs::{PathDir, PathFile};
+use ::path_abs::{PathDir, PathFile, PathAbs};
 use ::std::ffi::OsStr;
 use ::ui::logging::init_global_logger;
 use ::ui::cfg_merging::ConfigSources;
@@ -88,6 +88,7 @@ impl CliDeserialize for OptionalFileType {
                 match s {
                     "poscar" => Some(StructureFileType::Poscar),
                     "layers" => Some(StructureFileType::LayersYaml),
+                    "dir"    => Some(StructureFileType::StoredStructure),
                     "guess" => None,
                     _ => bail!("invalid setting for --structure-type"),
                 }
@@ -97,12 +98,25 @@ impl CliDeserialize for OptionalFileType {
 }
 
 impl OptionalFileType {
-    pub fn or_guess(self, path: &PathFile) -> StructureFileType {
+    pub fn or_guess(self, path: &PathAbs) -> StructureFileType {
+        let default = StructureFileType::Poscar;
+
         self.0.unwrap_or_else(|| {
-            match path.extension().and_then(|s| s.to_str()) {
-                Some("yaml") => StructureFileType::LayersYaml,
-                Some("vasp") => StructureFileType::Poscar,
-                _ => StructureFileType::Poscar,
+            let meta = match path.metadata() {
+                Ok(meta) => meta,
+                Err(_) => return default,
+            };
+
+            if meta.is_file() {
+                match path.extension().and_then(|s| s.to_str()) {
+                    Some("yaml") => StructureFileType::LayersYaml,
+                    Some("vasp") => StructureFileType::Poscar,
+                    _ => default,
+                }
+            } else if meta.is_dir() {
+                StructureFileType::StoredStructure
+            } else {
+                default
             }
         })
     }
@@ -139,7 +153,7 @@ pub fn rsp2() {
         let matches = app.get_matches();
         let (dir_args, (filetype, extra_args)) = de.resolve_args(&matches)?;
 
-        let input = PathFile::new(matches.expect_value_of("input"))?;
+        let input = PathAbs::new(matches.expect_value_of("input"))?;
         let filetype = OptionalFileType::or_guess(filetype, &input);
 
         let trial = TrialDir::create_new(dir_args)?;
@@ -234,7 +248,7 @@ pub fn bond_test() {
         let matches = app.get_matches();
         let filetype = de.resolve_args(&matches)?;
 
-        let input = PathFile::new(matches.expect_value_of("input"))?;
+        let input = PathAbs::new(matches.expect_value_of("input"))?;
         let filetype = OptionalFileType::or_guess(filetype, &input);
 
         let (coords, _, _, _, _) = ::cmd::read_optimizable_structure(None, None, filetype, &input)?;
