@@ -24,7 +24,7 @@ ordered-float = "0.5"
 itertools = "0.7"
 lazy_static = "0.2"
 log = "0.3"
-serde = "1.0.47"
+serde = { version = "1.0.63", features = ["rc"] } 
 serde_derive = "1.0.47"
 
 # test deps

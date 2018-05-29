@@ -7,7 +7,7 @@ use super::{write_eigen_info_for_humans, write_eigen_info_for_machines};
 use ::{FailResult, FailOk};
 use ::rsp2_tasks_config::{self as cfg, Settings};
 use ::meta::prelude::*;
-use ::meta::{Mass, Element};
+use ::meta::{Mass, Element, Layer};
 use ::traits::{AsPath};
 use ::phonopy::{DirWithBands};
 use ::hlist_aliases::*;
@@ -29,13 +29,13 @@ impl TrialDir {
         settings: &Settings,
         cli: &CliArgs,
         pot: &PotentialBuilder,
-        atom_layers: &Option<Vec<usize>>,
         layer_sc_mats: &Option<Vec<ScMatrix>>,
         phonopy: &PhonopyBuilder,
         original_coords: Coords,
-        meta: HList2<
+        meta: HList3<
             Rc<[Element]>,
             Rc<[Mass]>,
+            Option<Rc<[Layer]>>,
         >,
     ) -> FailResult<(Coords, GammaSystemAnalysis, DirWithBands<Box<AsPath>>)>
     {
@@ -54,32 +54,23 @@ impl TrialDir {
 
             trace!("============================");
 
-            self.write_poscar(
-                &format!("structure-{:02}.1.vasp", iteration),
-                &format!("Structure after CG round {}", iteration),
-                &coords, meta.sift(),
-            )?;
-
-            let aux_info = {
-                use super::ev_analyses::*;
-
-                super::aux_info::Info {
-                    atom_layers:   atom_layers.clone().map(AtomLayers),
-                    layer_sc_mats: layer_sc_mats.clone().map(LayerScMatrices),
-                }
-            };
-
             let (bands_dir, evals, evecs, ev_analysis) = {
-                self.save_analysis_aux_info(&aux_info)?;
-
                 let save_bands = match cli.save_bands {
                     true => Some(self.save_bands_dir()),
                     false => None,
                 };
 
+                let subdir = format!("ev-loop-{:02}.1.structure", iteration);
+                self.write_stored_structure(
+                    &subdir,
+                    &format!("Structure after CG round {}", iteration),
+                    &coords, meta.sift(), layer_sc_mats,
+                )?;
+
+                let stored = self.read_stored_structure(&subdir)?;
+
                 self.do_post_relaxation_computations(
-                    settings, save_bands.as_ref(), pot, aux_info, phonopy,
-                    &coords, meta.sift(),
+                    settings, save_bands.as_ref(), pot, phonopy, &stored,
                 )?
             };
 
@@ -93,10 +84,10 @@ impl TrialDir {
                 settings, pot, coords, meta.sift(), &ev_analysis, &evals, &evecs,
             )?;
 
-            self.write_poscar(
-                &format!("structure-{:02}.2.vasp", iteration),
+            self.write_stored_structure(
+                &format!("ev-loop-{:02}.2.structure", iteration),
                 &format!("Structure after eigenmode-chasing round {}", iteration),
-                &coords, meta.sift(),
+                &coords, meta.sift(), layer_sc_mats,
             )?;
 
             warn_on_improvable_lattice_params(pot, &coords, meta.sift())?;

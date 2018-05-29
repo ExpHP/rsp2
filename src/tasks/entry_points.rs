@@ -237,7 +237,7 @@ pub fn bond_test() {
         let input = PathFile::new(matches.expect_value_of("input"))?;
         let filetype = OptionalFileType::or_guess(filetype, &input);
 
-        let (coords, _, _, _) = ::cmd::read_optimizable_structure(None, filetype, &input)?;
+        let (coords, _, _, _, _) = ::cmd::read_optimizable_structure(None, None, filetype, &input)?;
         let coords = coords.construct(); // reckless
 
         let bonds = ::math::bonds::FracBonds::from_brute_force_very_dumb(&coords, 1.8)?;

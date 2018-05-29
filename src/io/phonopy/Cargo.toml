@@ -15,7 +15,7 @@ path = "lib.rs"
 [dependencies]
 failure = "0.1"
 nom = "3"
-serde = "1.0.47"
+serde = { version = "1.0.63", features = ["rc"] } 
 serde_derive = "1.0.47"
 serde_yaml = "0.7"
 serde_json = "1"

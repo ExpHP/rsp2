@@ -15,7 +15,7 @@ path = "lib.rs"
 [dependencies]
 rsp2-array-utils = { path = "../array" }
 
-serde = "1.0.47"
+serde = { version = "1.0.63", features = ["rc"] } 
 serde_derive = "1.0.47"
 slice-of-array = "0.2"
 num-traits = "0.2.3"

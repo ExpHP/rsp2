@@ -128,6 +128,7 @@ impl TrialDir {
     pub fn create_file(&self, path: impl AsPath) -> FailResult<FileWrite>
     { Ok(FileWrite::create(self.join(path))?) }
 
+    #[allow(unused)]
     pub fn read_file(&self, path: impl AsPath) -> FailResult<FileRead>
     { Ok(PathFile::new(self.join(path))?.read()?) }
 

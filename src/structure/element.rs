@@ -5,6 +5,7 @@
 
 use ::std::collections::HashMap;
 use ::std::fmt;
+use ::std::str;
 use ::failure::Backtrace;
 
 // member is private because I'm hoping there's some way
@@ -15,7 +16,7 @@ use ::failure::Backtrace;
 ///
 /// Only Elements up to `MAX_ATOMIC_NUMBER` are supported.
 /// This limitation enables methods to return `&'static str`.
-#[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
+#[derive(Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
 pub struct Element(u16);
 
 const MAX_ATOMIC_NUMBER: u32 = 999;
@@ -40,15 +41,18 @@ impl ElementParseError {
 impl Element {
     pub fn from_atomic_number(n: u32) -> Option<Self>
     {
-        if 1 <= n && n <= MAX_ATOMIC_NUMBER { Some(Element(n as u16)) }
+        if Self::is_valid_number(n) { Some(Element(n as u16)) }
         else { None }
     }
+
+    fn is_valid_number(n: u32) -> bool
+    { 1 <= n && n <= MAX_ATOMIC_NUMBER }
 
     pub fn from_symbol(s: &str) -> Result<Self, ElementParseError>
     {
         let &n = SHORT_TO_NUMBER.get(s).ok_or_else(|| ElementParseError::new("element symbol", s))?;
-        let elem = Element::from_atomic_number(n.into()).unwrap();
-        Ok(elem)
+        debug_assert!(Self::is_valid_number(n.into()));
+        Ok(Element(n))
     }
 
     pub fn atomic_number(&self) -> u32
@@ -63,10 +67,46 @@ impl Element {
 
 impl fmt::Display for Element {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result
+    { fmt::Display::fmt(self.symbol(), f) }
+}
+
+impl fmt::Debug for Element {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result
     {
         match f.alternate() {
-            false => self.symbol().fmt(f),
-            true => self.name().fmt(f),
+            false => fmt::Debug::fmt(self.symbol(), f),
+            true  => fmt::Debug::fmt(self.name(), f),
+        }
+    }
+}
+
+impl str::FromStr for Element {
+    type Err = ElementParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err>
+    {
+        let &n = DWIM_STR_TO_NUMBER.get(s).ok_or_else(|| ElementParseError::new("element", s))?;
+        debug_assert!(Self::is_valid_number(n.into()));
+        Ok(Element(n))
+    }
+}
+
+mod serde_impls {
+    use super::*;
+    use serde::{Serialize, Deserialize, ser, de};
+
+    impl Serialize for Element {
+        fn serialize<S: ser::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            self.symbol().serialize(serializer)
+        }
+    }
+
+    impl<'de> Deserialize<'de> for Element {
+        fn deserialize<D: de::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            let raw: &str = <&str>::deserialize(deserializer)?;
+            raw.parse().map_err(|_| {
+                de::Error::invalid_value(de::Unexpected::Str(raw), &"an element name or symbol")
+            })
         }
     }
 }
@@ -214,6 +254,42 @@ lazy_static!{
             .map(|&(num, _, american)| (num, american))
             .collect()
     };
+
+    static ref DWIM_STR_TO_NUMBER: DwimMap =
+    {
+        let mut map = DwimMap::new();
+
+        // TODO: add systematic names, alternative spellings
+        for &(num, sym, american) in SPECIAL_NAMES {
+            map.insert(sym, num);
+            map.insert(american, num);
+        }
+        map
+    };
+}
+
+use self::dwim::DwimMap;
+mod dwim {
+    use super::*;
+    /// Case-insensitive lookup that allows either the symbol or the name
+    pub struct DwimMap(HashMap<String, u16>);
+
+    impl DwimMap {
+        pub fn new() -> DwimMap
+        { DwimMap(Default::default()) }
+
+        pub fn insert(&mut self, key: &str, value: u16)
+        { self.0.insert(Self::canonicalize(key), value); }
+
+        pub fn get(&self, key: &str) -> Option<&u16>
+        { self.0.get(&Self::canonicalize(key)) }
+
+        fn canonicalize(s: &str) -> String {
+            let mut s = s.to_string();
+            s.make_ascii_lowercase();
+            s
+        }
+    }
 }
 
 pub mod consts {

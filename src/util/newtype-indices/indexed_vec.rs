@@ -51,11 +51,13 @@ unsafe impl Idx for usize {
 
 #[macro_export]
 macro_rules! newtype_index {
-    ($type:ident) => (
-        #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-        pub struct $type(usize);
+    ( $( #[ $($attr:tt)+ ] )* $type:ident) => (
 
-        unsafe impl Idx for $type {
+        $( #[ $($attr)+ ] )*
+        #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+        pub struct $type(pub usize);
+
+        unsafe impl $crate::Idx for $type {
             #[inline]
             fn new(value: usize) -> Self {
                 $type(value)
@@ -70,6 +72,12 @@ macro_rules! newtype_index {
         impl ::std::fmt::Display for $type {
             fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
                 ::std::fmt::Display::fmt(&self.0, f)
+            }
+        }
+
+        impl ::std::fmt::Debug for $type {
+            fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+                ::std::fmt::Debug::fmt(&self.0, f)
             }
         }
     );

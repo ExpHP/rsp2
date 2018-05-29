@@ -12,6 +12,9 @@ mod ev_analyses;
 use self::trial::TrialDir;
 pub(crate) mod trial;
 
+use self::stored_structure::StoredStructure;
+mod stored_structure;
+
 mod acoustic_search;
 mod relaxation;
 mod scipy_eigsh;
@@ -22,8 +25,9 @@ use ::rsp2_tasks_config::{self as cfg, Settings, NormalizationMode, SupercellSpe
 use ::traits::{AsPath};
 use ::phonopy::{DirWithBands, DirWithDisps, DirWithForces, DirWithSymmetry};
 
+use ::traits::{Load, Save};
 use ::meta::prelude::*;
-use ::meta::{Element, Mass};
+use ::meta::{Element, Mass, Layer};
 use ::util::ext_traits::{OptionResultExt, PathNiceExt};
 use ::math::basis::Basis3;
 use ::math::bonds::{FracBonds};
@@ -61,6 +65,7 @@ pub struct CliArgs {
 pub enum StructureFileType {
     Poscar,
     LayersYaml,
+    StoredStructure,
 }
 
 impl TrialDir {
@@ -74,11 +79,14 @@ impl TrialDir {
     {Ok({
         let pot = PotentialBuilder::from_config(&settings.threading, &settings.potential);
 
-        let (optimizable_coords, atom_elements, atom_layers, layer_sc_mats) = {
-            read_optimizable_structure(settings.layer_search.as_ref(), file_format, input)?
+        let (optimizable_coords, atom_elements, atom_masses, atom_layers, layer_sc_mats) = {
+            read_optimizable_structure(
+                settings.layer_search.as_ref(),
+                settings.masses.as_ref(),
+                file_format, input,
+            )?
         };
-        let atom_masses = masses_by_config(settings.masses.as_ref(), atom_elements.clone())?;
-        let meta = hlist![atom_elements, atom_masses];
+        let meta = hlist![atom_elements, atom_masses, atom_layers];
 
         let original_coords = {
             ::cmd::param_optimization::optimize_layer_parameters(
@@ -89,19 +97,22 @@ impl TrialDir {
             )?.construct()
         };
 
-        self.write_poscar(
-            "initial.vasp", "Initial structure (after lattice optimization)",
-            &original_coords, meta.sift(),
+        self.write_stored_structure(
+            "initial.structure", "Initial structure (after lattice optimization)",
+            &original_coords, meta.sift(), &layer_sc_mats,
         )?;
         let phonopy = phonopy_builder_from_settings(&settings.phonons, original_coords.lattice());
 
         let (coords, ev_analysis, final_bands_dir) = self.do_main_ev_loop(
-            settings, &cli, &*pot, &atom_layers, &layer_sc_mats,
+            settings, &cli, &*pot, &layer_sc_mats,
             &phonopy, original_coords, meta.sift(),
         )?;
         let _do_not_drop_the_bands_dir = final_bands_dir;
 
-        self.write_poscar("final.vasp", "Final structure", &coords, meta.sift())?;
+        self.write_stored_structure(
+            "final.structure", "Final structure",
+            &coords, meta.sift(), &layer_sc_mats,
+        )?;
 
         write_eigen_info_for_machines(&ev_analysis, self.create_file("eigenvalues.final")?)?;
 
@@ -154,45 +165,69 @@ impl TrialDir {
         self.write_summary_file(settings, pot, eva)?;
     })}
 
-    // log when writing poscar files, especially during loops
+    // log when writing stored structures, especially during loops
     // (to remove any doubt about the iteration number)
-    fn write_poscar(
+    fn write_stored_structure(
         &self,
-        filename: &str,
-        headline: &str,
+        dir_name: &str,
+        poscar_headline: &str,
         coords: &Coords,
-        meta: HList1<
+        meta: HList3<
             Rc<[Element]>,
+            Rc<[Mass]>,
+            Option<Rc<[Layer]>>,
         >,
+        layer_sc_mats: &Option<Vec<ScMatrix>>, // FIXME awkward
     ) -> FailResult<()>
     {Ok({
-        use ::rsp2_structure_io::Poscar;
+        let path = self.join(dir_name);
 
-        let elements: Rc<[Element]> = meta.pick();
-
-        let file = self.create_file(filename)?;
-        trace!("Writing '{}'", file.path().nice());
-        Poscar {
-            comment: headline,
-            coords: coords,
-            elements: elements,
-        }.to_writer(file)?
+        trace!("Writing '{}'", path.nice());
+        StoredStructure {
+            title: poscar_headline.into(),
+            coords: coords.clone(),
+            elements: meta.pick(),
+            masses: meta.pick(),
+            layers: meta.pick(),
+            layer_sc_matrices: layer_sc_mats.clone(),
+        }.save(path)?
     })}
+
+    fn read_stored_structure_data(
+        &self,
+        dir_name: &str,
+    ) -> FailResult<(
+        Coords,
+        HList3<Rc<[Element]>, Rc<[Mass]>, Option<Rc<[Layer]>>>,
+        Option<Vec<ScMatrix>>,
+    )>
+    {Ok({
+        let StoredStructure {
+            coords, elements, masses, layers, layer_sc_matrices, ..
+        } = self.read_stored_structure(dir_name)?;
+        let meta = hlist![elements, masses, layers];
+        (coords, meta, layer_sc_matrices)
+    })}
+
+    fn read_stored_structure(&self, dir_name: &str) -> FailResult<StoredStructure>
+    { Load::load(self.join(dir_name)) }
 
     fn do_post_relaxation_computations(
         &self,
         settings: &Settings,
         save_bands: Option<&PathArc>,
         pot: &PotentialBuilder,
-        aux_info: aux_info::Info,
         phonopy: &PhonopyBuilder,
-        coords: &Coords,
-        meta: HList2<
-            Rc<[Element]>,
-            Rc<[Mass]>,
-        >,
+        stored: &StoredStructure,
     ) -> FailResult<(DirWithBands<Box<AsPath>>, Vec<f64>, Basis3, GammaSystemAnalysis)>
     {Ok({
+        let (coords, meta, layer_sc_mats) = {
+            let StoredStructure {
+                coords, elements, layers, masses, layer_sc_matrices, ..
+            } = stored;
+            let meta = hlist![elements.clone(), layers.clone(), masses.clone()];
+            (coords, meta, layer_sc_matrices.clone())
+        };
 
         let bands_dir = do_diagonalize(
             pot, &settings.threading, phonopy, coords, meta.sift(), save_bands, &[Q_GAMMA],
@@ -219,14 +254,15 @@ impl TrialDir {
                 pot, &evals, &evecs, &coords, meta.sift(), &settings.acoustic_search,
             )?;
 
-            let aux_info::Info { atom_layers, layer_sc_mats } = aux_info;
             let atom_elements: Rc<[Element]> = meta.pick();
             let atom_masses: Rc<[Mass]> = meta.pick();
             let atom_masses: Vec<f64> = atom_masses.iter().map(|&Mass(x)| x).collect();
+            let atom_layers: Option<Rc<[Layer]>> = meta.pick();
+            let atom_layers = atom_layers.map(|v| v.iter().map(|&Layer(n)| n).collect());
 
             gamma_system_analysis::Input {
-                atom_layers,
-                layer_sc_mats,
+                atom_layers:        atom_layers.map(AtomLayers),
+                layer_sc_mats:      layer_sc_mats.map(LayerScMatrices),
                 atom_masses:        Some(AtomMasses(atom_masses)),
                 ev_classifications: Some(EvClassifications(classifications)),
                 atom_elements:      Some(AtomElements(atom_elements.to_vec())),
@@ -312,15 +348,16 @@ impl TrialDir {
         let mut out = vec![];
         out.push(ev_analysis.make_summary(settings));
         out.push({
-            let f = |(coords, meta): (Coords, ::frunk::HCons<_, _>)| FailOk({
+            let f = |s: &str| FailOk({
+                let (coords, meta, _) = self.read_stored_structure_data(s)?;
+
                 let na = coords.num_atoms() as f64;
                 pot.one_off().compute_value(&coords, meta.sift())? / na
             });
-            let f_path = |s: &AsPath| FailOk(f(read_poscar(settings.masses.as_ref(), self.read_file(s)?)?)?);
 
-            let initial = f_path(&"initial.vasp")?;
-            let final_ = f_path(&"final.vasp")?;
-            let before_ev_chasing = f_path(&"structure-01.1.vasp")?;
+            let initial = f(&"initial.structure")?;
+            let final_ = f(&"final.structure")?;
+            let before_ev_chasing = f(&"ev-loop-01.1.structure")?;
 
             let cereal = EnergyPerAtom { initial, final_, before_ev_chasing };
             let value = ::serde_yaml::to_value(&cereal)?;
@@ -394,36 +431,6 @@ fn do_force_sets_at_disps<P: AsPath + Send + Sync>(
 #[allow(unused)] const Q_GAMMA: V3 = V3([0.0, 0.0, 0.0]);
 #[allow(unused)] const Q_K: V3 = V3([1f64/3.0, 1.0/3.0, 0.0]);
 #[allow(unused)] const Q_K_PRIME: V3 = V3([2.0 / 3f64, 2.0 / 3f64, 0.0]);
-
-//=================================================================
-
-// auxilliary info for rerunning updated analysis code on old trial directories
-mod aux_info {
-    use super::*;
-    use self::ev_analyses::*;
-
-    const FILENAME: &'static str = "aux-analysis-info.json";
-
-    impl TrialDir {
-        pub(crate) fn save_analysis_aux_info(&self, aux: &Info) -> FailResult<()>
-        { Ok(::serde_json::to_writer(self.create_file(FILENAME)?, &aux)?) }
-
-        pub(crate) fn load_analysis_aux_info(&self) -> FailResult<Info>
-        {Ok({
-            let file = self.read_file(FILENAME)?;
-            let de = &mut ::serde_json::Deserializer::from_reader(file);
-            ::serde_ignored::deserialize(de, |path| {
-                panic!("Incompatible {}: unrecognized entry: {}", FILENAME, path)
-            })?
-        })}
-    }
-
-    #[derive(Clone, Deserialize, Serialize)]
-    pub struct Info {
-        pub atom_layers:   Option<AtomLayers>,
-        pub layer_sc_mats: Option<LayerScMatrices>,
-    }
-}
 
 //=================================================================
 
@@ -580,7 +587,8 @@ impl TrialDir {
     {Ok({
         let pot = PotentialBuilder::from_config(&settings.threading, &settings.potential);
 
-        let (coords, meta) = read_poscar(settings.masses.as_ref(), self.read_file("./final.vasp")?)?;
+        let (coords, meta, _) = self.read_stored_structure_data("final.structure")?;
+
         let phonopy = phonopy_builder_from_settings(&settings.phonons, coords.lattice());
         do_diagonalize(
             &*pot, &settings.threading, &phonopy, &coords, meta.sift(),
@@ -605,14 +613,12 @@ impl TrialDir {
     {Ok({
         let pot = PotentialBuilder::from_config(&settings.threading, &settings.potential);
 
-        let (coords, meta) = read_poscar(settings.masses.as_ref(), self.read_file("./final.vasp")?)?;
-        let phonopy = phonopy_builder_from_settings(&settings.phonons, coords.lattice());
-
-        let aux_info = self.load_analysis_aux_info()?;
+        let stored = self.read_stored_structure("./final.structure")?;
+        let phonopy = phonopy_builder_from_settings(&settings.phonons, stored.coords.lattice());
 
         let save_bands = None;
         let (_, _, _, ev_analysis) = self.do_post_relaxation_computations(
-            settings, save_bands, &*pot, aux_info, &phonopy, &coords, meta.sift(),
+            settings, save_bands, &*pot, &phonopy, &stored,
         )?;
 
         self.write_ev_analysis_output_files(settings, &*pot, &ev_analysis)?;
@@ -753,54 +759,97 @@ pub(crate) fn run_dynmat_test(phonopy_dir: &PathDir) -> FailResult<()>
 //
 // A POSCAR will have its layers searched if the relevant config section is provided.
 pub(crate) fn read_optimizable_structure(
-    layer_search: Option<&cfg::LayerSearch>,
+    layer_cfg: Option<&cfg::LayerSearch>,
+    mass_cfg: Option<&cfg::Masses>,
     file_format: StructureFileType,
-    input: &PathFile,
-) -> FailResult<(ScalableCoords, Rc<[Element]>, Option<Vec<usize>>, Option<Vec<ScMatrix>>)> {
-    let (output, atom_elements, atom_layers, layer_sc_mats);
+    input: impl AsPath,
+) -> FailResult<(
+    // FIXME train wreck output
+    ScalableCoords,
+    Rc<[Element]>,
+    Rc<[Mass]>,
+    Option<Rc<[Layer]>>,
+    Option<Vec<ScMatrix>>,
+)> {
+    let input = input.as_path();
+
+    let out_coords: ScalableCoords;
+    let out_elements: Rc<[Element]>;
+    let out_masses: Rc<[Mass]>;
+    let out_layers: Option<Rc<[Layer]>>;
+    let out_sc_mats: Option<Vec<ScMatrix>>;
     match file_format {
         StructureFileType::Poscar => {
             use ::rsp2_structure_io::Poscar;
 
-            let Poscar { coords, elements, .. } = Poscar::from_reader(input.read()?)?;
+            let Poscar { coords, elements, .. } = Load::load(input.as_path())?;
+            out_elements = elements.into();
+            out_masses = masses_by_config(mass_cfg, out_elements.clone())?;
 
-            atom_elements = elements.into();
-
-            if let Some(cfg) = layer_search {
+            if let Some(cfg) = layer_cfg {
                 let layers = perform_layer_search(cfg, &coords)?;
-                output = ScalableCoords::from_layer_search_results(coords, cfg, &layers);
-                atom_layers = Some(layers.by_atom());
+                out_coords = ScalableCoords::from_layer_search_results(coords, cfg, &layers);
+                out_layers = Some(layers.by_atom().into_iter().map(Layer).collect::<Vec<_>>().into());
                 // We could do a primitive cell search, but anything using our results would have
                 //  trouble interpreting our results if we chose a different cell from expected.
                 // Thus, anything using sc matrices requires them to be supplied in advance.
-                layer_sc_mats = None;
+                out_sc_mats = None;
             } else {
-                output = ScalableCoords::from_unlayered(coords);
-                atom_layers = None;
-                layer_sc_mats = None;
+                out_coords = ScalableCoords::from_unlayered(coords);
+                out_layers = None;
+                out_sc_mats = None;
             }
         },
         StructureFileType::LayersYaml => {
             use ::rsp2_structure_io::layers_yaml::load;
             use ::rsp2_structure_io::layers_yaml::load_layer_sc_info;
 
-            let layer_builder = load(input.read()?)?;
+            let layer_builder = load(PathFile::new(input)?.read()?)?;
 
-            layer_sc_mats = Some({
-                load_layer_sc_info(input.read()?)?
+            out_sc_mats = Some({
+                load_layer_sc_info(PathFile::new(input)?.read()?)?
                     .into_iter()
                     .map(|(matrix, periods, _)| ScMatrix::new(&matrix, &periods))
                     .collect_vec()
             });
 
-            atom_layers = Some(layer_builder.atom_layers());
-            atom_elements = vec![CARBON; layer_builder.num_atoms()];
+            out_layers = Some(layer_builder.atom_layers().into_iter().map(Layer).collect::<Vec<_>>().into());
+            out_elements = vec![CARBON; layer_builder.num_atoms()].into();
+            out_masses = masses_by_config(mass_cfg, out_elements.clone())?;
+            out_coords = ScalableCoords::KnownLayers { layer_builder };
 
-            output = ScalableCoords::KnownLayers { layer_builder };
+            if let Some(_) = layer_cfg {
+                trace!("{} is in layers.yaml format, so layer-search config is ignored", input.nice())
+            }
+        },
+        StructureFileType::StoredStructure => {
+            use ::cmd::stored_structure::StoredStructure;
+
+            let StoredStructure {
+                coords, elements, layers, masses, layer_sc_matrices, ..
+            } = Load::load(input.as_path())?;
+
+            out_elements = elements;
+            out_layers = layers;
+            out_masses = masses;
+            out_sc_mats = layer_sc_matrices;
+
+            // (FIXME: just having the layer indices metadata isn't good enough; we need
+            //         to be able to get contiguous layers, e.g. using rsp2_structure::Layers.
+            //
+            //         That said, I don't see any good reason to be optimizing layer seps
+            //         on structures read in this format)
+            out_coords = ScalableCoords::from_unlayered(coords);
+
+            if let Some(_) = mass_cfg {
+                trace!("{} is in directory format, so mass config is ignored", input.nice())
+            }
+            if let Some(_) = layer_cfg {
+                trace!("{} is in directory format, so layer-search config is ignored", input.nice())
+            }
         },
     }
-    let atom_elements = atom_elements.into();
-    Ok((output, atom_elements, atom_layers, layer_sc_mats))
+    Ok((out_coords, out_elements, out_masses, out_layers, out_sc_mats))
 }
 
 pub(crate) fn perform_layer_search(
@@ -829,18 +878,6 @@ pub(crate) fn perform_layer_search(
 
     layers
 })}
-
-fn read_poscar(
-    cfg_masses: Option<&cfg::Masses>,
-    r: impl ::std::io::Read,
-) -> FailResult<(Coords, HList2<Rc<[Element]>, Rc<[Mass]>>)> {
-    use ::rsp2_structure_io::Poscar;
-
-    let Poscar { coords, elements, .. } = Poscar::from_reader(r)?;
-    let elements: Rc<[Element]> = elements.into();
-    let masses = masses_by_config(cfg_masses, elements.clone())?;
-    Ok((coords, hlist![elements, masses]))
-}
 
 /// Implements the behavior of the `"masses"` config section.
 ///

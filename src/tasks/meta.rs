@@ -26,6 +26,11 @@ derive_newtype_display!{ Mass }
 
 pub use ::rsp2_structure::Element;
 
+newtype_index!{
+    #[derive(Serialize, Deserialize)]
+    Layer
+}
+
 pub mod prelude {
     pub use super::MetaSift;
     pub use super::MetaPick;
