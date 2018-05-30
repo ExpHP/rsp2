@@ -1,15 +1,13 @@
 use super::trial::TrialDir;
 use super::GammaSystemAnalysis;
 use super::potential::{PotentialBuilder, DiffFn, DynFlatDiffFn};
-use super::CliArgs;
 use super::{write_eigen_info_for_humans, write_eigen_info_for_machines};
 
 use ::{FailResult, FailOk};
 use ::rsp2_tasks_config::{self as cfg, Settings};
+use ::cmd::stored_structure::StoredStructure;
 use ::meta::prelude::*;
 use ::meta::{Mass, Element, Layer};
-use ::traits::{AsPath};
-use ::phonopy::{DirWithBands};
 use ::hlist_aliases::*;
 use ::math::basis::Basis3;
 use ::math::bands::ScMatrix;
@@ -21,23 +19,36 @@ use ::rsp2_array_types::{V3};
 use ::rsp2_structure::{Coords};
 use ::std::rc::Rc;
 
+pub trait EvLoopDiagonalizer {
+    type ExtraOut;
+
+    fn do_post_relaxation_computations(
+        &self,
+        settings: &cfg::Settings,
+        pot: &PotentialBuilder,
+        phonopy: &PhonopyBuilder,
+        stored: &StoredStructure,
+    ) -> FailResult<(GammaSystemAnalysis, Vec<f64>, Basis3, Self::ExtraOut)>;
+}
+
+
 impl TrialDir {
     /// NOTE: This writes to fixed filepaths in the trial directory
     ///       and is not designed to be called multiple times.
-    pub(crate) fn do_main_ev_loop(
+    pub(crate) fn do_main_ev_loop<ExtraOut>(
         &self,
         settings: &Settings,
-        cli: &CliArgs,
         pot: &PotentialBuilder,
         layer_sc_mats: &Option<Vec<ScMatrix>>,
         phonopy: &PhonopyBuilder,
+        diagonalizer: impl EvLoopDiagonalizer<ExtraOut=ExtraOut>,
         original_coords: Coords,
         meta: HList3<
             Rc<[Element]>,
             Rc<[Mass]>,
             Option<Rc<[Layer]>>,
         >,
-    ) -> FailResult<(Coords, GammaSystemAnalysis, DirWithBands<Box<AsPath>>)>
+    ) -> FailResult<(Coords, GammaSystemAnalysis, ExtraOut)>
     {
         let mut from_coords = original_coords;
         let mut loop_state = EvLoopFsm::new(&settings.ev_loop);
@@ -54,12 +65,7 @@ impl TrialDir {
 
             trace!("============================");
 
-            let (bands_dir, evals, evecs, ev_analysis) = {
-                let save_bands = match cli.save_bands {
-                    true => Some(self.save_bands_dir()),
-                    false => None,
-                };
-
+            let (ev_analysis, evals, evecs, extra_out) = {
                 let subdir = format!("ev-loop-{:02}.1.structure", iteration);
                 self.write_stored_structure(
                     &subdir,
@@ -69,9 +75,7 @@ impl TrialDir {
 
                 let stored = self.read_stored_structure(&subdir)?;
 
-                self.do_post_relaxation_computations(
-                    settings, save_bands.as_ref(), pot, phonopy, &stored,
-                )?
+                diagonalizer.do_post_relaxation_computations(settings, pot, phonopy, &stored)?
             };
 
             {
@@ -98,7 +102,7 @@ impl TrialDir {
                     continue;
                 },
                 EvLoopStatus::Done => {
-                    return Ok((coords, ev_analysis, bands_dir));
+                    return Ok((coords, ev_analysis, extra_out));
                 },
                 EvLoopStatus::ItsBadGuys(msg) => {
                     bail!("{}", msg);

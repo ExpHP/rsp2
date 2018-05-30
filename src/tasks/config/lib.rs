@@ -353,6 +353,9 @@ pub struct Phonons {
     pub symmetry_tolerance: f64,
     pub displacement_distance: f64,
 
+    #[serde(default = "_phonons__eigensolver")]
+    pub eigensolver: PhononEigenSolver,
+
     /// Supercell used for force constants.
     ///
     /// Ideally, this should be large enough for the following to be true:
@@ -372,6 +375,21 @@ pub struct Phonons {
     /// right eigensolutions at gamma, it might indicate a bug in rsp2's potentials)
     pub supercell: SupercellSpec,
 }
+fn _phonons__eigensolver() -> PhononEigenSolver { PhononEigenSolver::Phonopy { save_bands: false } }
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum PhononEigenSolver {
+    Phonopy {
+        /// Save the directory from the last phonopy computation,
+        /// which may contain incomprehensibly large files.
+        #[serde(default = "_phonon_eigen_solver__phonopy__save_bands")]
+        save_bands: bool,
+    },
+    Sparse,
+}
+fn _phonon_eigen_solver__phonopy__save_bands() -> bool { false }
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]

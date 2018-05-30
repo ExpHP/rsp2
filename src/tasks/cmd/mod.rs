@@ -15,8 +15,9 @@ pub(crate) mod trial;
 use self::stored_structure::StoredStructure;
 mod stored_structure;
 
-mod acoustic_search;
+use self::relaxation::EvLoopDiagonalizer;
 mod relaxation;
+mod acoustic_search;
 mod scipy_eigsh;
 mod param_optimization;
 
@@ -55,11 +56,6 @@ use ::hlist_aliases::*;
 
 const SAVE_BANDS_DIR: &'static str = "gamma-bands";
 
-// cli args aren't in Settings, so they're just here.
-pub struct CliArgs {
-    pub save_bands: bool,
-}
-
 // FIXME needs a better home
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub enum StructureFileType {
@@ -74,7 +70,6 @@ impl TrialDir {
         settings: &Settings,
         file_format: StructureFileType,
         input: &PathAbs,
-        cli: CliArgs,
     ) -> FailResult<()>
     {Ok({
         let pot = PotentialBuilder::from_config(&settings.threading, &settings.potential);
@@ -103,11 +98,53 @@ impl TrialDir {
         )?;
         let phonopy = phonopy_builder_from_settings(&settings.phonons, original_coords.lattice());
 
-        let (coords, ev_analysis, final_bands_dir) = self.do_main_ev_loop(
-            settings, &cli, &*pot, &layer_sc_mats,
-            &phonopy, original_coords, meta.sift(),
-        )?;
-        let _do_not_drop_the_bands_dir = final_bands_dir;
+        // FIXME: Prior to the addition of the sparse solver, the code used to do something like:
+        //
+        //       let _do_not_drop_the_bands_dir = final_bands_dir
+        //
+        // IIRC, this unsightly hack was to allow RSP2_SAVETEMP to recover bands directories if code
+        // after ev_analysis info panics, even if save_bands is disabled.
+        //
+        // Unfortunately, the addition of a second solver has only made this more convoluted,
+        // and so now the guard is an option. (`None` when the sparse solver is used)
+        let _do_not_drop_the_bands_dir: Option<DirWithBands<Box<AsPath>>>;
+
+        let (coords, ev_analysis) = {
+            use self::cfg::PhononEigenSolver::*;
+
+            // macro to simulate a generic closure.
+            // (we can't use dynamic polymorphism due to the differing associated types)
+            macro_rules! do_ev_loop {
+                ($diagonalizer:expr) => {{
+                    let diagonalizer = $diagonalizer;
+                    self.do_main_ev_loop(
+                        settings, &*pot, &layer_sc_mats,
+                        &phonopy, diagonalizer, original_coords, meta.sift(),
+                    )
+                }}
+            }
+
+            match settings.phonons.eigensolver {
+                Phonopy { save_bands } => {
+                    let save_bands = match save_bands {
+                        true => Some(self.save_bands_dir()),
+                        false => None,
+                    };
+                    let (coords, ev_analysis, final_bands_dir) = {
+                        do_ev_loop!(PhonopyDiagonalizer { save_bands })?
+                    };
+                    _do_not_drop_the_bands_dir = Some(final_bands_dir);
+                    (coords, ev_analysis)
+                },
+                Sparse => {
+                    let (coords, ev_analysis, ()) = {
+                        do_ev_loop!(SparseDiagonalizer)?
+                    };
+                    _do_not_drop_the_bands_dir = None;
+                    (coords, ev_analysis)
+                },
+            }
+        };
 
         self.write_stored_structure(
             "final.structure", "Final structure",
@@ -211,15 +248,25 @@ impl TrialDir {
 
     fn read_stored_structure(&self, dir_name: &str) -> FailResult<StoredStructure>
     { Load::load(self.join(dir_name)) }
+}
+
+struct PhonopyDiagonalizer {
+    save_bands: Option<PathAbs>,
+}
+impl EvLoopDiagonalizer for PhonopyDiagonalizer {
+    // I think this is used to keep TempDir bands alive after diagonalization, so that
+    //  they can be recovered by RSP2_TEMPDIR if a panic occurs, even without `save_bands`.
+    // (to be honest, the code has gone through so many changes in requirements that I can
+    //  no longer remember; I just put this here to preserve behavior during a refactor.)
+    type ExtraOut = DirWithBands<Box<AsPath>>;
 
     fn do_post_relaxation_computations(
         &self,
         settings: &Settings,
-        save_bands: Option<&PathArc>,
         pot: &PotentialBuilder,
         phonopy: &PhonopyBuilder,
         stored: &StoredStructure,
-    ) -> FailResult<(DirWithBands<Box<AsPath>>, Vec<f64>, Basis3, GammaSystemAnalysis)>
+    ) -> FailResult<(GammaSystemAnalysis, Vec<f64>, Basis3, DirWithBands<Box<AsPath>>)>
     {Ok({
         let (coords, meta, layer_sc_mats) = {
             let StoredStructure {
@@ -229,9 +276,7 @@ impl TrialDir {
             (coords, meta, layer_sc_matrices.clone())
         };
 
-        let bands_dir = do_diagonalize(
-            pot, &settings.threading, phonopy, coords, meta.sift(), save_bands, &[Q_GAMMA],
-        )?;
+        let bands_dir = self.create_bands_dir(&settings.threading, pot, phonopy, &coords, meta.sift())?;
         let (evals, evecs) = bands_dir.eigensystem_at(Q_GAMMA)?;
 
         trace!("============================");
@@ -242,69 +287,146 @@ impl TrialDir {
         let bonds = settings.bond_radius.map(|bond_radius| FailOk({
             trace!("Computing bonds");
             FracBonds::from_brute_force_very_dumb(&coords, bond_radius)?
-                .to_cart_bonds(&coords)
         })).fold_ok()?;
 
         trace!("Computing eigensystem info");
 
-        let ev_analysis = {
-            use self::ev_analyses::*;
+        let analysis = run_gamma_system_analysis(
+            &settings, pot, &coords, meta.sift(), &layer_sc_mats, &evals, &evecs, &bonds,
+        )?;
 
-            let classifications = acoustic_search::perform_acoustic_search(
-                pot, &evals, &evecs, &coords, meta.sift(), &settings.acoustic_search,
-            )?;
-
-            let atom_elements: Rc<[Element]> = meta.pick();
-            let atom_masses: Rc<[Mass]> = meta.pick();
-            let atom_masses: Vec<f64> = atom_masses.iter().map(|&Mass(x)| x).collect();
-            let atom_layers: Option<Rc<[Layer]>> = meta.pick();
-            let atom_layers = atom_layers.map(|v| v.iter().map(|&Layer(n)| n).collect());
-
-            gamma_system_analysis::Input {
-                atom_layers:        atom_layers.map(AtomLayers),
-                layer_sc_mats:      layer_sc_mats.map(LayerScMatrices),
-                atom_masses:        Some(AtomMasses(atom_masses)),
-                ev_classifications: Some(EvClassifications(classifications)),
-                atom_elements:      Some(AtomElements(atom_elements.to_vec())),
-                atom_coords:        Some(AtomCoordinates(coords.clone())),
-                ev_frequencies:     Some(EvFrequencies(evals.clone())),
-                ev_eigenvectors:    Some(EvEigenvectors(evecs.clone())),
-                bonds:              bonds.map(Bonds),
-            }.compute()?
-        };
-        (bands_dir, evals, evecs, ev_analysis)
+        (analysis, evals, evecs, bands_dir)
     })}
 }
 
-fn do_diagonalize(
+impl PhonopyDiagonalizer {
+    // Create a DirWithBands that may or may not be a TempDir (based on config)
+    fn create_bands_dir(
+        &self,
+        cfg_threading: &cfg::Threading,
+        pot: &PotentialBuilder,
+        phonopy: &PhonopyBuilder,
+        coords: &Coords,
+        meta: HList2<
+            Rc<[Element]>,
+            Rc<[Mass]>,
+        >,
+    ) -> FailResult<DirWithBands<Box<AsPath>>>
+    {Ok({
+        let disp_dir = phonopy.displacements(coords, meta.sift())?;
+        let force_sets = do_force_sets_at_disps(pot, cfg_threading, &disp_dir)?;
+
+        let bands_dir = disp_dir
+            .make_force_dir(&force_sets)?
+            .build_bands()
+            .eigenvectors(true)
+            .compute(&[Q_GAMMA])?;
+
+        if let Some(save_dir) = &self.save_bands {
+            rm_rf(save_dir)?;
+            bands_dir.relocate(save_dir.clone())?.boxed()
+        } else {
+            bands_dir.boxed()
+        }
+    })}
+}
+
+struct SparseDiagonalizer;
+impl EvLoopDiagonalizer for SparseDiagonalizer {
+    type ExtraOut = ();
+
+    fn do_post_relaxation_computations(
+        &self,
+        settings: &Settings,
+        pot: &PotentialBuilder,
+        phonopy: &PhonopyBuilder,
+        stored: &StoredStructure,
+    ) -> FailResult<(GammaSystemAnalysis, Vec<f64>, Basis3, ())>
+    {Ok({
+        let (coords, meta, layer_sc_mats) = {
+            let StoredStructure {
+                coords, elements, layers, masses, layer_sc_matrices, ..
+            } = stored;
+            let meta = hlist![elements.clone(), layers.clone(), masses.clone()];
+            (coords, meta, layer_sc_matrices.clone())
+        };
+
+        // FIXME currently copies PhonopyDiagonalizer
+        let (evals, evecs) = {
+            let disp_dir = phonopy.displacements(coords, meta.sift())?;
+            let force_sets = do_force_sets_at_disps(pot, &settings.threading, &disp_dir)?;
+
+            disp_dir
+                .make_force_dir(&force_sets)?
+                .build_bands()
+                .eigenvectors(true)
+                .compute(&[Q_GAMMA])?
+                .eigensystem_at(Q_GAMMA)?
+        };
+
+        trace!("============================");
+        trace!("Finished diagonalization");
+
+        // FIXME: only the CartBonds need to be recomputed each iteration;
+        //        we could keep the FracBonds around between iterations.
+        let bonds = settings.bond_radius.map(|bond_radius| FailOk({
+            trace!("Computing bonds");
+            FracBonds::from_brute_force_very_dumb(&coords, bond_radius)?
+        })).fold_ok()?;
+
+        trace!("Computing eigensystem info");
+
+        let analysis = run_gamma_system_analysis(
+            &settings, pot, &coords, meta.sift(), &layer_sc_mats, &evals, &evecs, &bonds,
+        )?;
+
+        (analysis, evals, evecs, ())
+    })}
+}
+
+// wrapper around the gamma_system_analysis module which handles all the newtype conversions
+fn run_gamma_system_analysis(
+    settings: &Settings,
     pot: &PotentialBuilder,
-    threading: &cfg::Threading,
-    phonopy: &PhonopyBuilder,
     coords: &Coords,
-    meta: HList2<
+    meta: HList3<
         Rc<[Element]>,
         Rc<[Mass]>,
+        Option<Rc<[Layer]>>,
     >,
-    save_bands: Option<&PathArc>,
-    points: &[V3],
-) -> FailResult<DirWithBands<Box<AsPath>>>
-{Ok({
-    let disp_dir = phonopy.displacements(coords, meta.sift())?;
-    let force_sets = do_force_sets_at_disps(pot, &threading, &disp_dir)?;
+    layer_sc_mats: &Option<Vec<ScMatrix>>,
+    evals: &[f64],
+    evecs: &Basis3,
+    bonds: &Option<FracBonds>,
+) -> FailResult<GammaSystemAnalysis> {
+    use self::ev_analyses::*;
 
-    let bands_dir = disp_dir
-        .make_force_dir(&force_sets)?
-        .build_bands()
-        .eigenvectors(true)
-        .compute(&points)?;
+    let cart_bonds = bonds.as_ref().map(|b| b.to_cart_bonds(coords));
 
-    if let Some(save_dir) = save_bands {
-        rm_rf(save_dir)?;
-        bands_dir.relocate(save_dir)?.boxed()
-    } else {
-        bands_dir.boxed()
-    }
-})}
+    // (this is more or less part of the analysis, but it is not done there
+    //  because it requires a couple more calls to the potential)
+    let classifications = acoustic_search::perform_acoustic_search(
+        pot, &evals, &evecs, &coords, meta.sift(), &settings.acoustic_search,
+    )?;
+
+    let atom_elements: Rc<[Element]> = meta.pick();
+    let atom_masses: Rc<[Mass]> = meta.pick();
+    let atom_masses: Vec<f64> = atom_masses.iter().map(|&Mass(x)| x).collect();
+    let atom_layers: Option<Rc<[Layer]>> = meta.pick();
+    let atom_layers = atom_layers.map(|v| v.iter().map(|&Layer(n)| n).collect());
+
+    gamma_system_analysis::Input {
+        atom_layers: atom_layers.map(AtomLayers),
+        layer_sc_mats: layer_sc_mats.clone().map(LayerScMatrices),
+        atom_masses: Some(AtomMasses(atom_masses)),
+        ev_classifications: Some(EvClassifications(classifications)),
+        atom_elements: Some(AtomElements(atom_elements.to_vec())),
+        atom_coords: Some(AtomCoordinates(coords.clone())),
+        ev_frequencies: Some(EvFrequencies(evals.to_vec())),
+        ev_eigenvectors: Some(EvEigenvectors(evecs.clone())),
+        bonds: cart_bonds.map(Bonds),
+    }.compute()
+}
 
 fn write_eigen_info_for_humans(
     analysis: &GammaSystemAnalysis,
@@ -590,17 +712,22 @@ impl TrialDir {
         let (coords, meta, _) = self.read_stored_structure_data("final.structure")?;
 
         let phonopy = phonopy_builder_from_settings(&settings.phonons, coords.lattice());
-        do_diagonalize(
-            &*pot, &settings.threading, &phonopy, &coords, meta.sift(),
-            Some(&self.save_bands_dir()),
-            &[Q_GAMMA, Q_K],
-        )?;
+
+        // NOTE: there is no information needed from settings.phonons.eigensolver, so we can freely
+        //       run this binary this even on computations that originally used sparse methods.
+        PhonopyDiagonalizer {
+            save_bands: Some(self.save_bands_dir()),
+        }.create_bands_dir(&settings.threading, &pot, &phonopy, &coords, meta.sift())?;
     })}
 }
 
 impl TrialDir {
-    pub fn save_bands_dir(&self) -> PathArc
-    { self.join(SAVE_BANDS_DIR).into() }
+    pub fn save_bands_dir(&self) -> PathAbs
+    {
+        let path: PathArc = self.join(SAVE_BANDS_DIR).into();
+        assert!(path.is_absolute());
+        PathAbs::mock(path) // FIXME self.join ought to give a PathAbs to begin with
+    }
 }
 
 //=================================================================
@@ -616,10 +743,50 @@ impl TrialDir {
         let stored = self.read_stored_structure("./final.structure")?;
         let phonopy = phonopy_builder_from_settings(&settings.phonons, stored.coords.lattice());
 
-        let save_bands = None;
-        let (_, _, _, ev_analysis) = self.do_post_relaxation_computations(
-            settings, save_bands, &*pot, &phonopy, &stored,
-        )?;
+        // !!!!!!!!!!!!!!!!!
+        //  FIXME FIXME BAD
+        // !!!!!!!!!!!!!!!!!
+        // The logic of constructing a Diagonalizer from a config is copied and pasted
+        // from the code that uses do_ev_loop.  The only way to make this DRY is to
+        // make a trait that simulates `for<T: EvLoopDiagonalizer> Fn(T) -> (B, T::ExtraOut)`
+        // with a generic associated method
+        //
+        let ev_analysis = {
+            use self::cfg::PhononEigenSolver::*;
+
+            // macro to simulate a generic closure.
+            // (we can't use dynamic polymorphism due to the differing associated types)
+            macro_rules! use_diagonalizer {
+                ($diagonalizer:expr) => {{
+                    $diagonalizer.do_post_relaxation_computations(
+                        settings, &*pot, &phonopy, &stored,
+                    )
+                }}
+            }
+
+            match settings.phonons.eigensolver {
+                Phonopy { save_bands } => {
+                    let save_bands = match save_bands {
+                        true => Some(self.save_bands_dir()),
+                        false => None,
+                    };
+                    let (ev_analysis, _, _, _) = {
+                        use_diagonalizer!(PhonopyDiagonalizer { save_bands })?
+                    };
+                    ev_analysis
+                },
+                Sparse => {
+                    let (ev_analysis, _, _, _) = {
+                        use_diagonalizer!(SparseDiagonalizer)?
+                    };
+                    ev_analysis
+                },
+            }
+        };
+        // ^^^^^^^^^^^^^^^
+        // !!!!!!!!!!!!!!!!!
+        //  FIXME FIXME BAD
+        // !!!!!!!!!!!!!!!!!
 
         self.write_ev_analysis_output_files(settings, &*pot, &ev_analysis)?;
     })}

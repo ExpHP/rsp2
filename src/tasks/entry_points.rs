@@ -126,21 +126,6 @@ impl OptionalFileType {
 
 // %% CRATES: binary: rsp2 %%
 pub fn rsp2() {
-    use ::cmd::CliArgs;
-
-    impl CliDeserialize for CliArgs {
-        fn _augment_clap_app<'a, 'b>(app: ::clap::App<'a, 'b>) -> ::clap::App<'a, 'b> {
-            app.args(&[
-                arg!( save_bands [--save-bands] "save phonopy directory with bands at gamma"),
-            ])
-        }
-
-        fn _resolve_args(m: &::clap::ArgMatches) -> FailResult<Self>
-        { Ok(CliArgs {
-            save_bands: m.is_present("save_bands"),
-        })}
-    }
-
     wrap_result_main(|| {
         let logfile = init_global_logger()?;
 
@@ -151,7 +136,7 @@ pub fn rsp2() {
                 ])
         });
         let matches = app.get_matches();
-        let (dir_args, (filetype, extra_args)) = de.resolve_args(&matches)?;
+        let (dir_args, filetype) = de.resolve_args(&matches)?;
 
         let input = PathAbs::new(matches.expect_value_of("input"))?;
         let filetype = OptionalFileType::or_guess(filetype, &input);
@@ -160,7 +145,7 @@ pub fn rsp2() {
         logfile.start(PathFile::new(trial.new_logfile_path()?)?)?;
 
         let settings = trial.read_settings()?;
-        trial.run_relax_with_eigenvectors(&settings, filetype, &input, extra_args)
+        trial.run_relax_with_eigenvectors(&settings, filetype, &input)
     });
 }
 
