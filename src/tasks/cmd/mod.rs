@@ -751,6 +751,11 @@ impl TrialDir {
         // make a trait that simulates `for<T: EvLoopDiagonalizer> Fn(T) -> (B, T::ExtraOut)`
         // with a generic associated method
         //
+        // (UPDATE: I tried that and it wasn't enough, because the main code couldn't recover
+        //          the bands_dir without being able to dispatch based on the Diagonalizer type.
+        //          Maybe we just need to give up on the associated type (the purpose of which
+        //          is currently just to facilitate debugging a bit)).
+        //
         let ev_analysis = {
             use self::cfg::PhononEigenSolver::*;
 
