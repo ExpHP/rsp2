@@ -109,6 +109,9 @@ impl Coords {
 
 /// # Modifying coordinates
 impl Coords {
+    /// Mutably borrow the cartesian coordinates.
+    ///
+    /// This forcibly clears any cached fractional data.
     pub fn carts_mut(&mut self) -> &mut [V3] {
         self.ensure_only_carts(); // 'only' because user modifications will invalidate fracs
         match &mut self.coords {
@@ -117,6 +120,9 @@ impl Coords {
         }
     }
 
+    /// Mutably borrow the fractional coordinates.
+    ///
+    /// This forcibly clears any cached cartesian data.
     pub fn fracs_mut(&mut self) -> &mut [V3] {
         self.ensure_only_fracs(); // 'only' because user modifications will invalidate carts
         match &mut self.coords {
@@ -151,10 +157,10 @@ impl Coords {
     /// It is unspecified whether cartesian coordinates remain cached after this call.
     pub fn ensure_fracs(&mut self) { self.ensure_only_fracs(); }
 
-    /// Ensure that carts are available, and that fracs are NOT available.
+    /// Ensure that carts are available, and that fracs are **not** available.
     ///
     /// Currently equivalent to `ensure_carts`, but that method may eventually
-    /// retain the fracs.
+    /// retain the carts.
     fn ensure_only_carts(&mut self) {
         let dummy = CoordsKind::Carts(vec![]);
         let coords = ::std::mem::replace(&mut self.coords, dummy);

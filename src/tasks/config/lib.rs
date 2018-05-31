@@ -381,13 +381,21 @@ fn _phonons__eigensolver() -> PhononEigenSolver { PhononEigenSolver::Phonopy { s
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub enum PhononEigenSolver {
+    #[serde(rename_all = "kebab-case")]
     Phonopy {
         /// Save the directory from the last phonopy computation,
         /// which may contain incomprehensibly large files.
         #[serde(default = "_phonon_eigen_solver__phonopy__save_bands")]
         save_bands: bool,
     },
-    Sparse,
+    #[serde(rename_all = "kebab-case")]
+    Sparse {
+        /// Solve for up to this many solutions when looking for imaginary modes.
+        ///
+        /// This will be clipped to the greatest number that the sparse solver is capable
+        /// of solving for, which is `rank - 2` (where `rank = 3 * num_sites`).
+        max_count: usize,
+    },
 }
 fn _phonon_eigen_solver__phonopy__save_bands() -> bool { false }
 

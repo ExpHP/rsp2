@@ -36,7 +36,6 @@
 use ::FailResult;
 use ::math::basis::{Basis3, Ket3};
 
-use ::rsp2_newtype_indices::cast_index;
 use ::slice_of_array::prelude::*;
 
 use ::std::process;
@@ -80,15 +79,23 @@ const PY_CALL_EIGSH: &'static str = indoc!(r#"
     m = d.pop('matrix')
     assert not d
 
-    data = np.array(m['complex_blocks'])
+    data = np.array(m['complex-blocks'])
 
     assert data.shape[1] == 2
-    data = 1.0 * data[:, 0] + 1.0j * data[:, 1]
+
+    # scipy will use eigs for dtype=complex even if imag is all zero.
+    # Unfortunately this leads to small but nonzero imaginary components
+    # appearing in the output eigenkets at gamma.
+    # Hence we force dtype=float when possible.
+    if np.absolute(data[:, 1]).max() == 0:
+        data = data[:, 0] * 1.0
+    else:
+        data = data[:, 0] + 1.0j * data[:, 1]
 
     assert data.ndim == 3
     assert data.shape[1] == data.shape[2] == 3
     m = scipy.sparse.bsr_matrix(
-        (data, m['col'], m['row_ptr']),
+        (data, m['col'], m['row-ptr']),
         shape=tuple(3*x for x in m['dim']),
     ).tocsc()
 
@@ -102,20 +109,9 @@ const PY_CALL_EIGSH: &'static str = indoc!(r#"
 "#);
 
 #[derive(Serialize)]
-struct Input<'a> {
-    matrix: Matrix<'a>,
+struct Input {
+    matrix: ::math::dynmat::Cereal,
     kw: PyKw,
-}
-
-#[derive(Serialize)]
-struct Matrix<'a> {
-    // these should be suitable for col_ptr and row_ind (i.e. no additional factor of 3).
-    pub dim: (usize, usize),
-
-    // CSR format (or technically Block CSR).
-    pub complex_blocks: &'a [::math::dynmat::Complex33],
-    pub col: &'a [usize],
-    pub row_ptr: &'a [usize],
 }
 
 #[allow(dead_code)]
@@ -175,7 +171,7 @@ pub fn check_scipy_availability() -> FailResult<()> {
 // Returns:
 // - frequencies (not eigenvalues)
 // - eigenvectors
-fn call_eigsh(input: &Input<'_>) -> FailResult<(Vec<f64>, Basis3)> {
+fn call_eigsh(input: &Input) -> FailResult<(Vec<f64>, Basis3)> {
 
     let (vals, (real, imag)) = call_script_and_communicate(PY_CALL_EIGSH, input)?;
     // annotate types to select Deserialize impl
@@ -279,22 +275,16 @@ where
 use ::math::dynmat::DynamicalMatrix;
 
 impl DynamicalMatrix {
-    fn py_matrix(&self) -> Matrix<'_> {
-        // validate it because scipy apparently does not.
-        // (I would think it could be done at *light speed* compared to all the magic
-        //  python type-hackery they have to deal with, but whatever)
-        self.0.validate().unwrap();
-        Matrix {
-            dim: self.0.dim,
-            complex_blocks: &self.0.val,
-            col: cast_index(&self.0.col),
-            row_ptr: &self.0.row_ptr.raw,
-        }
+    /// Requesting more than this number of eigensolutions will fail.
+    ///
+    /// (inherent limitation of the method used by ARPACK)
+    pub fn max_sparse_eigensolutions(&self) -> usize {
+        3 * self.0.dim.0 - 2
     }
 
     pub fn compute_most_negative_eigensolutions(&self, how_many: usize) -> FailResult<(Vec<f64>, Basis3)> {
         call_eigsh(&Input {
-            matrix: self.py_matrix(),
+            matrix: self.cereal(),
             kw: PyKw {
                 how_many: Some(how_many),
                 which: Some(Which::MostNegative),
@@ -305,7 +295,7 @@ impl DynamicalMatrix {
 
     pub fn compute_most_extreme_eigensolutions(&self, how_many: usize) -> FailResult<(Vec<f64>, Basis3)> {
         call_eigsh(&Input {
-            matrix: self.py_matrix(),
+            matrix: self.cereal(),
             kw: PyKw {
                 how_many: Some(how_many),
                 ..Default::default()

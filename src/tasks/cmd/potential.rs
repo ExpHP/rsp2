@@ -226,10 +226,13 @@ pub trait DiffFn<Meta> {
 
     /// Compute the change in force when displacing an atom, in a sparse representation.
     ///
-    /// Some potentials may assume that `original` has zero force.
+    /// The default implementation works from the dense representation of the forces, meaning
+    /// it is inherently at least `O(num_atoms)`. This method is present on the trait because some
+    /// potentials (e.g. those based on a bond graph) may be capable of providing optimized
+    /// implementations that only do `O(output.len())` work on large structures.
     ///
-    /// The default implementation works from the dense representation of the forces.
-    fn compute_force_set(
+    /// Some potentials may assume that `original` has zero force.
+    fn compute_sparse_force_set(
         &mut self,
         original_coords: &Coords,
         meta: Meta,
@@ -238,8 +241,8 @@ pub trait DiffFn<Meta> {
     where Meta: Clone,
     {
         let mut coords = original_coords.clone();
-        // FIXME maybe ensure_only_carts() should be exposed.
-        let _ = coords.carts_mut(); // prevent numerical differences from change in representation
+
+        ensure_only_carts(&mut coords); // ... see the long doc comment on this method.
 
         // FIXME this is going to get recomputed frequently unless we change the signature.
         let original_force = self.compute_force(&coords, meta.clone())?;
@@ -248,10 +251,18 @@ pub trait DiffFn<Meta> {
 
         let diffs = {
             zip_eq!(original_force, displaced_force).enumerate()
-                // assuming that the potential is deterministic and implements a cutoff radius,
-                // this might actually succeed at filtering out a lot of zero terms.
-                .filter(|(_, (old, new))| old != new)
+                // assuming that the potential...
+                //
+                //  * is deterministic, and
+                //  * implements a cutoff radius,
+                //
+                // ...then with the help of the "ensure_only_carts" call above, even this
+                // exact equality check should be effective at sparsifying the data.
+                //
+                // Which is good, because it's tough to define an approximate scale for comparison
+                // here, as the forces are the end-result of catastrophic cancellations.
                 .map(|(atom, (old, new))| (atom, new - old))
+                .filter(|&(_, v)| v != V3::zero())
 
                 // this one is a closer approximation of phonopy, producing a dense matrix with
                 // just the new forces (assuming the old ones are zero)
@@ -278,6 +289,50 @@ impl<'d, Meta> DiffFn<Meta> for Box<DiffFn<Meta> + 'd> {
     /// Convenience method to compute the force.
     fn compute_force(&mut self, coords: &Coords, meta: Meta) -> FailResult<Vec<V3>>
     { (**self).compute_force(coords, meta) }
+}
+
+/// Ensure that carts are available on a Coords, and that fracs are **not** available.
+///
+/// **TL;DR:**  Its usage in `compute_force_set` makes it feasible to use exact equality
+/// when converting forces into a sparse format.
+///
+/// ---
+///
+/// The use case is extremely niche.  So niche that I've chosen to just simulate it with
+/// this free function helper rather than exposing the (currently private) method on Coords.
+///
+/// Basically, the purpose is to guarantee that an ensuing call to `carts_mut()` will not
+/// change the values returned by `to_fracs()` (which matters to us in the body of
+/// `compute_force_set` because the potential might use `to_fracs()`). That is to say:
+///
+/// ```rust,ignore
+/// fn bad(mut coords: Coords) {
+///     coords.ensure_carts();
+///     let v1 = coords.to_fracs();
+///     let _ = coords.carts_mut();
+///     let v2 = coords.to_fracs();
+///
+///     // this is not guaranteed to succeed! (it does at the time of writing, but may not in the
+///     // future). Basically, v2 must have been recomputed from cartesian data, but v1 might
+///     // have been cached; thus they may differ on the order of machine epsilon if v1
+///     // was the source of the cartesian data.
+///     assert_eq!(v1, v2);
+/// }
+///
+/// fn good(mut coords: Coords) {
+///     ensure_only_carts(&mut coords);  // <--- the only change
+///     let v1 = coords.to_fracs();
+///     let _ = coords.carts_mut();
+///     let v2 = coords.to_fracs();
+///
+///     // this IS guaranteed to succeed! (for now, and forever)
+///     assert_eq!(v1, v2);
+/// }
+/// ```
+fn ensure_only_carts(coords: &mut Coords) {
+    // The signature of `carts_mut()` guarantees that it drops all fractional data;
+    // it could not be correct otherwise.
+    let _ = coords.carts_mut();
 }
 
 //-------------------------------------

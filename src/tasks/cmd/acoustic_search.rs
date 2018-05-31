@@ -100,9 +100,13 @@ pub(crate) fn perform_acoustic_search(
 
     { // quickly spot translational modes
 
-        // We want to search a little bit past the negative freqs, but not *too* far.
-        // Surely, the frequencies of the acoustic modes must be less than this:
-        let stop_index = eigenvalues.iter().position(|&x| x >= 10.0).unwrap_or(eigenvalues.len());
+        let stop_index = {
+            // We want to search a little bit past the negative eigenvalues, but not *too* far.
+            // Surely, the frequencies of the acoustic modes must be less than this:
+            const HARD_LIMIT: f64 = 10.0;
+
+            eigenvalues.iter().position(|&x| x >= HARD_LIMIT).unwrap_or(eigenvalues.len())
+        };
 
         let mut t_end = zero_index;
         for (i, ket) in eigenvectors.0.iter().take(stop_index).enumerate() {
@@ -116,6 +120,7 @@ pub(crate) fn perform_acoustic_search(
         ensure!(
             kinds.iter().filter(|&x| x == &Some(ModeKind::Translational)).count() <= 3,
             "More than 3 pure translational modes! These eigenvectors are garbage!");
+
 
         // Everything after the last translational or negative mode is vibrational.
         kinds.truncate(t_end);
@@ -162,7 +167,7 @@ pub(crate) fn perform_acoustic_search(
         let ddot = vdot(&d_grad_l, &d_grad_r);
         trace!("Examining mode {} ({:.7}) (ddot = {:.6})...", i + 1, eigenvalues[i], ddot);
         match ddot {
-            dot if dot < -1.001 || 1.001 < dot => panic!("bad unit vector dot"),
+            dot if f64::abs(dot - 1.0) < 1e-3 => panic!("bad unit vector dot"),
             dot if dot <= -rotational_fdot_threshold => {
                 kinds[i] = Some(ModeKind::Rotational);
                 rotational_count += 1;

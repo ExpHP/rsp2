@@ -53,6 +53,8 @@ use ::std::rc::Rc;
 use ::itertools::Itertools;
 
 use ::hlist_aliases::*;
+use std::collections::BTreeMap;
+use math::dynmat::ForceConstants;
 
 const SAVE_BANDS_DIR: &'static str = "gamma-bands";
 
@@ -136,9 +138,9 @@ impl TrialDir {
                     _do_not_drop_the_bands_dir = Some(final_bands_dir);
                     (coords, ev_analysis)
                 },
-                Sparse => {
+                Sparse { max_count } => {
                     let (coords, ev_analysis, ()) = {
-                        do_ev_loop!(SparseDiagonalizer)?
+                        do_ev_loop!(SparseDiagonalizer { max_count })?
                     };
                     _do_not_drop_the_bands_dir = None;
                     (coords, ev_analysis)
@@ -314,7 +316,7 @@ impl PhonopyDiagonalizer {
     ) -> FailResult<DirWithBands<Box<AsPath>>>
     {Ok({
         let disp_dir = phonopy.displacements(coords, meta.sift())?;
-        let force_sets = do_force_sets_at_disps(pot, cfg_threading, &disp_dir)?;
+        let force_sets = do_force_sets_at_disps_for_phonopy(pot, cfg_threading, &disp_dir)?;
 
         let bands_dir = disp_dir
             .make_force_dir(&force_sets)?
@@ -331,7 +333,9 @@ impl PhonopyDiagonalizer {
     })}
 }
 
-struct SparseDiagonalizer;
+struct SparseDiagonalizer {
+    max_count: usize,
+}
 impl EvLoopDiagonalizer for SparseDiagonalizer {
     type ExtraOut = ();
 
@@ -347,25 +351,88 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
             let StoredStructure {
                 coords, elements, layers, masses, layer_sc_matrices, ..
             } = stored;
-            let meta = hlist![elements.clone(), layers.clone(), masses.clone()];
+            let meta = hlist![elements.clone(), masses.clone(), layers.clone()];
             (coords, meta, layer_sc_matrices.clone())
         };
 
-        // FIXME currently copies PhonopyDiagonalizer
-        let (evals, evecs) = {
-            let disp_dir = phonopy.displacements(coords, meta.sift())?;
-            let force_sets = do_force_sets_at_disps(pot, &settings.threading, &disp_dir)?;
-
-            disp_dir
-                .make_force_dir(&force_sets)?
-                .build_bands()
-                .eigenvectors(true)
-                .compute(&[Q_GAMMA])?
-                .eigensystem_at(Q_GAMMA)?
+        let frac_ops = phonopy.symmetry(coords, meta.sift())?.frac_ops()?;
+        let cart_rots: Vec<M33> = {
+            frac_ops.iter()
+                .map(|oper| oper.to_rot().cart(&coords.lattice()))
+                .collect()
         };
 
-        trace!("============================");
-        trace!("Finished diagonalization");
+        let ::phonopy::Rsp2StyleDisplacements {
+            super_coords, sc, prim_displacements, ..
+        } = phonopy.displacements(coords, meta.sift())?.rsp2_style_displacements()?;
+
+        let space_group_deperms: Vec<_> = {
+            ::rsp2_structure::find_perm::of_spacegroup_for_general(
+                &super_coords,
+                &frac_ops,
+                &coords.lattice(),
+                // larger than SYMPREC because the coords we see may may be slightly
+                // different from what spglib saw, but not so large that we risk pairing
+                // the wrong atoms
+                settings.phonons.symmetry_tolerance * 3.0,
+            )?.into_iter().map(|p| p.inverted()).collect()
+        };
+
+        let super_meta = {
+            // macro to generate a closure, because generic closures don't exist
+            macro_rules! f {
+                () => { |x: Rc<[_]>| -> Rc<[_]> {
+                    sc.replicate(&x[..]).into()
+                }};
+            }
+            meta.clone().map(hlist![
+                f!(),
+                f!(),
+                |opt: Option<_>| opt.map(f!()),
+            ])
+        };
+        let super_displacements: Vec<_> = {
+            prim_displacements.iter()
+                .map(|&(prim, disp)| {
+                    let atom = sc.atom_from_cell(prim, ForceConstants::DESIGNATED_CELL);
+                    (atom, disp)
+                })
+                .collect()
+        };
+        let force_sets = do_force_sets_at_disps_for_sparse(
+            pot,
+            &settings.threading,
+            &super_displacements,
+            &super_coords,
+            super_meta.sift(),
+        )?;
+
+        let force_constants = ::math::dynmat::ForceConstants::compute(
+            &prim_displacements,
+            &force_sets,
+            &cart_rots,
+            &space_group_deperms,
+            &sc,
+        )?;
+
+        let dynmat = {
+            force_constants
+                .gamma_dynmat(&sc, meta.pick())
+                .hermitianize()
+        };
+
+//        HACK
+//        Json(&dynmat.cereal()).save(self.join("dynmat.json"))?;
+
+        let (evals, evecs) = {
+            let how_many = self.max_count.min(dynmat.max_sparse_eigensolutions());
+            dynmat.compute_most_negative_eigensolutions(how_many)?
+        };
+
+        // =============FIXME======================
+        // ===   the rest is still copy-pasta   ===
+        // === and should be pulled out of here ===
+        // ========================================
 
         // FIXME: only the CartBonds need to be recomputed each iteration;
         //        we could keep the FracBonds around between iterations.
@@ -502,7 +569,7 @@ fn phonopy_builder_from_settings(
         .conf("DIAG", ".FALSE.")
 }
 
-fn do_force_sets_at_disps<P: AsPath + Send + Sync>(
+fn do_force_sets_at_disps_for_phonopy<P: AsPath + Send + Sync>(
     pot: &PotentialBuilder,
     threading: &cfg::Threading,
     disp_dir: &DirWithDisps<P>,
@@ -520,6 +587,8 @@ fn do_force_sets_at_disps<P: AsPath + Send + Sync>(
         eprint!("\rdisp {} of {}", i + 1, num_displacements);
         ::std::io::stderr().flush().unwrap();
 
+        // FIXME wait, why is this `one_off` for both serial and parallel?
+        //       couldn't the serial branch be significantly sped up by reusing a DiffFn?
         pot.one_off().compute_force(coords, meta.sift())?
     });
 
@@ -538,6 +607,55 @@ fn do_force_sets_at_disps<P: AsPath + Send + Sync>(
                 .collect::<Vec<_>>()
                 .into_par_iter()
                 .map(|coords| compute(&coords, get_meta().sift()))
+                .collect::<FailResult<Vec<_>>>()?
+        },
+    };
+    eprintln!();
+    force_sets
+})}
+
+// FIXME: largely copy-pasta from the `_for_phonopy` function,
+//        but there's too much different to easily factor the similarities out  :/
+fn do_force_sets_at_disps_for_sparse(
+    pot: &PotentialBuilder,
+    threading: &cfg::Threading,
+    displacements: &[(usize, V3)],
+    coords: &Coords,
+    meta: HList2<
+        Rc<[Element]>,
+        Rc<[Mass]>,
+    >,
+) -> FailResult<Vec<BTreeMap<usize, V3>>>
+{Ok({
+    use ::std::io::prelude::*;
+    use ::rayon::prelude::*;
+
+    trace!("Computing forces at displacements");
+
+    let counter = ::util::AtomicCounter::new();
+    let num_displacements = displacements.len();
+
+    let compute = move |displacement: (usize, V3), meta: HList2<Rc<[Element]>, Rc<[Mass]>>| FailOk({
+        let i = counter.inc();
+        eprint!("\rdisp {} of {}", i + 1, num_displacements);
+        ::std::io::stderr().flush().unwrap();
+
+        // FIXME wait, why is this `one_off` for both serial and parallel?
+        //       couldn't the serial branch be significantly sped up by reusing a DiffFn?
+        pot.one_off().compute_sparse_force_set(coords, meta.sift(), displacement)?
+    });
+
+    let force_sets = match threading {
+        &cfg::Threading::Lammps |
+        &cfg::Threading::Serial => {
+            displacements.iter()
+                .map(|&disp| compute(disp, meta.sift()))
+                .collect::<FailResult<Vec<_>>>()?
+        },
+        &cfg::Threading::Rayon => {
+            let get_meta = meta.sendable();
+            displacements.par_iter()
+                .map(|&disp| compute(disp, get_meta().sift()))
                 .collect::<FailResult<Vec<_>>>()?
         },
     };
@@ -780,9 +898,9 @@ impl TrialDir {
                     };
                     ev_analysis
                 },
-                Sparse => {
+                Sparse { max_count } => {
                     let (ev_analysis, _, _, _) = {
-                        use_diagonalizer!(SparseDiagonalizer)?
+                        use_diagonalizer!(SparseDiagonalizer { max_count } )?
                     };
                     ev_analysis
                 },
@@ -812,7 +930,7 @@ pub(crate) fn run_dynmat_test(phonopy_dir: &PathDir) -> FailResult<()>
         super_coords, sc, prim_displacements, perm_from_phonopy, ..
     } = disp_dir.rsp2_style_displacements()?;
 
-    let (prim_coords, prim_meta) = symmetry_dir.structure()?;
+    let (prim_coords, prim_meta) = disp_dir.primitive_structure()?;
     let space_group = symmetry_dir.frac_ops()?;
     let prim_lattice = prim_coords.lattice().clone();
 

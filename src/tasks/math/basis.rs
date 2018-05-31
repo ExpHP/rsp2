@@ -118,7 +118,9 @@ impl Ket3 {
 
     pub fn as_real_checked(&self) -> &[V3]
     {
-        assert!(self.imag.flat().iter().all(|&x| x == 0.0));
+        for &x in self.imag.flat() {
+            assert_eq!(x, 0.0);
+        }
         &self.real
     }
 }

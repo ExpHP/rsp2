@@ -11,10 +11,6 @@ use ::math::sparse::{self, RawCoo, RawCsr};
 
 use ::util::ext_traits::OptionExpectNoneExt;
 
-// Displaced atoms are always in this cell.
-// (HACK: shouldn't need to be pub(crate))
-pub(crate) const DESIGNATED_CELL: [u32; 3] = [0, 0, 0];
-
 // index types for local use, to aid in reasoning
 newtype_index!{DispI}  // index of a displacement
 newtype_index!{PrimI}  // index of a primitive cell site
@@ -34,6 +30,10 @@ pub struct DynamicalMatrix(
 );
 
 impl ForceConstants {
+
+    /// Displaced atoms must always be in this cell.
+    pub const DESIGNATED_CELL: [u32; 3] = [0, 0, 0];
+
     // This basically follows Phonopy's method for `--writefc` to a T, although it
     // is a bit smarter in some places, and probably dumber in other places.
     //
@@ -47,6 +47,10 @@ impl ForceConstants {
     // The produced ForceConstants only include the rows in the 'designated cell.'
     // (the only rows that are required to produce a dynamical matrix)
     pub fn compute(
+        // (FIXME: this should take super_displacements in order to verify that
+        //         everything uses the correct image.  Otherwise, the caller could
+        //         displace the wrong image when computing force sets, and it would
+        //         go unnoticed)
         // Displacements, using primitive cell indices.
         //
         // For each symmetry star of sites in the primitive cell, only one of those
@@ -79,7 +83,7 @@ impl ForceConstants {
         let primitive_atoms = &primitive_atoms[..];
         let lattice_points = &lattice_points[..];
 
-        let designated_lattice_point = sc.lattice_point_from_cell(DESIGNATED_CELL);
+        let designated_lattice_point = sc.lattice_point_from_cell(Self::DESIGNATED_CELL);
 
         Context {
             sc, primitive_atoms, lattice_points, displacements, force_sets,
@@ -129,7 +133,6 @@ impl<'ctx> Context<'ctx> {
         Ok(ForceConstants(matrix))
     }
 }
-
 
 //--------------------------------------------------
 // data computed early on
@@ -511,7 +514,7 @@ impl ForceConstants {
     pub fn add_rows_for_other_cells(mut self, sc: &SupercellToken) -> Self {
         assert!({
             let cells = sc.atom_cells();
-            self.0.row.iter().all(|&SuperI(row)| cells[row] == DESIGNATED_CELL)
+            self.0.row.iter().all(|&SuperI(row)| cells[row] == Self::DESIGNATED_CELL)
         });
 
         let old_len = self.0.row.len();
@@ -565,7 +568,7 @@ impl ForceConstants {
         let iter = zip_eq!(&self.0.row, &self.0.col, &self.0.val)
             // ignore elements outside the rows of the designated cell, which were added
             // for no other purpose than to facilitate imposing translational invariance
-            .filter(|&(&SuperI(r), _, _)| cells[r] == DESIGNATED_CELL)
+            .filter(|&(&SuperI(r), _, _)| cells[r] == Self::DESIGNATED_CELL)
             // each column of the dynamical matrix sums over columns for images in
             // the force constants matrix, with phase factors.
             .map(|(&r, &c, &m)| {
@@ -649,6 +652,28 @@ impl DynamicalMatrix {
         let csr = self.0.to_raw_transpose().map(|c| c.conj_t());
         DynamicalMatrix(csr)
     }
+
+    pub fn cereal(&self) -> Cereal {
+        self.0.validate().expect("(BUG!) invalid sparse data");
+        Cereal {
+            dim: self.0.dim,
+            complex_blocks: self.0.val.to_vec(),
+            col: cast_index(self.0.col.to_vec()),
+            row_ptr: self.0.row_ptr.raw.to_vec(),
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct Cereal {
+    // these should be suitable for col and row_ptr (i.e. no additional factor of 3).
+    pub dim: (usize, usize),
+
+    // CSR format (or technically Block CSR).
+    pub complex_blocks: Vec<Complex33>,
+    pub col: Vec<usize>,
+    pub row_ptr: Vec<usize>,
 }
 
 pub use self::complex_33::Complex33;

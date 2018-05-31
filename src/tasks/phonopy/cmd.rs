@@ -304,8 +304,13 @@ impl<P: AsPath> DirWithSymmetry<P> {
     })}
 
     /// Input structure. (the one you provided while creating this)
-    pub fn structure(&self) -> FailResult<(Coords, HList2<Rc<[Element]>, Rc<[Mass]>>)>
-    { read_input_structure_with_mass(self) }
+    pub fn structure(&self) -> FailResult<(Coords, HList1<Rc<[Element]>>)>
+    {
+        // we don't save disp.conf here
+        //read_input_structure_with_mass(self)
+        let Poscar { coords, elements, .. } = Poscar::load(self.path().join("POSCAR"))?;
+        Ok((coords, hlist![elements.into()]))
+    }
 
     /// Read PPOSCAR.
     pub fn phonopy_primitive_structure(&self) -> FailResult<(Coords, HList1<Rc<[Element]>>)>
@@ -328,7 +333,7 @@ impl<P: AsPath> DirWithSymmetry<P> {
             .into_iter()
             .map(|op| Ok({
                 let rot = FracRot::new(&op.rotation);
-                let trans = FracTrans::from_floats(op.translation)?;
+                let trans = FracTrans::from_floats(op.translation).expect("BUG!");
                 let phonopy_op = FracOp::new(&rot, &trans);
 
                 // convert from primitive cell chosen by phonopy to our primitive cell.
@@ -338,12 +343,13 @@ impl<P: AsPath> DirWithSymmetry<P> {
 
                 if phonopy_op != our_op {
                     warn_once!("\
-                            It looks like Phonopy chose a different primitive cell in PPOSCAR than \
-                            the one you wrote.  rsp2 has adjusted the symmetry operators assuming \
-                            that the operators output by phonopy were for the PPOSCAR cell, but \
-                            since this case has never come up for the author, this conversion is \
-                            not well-tested.\
-                        ");
+                        It looks like Phonopy chose a different primitive cell in PPOSCAR than \
+                        the one you wrote.  rsp2 has adjusted the symmetry operators assuming \
+                        that the operators output by phonopy were for the PPOSCAR cell \
+                        (and also assuming that phonopy did not rotate the structure), \
+                        but since this case has never come up for the author, this conversion is \
+                        not well-tested.\
+                    ");
                 }
                 our_op
             }))
@@ -407,7 +413,8 @@ impl<P: AsPath> DirWithDisps<P> {
         }
     })}
 
-    fn primitive_structure(&self) -> FailResult<(Coords, HList2<Rc<[Element]>, Rc<[Mass]>>)>
+    /// The structure you provided as input.
+    pub fn primitive_structure(&self) -> FailResult<(Coords, HList2<Rc<[Element]>, Rc<[Mass]>>)>
     { read_input_structure_with_mass(self) }
 
     /// Get the structure from `disp.yaml`.
