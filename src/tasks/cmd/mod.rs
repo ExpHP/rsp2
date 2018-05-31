@@ -533,31 +533,33 @@ fn do_force_sets_at_disps_for_phonopy<P: AsPath + Send + Sync>(
 
     let counter = ::util::AtomicCounter::new();
     let num_displacements = disp_dir.displacements().len();
-    let compute = move |coords: &Coords, meta: HList2<Rc<[Element]>, Rc<[Mass]>>| FailOk({
+    let compute = move |diff_fn: &mut DiffFn<_>, coords: &Coords, meta: HList2<Rc<[Element]>, Rc<[Mass]>>| FailOk({
         let i = counter.inc();
         eprint!("\rdisp {} of {}", i + 1, num_displacements);
         ::std::io::stderr().flush().unwrap();
 
-        // FIXME wait, why is this `one_off` for both serial and parallel?
-        //       couldn't the serial branch be significantly sped up by reusing a DiffFn?
-        pot.one_off().compute_force(coords, meta.sift())?
+        diff_fn.compute_force(coords, meta.sift())?
     });
 
+    // FIXME duplicated logic
     let force_sets = match threading {
         &cfg::Threading::Lammps |
         &cfg::Threading::Serial => {
-            let (_, meta) = disp_dir.superstructure();
+            let (initial_coords, meta) = disp_dir.superstructure();
+            let mut diff_fn = pot.initialize_diff_fn(initial_coords, meta.sift())?;
+
             disp_dir.displaced_coord_sets()
-                .map(|coords| compute(&coords, meta.sift()))
+                .map(|coords| compute(&mut diff_fn, &coords, meta.sift()))
                 .collect::<FailResult<Vec<_>>>()?
         },
         &cfg::Threading::Rayon => {
             let (_, meta) = disp_dir.superstructure();
             let get_meta = meta.sendable();
+
             disp_dir.displaced_coord_sets()
                 .collect::<Vec<_>>()
                 .into_par_iter()
-                .map(|coords| compute(&coords, get_meta().sift()))
+                .map(|coords| compute(&mut pot.one_off(), &coords, get_meta().sift()))
                 .collect::<FailResult<Vec<_>>>()?
         },
     };
@@ -565,8 +567,6 @@ fn do_force_sets_at_disps_for_phonopy<P: AsPath + Send + Sync>(
     force_sets
 })}
 
-// FIXME: largely copy-pasta from the `_for_phonopy` function,
-//        but there's too much different to easily factor the similarities out  :/
 fn do_force_sets_at_disps_for_sparse(
     pot: &PotentialBuilder,
     threading: &cfg::Threading,
@@ -586,27 +586,27 @@ fn do_force_sets_at_disps_for_sparse(
     let counter = ::util::AtomicCounter::new();
     let num_displacements = displacements.len();
 
-    let compute = move |displacement: (usize, V3), meta: HList2<Rc<[Element]>, Rc<[Mass]>>| FailOk({
+    let compute = move |diff_fn: &mut DiffFn<_>, displacement: (usize, V3), meta: HList2<Rc<[Element]>, Rc<[Mass]>>| FailOk({
         let i = counter.inc();
         eprint!("\rdisp {} of {}", i + 1, num_displacements);
         ::std::io::stderr().flush().unwrap();
 
-        // FIXME wait, why is this `one_off` for both serial and parallel?
-        //       couldn't the serial branch be significantly sped up by reusing a DiffFn?
-        pot.one_off().compute_sparse_force_set(coords, meta.sift(), displacement)?
+        diff_fn.compute_sparse_force_set(coords, meta.sift(), displacement)?
     });
 
+    // FIXME duplicated logic
     let force_sets = match threading {
         &cfg::Threading::Lammps |
         &cfg::Threading::Serial => {
+            let mut diff_fn = pot.initialize_diff_fn(coords, meta.sift())?;
             displacements.iter()
-                .map(|&disp| compute(disp, meta.sift()))
+                .map(|&disp| compute(&mut diff_fn, disp, meta.sift()))
                 .collect::<FailResult<Vec<_>>>()?
         },
         &cfg::Threading::Rayon => {
             let get_meta = meta.sendable();
             displacements.par_iter()
-                .map(|&disp| compute(disp, get_meta().sift()))
+                .map(|&disp| compute(&mut pot.one_off(), disp, get_meta().sift()))
                 .collect::<FailResult<Vec<_>>>()?
         },
     };
