@@ -56,6 +56,8 @@ use ::hlist_aliases::*;
 use std::collections::BTreeMap;
 use math::dynmat::ForceConstants;
 use cmd::potential::CommonMeta;
+use math::dynmat::DynamicalMatrix;
+use traits::save::Json;
 
 const SAVE_BANDS_DIR: &'static str = "gamma-bands";
 
@@ -140,10 +142,14 @@ impl TrialDir {
                     (coords, ev_analysis)
                 },
                 Sparse { max_count } => {
-                    let (coords, ev_analysis, ()) = {
+                    let (coords, ev_analysis, dynmat) = {
                         do_ev_loop!(SparseDiagonalizer { max_count })?
                     };
                     _do_not_drop_the_bands_dir = None;
+
+                    // HACK
+                    Json(dynmat.cereal()).save(self.join("gamma-dynmat.json"))?;
+
                     (coords, ev_analysis)
                 },
             }
@@ -315,7 +321,7 @@ struct SparseDiagonalizer {
     max_count: usize,
 }
 impl EvLoopDiagonalizer for SparseDiagonalizer {
-    type ExtraOut = ();
+    type ExtraOut = DynamicalMatrix;
 
     fn do_post_relaxation_computations(
         &self,
@@ -323,7 +329,7 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
         pot: &PotentialBuilder,
         phonopy: &PhonopyBuilder,
         stored: &StoredStructure,
-    ) -> FailResult<(Vec<f64>, Basis3, ())>
+    ) -> FailResult<(Vec<f64>, Basis3, DynamicalMatrix)>
     {Ok({
         let coords = &stored.coords;
         let meta = stored.meta();
@@ -399,7 +405,7 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
 
         let how_many = self.max_count.min(dynmat.max_sparse_eigensolutions());
         let (evals, evecs) = dynmat.compute_most_negative_eigensolutions(how_many)?;
-        (evals, evecs, ())
+        (evals, evecs, dynmat)
     })}
 }
 

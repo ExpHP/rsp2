@@ -38,6 +38,8 @@ pub trait EvLoopDiagonalizer {
 impl TrialDir {
     /// NOTE: This writes to fixed filepaths in the trial directory
     ///       and is not designed to be called multiple times.
+    ///
+    /// The `ExtraOut` returned is the one from the final iteration.
     pub(crate) fn do_main_ev_loop<ExtraOut>(
         &self,
         settings: &Settings,
