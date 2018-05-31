@@ -34,31 +34,30 @@ impl ForceConstants {
     /// Displaced atoms must always be in this cell.
     pub const DESIGNATED_CELL: [u32; 3] = [0, 0, 0];
 
-    // This basically follows Phonopy's method for `--writefc` to a T, although it
-    // is a bit smarter in some places, and probably dumber in other places.
-    //
-    // Notable differences from phonopy include:
-    //
-    // * This uses a sparse format for anything indexed by atoms (primitive or super)
-    // * Phonopy translates each displaced atom to the origin and performs
-    //   expensive brute force overlap searches, while this leaves everything where
-    //   they are and adjusts indices to simulate translation by a lattice point)
-    //
-    // The produced ForceConstants only include the rows in the 'designated cell.'
-    // (the only rows that are required to produce a dynamical matrix)
-    pub fn compute(
-        // (FIXME: this should take super_displacements in order to verify that
-        //         everything uses the correct image.  Otherwise, the caller could
-        //         displace the wrong image when computing force sets, and it would
-        //         go unnoticed)
-        // Displacements, using primitive cell indices.
+    /// Compute a partially filled force constants matrix that contains only the rows
+    /// that appear in the definition of the dynamical matrix. (those where the displaced
+    /// atom is an image in `ForceConstants::DESIGNATED_CELL`)
+    ///
+    /// This basically follows Phonopy's method for `--writefc` to a T, although it
+    /// is a bit smarter in some places, and probably dumber in other places.
+    ///
+    /// Notable differences from phonopy include:
+    ///
+    /// * This uses a sparse format for anything indexed by atoms (primitive or super)
+    /// * Phonopy translates each displaced atom to the origin and performs
+    ///   expensive brute force overlap searches, while this leaves everything where
+    ///   they are and adjusts indices to simulate translation by a lattice point)
+    pub fn compute_required_rows(
+        // Displacements, using the same supercell indices that the corresponding
+        // `force_sets` were generated from.  Currently these are all required to use
+        // the images in `ForceConstants::DESIGNATED_CELL`. (this requirement is checked)
         //
-        // For each symmetry star of sites in the primitive cell, only one of those
+        // Furthermore, for each symmetry star of sites in the primitive cell, only one of those
         // sites may appear in this list. (this requirement is checked)
-        prim_displacements: &[(usize, V3)], // [displacement] -> (prim_displaced, cart_disp)
-        force_sets: &[BTreeMap<usize, V3>], // [displacement][affected] -> cart_force
-        cart_rots: &[M33],                  // [sg_index] -> matrix
-        super_deperms: &[Perm],             // [sg_index] -> permutation on supercell
+        super_displacements: &[(usize, V3)], // [displacement] -> (super_displaced, cart_disp)
+        force_sets: &[BTreeMap<usize, V3>],  // [displacement][affected] -> cart_force
+        cart_rots: &[M33],                   // [sg_index] -> matrix
+        super_deperms: &[Perm],              // [sg_index] -> permutation on supercell
         sc: &SupercellToken,
     ) -> FailResult<ForceConstants>
     {
@@ -67,8 +66,8 @@ impl ForceConstants {
         // most type annotations in here are not strictly necessary, but serve as a stop-gap measure
         // to ensure that at least *something* close to the public interface stops compiling if the
         // newtyped indices in Context are changed (to remind you to check callers)
-        let displacements: &[(PrimI, V3)] = cast_index(prim_displacements);
-        let displacements: &Indexed<DispI, [_]> = Indexed::from_raw_ref(displacements);
+        let super_displacements: &[(SuperI, V3)] = cast_index(super_displacements);
+        let super_displacements: &Indexed<DispI, [_]> = Indexed::from_raw_ref(super_displacements);
 
         let force_sets: &[BTreeMap<SuperI, V3>] = cast_index(force_sets);
         let force_sets: &Indexed<DispI, [_]> = Indexed::from_raw_ref(force_sets);
@@ -85,10 +84,31 @@ impl ForceConstants {
 
         let designated_lattice_point = sc.lattice_point_from_cell(Self::DESIGNATED_CELL);
 
+        let displacements: Indexed<DispI, Vec<(PrimI, V3)>> = {
+            super_displacements.iter()
+                .map(|&(super_disp, force)| {
+                    if lattice_points[super_disp] != designated_lattice_point {
+                        // (NOTE: this requirement could easily be lifted by correcting the indices in
+                        //        force sets by applying lattice point translations that move the displaced
+                        //        atom to DESIGNATED_CELL.  I have not implemented this because I haven't
+                        //        needed it.)
+                        bail!(
+                            "\
+                                ForceConstants currently requires input forces to use displaced atoms in \
+                                ForceConstants::DESIGNATED_CELL (= {:?}). (found atom with cell {:?})\
+                            ",
+                            ForceConstants::DESIGNATED_CELL,
+                            sc.cell_from_lattice_point(lattice_points[super_disp]),
+                        )
+                    }
+                    Ok((primitive_atoms[super_disp], force))
+                }).collect::<FailResult<_>>()?
+        };
+
         Context {
-            sc, primitive_atoms, lattice_points, displacements, force_sets,
-            cart_rots, super_deperms,
-            designated_lattice_point,
+            displacements: &displacements,
+            sc, primitive_atoms, lattice_points, force_sets,
+            cart_rots, super_deperms, designated_lattice_point,
         }.compute_force_constants()
     }
 }

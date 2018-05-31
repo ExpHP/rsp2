@@ -36,10 +36,12 @@ struct PrimInfo {
 #[derive(Deserialize)]
 #[serde(rename_all = "kebab-case")]
 struct SuperInfo {
-    #[serde(rename =    "sc-dims")] sc_dims: [u32; 3],
-    // carts are used to make the test robust to changes in supercell ordering convention
-    #[serde(rename =  "structure")] orig_super_coords: Coords,
-    #[serde(rename = "force-sets")] orig_super_force_sets: Vec<Vec<(usize, V3)>>, // [disp] -> [(super, V3)]
+    #[serde(rename =         "sc-dims")] sc_dims: [u32; 3],
+    // supercell coordinates and "designated cell indices" are used to make the test
+    // robust to changes in supercell ordering convention
+    #[serde(rename = "designated-cell")] orig_designated_images: Vec<usize>, // [prim] -> super
+    #[serde(rename =       "structure")] orig_super_coords: Coords,
+    #[serde(rename =      "force-sets")] orig_super_force_sets: Vec<Vec<(usize, V3)>>, // [disp] -> [(super, V3)]
 }
 
 #[derive(Deserialize)]
@@ -68,7 +70,7 @@ fn check(
     } = ::serde_json::from_reader(File::open(prim_info)?)?;
 
     let SuperInfo {
-        sc_dims, orig_super_coords, orig_super_force_sets,
+        sc_dims, orig_super_coords, orig_super_force_sets, orig_designated_images,
     } = ::serde_json::from_reader(File::open(super_info)?)?;
 
     let OutputForceConstants {
@@ -103,6 +105,16 @@ fn check(
     };
     let expected_force_constants: Vec<_> = permute_block(orig_force_constants);
 
+    let super_displacements: Vec<_> = {
+        prim_displacements.into_iter()
+            .map(|(prim, v3)| {
+                let orig_atom = orig_designated_images[prim];
+                let atom = perm_from_orig.permute_index(orig_atom);
+                (atom, v3)
+            })
+            .collect()
+    };
+
     let super_sg_deperms: Vec<_> = {
         ::rsp2_structure::find_perm::of_spacegroup_for_general(
             &super_coords,
@@ -116,8 +128,8 @@ fn check(
     // ------- Force constants ---------
     // ---------------------------------
 
-    let force_constants = ForceConstants::compute(
-        &prim_displacements,
+    let force_constants = ForceConstants::compute_required_rows(
+        &super_displacements,
         &super_force_sets,
         &cart_rots,
         &super_sg_deperms,

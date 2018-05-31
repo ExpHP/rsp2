@@ -379,8 +379,8 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
             super_meta.sift(),
         )?;
 
-        let force_constants = ::math::dynmat::ForceConstants::compute(
-            &prim_displacements,
+        let force_constants = ::math::dynmat::ForceConstants::compute_required_rows(
+            &super_displacements,
             &force_sets,
             &cart_rots,
             &space_group_deperms,
@@ -896,7 +896,7 @@ pub(crate) fn run_dynmat_test(phonopy_dir: &PathDir) -> FailResult<()>
     let forces_dir = DirWithForces::from_existing(phonopy_dir)?;
     let disp_dir = DirWithDisps::from_existing(phonopy_dir)?;
     let ::phonopy::Rsp2StyleDisplacements {
-        super_coords, sc, prim_displacements, perm_from_phonopy, ..
+        super_coords, sc, perm_from_phonopy, ..
     } = disp_dir.rsp2_style_displacements()?;
 
     let (prim_coords, prim_meta) = disp_dir.primitive_structure()?;
@@ -913,17 +913,22 @@ pub(crate) fn run_dynmat_test(phonopy_dir: &PathDir) -> FailResult<()>
         )?.into_iter().map(|p| p.inverted()).collect()
     };
 
-    let original_force_sets: Vec<_> = {
+    let (force_sets, super_displacements): (Vec<_>, Vec<_>) = {
         let ::phonopy::ForceSets {
-            force_sets: phonopy_force_sets, ..
+            force_sets: phonopy_force_sets,
+            displacements: phonopy_super_displacements,
         } = forces_dir.force_sets()?;
 
-        phonopy_force_sets.into_iter()
-            .map(|vec| {
-                vec.into_iter().enumerate()
-                    .map(|(atom, v3)| (perm_from_phonopy.permute_index(atom), v3))
-                    .collect()
-            }).collect()
+        zip_eq!(phonopy_force_sets, phonopy_super_displacements)
+            .map(|(fset, (phonopy_displaced, disp))| {
+                let displaced = perm_from_phonopy.permute_index(phonopy_displaced);
+                let fset = {
+                    fset.into_iter().enumerate()
+                        .map(|(atom, force)| (perm_from_phonopy.permute_index(atom), force))
+                        .collect()
+                };
+                (fset, (displaced, disp))
+            }).unzip()
     };
 
     let cart_rots: Vec<M33> = {
@@ -932,11 +937,10 @@ pub(crate) fn run_dynmat_test(phonopy_dir: &PathDir) -> FailResult<()>
             .collect()
     };
 
-
     trace!("Computing designated rows of force constants...");
-    let force_constants = ::math::dynmat::ForceConstants::compute(
-        &prim_displacements,
-        &original_force_sets,
+    let force_constants = ::math::dynmat::ForceConstants::compute_required_rows(
+        &super_displacements,
+        &force_sets,
         &cart_rots,
         &space_group_deperms,
         &sc,
