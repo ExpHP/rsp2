@@ -5,15 +5,21 @@ use ::cmd::trial::{TrialDir, NewTrialDirArgs};
 use ::cmd::StructureFileType;
 use ::path_abs::{PathDir, PathFile, PathAbs};
 use ::std::ffi::OsStr;
-use ::ui::logging::init_global_logger;
+use ::ui::logging::{init_global_logger, SetGlobalLogfile};
 use ::ui::cfg_merging::ConfigSources;
 use ::ui::cli_deserialize::CliDeserialize;
 use ::util::ext_traits::{ArgMatchesExt};
 
 fn wrap_result_main<F>(main: F)
-where F: FnOnce() -> FailResult<()>,
+where F: FnOnce(SetGlobalLogfile) -> FailResult<()>,
 {
-    main().unwrap_or_else(|e| {
+    let wrapped = || {
+        let logfile = init_global_logger().expect("Could not init logger");
+        check_for_deps()?;
+        main(logfile)
+    };
+    
+    wrapped().unwrap_or_else(|e| {
         for cause in e.causes() {
             error!("{}", cause);
         }
@@ -122,13 +128,21 @@ impl OptionalFileType {
     }
 }
 
+fn check_for_deps() -> FailResult<()> {
+    ::cmd::check_scipy_availability()?;
+
+    if ::std::env::var_os("LAMMPS_POTENTIALS").is_none() {
+        bail!("rsp2 requires you to set the LAMMPS_POTENTIALS environment variable.");
+    }
+
+    Ok(())
+}
+
 // -------------------------------------------------------------------------------------
 
 // %% CRATES: binary: rsp2 %%
 pub fn rsp2() {
-    wrap_result_main(|| {
-        let logfile = init_global_logger()?;
-
+    wrap_result_main(|logfile| {
         let (app, de) = CliDeserialize::augment_clap_app({
             app_from_crate!(", ")
                 .args(&[
@@ -151,9 +165,7 @@ pub fn rsp2() {
 
 // %% CRATES: binary: rsp2-shear-plot %%
 pub fn shear_plot() {
-    wrap_result_main(|| {
-        let logfile = init_global_logger()?;
-
+    wrap_result_main(|logfile| {
         let (app, de) = CliDeserialize::augment_clap_app({
             ::clap::App::new("rsp2-shear-plot")
                 .args(&[
@@ -175,9 +187,7 @@ pub fn shear_plot() {
 
 // %% CRATES: binary: rsp2-save-bands-after-the-fact %%
 pub fn save_bands_after_the_fact() {
-    wrap_result_main(|| {
-        let logfile = init_global_logger()?;
-
+    wrap_result_main(|logfile| {
         let (app, de) = CliDeserialize::augment_clap_app({
             ::clap::App::new("rsp2-save-bands")
                 .args(&[
@@ -198,9 +208,7 @@ pub fn save_bands_after_the_fact() {
 
 // %% CRATES: binary: rsp2-rerun-analysis %%
 pub fn rerun_analysis() {
-    wrap_result_main(|| {
-        let logfile = init_global_logger()?;
-
+    wrap_result_main(|logfile| {
         let (app, de) = CliDeserialize::augment_clap_app({
             ::clap::App::new("rsp2-rerun-analysis")
                 .args(&[
@@ -221,9 +229,7 @@ pub fn rerun_analysis() {
 
 // %% CRATES: binary: rsp2-bond-test %%
 pub fn bond_test() {
-    wrap_result_main(|| {
-        let _logfile = init_global_logger()?;
-
+    wrap_result_main(|_logfile| {
         let (app, de) = CliDeserialize::augment_clap_app({
             ::clap::App::new("rsp2-bond-test")
                 .args(&[
@@ -249,9 +255,7 @@ pub fn bond_test() {
 
 // %% CRATES: binary: rsp2-dynmat-test %%
 pub fn dynmat_test() {
-    wrap_result_main(|| {
-        let logfile = init_global_logger()?;
-
+    wrap_result_main(|logfile| {
         let (app, de) = CliDeserialize::augment_clap_app({
             ::clap::App::new("rsp2-dynmat-test")
                 .args(&[

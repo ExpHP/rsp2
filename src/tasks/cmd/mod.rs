@@ -18,8 +18,10 @@ mod stored_structure;
 use self::relaxation::EvLoopDiagonalizer;
 mod relaxation;
 mod acoustic_search;
-mod scipy_eigsh;
 mod param_optimization;
+
+pub(crate) use self::scipy_eigsh::check_scipy_availability;
+mod scipy_eigsh;
 
 use ::{FailResult, FailOk};
 use ::rsp2_tasks_config::{self as cfg, Settings, NormalizationMode, SupercellSpec};
@@ -902,8 +904,6 @@ impl TrialDir {
 // FIXME refactor once it's working, this is way too long
 pub(crate) fn run_dynmat_test(phonopy_dir: &PathDir) -> FailResult<()>
 {Ok({
-    ::cmd::scipy_eigsh::check_scipy_availability()?;
-
     // Make a supercell, and determine how our ordering of the supercell differs from phonopy.
     let symmetry_dir = DirWithSymmetry::from_existing(phonopy_dir)?;
     let forces_dir = DirWithForces::from_existing(phonopy_dir)?;
