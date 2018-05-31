@@ -343,11 +343,16 @@ impl<'ctx> Context<'ctx> {
                     if force_map.len() < num_eqns {
                         // rare circumstance --> chance for bitrot.
                         // Leave a note, but don't spam.
-                        info_once!("\
+                        //
+                        // (NOTE: This appeared on one of the first structures I tested it on,
+                        //        which I certainly did not expect to see. This condition could
+                        //        also indicate an issue with the force sets, so I've upgraded it
+                        //        to a warning to increase visibility)
+                        warn_once!("\
                             Found atoms with nonzero forces at some rotations, but not others. \
-                            This is a rare circumstance!...but don't worry too much, I *think* \
-                            it is handled correctly. \
-                        ");
+                            This is expected to be a rare circumstance! \
+                            (strongest force magnitude: {})\
+                        ", force_map.values().map(|v| v.norm()).fold(0.0, f64::max));
                     }
 
                     let mut force_vec = Indexed::from_elem(V3::zero(), &all_displacements);
