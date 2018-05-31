@@ -9,15 +9,18 @@ use ::cmd::stored_structure::StoredStructure;
 use ::meta::prelude::*;
 use ::meta::{Mass, Element, Layer};
 use ::hlist_aliases::*;
+
 use ::math::basis::Basis3;
 use ::math::bands::ScMatrix;
 use ::phonopy::Builder as PhonopyBuilder;
+use ::util::ext_traits::OptionResultExt;
 
 use ::slice_of_array::prelude::*;
 use ::rsp2_slice_math::{v, V, vdot};
 use ::rsp2_array_types::{V3};
 use ::rsp2_structure::{Coords};
 use ::std::rc::Rc;
+use math::bonds::FracBonds;
 
 pub trait EvLoopDiagonalizer {
     type ExtraOut;
@@ -28,7 +31,7 @@ pub trait EvLoopDiagonalizer {
         pot: &PotentialBuilder,
         phonopy: &PhonopyBuilder,
         stored: &StoredStructure,
-    ) -> FailResult<(GammaSystemAnalysis, Vec<f64>, Basis3, Self::ExtraOut)>;
+    ) -> FailResult<(Vec<f64>, Basis3, Self::ExtraOut)>;
 }
 
 
@@ -65,7 +68,7 @@ impl TrialDir {
 
             trace!("============================");
 
-            let (ev_analysis, evals, evecs, extra_out) = {
+            let (evals, evecs, extra_out) = {
                 let subdir = format!("ev-loop-{:02}.1.structure", iteration);
                 self.write_stored_structure(
                     &subdir,
@@ -77,6 +80,22 @@ impl TrialDir {
 
                 diagonalizer.do_post_relaxation_computations(settings, pot, phonopy, &stored)?
             };
+
+            trace!("============================");
+            trace!("Finished diagonalization");
+
+            // FIXME: only the CartBonds need to be recomputed each iteration;
+            //       we could keep the FracBonds around between iterations.
+            let bonds = settings.bond_radius.map(|bond_radius| FailOk({
+                trace!("Computing bonds");
+                FracBonds::from_brute_force_very_dumb(&coords, bond_radius)?
+            })).fold_ok()?;
+
+            trace!("Computing eigensystem info");
+
+            let ev_analysis = super::run_gamma_system_analysis(
+                &settings, pot, &coords, meta.sift(), &layer_sc_mats, &evals, &evecs, &bonds,
+            )?;
 
             {
                 let file = self.create_file(format!("eigenvalues.{:02}", iteration))?;

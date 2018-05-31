@@ -241,11 +241,9 @@ impl TrialDir {
         Option<Vec<ScMatrix>>,
     )>
     {Ok({
-        let StoredStructure {
-            coords, elements, masses, layers, layer_sc_matrices, ..
-        } = self.read_stored_structure(dir_name)?;
-        let meta = hlist![elements, masses, layers];
-        (coords, meta, layer_sc_matrices)
+        let stored = self.read_stored_structure(dir_name)?;
+        let meta = stored.meta();
+        (stored.coords, meta, stored.layer_sc_matrices)
     })}
 
     fn read_stored_structure(&self, dir_name: &str) -> FailResult<StoredStructure>
@@ -268,36 +266,15 @@ impl EvLoopDiagonalizer for PhonopyDiagonalizer {
         pot: &PotentialBuilder,
         phonopy: &PhonopyBuilder,
         stored: &StoredStructure,
-    ) -> FailResult<(GammaSystemAnalysis, Vec<f64>, Basis3, DirWithBands<Box<AsPath>>)>
+    ) -> FailResult<(Vec<f64>, Basis3, DirWithBands<Box<AsPath>>)>
     {Ok({
-        let (coords, meta, layer_sc_mats) = {
-            let StoredStructure {
-                coords, elements, layers, masses, layer_sc_matrices, ..
-            } = stored;
-            let meta = hlist![elements.clone(), layers.clone(), masses.clone()];
-            (coords, meta, layer_sc_matrices.clone())
-        };
+        let meta = stored.meta();
+        let coords = stored.coords.clone();
 
         let bands_dir = self.create_bands_dir(&settings.threading, pot, phonopy, &coords, meta.sift())?;
         let (evals, evecs) = bands_dir.eigensystem_at(Q_GAMMA)?;
 
-        trace!("============================");
-        trace!("Finished diagonalization");
-
-        // FIXME: only the CartBonds need to be recomputed each iteration;
-        //       we could keep the FracBonds around between iterations.
-        let bonds = settings.bond_radius.map(|bond_radius| FailOk({
-            trace!("Computing bonds");
-            FracBonds::from_brute_force_very_dumb(&coords, bond_radius)?
-        })).fold_ok()?;
-
-        trace!("Computing eigensystem info");
-
-        let analysis = run_gamma_system_analysis(
-            &settings, pot, &coords, meta.sift(), &layer_sc_mats, &evals, &evecs, &bonds,
-        )?;
-
-        (analysis, evals, evecs, bands_dir)
+        (evals, evecs, bands_dir)
     })}
 }
 
@@ -345,15 +322,10 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
         pot: &PotentialBuilder,
         phonopy: &PhonopyBuilder,
         stored: &StoredStructure,
-    ) -> FailResult<(GammaSystemAnalysis, Vec<f64>, Basis3, ())>
+    ) -> FailResult<(Vec<f64>, Basis3, ())>
     {Ok({
-        let (coords, meta, layer_sc_mats) = {
-            let StoredStructure {
-                coords, elements, layers, masses, layer_sc_matrices, ..
-            } = stored;
-            let meta = hlist![elements.clone(), masses.clone(), layers.clone()];
-            (coords, meta, layer_sc_matrices.clone())
-        };
+        let coords = &stored.coords;
+        let meta = stored.meta();
 
         let frac_ops = phonopy.symmetry(coords, meta.sift())?.frac_ops()?;
         let cart_rots: Vec<M33> = {
@@ -424,30 +396,9 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
 //        HACK
 //        Json(&dynmat.cereal()).save(self.join("dynmat.json"))?;
 
-        let (evals, evecs) = {
-            let how_many = self.max_count.min(dynmat.max_sparse_eigensolutions());
-            dynmat.compute_most_negative_eigensolutions(how_many)?
-        };
-
-        // =============FIXME======================
-        // ===   the rest is still copy-pasta   ===
-        // === and should be pulled out of here ===
-        // ========================================
-
-        // FIXME: only the CartBonds need to be recomputed each iteration;
-        //        we could keep the FracBonds around between iterations.
-        let bonds = settings.bond_radius.map(|bond_radius| FailOk({
-            trace!("Computing bonds");
-            FracBonds::from_brute_force_very_dumb(&coords, bond_radius)?
-        })).fold_ok()?;
-
-        trace!("Computing eigensystem info");
-
-        let analysis = run_gamma_system_analysis(
-            &settings, pot, &coords, meta.sift(), &layer_sc_mats, &evals, &evecs, &bonds,
-        )?;
-
-        (analysis, evals, evecs, ())
+        let how_many = self.max_count.min(dynmat.max_sparse_eigensolutions());
+        let (evals, evecs) = dynmat.compute_most_negative_eigensolutions(how_many)?;
+        (evals, evecs, ())
     })}
 }
 
@@ -861,6 +812,11 @@ impl TrialDir {
         let stored = self.read_stored_structure("./final.structure")?;
         let phonopy = phonopy_builder_from_settings(&settings.phonons, stored.coords.lattice());
 
+        let bonds = settings.bond_radius.map(|bond_radius| FailOk({
+            trace!("Computing bonds");
+            FracBonds::from_brute_force_very_dumb(&stored.coords, bond_radius)?
+        })).fold_ok()?;
+
         // !!!!!!!!!!!!!!!!!
         //  FIXME FIXME BAD
         // !!!!!!!!!!!!!!!!!
@@ -874,7 +830,7 @@ impl TrialDir {
         //          Maybe we just need to give up on the associated type (the purpose of which
         //          is currently just to facilitate debugging a bit)).
         //
-        let ev_analysis = {
+        let (evals, evecs) = {
             use self::cfg::PhononEigenSolver::*;
 
             // macro to simulate a generic closure.
@@ -893,16 +849,16 @@ impl TrialDir {
                         true => Some(self.save_bands_dir()),
                         false => None,
                     };
-                    let (ev_analysis, _, _, _) = {
+                    let (evals, evecs, _) = {
                         use_diagonalizer!(PhonopyDiagonalizer { save_bands })?
                     };
-                    ev_analysis
+                    (evals, evecs)
                 },
                 Sparse { max_count } => {
-                    let (ev_analysis, _, _, _) = {
+                    let (evals, evecs, _) = {
                         use_diagonalizer!(SparseDiagonalizer { max_count } )?
                     };
-                    ev_analysis
+                    (evals, evecs)
                 },
             }
         };
@@ -910,6 +866,19 @@ impl TrialDir {
         // !!!!!!!!!!!!!!!!!
         //  FIXME FIXME BAD
         // !!!!!!!!!!!!!!!!!
+
+        trace!("============================");
+        trace!("Finished diagonalization");
+
+        trace!("Computing eigensystem info");
+
+        let ev_analysis = run_gamma_system_analysis(
+            &settings, &pot,
+            &stored.coords,
+            stored.meta().sift(),
+            &stored.layer_sc_matrices,
+            &evals, &evecs, &bonds,
+        )?;
 
         self.write_ev_analysis_output_files(settings, &*pot, &ev_analysis)?;
     })}

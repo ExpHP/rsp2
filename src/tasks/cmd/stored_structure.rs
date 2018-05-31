@@ -1,13 +1,14 @@
-use FailResult;
-use meta::{Element, Layer, Mass};
-use math::bands::ScMatrix;
-use traits::{Save, Load, AsPath};
+use ::FailResult;
+use ::meta::{Element, Layer, Mass};
+use ::math::bands::ScMatrix;
+use ::traits::{Save, Load, AsPath};
+use ::hlist_aliases::*;
+use ::rsp2_structure_io::Poscar;
+use ::rsp2_structure::Coords;
+use ::traits::save::Json;
 
-use rsp2_structure_io::Poscar;
-use rsp2_structure::Coords;
-use path_abs::PathDir;
-use traits::save::Json;
-use std::rc::Rc;
+use ::path_abs::PathDir;
+use ::std::rc::Rc;
 
 /// "Filetype" for a structure that uses a directory.
 ///
@@ -20,6 +21,12 @@ pub struct StoredStructure {
     pub layers: Option<Rc<[Layer]>>,
     pub masses: Rc<[Mass]>,
     pub layer_sc_matrices: Option<Vec<ScMatrix>>,
+}
+
+impl StoredStructure {
+    pub fn meta(&self) -> HList3<Rc<[Element]>, Rc<[Mass]>, Option<Rc<[Layer]>>> {
+        hlist![self.elements.clone(), self.masses.clone(), self.layers.clone()]
+    }
 }
 
 #[derive(Serialize, Deserialize)]
