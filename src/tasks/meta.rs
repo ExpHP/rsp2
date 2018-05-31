@@ -82,7 +82,7 @@ where
 /// Basically, metadata is not threadsafe due to heavy use of Rc.
 /// This makes a sendable function that produces a copy of Self
 /// each time it is called.
-pub trait MetaSendable: Sized {
+pub trait MetaSendable: Sized + Clone {
     fn sendable<'a>(&'a self) -> Box<Fn() -> Self + Send + Sync + 'a>;
 }
 

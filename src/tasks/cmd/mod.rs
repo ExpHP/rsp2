@@ -55,6 +55,7 @@ use ::itertools::Itertools;
 use ::hlist_aliases::*;
 use std::collections::BTreeMap;
 use math::dynmat::ForceConstants;
+use cmd::potential::CommonMeta;
 
 const SAVE_BANDS_DIR: &'static str = "gamma-bands";
 
@@ -527,42 +528,27 @@ fn do_force_sets_at_disps_for_phonopy<P: AsPath + Send + Sync>(
 ) -> FailResult<Vec<Vec<V3>>>
 {Ok({
     use ::std::io::prelude::*;
-    use ::rayon::prelude::*;
 
     trace!("Computing forces at displacements");
 
     let counter = ::util::AtomicCounter::new();
     let num_displacements = disp_dir.displacements().len();
-    let compute = move |diff_fn: &mut DiffFn<_>, coords: &Coords, meta: HList2<Rc<[Element]>, Rc<[Mass]>>| FailOk({
-        let i = counter.inc();
-        eprint!("\rdisp {} of {}", i + 1, num_displacements);
-        ::std::io::stderr().flush().unwrap();
+    let (initial_coords, meta) = disp_dir.superstructure();
 
-        diff_fn.compute_force(coords, meta.sift())?
-    });
+    let force_sets = use_potential_maybe_with_rayon(
+        pot,
+        initial_coords,
+        &meta.sift(),
+        threading == &cfg::Threading::Rayon,
+        disp_dir.displaced_coord_sets().collect::<Vec<_>>(),
+        move |diff_fn: &mut DiffFn<_>, meta, coords: Coords| FailOk({
+            let i = counter.inc();
+            eprint!("\rdisp {} of {}", i + 1, num_displacements);
+            ::std::io::stderr().flush().unwrap();
 
-    // FIXME duplicated logic
-    let force_sets = match threading {
-        &cfg::Threading::Lammps |
-        &cfg::Threading::Serial => {
-            let (initial_coords, meta) = disp_dir.superstructure();
-            let mut diff_fn = pot.initialize_diff_fn(initial_coords, meta.sift())?;
-
-            disp_dir.displaced_coord_sets()
-                .map(|coords| compute(&mut diff_fn, &coords, meta.sift()))
-                .collect::<FailResult<Vec<_>>>()?
-        },
-        &cfg::Threading::Rayon => {
-            let (_, meta) = disp_dir.superstructure();
-            let get_meta = meta.sendable();
-
-            disp_dir.displaced_coord_sets()
-                .collect::<Vec<_>>()
-                .into_par_iter()
-                .map(|coords| compute(&mut pot.one_off(), &coords, get_meta().sift()))
-                .collect::<FailResult<Vec<_>>>()?
-        },
-    };
+            diff_fn.compute_force(&coords, meta)?
+        }),
+    )?;
     eprintln!();
     force_sets
 })}
@@ -579,40 +565,61 @@ fn do_force_sets_at_disps_for_sparse(
 ) -> FailResult<Vec<BTreeMap<usize, V3>>>
 {Ok({
     use ::std::io::prelude::*;
-    use ::rayon::prelude::*;
 
     trace!("Computing forces at displacements");
 
     let counter = ::util::AtomicCounter::new();
     let num_displacements = displacements.len();
+    let force_sets = use_potential_maybe_with_rayon(
+        pot,
+        coords,
+        &meta.sift(),
+        threading == &cfg::Threading::Rayon,
+        displacements,
+        |diff_fn: &mut DiffFn<_>, meta, &displacement: &(usize, V3)| FailOk({
+            let i = counter.inc();
+            eprint!("\rdisp {} of {}", i + 1, num_displacements);
+            ::std::io::stderr().flush().unwrap();
 
-    let compute = move |diff_fn: &mut DiffFn<_>, displacement: (usize, V3), meta: HList2<Rc<[Element]>, Rc<[Mass]>>| FailOk({
-        let i = counter.inc();
-        eprint!("\rdisp {} of {}", i + 1, num_displacements);
-        ::std::io::stderr().flush().unwrap();
-
-        diff_fn.compute_sparse_force_set(coords, meta.sift(), displacement)?
-    });
-
-    // FIXME duplicated logic
-    let force_sets = match threading {
-        &cfg::Threading::Lammps |
-        &cfg::Threading::Serial => {
-            let mut diff_fn = pot.initialize_diff_fn(coords, meta.sift())?;
-            displacements.iter()
-                .map(|&disp| compute(&mut diff_fn, disp, meta.sift()))
-                .collect::<FailResult<Vec<_>>>()?
-        },
-        &cfg::Threading::Rayon => {
-            let get_meta = meta.sendable();
-            displacements.par_iter()
-                .map(|&disp| compute(&mut pot.one_off(), disp, get_meta().sift()))
-                .collect::<FailResult<Vec<_>>>()?
-        },
-    };
+            diff_fn.compute_sparse_force_set(coords, meta, displacement)?
+        })
+    )?;
     eprintln!();
     force_sets
 })}
+
+// use a potential on many similar structures, possibly using Rayon.
+//
+// When rayon is not used, a single DiffFn is reused.
+fn use_potential_maybe_with_rayon<Inputs, Input, F, Output>(
+    pot: &PotentialBuilder,
+    coords_for_initialize: &Coords,
+    meta: &CommonMeta,
+    use_rayon: bool,
+    inputs: Inputs,
+    compute: F,
+) -> FailResult<Vec<Output>>
+where
+    Input: Send,
+    Output: Send,
+    Inputs: IntoIterator<Item=Input>,
+    Inputs: ::rayon::iter::IntoParallelIterator<Item=Input>,
+    F: Fn(&mut DiffFn<CommonMeta>, CommonMeta, Input) -> FailResult<Output> + Sync + Send,
+{
+    if use_rayon {
+        use ::rayon::prelude::*;
+        let get_meta = meta.sendable();
+        inputs.into_par_iter()
+            .map(|x| compute(&mut pot.one_off(), get_meta(), x))
+            .collect()
+    } else {
+        // save the cost of repeated DiffFn initialization since we don't need Send.
+        let mut diff_fn = pot.initialize_diff_fn(coords_for_initialize, meta.clone())?;
+        inputs.into_iter()
+            .map(|x| compute(&mut diff_fn, meta.clone(), x))
+            .collect()
+    }
+}
 
 //-----------------------------------
 
