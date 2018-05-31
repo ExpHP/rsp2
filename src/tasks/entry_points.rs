@@ -18,7 +18,7 @@ where F: FnOnce(SetGlobalLogfile) -> FailResult<()>,
         check_for_deps()?;
         main(logfile)
     };
-    
+
     wrapped().unwrap_or_else(|e| {
         for cause in e.causes() {
             error!("{}", cause);

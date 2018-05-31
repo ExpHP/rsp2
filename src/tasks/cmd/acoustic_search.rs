@@ -167,7 +167,7 @@ pub(crate) fn perform_acoustic_search(
         let ddot = vdot(&d_grad_l, &d_grad_r);
         trace!("Examining mode {} ({:.7}) (ddot = {:.6})...", i + 1, eigenvalues[i], ddot);
         match ddot {
-            dot if f64::abs(dot - 1.0) < 1e-3 => panic!("bad unit vector dot"),
+            dot if f64::abs(dot - 1.0) > 1e-3 => panic!("bad unit vector dot"),
             dot if dot <= -rotational_fdot_threshold => {
                 kinds[i] = Some(ModeKind::Rotational);
                 rotational_count += 1;

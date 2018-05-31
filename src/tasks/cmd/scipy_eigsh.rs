@@ -38,6 +38,7 @@ use ::math::basis::{Basis3, Ket3};
 
 use ::slice_of_array::prelude::*;
 
+use ::rsp2_fs_util::TempDir;
 use ::std::process;
 
 // Conversion factor phonopy uses to scale the eigenvalues to THz angular momentum.
@@ -201,7 +202,7 @@ pub struct ScipyAvailabilityError;
 fn call_script_and_check_success<E: ::failure::Fail>(
     script: &'static str,
     error: E,
-) -> FailResult<()>
+) -> FailResult<TempDir>
 {Ok({
     use ::std::process::Stdio;
 
