@@ -25,7 +25,7 @@ pub(crate) mod python;
 use ::{FailResult, FailOk};
 use ::rsp2_tasks_config::{self as cfg, Settings, NormalizationMode, SupercellSpec};
 use ::traits::{AsPath};
-use ::phonopy::{DirWithBands, DirWithDisps, DirWithForces, DirWithSymmetry};
+use ::phonopy::{DirWithBands, DirWithDisps, DirWithForces};
 
 use ::traits::{Load, Save};
 use ::meta::prelude::*;
@@ -335,7 +335,8 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
         let coords = &stored.coords;
         let meta = stored.meta();
 
-        let frac_ops = phonopy.symmetry(coords, meta.sift())?.frac_ops()?;
+        let disp_dir = phonopy.displacements(coords, meta.sift())?;
+        let frac_ops = disp_dir.symmetry()?;
         let cart_rots: Vec<M33> = {
             frac_ops.iter()
                 .map(|oper| oper.to_rot().cart(&coords.lattice()))
@@ -344,7 +345,7 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
 
         let ::phonopy::Rsp2StyleDisplacements {
             super_coords, sc, prim_displacements, ..
-        } = phonopy.displacements(coords, meta.sift())?.rsp2_style_displacements()?;
+        } = disp_dir.rsp2_style_displacements()?;
 
         let space_group_deperms: Vec<_> = {
             ::rsp2_structure::find_perm::of_spacegroup_for_general(
@@ -904,7 +905,6 @@ impl TrialDir {
 pub(crate) fn run_dynmat_test(phonopy_dir: &PathDir) -> FailResult<()>
 {Ok({
     // Make a supercell, and determine how our ordering of the supercell differs from phonopy.
-    let symmetry_dir = DirWithSymmetry::from_existing(phonopy_dir)?;
     let forces_dir = DirWithForces::from_existing(phonopy_dir)?;
     let disp_dir = DirWithDisps::from_existing(phonopy_dir)?;
     let ::phonopy::Rsp2StyleDisplacements {
@@ -912,7 +912,7 @@ pub(crate) fn run_dynmat_test(phonopy_dir: &PathDir) -> FailResult<()>
     } = disp_dir.rsp2_style_displacements()?;
 
     let (prim_coords, prim_meta) = disp_dir.primitive_structure()?;
-    let space_group = symmetry_dir.frac_ops()?;
+    let space_group = disp_dir.symmetry()?;
     let prim_lattice = prim_coords.lattice().clone();
 
     let space_group_deperms: Vec<_> = {

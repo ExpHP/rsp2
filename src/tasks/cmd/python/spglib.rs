@@ -37,12 +37,10 @@ pub struct SpglibAvailabilityError;
 //-------------------------------------------------------------------------------
 
 impl SpgDataset {
-    pub fn compute(coords: &Coords, meta: HList1<Rc<[Element]>>, symprec: f64) -> FailResult<Self> {
+    pub fn compute(coords: &Coords, types: &[u32], symprec: f64) -> FailResult<Self> {
         let mut coords = coords.clone();
         coords.ensure_fracs();
-
-        let elements: Rc<[Element]> = meta.pick();
-        let types = elements.iter().map(|e| e.atomic_number()).collect();
+        let types = types.to_vec();
 
         let input = Input { coords, types, symprec };
         call_script_and_communicate(PY_CALL_SPGLIB, &input)

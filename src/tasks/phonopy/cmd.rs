@@ -72,9 +72,7 @@ const FNAME_SETTINGS_ARGS: &'static str = "disp.args";
 const FNAME_HELPER_SCRIPT: &'static str = "phonopy";
 const FNAME_CONF_DISPS: &'static str = "disp.conf";
 const FNAME_CONF_BANDS: &'static str = "band.conf";
-#[allow(unused)]
 const FNAME_CONF_SYMMETRY: &'static str = "phonopy.conf";
-#[allow(unused)]
 const FNAME_OUT_SYMMETRY: &'static str = "symmetry.yaml";
 
 impl Builder {
@@ -188,8 +186,8 @@ phonopy \
 "#, FNAME_SETTINGS_ARGS).as_bytes())?;
             }
 
-            trace!("Calling phonopy for displacements...");
             {
+                trace!("Calling phonopy for displacements...");
                 let mut command = Command::new("phonopy");
                 command
                     .args(&extra_args.0)
@@ -199,153 +197,40 @@ phonopy \
 
                 log_stdio_and_wait(command, None)?;
             }
-        };
 
-        DirWithDisps::from_existing(dir)?
-    })}
-
-    #[allow(unused)]
-    pub fn symmetry(
-        &self,
-        coords: &Coords,
-        meta: HList2<
-            Rc<[Element]>,
-            Rc<[Mass]>,
-        >,
-    ) -> FailResult<DirWithSymmetry<TempDir>>
-    {
-        // NOTE: not actually sure whether it's worth having this depend
-        //       on mass. (suppose you were to have a bunch of gold atoms,
-        //       one of which has a different mass. Would phonopy realize
-        //       that this atom should not be symmetric with any other?)
-        self.finalize_config(meta.sift())
-            ._symmetry(coords, meta.sift())
-    }
-
-    fn _symmetry(
-        &self,
-        coords: &Coords,
-        meta: HList1<
-            Rc<[Element]>,
-        >,
-    ) -> FailResult<DirWithSymmetry<TempDir>>
-    {
-        let tmp = TempDir::new("rsp2")?;
-        {
-            let tmp = tmp.path();
-            trace!("Entered '{}'...", tmp.display());
-
-            self.conf.save(tmp.join(FNAME_CONF_SYMMETRY))?;
-
-            Poscar {
-                comment: "cell checked for symmetry", coords, elements: meta.pick(),
-            }.save(tmp.join("POSCAR"))?;
-
-            trace!("Calling phonopy for symmetry...");
-            check_status(Command::new("phonopy")
-                .args(self.args_from_settings().0)
-                .arg(FNAME_CONF_SYMMETRY)
-                .arg("--sym")
-                .current_dir(&tmp)
-                .stdout(create(tmp.join(FNAME_OUT_SYMMETRY))?)
-                .status()?)?;
-
-            trace!("Done calling phonopy");
-
-            // check if input structure was primitive;
-            // this is a hard requirement due to the integer representation of FracOp.
             {
-                let Poscar { coords: prim, .. } = Poscar::load(tmp.join("PPOSCAR"))?;
+                trace!("Producing {}...", FNAME_OUT_SYMMETRY);
+                let mut command = Command::new("phonopy");
+                command
+                    .args(&extra_args.0)
+                    .arg(FNAME_CONF_DISPS)
+                    .arg("--sym")
+                    .current_dir(&dir)
+                    .stdout(create(dir.join(FNAME_OUT_SYMMETRY))?);
+
+                check_status(command.status()?)?;
+
+                //---------------------------
+                // NOTE: Even though integer-based FracTrans is gone, this limitation is
+                //       still necessary because we're only capable of hashing the rotations
+                //       when using GroupTree. (meaning they must be unique, meaning there
+                //       must be no pure translations)
+                //       (though maybe it would be better to check for pure translations *there*,
+                //        rather than checking PPOSCAR *here*)
+                //---------------------------
+                //
+                // check if input structure was primitive
+                let Poscar { coords: prim, .. } = Poscar::load(dir.join("PPOSCAR"))?;
 
                 let ratio = coords.lattice().volume() / prim.lattice().volume();
                 let ratio = round_checked(ratio, 1e-4)?;
 
-                // sorry, supercells are just not supported... yet.
-                //
-                // (In the future we may be able to instead return an object
-                //  which will allow the spacegroup operators of the primitive
-                //  to be applied in meaningful ways to the superstructure.)
                 ensure!(ratio == 1, "attempted to compute symmetry of a supercell");
             }
-        }
-        DirWithSymmetry::from_existing(tmp)
-    }
-}
+        };
 
-/// Represents a directory with the following data:
-/// - `POSCAR`: The input structure
-/// - `PPOSCAR`: Phonopy's "primitive cell", created by `phonopy --sym`
-/// - `symmetry.yaml`: Stdout of `phonopy --sym`
-///
-/// # Note
-///
-/// Currently, the implementation is rather optimistic that files in
-/// the directory have not been tampered with since its creation.
-/// As a result, some circumstances which probably should return `Error`
-/// may instead cause a panic, or may not be detected as early as possible.
-#[derive(Debug, Clone)]
-pub struct DirWithSymmetry<P: AsPath> {
-    pub(crate) dir: P,
-}
-
-impl<P: AsPath> DirWithSymmetry<P> {
-    pub fn from_existing(dir: P) -> FailResult<Self>
-    {Ok({
-        for name in &[
-            "POSCAR",
-            "PPOSCAR",
-            FNAME_OUT_SYMMETRY,
-        ] {
-            let path = dir.as_path().join(name);
-            if !path.exists() {
-                throw!(MissingFileError::new("DirWithSymmetry", &dir, name.to_string()));
-            }
-        }
-        DirWithSymmetry { dir }
+        DirWithDisps::from_existing(dir)?
     })}
-
-    /// Input structure. (the one you provided while creating this)
-    #[allow(unused)]
-    pub fn structure(&self) -> FailResult<(Coords, HList1<Rc<[Element]>>)>
-    {
-        // we don't save disp.conf here
-        //read_input_structure_with_mass(self)
-        let Poscar { coords, elements, .. } = Poscar::load(self.path().join("POSCAR"))?;
-        Ok((coords, hlist![elements.into()]))
-    }
-
-    /// Read PPOSCAR.
-    #[allow(unused)]
-    pub fn phonopy_primitive_structure(&self) -> FailResult<(Coords, HList1<Rc<[Element]>>)>
-    {
-        let Poscar { coords, elements, .. } = Poscar::load(self.path().join("PPOSCAR"))?;
-        Ok((coords, hlist![elements.into()]))
-    }
-
-    fn symmetry_yaml(&self) -> FailResult<SymmetryYaml>
-    { Ok(SymmetryYaml::load(self.path().join(FNAME_OUT_SYMMETRY))?) }
-
-    /// Return FracOps in fractional units of the input structure.
-    pub fn frac_ops(&self) -> FailResult<Vec<FracOp>>
-    {
-        self.symmetry_yaml()?
-            .space_group_operations
-            .into_iter()
-            .map(|op| Ok({
-                let rot = FracRot::new(&op.rotation);
-                let trans = {
-                    unimplemented!("FIXME: make FracTrans floating point")
-//                    FracTrans::from_floats(op.translation)
-//                        .with_context(|e| format!("\
-//                            spglib gave garbage translations. You should try decreasing \
-//                            the symmetry tolerance. ({})", e))?
-                };
-                // as far as I can tell, the fractional operators given by --symmetry are,
-                // in fact, in units of input structure lattice. We can just return them as is.
-                FracOp::new(&rot, &trans)
-            }))
-            .collect()
-    }
 }
 
 /// Represents a directory with the following data:
@@ -353,6 +238,8 @@ impl<P: AsPath> DirWithSymmetry<P> {
 /// - `disp.yaml`: Phonopy file with displacements
 /// - configuration settings which impact the selection of displacements
 ///   - `--tol`, `--dim`
+/// - `symmetry.yaml`: Output of `phonopy --sym`, currently present
+///   only for validation purposes. (we use spglib)
 ///
 /// Generally, the next step is to supply the force sets, turning this
 /// into a DirWithForces.
@@ -381,6 +268,7 @@ impl<P: AsPath> DirWithDisps<P> {
             "disp.yaml",
             FNAME_CONF_DISPS,
             FNAME_SETTINGS_ARGS,
+            FNAME_OUT_SYMMETRY,
         ] {
             let path = dir.as_path().join(name);
             if !path.exists() {
@@ -499,6 +387,57 @@ impl<P: AsPath> DirWithDisps<P> {
             forces,
         )?;
     })}
+
+    /// Gets the spacegroup operators.
+    pub fn symmetry(&self) -> FailResult<Vec<FracOp>>
+    {
+        use cmd::python::SpgDataset;
+
+        // phonopy prints symmetry.yaml at too little precision.
+        // Use spglib.
+        let (coords, meta) = self.primitive_structure()?;
+
+        // (this deliberately does not accomodate things such as differing masses
+        //  for the same element ("false masses"), because phonopy does not.)
+        let elements: Rc<[Element]> = meta.pick();
+        let types: Vec<_> = elements.iter().map(|e| e.atomic_number()).collect();
+
+        let symprec = self._symmetry_precision()?;
+        let dataset = SpgDataset::compute(&coords, &types, symprec)?;
+
+        // This is... yeah.
+        let phonopy_sg = self._phonopy_sg_number()?;
+        ensure!(
+            dataset.space_group_number == phonopy_sg,
+            "(BUG in rsp2) spglib found a different spacegroup than phonopy! \
+            This must mean rsp2 supplied the wrong input.");
+
+        unimplemented!("get float sg ops")
+    }
+
+    fn _symmetry_precision(&self) -> FailResult<f64>
+    {Ok({
+        // FIXME (I never intended for rsp2 to be parsing this file
+        //        to recover configuration settings!)
+        let args = Args::load(self.join(FNAME_SETTINGS_ARGS))?;
+        ensure!(
+            &args.0[0] == "--tolerance", "unexpected in {}: {:?}",
+            FNAME_SETTINGS_ARGS,
+            args.0[0],
+        );
+        args.0[1].parse::<f64>()
+            .with_context(|e| format!("could not parse tolerance: {}", e))?
+    })}
+
+    // Although we ultimately use `spglib` (since it gives fuller precision for
+    // the translations), the intent is still to get the spacegroup used *by phonopy*
+    // (as otherwise we might end up with e.g. underdetermined force constants)
+    //
+    // So we call `phonopy --sym` for the sole purpose of validating that the spacegroup
+    // returned is the same. This could fail if our method of assigning integer atom types
+    // differed from phonopy (e.g. are masses checked?).
+    fn _phonopy_sg_number(&self) -> FailResult<u32>
+    { Ok(SymmetryYaml::load(self.join(FNAME_OUT_SYMMETRY))?.space_group_number) }
 }
 
 /// Like Gramma used to make.
@@ -1020,12 +959,6 @@ pub fn copy_or_link(src: impl AsPath, dest: impl AsPath) -> FailResult<()>
 }
 
 //-----------------------------
-
-impl_dirlike_boilerplate!{
-    type: {DirWithSymmetry<_>}
-    member: self.dir
-    other_members: []
-}
 
 impl_dirlike_boilerplate!{
     type: {DirWithDisps<_>}
