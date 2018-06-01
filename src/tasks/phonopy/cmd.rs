@@ -43,6 +43,7 @@ use ::rsp2_array_types::{V3, Unvee};
 
 use ::slice_of_array::prelude::*;
 use ::itertools::Itertools;
+use ::failure::ResultExt;
 
 const THZ_TO_WAVENUMBER: f64 = 33.35641;
 
@@ -304,6 +305,7 @@ impl<P: AsPath> DirWithSymmetry<P> {
     })}
 
     /// Input structure. (the one you provided while creating this)
+    #[allow(unused)]
     pub fn structure(&self) -> FailResult<(Coords, HList1<Rc<[Element]>>)>
     {
         // we don't save disp.conf here
@@ -313,6 +315,7 @@ impl<P: AsPath> DirWithSymmetry<P> {
     }
 
     /// Read PPOSCAR.
+    #[allow(unused)]
     pub fn phonopy_primitive_structure(&self) -> FailResult<(Coords, HList1<Rc<[Element]>>)>
     {
         let Poscar { coords, elements, .. } = Poscar::load(self.path().join("PPOSCAR"))?;
@@ -325,33 +328,21 @@ impl<P: AsPath> DirWithSymmetry<P> {
     /// Return FracOps in fractional units of the input structure.
     pub fn frac_ops(&self) -> FailResult<Vec<FracOp>>
     {
-        let lattice = self.structure()?.0.lattice().clone();
-        let phonopy_lattice = self.phonopy_primitive_structure()?.0.lattice().clone();
-
         self.symmetry_yaml()?
             .space_group_operations
             .into_iter()
             .map(|op| Ok({
                 let rot = FracRot::new(&op.rotation);
-                let trans = FracTrans::from_floats(op.translation).expect("BUG!");
-                let phonopy_op = FracOp::new(&rot, &trans);
-
-                // convert from primitive cell chosen by phonopy to our primitive cell.
-                let rot = FracRot::from_cart(&lattice, &rot.cart(&phonopy_lattice))?;
-                let trans = FracTrans::from_cart(&lattice, trans.cart(&phonopy_lattice))?;
-                let our_op = FracOp::new(&rot, &trans);
-
-                if phonopy_op != our_op {
-                    warn_once!("\
-                        It looks like Phonopy chose a different primitive cell in PPOSCAR than \
-                        the one you wrote.  rsp2 has adjusted the symmetry operators assuming \
-                        that the operators output by phonopy were for the PPOSCAR cell \
-                        (and also assuming that phonopy did not rotate the structure), \
-                        but since this case has never come up for the author, this conversion is \
-                        not well-tested.\
-                    ");
-                }
-                our_op
+                let trans = {
+                    unimplemented!("FIXME: make FracTrans floating point")
+//                    FracTrans::from_floats(op.translation)
+//                        .with_context(|e| format!("\
+//                            spglib gave garbage translations. You should try decreasing \
+//                            the symmetry tolerance. ({})", e))?
+                };
+                // as far as I can tell, the fractional operators given by --symmetry are,
+                // in fact, in units of input structure lattice. We can just return them as is.
+                FracOp::new(&rot, &trans)
             }))
             .collect()
     }
@@ -966,8 +957,8 @@ pub(crate) fn log_stdio_and_wait(
         child.stdin.take().unwrap().write_all(text.as_bytes())?;
     }
 
-    let stdout_worker = ::stdout::log_worker(child.stdout.take().unwrap());
-    let stderr_worker = ::stderr::log_worker(child.stderr.take().unwrap());
+    let stdout_worker = ::stdout::spawn_log_worker(child.stdout.take().unwrap());
+    let stderr_worker = ::stderr::spawn_log_worker(child.stderr.take().unwrap());
 
     check_status(child.wait()?)?;
 

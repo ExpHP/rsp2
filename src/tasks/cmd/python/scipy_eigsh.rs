@@ -37,9 +37,7 @@ use ::FailResult;
 use ::math::basis::{Basis3, Ket3};
 
 use ::slice_of_array::prelude::*;
-
-use ::rsp2_fs_util::TempDir;
-use ::std::process;
+use super::{call_script_and_communicate};
 
 // Conversion factor phonopy uses to scale the eigenvalues to THz angular momentum.
 //    = sqrt(eV/amu)/angstrom/(2*pi)/THz
@@ -48,66 +46,14 @@ const SQRT_EIGENVALUE_TO_THZ: f64 = 15.6333043006705;
 const THZ_TO_WAVENUMBER: f64 = 33.3564095198152;
 const SQRT_EIGENVALUE_TO_WAVENUMBER: f64 = SQRT_EIGENVALUE_TO_THZ * THZ_TO_WAVENUMBER;
 
-const PY_NOOP: &'static str = indoc!(r#"
-    #!/usr/bin/env python3
-"#);
-
-const PY_CHECK_SCIPY_AVAILABILITY: &'static str = indoc!(r#"
+pub(super) const PY_CHECK_SCIPY_AVAILABILITY: &'static str = indoc!(r#"
     #!/usr/bin/env python3
     import numpy as np
     import scipy.sparse
     import scipy.sparse.linalg as spla
 "#);
 
-const PY_CALL_EIGSH: &'static str = indoc!(r#"
-    #!/usr/bin/env python3
-
-    import json
-    import sys
-    import numpy as np
-    import scipy.sparse
-    import scipy.sparse.linalg as spla
-
-    import time
-
-    # (you can add calls to this if you want to do some "println profiling".
-    #  rsp2 will timestamp the lines as they are received)
-    def info(s):
-        print(s, file=sys.stderr); sys.stderr.flush(); time.sleep(0)
-
-    d = json.load(sys.stdin)
-    kw = d.pop('kw')
-    m = d.pop('matrix')
-    assert not d
-
-    data = np.array(m['complex-blocks'])
-
-    assert data.shape[1] == 2
-
-    # scipy will use eigs for dtype=complex even if imag is all zero.
-    # Unfortunately this leads to small but nonzero imaginary components
-    # appearing in the output eigenkets at gamma.
-    # Hence we force dtype=float when possible.
-    if np.absolute(data[:, 1]).max() == 0:
-        data = data[:, 0] * 1.0
-    else:
-        data = data[:, 0] + 1.0j * data[:, 1]
-
-    assert data.ndim == 3
-    assert data.shape[1] == data.shape[2] == 3
-    m = scipy.sparse.bsr_matrix(
-        (data, m['col'], m['row-ptr']),
-        shape=tuple(3*x for x in m['dim']),
-    ).tocsc()
-
-    (vals, vecs) = scipy.sparse.linalg.eigsh(m, **kw)
-
-    real = vecs.real.T.tolist()
-    imag = vecs.imag.T.tolist()
-    vals = vals.tolist()
-    json.dump((vals, (real, imag)), sys.stdout)
-    print()
-"#);
+const PY_CALL_EIGSH: &'static str = include_str!("call-eigsh.py");
 
 #[derive(Serialize)]
 struct Input {
@@ -163,12 +109,6 @@ struct PyKw {
 //-------------------------------------------------------------------------------
 // calling scripts
 
-pub fn check_scipy_availability() -> FailResult<()> {
-    call_script_and_check_success(PY_NOOP, PythonExecutionError)?;
-    call_script_and_check_success(PY_CHECK_SCIPY_AVAILABILITY, ScipyAvailabilityError)?;
-    Ok(())
-}
-
 // Returns:
 // - frequencies (not eigenvalues)
 // - eigenvectors
@@ -192,84 +132,8 @@ fn call_eigsh(input: &Input) -> FailResult<(Vec<f64>, Basis3)> {
 }
 
 #[derive(Debug, Fail)]
-#[fail(display = "an error occurred running the most trivial python script")]
-pub struct PythonExecutionError;
-
-#[derive(Debug, Fail)]
 #[fail(display = "an error occurred importing numpy and scipy")]
 pub struct ScipyAvailabilityError;
-
-fn call_script_and_check_success<E: ::failure::Fail>(
-    script: &'static str,
-    error: E,
-) -> FailResult<TempDir>
-{Ok({
-    use ::std::process::Stdio;
-
-    let tmp = ::rsp2_fs_util::TempDir::new("rsp2")?;
-    let path = tmp.path().join("script.py");
-
-    ::std::fs::write(&path, script)?;
-
-    let mut cmd = process::Command::new("python3");
-    cmd.arg(path);
-
-    cmd.stdout(Stdio::piped());
-    cmd.stderr(Stdio::piped());
-    let mut child = cmd.spawn()?;
-    let child_stdout = child.stdout.take().unwrap();
-    let child_stderr = child.stderr.take().unwrap();
-
-    let stdout_worker = ::stdout::log_worker(child_stdout);
-    let stderr_worker = ::stderr::log_worker(child_stderr);
-
-    if !child.wait()?.success() {
-        throw!(error);
-    }
-
-    let _ = stdout_worker.join();
-    let _ = stderr_worker.join();
-})}
-
-fn call_script_and_communicate<In, Out>(
-    script: &'static str,
-    stdin_data: &In,
-) -> FailResult<Out>
-where
-    In: ::serde::Serialize,
-    Out: for<'de> ::serde::Deserialize<'de>,
-{Ok({
-    use ::std::process::Stdio;
-
-    let tmp = ::rsp2_fs_util::TempDir::new("rsp2")?;
-    let path = tmp.path().join("script.py");
-
-    ::std::fs::write(&path, script)?;
-
-    let mut cmd = process::Command::new("python3");
-    cmd.arg(path);
-    cmd.stdin(Stdio::piped());
-    cmd.stdout(Stdio::piped());
-    cmd.stderr(Stdio::piped());
-
-    let mut child = cmd.spawn()?;
-    let child_stdin = child.stdin.take().unwrap();
-    let child_stdout = child.stdout.take().unwrap();
-    let child_stderr = child.stderr.take().unwrap();
-
-    let stderr_worker = ::stderr::log_worker(child_stderr);
-
-    ::serde_json::to_writer(child_stdin, stdin_data)?;
-    let stdout = ::serde_json::from_reader(child_stdout)?;
-
-    if !child.wait()?.success() {
-        bail!("an error occurred in a python script");
-    }
-
-    let _ = stderr_worker.join();
-
-    stdout
-})}
 
 //-------------------------------------------------------------------------------
 

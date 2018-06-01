@@ -20,8 +20,7 @@ mod relaxation;
 mod acoustic_search;
 mod param_optimization;
 
-pub(crate) use self::scipy_eigsh::check_scipy_availability;
-mod scipy_eigsh;
+pub(crate) mod python;
 
 use ::{FailResult, FailOk};
 use ::rsp2_tasks_config::{self as cfg, Settings, NormalizationMode, SupercellSpec};

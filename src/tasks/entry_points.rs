@@ -129,7 +129,7 @@ impl OptionalFileType {
 }
 
 fn check_for_deps() -> FailResult<()> {
-    ::cmd::check_scipy_availability()?;
+    ::cmd::python::check_availability()?;
 
     if ::std::env::var_os("LAMMPS_POTENTIALS").is_none() {
         bail!("rsp2 requires you to set the LAMMPS_POTENTIALS environment variable.");

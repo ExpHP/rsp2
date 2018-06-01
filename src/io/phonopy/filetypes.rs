@@ -138,7 +138,16 @@ pub mod conf {
 pub mod symmetry_yaml {
     use super::*;
 
-    /// Spacegroup operator from disp.yaml
+    /// Spacegroup operator from `disp.yaml`.
+    ///
+    /// Properties, as far as I can tell (I have not found actual documentation yet):
+    ///
+    /// * Expressed in fractional units of the **input structure.** (not of `PPOSCAR`
+    ///   or of `BPOSCAR`).
+    /// * If the input structure was a supercell, then **pure translations will be included.**
+    /// * Rotation is in a **coordinate-major layout** (as opposed to vector-major).
+    ///   Alternatively, one might say that, if each inner list were regarded as a row vector,
+    ///   you would have the matrix that operates on column vectors. (and vice versa)
     #[derive(Deserialize)]
     pub struct Operation {
         pub rotation: M33<i32>,

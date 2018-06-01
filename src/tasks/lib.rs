@@ -99,12 +99,18 @@ mod errors {
 /// It marks a child process's stdout.
 mod stdout {
     use ::FailResult;
-    use std::{process, thread, io::{BufReader, BufRead}};
+    use ::std::{process::ChildStdout, thread, io::{BufReader, BufRead}};
+    use ::log::LogLevel;
+
+    const LEVEL: LogLevel = LogLevel::Info;
 
     pub fn log(s: &str)
-    { info!("{}", s) }
+    { log!(LEVEL, "{}", s) }
 
-    pub fn log_worker(stdout: process::ChildStdout) -> thread::JoinHandle<FailResult<()>> {
+    pub fn is_log_enabled() -> bool
+    { log_enabled!(LEVEL) }
+
+    pub fn spawn_log_worker(stdout: ChildStdout) -> thread::JoinHandle<FailResult<()>> {
         let f = BufReader::new(stdout);
         thread::spawn(move || -> ::FailResult<()> {Ok({
             for line in f.lines() {
@@ -118,12 +124,18 @@ mod stdout {
 /// It marks a child process's stderr.
 mod stderr {
     use ::FailResult;
-    use std::{process, thread, io::{BufReader, BufRead}};
+    use ::std::{process::ChildStderr, thread, io::{BufReader, BufRead}};
+    use ::log::LogLevel;
+
+    const LEVEL: LogLevel = LogLevel::Warn;
 
     pub fn log(s: &str)
-    { warn!("{}", s) }
+    { log!(LEVEL, "{}", s) }
 
-    pub fn log_worker(stderr: process::ChildStderr) -> thread::JoinHandle<FailResult<()>> {
+    pub fn is_log_enabled() -> bool
+    { log_enabled!(LEVEL) }
+
+    pub fn spawn_log_worker(stderr: ChildStderr) -> thread::JoinHandle<FailResult<()>> {
         let f = BufReader::new(stderr);
         thread::spawn(move || -> ::FailResult<()> {Ok({
             for line in f.lines() {
