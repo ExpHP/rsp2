@@ -14,7 +14,7 @@
 //! things was the biggest limitation of the previous API, which never
 //! exposed its own temporary directories.
 
-use ::FailResult;
+use ::{FailOk, FailResult};
 use ::{IoResult};
 
 use super::{MissingFileError, PhonopyFailed};
@@ -150,7 +150,7 @@ impl Builder {
     {Ok({
         let elements: Rc<[Element]> = meta.pick();
         let dir = TempDir::new("rsp2")?;
-        {
+        let dir = dir.try_with_recovery(|dir| FailOk({
             let dir = dir.path();
             trace!("Displacement dir: '{}'...", dir.display());
 
@@ -227,7 +227,7 @@ phonopy \
 
                 ensure!(ratio == 1, "attempted to compute symmetry of a supercell");
             }
-        };
+        }))?.0; // let dir = dir.try_with_recovery(...)
 
         DirWithDisps::from_existing(dir)?
     })}
@@ -639,8 +639,7 @@ impl<'moveck, 'p, P: AsPath> BandsBuilder<'moveck, 'p, P> {
     {Ok({
         let dir = TempDir::new("rsp2")?;
 
-        // scope to temporarily shadow `dir` with a &Path, which is easier to work with.
-        {
+        let dir = dir.try_with_recovery(|dir| FailOk({
             let src = self.dir_with_forces.as_path();
             let dir = dir.as_path();
 
@@ -727,7 +726,7 @@ import os; os.unlink('band.hdf5')
             if self.dir_with_forces.cache_force_constants {
                 cache_link(dir.join(fc_filename), src.join(fc_filename))?;
             }
-        } // end of scope that borrows dir
+        }))?.0; // let dir = try_with_recovery(...)
 
         DirWithBands::from_existing(dir)?
     })}

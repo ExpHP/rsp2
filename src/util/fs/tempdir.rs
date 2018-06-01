@@ -25,6 +25,23 @@ impl TempDir {
     pub fn path(&self) -> &Path { self.0.as_ref().unwrap().path() }
     pub fn into_path(mut self) -> PathBuf { self.0.take().unwrap().into_path() }
     pub fn close(mut self) -> IoResult<()> { self.0.take().unwrap().close() }
+
+    /// Recover the tempdir, as if we were unwinding.
+    pub fn recover(mut self) { self._recover(); }
+
+    /// Recover the tempdir if a closure returns Err.
+    pub fn try_with_recovery<B, E>(
+        self,
+        f: impl FnOnce(&TempDir) -> Result<B, E>,
+    ) -> Result<(TempDir, B), E> {
+        match f(&self) {
+            Ok(x) => Ok((self, x)),
+            Err(e) => {
+                self.recover();
+                Err(e)
+            }
+        }
+    }
 }
 
 impl AsRef<Path> for TempDir {
@@ -35,56 +52,62 @@ impl AsRef<Path> for TempDir {
 impl Drop for TempDir {
     fn drop(&mut self) {
         if ::std::thread::panicking() {
-            let temp = match self.0.take() {
-                Some(temp) => temp.into_path(),
-                None => {
-                    error!("A TempDir was double-dropped during panic");
+            self._recover();
+        }
+    }
+}
+
+impl TempDir {
+    fn _recover(&mut self) {
+        let temp = match self.0.take() {
+            Some(temp) => temp.into_path(),
+            None => {
+                error!("A TempDir was double-dropped during panic");
+                return; // avoid double-panic
+            },
+        };
+        let temp: &Path = temp.as_ref();
+
+        // Either move the directory to a user-specified location
+        // or else leak it in its current location.
+
+        let dest = match non_empty_env("RSP2_SAVETEMP") {
+            None => {
+                info!("successfully leaked tempdir at {}", temp.display());
+                return;
+            },
+            Some(env_dest) => match ::std::env::current_dir() {
+                Err(e) => {
+                    warn!("could not read current directory during panic: {}", e);
                     return; // avoid double-panic
                 },
-            };
-            let temp: &Path = temp.as_ref();
+                Ok(cwd) => cwd.join(env_dest),
+            },
+        };
+        let dest: &Path = dest.as_ref();
 
-            // Either move the directory to a user-specified location
-            // or else leak it in its current location.
+        let name = match temp.file_name() {
+            None => {
+                warn!("could not gettemp dir name during panic");
+                return; // avoid double-panic
+            },
+            Some(path) => path,
+        };
 
-            let dest = match non_empty_env("RSP2_SAVETEMP") {
-                None => {
-                    info!("successfully leaked tempdir at {}", temp.display());
-                    return;
-                },
-                Some(env_dest) => match ::std::env::current_dir() {
-                    Err(e) => {
-                        warn!("could not read current directory during panic: {}", e);
-                        return; // avoid double-panic
-                    },
-                    Ok(cwd) => cwd.join(env_dest),
-                },
-            };
-            let dest: &Path = dest.as_ref();
-
-            let name = match temp.file_name() {
-                None => {
-                    warn!("could not gettemp dir name during panic");
-                    return; // avoid double-panic
-                },
-                Some(path) => path,
-            };
-
-            // create $RSP2_SAVETEMP if it doesn't exist yet.
-            if let Err(e) = ::std::fs::create_dir(dest) {
-                if !dest.exists() {
-                    warn!("failed to create '{}' during panic: {}", dest.display(), e);
-                    return;
-                }
+        // create $RSP2_SAVETEMP if it doesn't exist yet.
+        if let Err(e) = ::std::fs::create_dir(dest) {
+            if !dest.exists() {
+                warn!("failed to create '{}' during panic: {}", dest.display(), e);
+                return;
             }
+        }
 
-            let dest_file = dest.join(name);
-            let dest_file: &Path = dest_file.as_ref();
+        let dest_file = dest.join(name);
+        let dest_file: &Path = dest_file.as_ref();
 
-            match ::mv(temp, dest_file) {
-                Err(e) => warn!("failed to move during panic: from '{}' to '{}': {}", temp.display(), dest_file.display(), e),
-                Ok(_) => info!("recovered tempdir during panic: {}", dest_file.display()),
-            }
+        match ::mv(temp, dest_file) {
+            Err(e) => warn!("failed to move during panic: from '{}' to '{}': {}", temp.display(), dest_file.display(), e),
+            Ok(_) => info!("recovered tempdir during panic: {}", dest_file.display()),
         }
     }
 }
