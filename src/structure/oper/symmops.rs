@@ -195,6 +195,27 @@ impl IntRot {
     // transposed float matrix
     pub(crate) fn frac_t(&self) -> M33
     { self.t.map(Into::into) }
+
+    /// Recover a cartesian operation with zero translation, assuming that
+    /// the the operator is expressed in units of the given lattice.
+    ///
+    /// To construct one with a cartesian translation, follow up with `.then_translate()`.
+    /// To construct one with a fractional translation, use `.to_cart_op_with_frac_trans()`.
+    ///
+    /// This conversion requires the same primitive lattice that was used to compute this
+    /// symmetry operator.
+    pub fn to_cart_op(&self, lattice: &Lattice) -> CartOp
+    { CartOp {
+        rot_t: self.cart_t(lattice),
+        trans: V3::zero(),
+    }}
+
+    /// This helper is provided because otherwise all possible methods of doing this
+    /// require naming the lattice twice.
+    ///
+    /// Enjoy the long name, sucker.
+    pub fn to_cart_op_with_frac_trans(&self, trans: V3, lattice: &Lattice) -> CartOp
+    { self.to_cart_op(lattice).then_translate(trans * lattice) }
 }
 
 fn frac_t_from_cart_t(lattice: &Lattice, cart_t: M33) -> M33
@@ -381,6 +402,11 @@ impl<'a> From<&'a [[i32; 3]; 3]> for IntRot {
     { IntRot::new(&mat::from_array(*m)) }
 }
 
+impl From<[[i32; 3]; 3]> for IntRot {
+    fn from(m: [[i32; 3]; 3]) -> Self
+    { IntRot::from(&m) }
+}
+
 impl FracTrans {
     pub fn transform_prim_mut(&self, fracs: &mut [V3])
     { ::util::translate_mut_n3_3(fracs, &self.float()) }
@@ -506,45 +532,22 @@ mod serde_impls {
 
     #[test]
     fn round_trip() {
-        let r = IntRot::from(&[
+        let rot = IntRot::from([
             [-1, 1, 0],
             [-1, 0, 0],
             [ 0, 0, 1],
         ]);
-        let t = FracTrans::from_floats(V3([0.0, 1.0/3.0, 1.0/6.0])).unwrap();
-        check_round_trip(&r);
-        check_round_trip(&t);
-        check_round_trip(&FracOp::new(&r, &t));
-    }
+        check_round_trip(&rot);
 
-    #[test]
-    #[should_panic(expected = "out of range")]
-    fn bad_trans() {
-        let _: FracTrans = ::serde_json::from_str("[0, -4, 0]").unwrap();
+        let lattice = super::tests::graphene_lattice();
+        let op = rot.to_cart_op(&lattice).then_translate(V3([0.6, 7.7777, -2.1]));
+        check_round_trip(&op);
     }
 
     #[test]
     #[should_panic(expected = "unimodular")]
     fn bad_rot() {
         let _: IntRot = ::serde_json::from_str("[[-1, 1, 0], [-2, 0, 0], [0, 0, 1]]").unwrap();
-    }
-
-    #[test]
-    #[should_panic(expected = "out of range")]
-    fn bad_trans_in_op() {
-        let _: FracOp = ::serde_json::from_str(r#"{
-            "rot": [[-1, 1, 0], [-1, 0, 0], [ 0, 0, 1]],
-            "trans": [0, -4, 0]
-        }"#).unwrap();
-    }
-
-    #[test]
-    #[should_panic(expected = "unimodular")]
-    fn bad_rot_in_op() {
-        let _: FracOp = ::serde_json::from_str(r#"{
-            "rot": [[-1, 1, 0], [-2, 0, 0], [ 0, 0, 1]],
-            "trans": [0, 3, 6]
-        }"#).unwrap();
     }
 }
 
@@ -553,6 +556,16 @@ mod serde_impls {
 mod tests {
     use super::*;
     use ::rsp2_array_types::{mat, Unvee, Envee};
+    use CoordsKind;
+
+    pub(super) fn graphene_lattice() -> Lattice {
+        let half_r3 = 0.5 * f64::sqrt(3.0);
+        Lattice::new(&(2.4 * &mat::from_array([
+            [ 1.0,     0.0, 0.0],
+            [-0.5, half_r3, 0.0],
+            [ 0.0,     0.0, 1.0],
+        ])))
+    }
 
     #[test]
     fn rot_transform()
@@ -568,8 +581,16 @@ mod tests {
         );
     }
 
+    fn check_cart_ops_close(a: CartOp, b: CartOp, lattice: &Lattice) {
+        assert_close!(rel=1e-14, a.cart_rot().unvee(), b.cart_rot().unvee());
+
+        let diff = (a.cart_trans() - b.cart_trans()) / lattice;
+        let diff = diff.map(|x| x - x.round());
+        assert!((diff * lattice).sqnorm() < 1e-14, "{}", (diff * lattice).sqnorm());
+    }
+
     #[test]
-    fn two_transform()
+    fn composition()
     {
         // two operations that don't commute
         let xy = IntRot::from(&[
@@ -588,51 +609,59 @@ mod tests {
             [0, 1, 0],
         ]);
         // a primitive structure that is sensitive to any permutations of the axes
-        let prim = vec![[1., 2., 3.]].envee();
+        let fracs = vec![[1., 2., 3.]].envee();
         assert_eq!(xy.then(&zx), xyzx);
         assert_eq!(zx.of(&xy), xyzx);
         assert_eq!(
-            zx.transform_fracs(&xy.transform_fracs(&prim)),
-            xyzx.transform_fracs(&prim),
+            zx.transform_fracs(&xy.transform_fracs(&fracs)),
+            xyzx.transform_fracs(&fracs),
         );
 
-        let t = FracTrans::eye();
-        let xy = FracOp::new(&xy, &t);
-        let zx = FracOp::new(&zx, &t);
-        let xyzx = FracOp::new(&xyzx, &t);
-        assert_eq!(xy.then(&zx), xyzx);
-        assert_eq!(zx.of(&xy), xyzx);
-        assert_eq!(
-            zx.transform_prim(&xy.transform_prim(&prim)),
-            xyzx.transform_prim(&prim),
+        let lattice = graphene_lattice();
+        let carts = CoordsKind::Fracs(fracs.clone()).to_carts(&lattice);
+
+        let xy = xy.to_cart_op_with_frac_trans(V3([0.01, 0.02, 0.03]) , &lattice);
+        let zx = zx.to_cart_op_with_frac_trans(V3([0.10, 0.20, 0.30]), &lattice);
+        let xyzx = xyzx.to_cart_op_with_frac_trans(V3([0.13, 0.22, 0.31]), &lattice);
+
+        check_cart_ops_close(xy.then(&zx), xyzx, &lattice);
+        check_cart_ops_close(zx.of(&xy), xyzx, &lattice);
+        assert_close!(
+            rel=1e-14,
+            zx.transform_fracs(&lattice, &xy.transform_fracs(&lattice, &fracs)).unvee(),
+            xyzx.transform_fracs(&lattice, &fracs).unvee(),
+        );
+        assert_close!(
+            rel=1e-14,
+            zx.transform_carts(&xy.transform_carts(&carts)).unvee(),
+            xyzx.transform_carts(&carts).unvee(),
         );
     }
 
     #[test]
     fn symmop_mul()
     {
-        let op = FracOp::new(
-            &IntRot::from(&[
-                [ 0,  1, 0],
-                [-1,  1, 0],
-                [ 0,  0, 1],
-            ]),
-            &FracTrans::from_floats(V3([1./3., 2./3., 0.0])).unwrap(),
-        );
-        let square = FracOp::new(
-            &IntRot::from(&[
-                [-1, 1, 0],
-                [-1, 0, 0],
-                [ 0, 0, 1],
-            ]),
-            &FracTrans::from_floats(V3([0., 0., 0.])).unwrap(),
-        );
+        let lattice = Lattice::eye();
+        let op_rot = IntRot::from(&[
+            [ 0,  1, 0],
+            [-1,  1, 0],
+            [ 0,  0, 1],
+        ]);
+        let op = op_rot.to_cart_op(&lattice).then_translate(V3([1./3., 2./3., 0.0]));
 
-        assert_eq!(op.then(&op), square);
+        let square_rot = IntRot::from(&[
+            [-1, 1, 0],
+            [-1, 0, 0],
+            [ 0, 0, 1],
+        ]);
+        let square = square_rot.to_cart_op(&lattice);
+
+        assert_eq!(op_rot.then(&op_rot), square_rot);
+        check_cart_ops_close(op.then(&op), square, &Lattice::eye());
     }
 
     #[test]
-    fn symmop_to_cart_from_cart()
+    fn int_rot_to_cart_from_cart()
     {
         // graphene lattice
         let half_r3 = 0.5 * f64::sqrt(3.0);
@@ -658,14 +687,13 @@ mod tests {
             [    0.0,      0.0, 1.0],
         ]);
 
-        // one with nonzero translation
+        // CartOp
         let rot = IntRot::from(&[
             [ 0, 1,  0],
             [-1, 1,  0],
             [ 0, 0, -1],
         ]);
-        let trans = FracTrans::from_floats(V3([-1./3., 1./3., 0.0])).unwrap();
-        assert_eq!(rot, IntRot::from_cart(&lattice, &rot.cart(&lattice)).unwrap());
-        assert_eq!(trans, FracTrans::from_cart(&lattice, trans.cart(&lattice)).unwrap());
+        let op = rot.to_cart_op_with_frac_trans(V3([-1./3., 1./3., 0.0]), &lattice);
+        assert_eq!(rot, IntRot::from_cart(&lattice, &op.cart_rot()).unwrap());
     }
 }
