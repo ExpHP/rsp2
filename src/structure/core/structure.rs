@@ -135,7 +135,8 @@ impl Coords {
     /// Replace the coordinates in the structure.
     ///
     /// # Panics
-    /// Panics if the length does not match.
+    /// Panics if the length does not match. (this restriction is a holdover from earlier
+    /// designs, but is now fairly arbitrary, and may be lifted in the future.)
     pub fn set_coords(&mut self, coords: CoordsKind) {
         assert_eq!(self.coords.len(), coords.len());
         self.coords = coords;
@@ -183,11 +184,10 @@ impl Coords {
 
 /// # Chainable modification
 impl Coords {
-    /// # Panics
-    /// Panics if the length does not match.
-    pub fn with_coords(mut self, coords: CoordsKind) -> Self { self.set_coords(coords); self }
-    pub fn with_carts(mut self, carts: Vec<V3>) -> Self { self.set_carts(carts); self }
-    pub fn with_fracs(mut self, fracs: Vec<V3>) -> Self { self.set_fracs(fracs); self }
+    /// Construct a new `Coords` with the same lattice.  Length need not match.
+    pub fn with_coords(&self, coords: CoordsKind) -> Self { Coords::new(self.lattice.clone(), coords) }
+    pub fn with_carts(&self, carts: Vec<V3>) -> Self { self.with_coords(CoordsKind::Carts(carts)) }
+    pub fn with_fracs(&self, fracs: Vec<V3>) -> Self { self.with_coords(CoordsKind::Fracs(fracs)) }
 }
 
 //---------------------------------------

@@ -24,7 +24,7 @@ fn test_graphene() {
     for (op, perm) in zip_eq!(frac_ops, perms) {
         let transformed_fracs = op.transform_prim(&coords.to_fracs());
         let transformed = coords.clone().with_fracs(transformed_fracs);
-        let permuted = coords.clone().permuted_by(&perm);
+        let permuted = coords.permuted_by(&perm);
 
         transformed.check_same_cell_and_order(&permuted, 1e-2 * (1.0 + 1e-7)).unwrap();
     }
@@ -45,7 +45,7 @@ fn validation_van_fail() {
     for (op, perm) in zip_eq!(frac_ops, perms) {
         let transformed_fracs = op.transform_prim(&coords.to_fracs());
         let transformed = coords.clone().with_fracs(transformed_fracs);
-        let permuted = coords.clone().permuted_by(&perm);
+        let permuted = coords.permuted_by(&perm);
 
         transformed.check_same_cell_and_order(&permuted, 1e-2 * (1.0 + 1e-7)).expect("looney");
     }
