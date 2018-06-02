@@ -1,8 +1,10 @@
+#![allow(deprecated)] // FIXME
+
+use ::{Coords, CoordsKind, Lattice};
 use ::std::rc::Rc;
-use ::Lattice;
+use ::std::fmt;
 
 use ::rsp2_array_types::{V3, M33, M44, M4, V4, mat};
-
 
 // NOTE: This API is in flux. Some (possibly incorrect) notes:
 //
@@ -42,43 +44,48 @@ pub struct IntRot {
     t: M33<i32>,
 }
 
-// FIXME: **Where the hell** did I ever get the notion that translations
-//        are always multiples of `1/12`
-
-/// The translation part of a spacegroup operation **on a primitive cell**.
-///
-/// This always has coordinates that are multiples of `1/12`.
-///
-/// (FIXME: CITATION NEEDED for the fact that at least one primitive cell
-///  satisfies this property for every periodic structure.)
-///
-/// (However, so long as at least one primitive cell of a given structure
-///  satisfies this property, it can easily be shown that they ALL do.
-///  When transforming from any one primitive cell to another, the
-///  translations get multiplied with a unimodular matrix)
-///
-/// Before applying it to supercells, you should convert it into cartesian.
+#[deprecated]
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct FracTrans (
-    /// This is the vector times 12.
-    ///
-    /// Invariants:
-    ///  - elements are reduced into the range `0 <= x < 12`.
     V3<i32>,
 );
 
-/// A spacegroup operation on a primitive cell.
+#[deprecated]
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct FracOp {
-    /// This is the transpose of what one would typically
-    /// think of as the affine transformation matrix.
-    ///
-    /// The translation elements in the final row are numerators over 12.
-    ///
-    /// Invariants:
-    ///  - translation elements are reduced into the range `0 <= x < 12`.
-    ///  - final element is 1
     t: Rc<M44<i32>>,
+}
+
+/// A space group operation in cartesian units.
+///
+/// The cartesian representation allows CartOps to be transferable between
+/// primitive cells and supercells. More specifically, it is valid for any
+/// (non-strict) supercell for which the point group of the superlattice contains
+/// the operator. This necessarily includes all possible choices of equivalent
+/// primitive cells (since they all share the same lattice).
+///
+/// (**Note:** if you apply it to a supercell which violates this rule, you may
+///  witness multiple atoms being mapped into the same position--even though
+///  *physically speaking* the operator ought to be a symmetry.)
+///
+/// Be aware that almost any change to the coordinate data will invalidate CartOps.
+/// Obviously, the motion of individual atoms can break symmetry, but there is more
+/// to it than that:
+///
+/// * uniform translations of the structure require a similarity transform
+///   to recenter the rotations
+/// * uniform rotations of the structure also require a similarity transform.
+///   (picture a rotation which permutes the XYZ axes of a 2D structure,
+///    and the issue here should be self-evident!)
+/// * uniform scaling by a constant factor requires rescaling the translations
+///
+/// The issues with uniform translations and rotations would remain true even if we
+/// used a fractional representation.
+#[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
+pub struct CartOp {
+    /// The transpose of the rotation matrix.
+    rot_t: M33,
+    trans: V3,
 }
 
 impl Default for FracOp {
@@ -96,6 +103,11 @@ impl Default for IntRot {
     { Self::eye() }
 }
 
+impl Default for CartOp {
+    fn default() -> Self
+    { Self::eye() }
+}
+
 impl From<FracTrans> for FracOp {
     fn from(v: FracTrans) -> Self
     { Self::new(&Default::default(), &v) }
@@ -104,6 +116,23 @@ impl From<FracTrans> for FracOp {
 impl From<IntRot> for FracOp {
     fn from(r: IntRot) -> Self
     { Self::new(&r, &Default::default()) }
+}
+
+#[derive(Debug, Fail)]
+pub struct LatticeSymmetryError {
+    lattice: Lattice,
+    cart_rot: M33,
+    #[cause]
+    cause: ::IntPrecisionError,
+}
+
+impl fmt::Display for LatticeSymmetryError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f, "{:?} is not in the point group of the lattice {:?}",
+            self.cart_rot, self.lattice.matrix(),
+        )
+    }
 }
 
 impl IntRot {
@@ -127,11 +156,28 @@ impl IntRot {
     fn from_frac_t(float_t: &M33<f64>) -> Result<IntRot, ::IntPrecisionError>
     { float_t.try_map(|x| ::util::Tol(1e-4).unfloat(x)).map(|t| IntRot { t }) }
 
-    pub fn from_cart(lattice: &Lattice, mat: &M33) -> Result<IntRot, ::IntPrecisionError>
+    /// Obtain an integer representation of a point group operation, in units
+    /// of a particular lattice.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the rotation part of `self` is not a symmetry
+    /// of the lattice. (using an approximate numerical test with a *generous*
+    /// tolerance)
+    pub fn from_cart(lattice: &Lattice, mat: &M33) -> Result<IntRot, LatticeSymmetryError>
     { Self::from_cart_t(lattice, &mat.t()) }
 
-    fn from_cart_t(lattice: &Lattice, &cart_t: &M33) -> Result<IntRot, ::IntPrecisionError>
-    { Self::from_frac_t(&frac_t_from_cart_t(lattice, cart_t)) }
+    fn from_cart_t(lattice: &Lattice, cart_t: &M33) -> Result<IntRot, LatticeSymmetryError>
+    {
+        Self::from_frac_t(&frac_t_from_cart_t(lattice, *cart_t))
+            .map_err(|cause| {
+                LatticeSymmetryError {
+                    lattice: lattice.clone(),
+                    cart_rot: cart_t.t(),
+                    cause,
+                }
+            })
+    }
 
     pub fn matrix(&self) -> M33<i32>
     { self.t.t() }
@@ -268,6 +314,63 @@ impl FracOp {
     { other.then(self) }
 }
 
+impl CartOp {
+    pub fn eye() -> Self
+    { Self {
+        rot_t: M33::eye(),
+        trans: V3::zero(),
+    }}
+
+    pub fn new(rot: &M33, trans: V3) -> Self
+    { CartOp { rot_t: rot.t(), trans } }
+
+    /// Obtain an integer representation of the associated point group operation,
+    /// in units of a particular lattice.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the rotation part of `self` is not a symmetry of the
+    /// lattice. (using an approximate numerical test with a *generous* tolerance)
+    pub fn int_rot(&self, lattice: &Lattice) -> Result<IntRot, LatticeSymmetryError>
+    { IntRot::from_cart_t(lattice, &self.rot_t) }
+
+    pub fn cart_rot_t(&self) -> M33
+    { self.rot_t }
+
+    pub fn cart_rot(&self) -> M33
+    { self.rot_t.t() }
+
+    pub fn cart_trans(&self) -> V3
+    { self.trans }
+
+    fn frac_rot_t(&self, lattice: &Lattice) -> M33
+    { frac_t_from_cart_t(lattice, self.rot_t) }
+
+    /// Compose with a translation.
+    pub fn then_translate(&self, cart: V3) -> Self
+    {
+        let mut out = *self;
+        out.trans += cart;
+        out
+    }
+}
+
+impl CartOp {
+    /// Flipped group operator.
+    ///
+    /// `a.then(b) == b.of(a)`.  The flipped order is more aligned
+    /// with this library's generally row-centric design.
+    pub fn then(&self, other: &CartOp) -> CartOp
+    { CartOp {
+        rot_t: self.rot_t * other.rot_t,
+        trans: self.trans * other.rot_t + other.trans,
+    }}
+
+    /// Conventional group operator.
+    pub fn of(&self, other: &CartOp) -> CartOp
+    { other.then(self) }
+}
+
 impl IntRot {
     pub fn transform_fracs(&self, fracs: &[V3]) -> Vec<V3>
     { fracs.iter().map(|v| v * self.frac_t()).collect() }
@@ -292,6 +395,27 @@ impl FracOp {
     }
 }
 
+impl CartOp {
+    pub fn transform_carts(&self, carts: &[V3]) -> Vec<V3>
+    { carts.iter().map(|v| v * self.rot_t + self.trans).collect() }
+
+    pub fn transform_fracs(&self, lattice: &Lattice, fracs: &[V3]) -> Vec<V3>
+    {
+        let rot_t = self.frac_rot_t(lattice);
+        let trans = self.trans / lattice;
+        fracs.iter().map(|v| v * rot_t + trans).collect()
+    }
+
+    pub fn transform(&self, coords: &Coords) -> Coords
+    {
+        let Coords { lattice, coords } = coords;
+        Coords::new(lattice.clone(), match coords {
+            CoordsKind::Fracs(vs) => CoordsKind::Fracs(self.transform_fracs(lattice, vs)),
+            CoordsKind::Carts(vs) => CoordsKind::Carts(self.transform_carts(vs)),
+        })
+    }
+}
+
 mod serde_impls {
     use super::*;
     use ::serde::{Serialize, Serializer, Deserialize, Deserializer};
@@ -301,6 +425,12 @@ mod serde_impls {
     pub struct RawFracOp {
         rot: IntRot,
         trans: FracTrans,
+    }
+
+    #[derive(Serialize, Deserialize)]
+    pub struct RawCartOp {
+        rot: M33,
+        trans: V3,
     }
 
     impl Serialize for IntRot {
@@ -326,6 +456,15 @@ mod serde_impls {
         }
     }
 
+    impl Serialize for CartOp {
+        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            RawCartOp {
+                rot: self.cart_rot(),
+                trans: self.cart_trans(),
+            }.serialize(serializer)
+        }
+    }
+
     impl<'de> Deserialize<'de> for IntRot {
         fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
             let raw = M33::<i32>::deserialize(deserializer)?;
@@ -346,6 +485,13 @@ mod serde_impls {
         fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
             let RawFracOp { rot, trans } = RawFracOp::deserialize(deserializer)?;
             Ok(FracOp::new(&rot, &trans))
+        }
+    }
+
+    impl<'de> Deserialize<'de> for CartOp {
+        fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            let RawCartOp { rot, trans } = RawCartOp::deserialize(deserializer)?;
+            Ok(CartOp::new(&rot, trans))
         }
     }
 
