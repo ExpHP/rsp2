@@ -32,7 +32,7 @@ use ::std::path::{Path, PathBuf};
 use ::rsp2_fs_util::{TempDir};
 
 use ::rsp2_fs_util::{open, create, copy, hard_link};
-use ::rsp2_structure::{Coords, FracRot, FracTrans, FracOp};
+use ::rsp2_structure::{Coords, IntRot, FracTrans, FracOp};
 use ::rsp2_structure::supercell::{SupercellToken};
 use ::rsp2_soa_ops::{Permute, Perm};
 

@@ -3,31 +3,39 @@ use ::Lattice;
 
 use ::rsp2_array_types::{V3, M33, M44, M4, V4, mat};
 
+
 // NOTE: This API is in flux. Some (possibly incorrect) notes:
 //
-//  * Correct usage of spacegroup operators requires knowing the
-//    primitive cell.  A supercell does not have its own spacegroup
-//    independent of the primitive cell; that would allow a supercell
-//    to have different physics!
+//  * There exists an integer encoding of translations for primitive structures,
+//    where, after recentering the rotations around a certain point, all of the
+//    translations will have fractional coords that are multiples of 1/12.
 //
-//  * I am not currently aware of any good integer-based representation
-//    of space group operators that can be applied to supercell
-//    fractional coords.  I mean, *obviously* you can do *something
-//    something coefficient matrix something something similarity
-//    transform,* but you get all these rational numbers and it's
-//    all full of barf.
+//    rsp2 used to use these integer translations (in some funky 4x4 integer affine
+//    matrix), but this was removed once I discovered the bit about recentering.
 //
-//    For now, you should convert fractional operators into cartesian
-//    before using them on a supercell. (this conversion requires the
-//    primitive lattice!).
+//  * I tried my best to clean it up, but you may still find language in some places
+//    around the code base claiming a primitive cell is required for working with
+//    space group operators. I believe that, in most cases, this is now
+//    *almost always false,* since most code is now working with CartOps.
+//
 
-/// A point group operation **on a primitive cell**.
+/// A point group operation in units of **a particular lattice matrix**.
 ///
-/// Before applying it to supercells, you should convert it into cartesian.
+/// This uses an integral representation that can provide `Eq + Hash + Ord` impls,
+/// making it a great choice for analyzing the mathematical structure of the point
+/// group and space group.
+///
+/// Its representation is sensitive to the choice of cell.
+/// (i.e. it is not transferrable between identical structures expressed in terms
+///  of different unit cells, or between primitive cells and supercells)
+///
+/// In this form, it is not capable of being applied to coordinate data.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
-pub struct FracRot {
-    /// This is the transpose of what one would
-    /// typically think of as the "rotation matrix"
+pub struct IntRot {
+    /// The transpose of the rotation matrix in fractional coords.
+    /// (equivalently (given rsp2's other conventions), one might say this
+    ///  is the rotation matrix in a vector-major layout (as opposed to
+    ///  coordinate-major))
     ///
     /// Invariants:
     ///  - `abs(det(t)) == 1`
@@ -83,7 +91,7 @@ impl Default for FracTrans {
     { Self::eye() }
 }
 
-impl Default for FracRot {
+impl Default for IntRot {
     fn default() -> Self
     { Self::eye() }
 }
@@ -93,12 +101,12 @@ impl From<FracTrans> for FracOp {
     { Self::new(&Default::default(), &v) }
 }
 
-impl From<FracRot> for FracOp {
-    fn from(r: FracRot) -> Self
+impl From<IntRot> for FracOp {
+    fn from(r: IntRot) -> Self
     { Self::new(&r, &Default::default()) }
 }
 
-impl FracRot {
+impl IntRot {
     pub fn eye() -> Self
     { Self { t: mat::from_array([[1, 0, 0], [0, 1, 0], [0, 0, 1]]) } }
 
@@ -106,60 +114,56 @@ impl FracRot {
     ///
     /// The input should be a matrix `R` such that `X R^T ~ X`,
     /// where the rows of `X` are fractional positions.
-    pub fn new(mat: &M33<i32>) -> FracRot
+    pub fn new(mat: &M33<i32>) -> IntRot
     { Self::opt_new(mat).expect("matrix not unimodular") }
 
-    fn opt_new(mat: &M33<i32>) -> Option<FracRot> {
+    fn opt_new(mat: &M33<i32>) -> Option<IntRot> {
         match mat.det().abs() {
-            1 => Some(FracRot { t: mat.t() }),
+            1 => Some(IntRot { t: mat.t() }),
             _ => None,
         }
     }
 
-    fn from_float_t(float_t: &M33<f64>) -> Result<FracRot, ::IntPrecisionError>
-    { float_t.try_map(|x| ::util::Tol(1e-4).unfloat(x)).map(|t| FracRot { t }) }
+    fn from_frac_t(float_t: &M33<f64>) -> Result<IntRot, ::IntPrecisionError>
+    { float_t.try_map(|x| ::util::Tol(1e-4).unfloat(x)).map(|t| IntRot { t }) }
 
-    pub fn from_cart(prim_lattice: &Lattice, mat: &M33) -> Result<FracRot, ::IntPrecisionError>
-    { Self::from_cart_t(prim_lattice, &mat.t()) }
+    pub fn from_cart(lattice: &Lattice, mat: &M33) -> Result<IntRot, ::IntPrecisionError>
+    { Self::from_cart_t(lattice, &mat.t()) }
 
-    fn from_cart_t(prim_lattice: &Lattice, cart_t: &M33) -> Result<FracRot, ::IntPrecisionError>
-    { Self::from_float_t(&(prim_lattice.matrix() * cart_t * prim_lattice.inverse_matrix())) }
+    fn from_cart_t(lattice: &Lattice, cart_t: &M33) -> Result<IntRot, ::IntPrecisionError>
+    { Self::from_frac_t(&(lattice.matrix() * cart_t * lattice.inverse_matrix())) }
 
     pub fn matrix(&self) -> M33<i32>
     { self.t.t() }
 
-    /// Get the transpose of the cartesian rotation matrix.
-    ///
-    /// This conversion requires the same primitive lattice that was used to compute this
-    /// symmetry operator.
-    pub fn cart_t(&self, prim_lattice: &Lattice) -> M33
-    { prim_lattice.inverse_matrix() * self.float_t() * prim_lattice.matrix() }
+    /// Get the transpose of the cartesian rotation matrix, assuming that
+    /// the the operator is expressed in units of the given lattice.
+    pub fn cart_t(&self, lattice: &Lattice) -> M33
+    { lattice.inverse_matrix() * self.float_t() * lattice.matrix() }
 
-    /// Recover the cartesian rotation matrix.
-    ///
-    /// This conversion requires the same primitive lattice that was used to compute this
-    /// symmetry operator.
-    pub fn cart(&self, prim_lattice: &Lattice) -> M33
-    { self.cart_t(prim_lattice).t() }
+    /// Recover the cartesian rotation matrix, assuming that
+    /// the the operator is expressed in units of the given lattice.
+    pub fn cart(&self, lattice: &Lattice) -> M33
+    { self.cart_t(lattice).t() }
 
     // transposed float matrix
     pub(crate) fn float_t(&self) -> M33
     { self.t.map(Into::into) }
 }
 
-impl FracRot {
+impl IntRot {
     /// Flipped group operator.
     ///
     /// `a.then(b) == b.of(a)`.  The flipped order is more aligned
     /// with this library's generally row-centric design.
-    pub fn then(&self, other: &FracRot) -> FracRot
+    pub fn then(&self, other: &IntRot) -> IntRot
     {
         // (since these are transposes, this is the natural order of application)
-        FracRot { t: self.t * other.t }
+        IntRot { t: self.t * other.t }
     }
 
     /// Conventional group operator.
-    pub fn of(&self, other: &FracRot) -> FracRot
+    pub fn of(&self, other: &IntRot) -> IntRot
     { other.then(self) }
 }
 
@@ -206,7 +210,7 @@ impl FracOp {
     pub fn eye() -> Self
     { Self { t: FRAC_OP_EYE.into() } }
 
-    pub fn new(rot: &FracRot, trans: &FracTrans) -> Self
+    pub fn new(rot: &IntRot, trans: &FracTrans) -> Self
     {
         let mut out = FRAC_OP_EYE;
         out[0][..3].copy_from_slice(&*rot.t[0]);
@@ -216,9 +220,9 @@ impl FracOp {
         FracOp { t: out.into() }
     }
 
-    pub fn to_rot(&self) -> FracRot
+    pub fn to_rot(&self) -> IntRot
     {
-        let mut out = FracRot::eye();
+        let mut out = IntRot::eye();
         out.t[0].copy_from_slice(&self.t[0][..3]);
         out.t[1].copy_from_slice(&self.t[1][..3]);
         out.t[2].copy_from_slice(&self.t[2][..3]);
@@ -258,14 +262,14 @@ impl FracOp {
     { other.then(self) }
 }
 
-impl FracRot {
-    pub fn transform_prim(&self, fracs: &[V3]) -> Vec<V3>
+impl IntRot {
+    pub fn transform_fracs(&self, fracs: &[V3]) -> Vec<V3>
     { fracs.iter().map(|v| v * self.float_t()).collect() }
 }
 
-impl<'a> From<&'a [[i32; 3]; 3]> for FracRot {
+impl<'a> From<&'a [[i32; 3]; 3]> for IntRot {
     fn from(m: &'a [[i32; 3]; 3]) -> Self
-    { FracRot::new(&mat::from_array(*m)) }
+    { IntRot::new(&mat::from_array(*m)) }
 }
 
 impl FracTrans {
@@ -276,7 +280,7 @@ impl FracTrans {
 impl FracOp {
     pub fn transform_prim(&self, fracs: &[V3]) -> Vec<V3>
     {
-        let mut out = self.to_rot().transform_prim(fracs);
+        let mut out = self.to_rot().transform_fracs(fracs);
         self.to_trans().transform_prim_mut(&mut out);
         out
     }
@@ -289,11 +293,11 @@ mod serde_impls {
 
     #[derive(Serialize, Deserialize)]
     pub struct RawFracOp {
-        rot: FracRot,
+        rot: IntRot,
         trans: FracTrans,
     }
 
-    impl Serialize for FracRot {
+    impl Serialize for IntRot {
         fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
             let raw: M33<i32> = self.matrix();
             raw.serialize(serializer)
@@ -316,10 +320,10 @@ mod serde_impls {
         }
     }
 
-    impl<'de> Deserialize<'de> for FracRot {
+    impl<'de> Deserialize<'de> for IntRot {
         fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
             let raw = M33::<i32>::deserialize(deserializer)?;
-            FracRot::opt_new(&raw)
+            IntRot::opt_new(&raw)
                 .ok_or_else(|| D::Error::custom("matrix not unimodular"))
         }
     }
@@ -350,7 +354,7 @@ mod serde_impls {
 
     #[test]
     fn round_trip() {
-        let r = FracRot::from(&[
+        let r = IntRot::from(&[
             [-1, 1, 0],
             [-1, 0, 0],
             [ 0, 0, 1],
@@ -370,7 +374,7 @@ mod serde_impls {
     #[test]
     #[should_panic(expected = "unimodular")]
     fn bad_rot() {
-        let _: FracRot = ::serde_json::from_str("[[-1, 1, 0], [-2, 0, 0], [0, 0, 1]]").unwrap();
+        let _: IntRot = ::serde_json::from_str("[[-1, 1, 0], [-2, 0, 0], [0, 0, 1]]").unwrap();
     }
 
     #[test]
@@ -407,7 +411,7 @@ mod tests {
             [0,  0, 1],
         ];
         assert_eq!(
-            FracRot::from(&r).transform_prim([[1.0, 5.0, 7.0]].envee_ref()),
+            IntRot::from(&r).transform_fracs([[1.0, 5.0, 7.0]].envee_ref()),
             vec![[-5.0, 1.0, 7.0]].envee(),
         );
     }
@@ -416,17 +420,17 @@ mod tests {
     fn two_transform()
     {
         // two operations that don't commute
-        let xy = FracRot::from(&[
+        let xy = IntRot::from(&[
             [0, 1, 0],
             [1, 0, 0],
             [0, 0, 1],
         ]);
-        let zx = FracRot::from(&[
+        let zx = IntRot::from(&[
             [0, 0, 1],
             [0, 1, 0],
             [1, 0, 0],
         ]);
-        let xyzx = FracRot::from(&[
+        let xyzx = IntRot::from(&[
             [0, 0, 1],
             [1, 0, 0],
             [0, 1, 0],
@@ -436,8 +440,8 @@ mod tests {
         assert_eq!(xy.then(&zx), xyzx);
         assert_eq!(zx.of(&xy), xyzx);
         assert_eq!(
-            zx.transform_prim(&xy.transform_prim(&prim)),
-            xyzx.transform_prim(&prim),
+            zx.transform_fracs(&xy.transform_fracs(&prim)),
+            xyzx.transform_fracs(&prim),
         );
 
         let t = FracTrans::eye();
@@ -456,7 +460,7 @@ mod tests {
     fn symmop_mul()
     {
         let op = FracOp::new(
-            &FracRot::from(&[
+            &IntRot::from(&[
                 [ 0,  1, 0],
                 [-1,  1, 0],
                 [ 0,  0, 1],
@@ -464,7 +468,7 @@ mod tests {
             &FracTrans::from_floats(V3([1./3., 2./3., 0.0])).unwrap(),
         );
         let square = FracOp::new(
-            &FracRot::from(&[
+            &IntRot::from(&[
                 [-1, 1, 0],
                 [-1, 0, 0],
                 [ 0, 0, 1],
@@ -486,7 +490,7 @@ mod tests {
             [ 0.0,     0.0, 1.0],
         ])));
         // threefold rotation
-        let op = FracRot::from(&[
+        let op = IntRot::from(&[
             [-1, 1, 0],
             [-1, 0, 0],
             [ 0, 0, 1],
@@ -503,13 +507,13 @@ mod tests {
         ]);
 
         // one with nonzero translation
-        let rot = FracRot::from(&[
+        let rot = IntRot::from(&[
             [ 0, 1,  0],
             [-1, 1,  0],
             [ 0, 0, -1],
         ]);
         let trans = FracTrans::from_floats(V3([-1./3., 1./3., 0.0])).unwrap();
-        assert_eq!(rot, FracRot::from_cart(&lattice, &rot.cart(&lattice)).unwrap());
+        assert_eq!(rot, IntRot::from_cart(&lattice, &rot.cart(&lattice)).unwrap());
         assert_eq!(trans, FracTrans::from_cart(&lattice, trans.cart(&lattice)).unwrap());
     }
 }

@@ -1,5 +1,5 @@
 use ::{Lattice, Coords};
-use ::{FracRot, FracOp};
+use ::{IntRot, FracOp};
 use super::group::GroupTree;
 
 use ::rsp2_array_types::V3;
@@ -184,13 +184,13 @@ pub fn of_spacegroup_for_primitive_with_meta<M: Ord>(
 pub(crate) fn of_rotation_with_meta<M: Ord>(
     structure: &Coords,
     meta: &[M],
-    rotation: &FracRot,
+    rotation: &IntRot,
     tol: f64,
 ) -> Result<Perm, PositionMatchError>
 {Ok({
     let lattice = structure.lattice();
     let from_fracs = structure.to_fracs();
-    let to_fracs = rotation.transform_prim(&from_fracs);
+    let to_fracs = rotation.transform_fracs(&from_fracs);
 
     brute_force_with_sort_trick(lattice, meta, &from_fracs, &to_fracs, tol)?
 })}

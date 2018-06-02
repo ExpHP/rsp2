@@ -23,7 +23,7 @@
 //!   *G*<sup>op</sup>, where the operations compose in reverse.
 //!   See https://github.com/ExpHP/rsp2/issues/1#issuecomment-340279243
 
-use ::FracRot;
+use ::IntRot;
 use ::rsp2_soa_ops::{Perm};
 
 use ::rsp2_array_types::{V3, vee, Envee};
@@ -59,9 +59,9 @@ fn point_from_index(index: usize) -> V3
 }
 
 // interpret a rotation as a permutation on INIT_X
-fn vertex_perm_from_rot(rot: &FracRot) -> Perm
+fn vertex_perm_from_rot(rot: &IntRot) -> Perm
 {
-    let points = rot.transform_prim(&INIT_X);
+    let points = rot.transform_fracs(&INIT_X);
     let indices = points.into_iter().map(index_from_point).collect();
     Perm::from_vec(indices).unwrap()
 }
@@ -82,7 +82,7 @@ impl SignedPerm {
     pub fn eye() -> Self
     { SignedPerm { signs: V3([1, 1, 1]), perm: V3([0, 1, 2]) } }
 
-    pub fn from_rot(rot: &FracRot) -> Self
+    pub fn from_rot(rot: &IntRot) -> Self
     {
         // (stupid hat trick...)
         let v = V3([0.001, 1.0, 2.0]) * &rot.float_t();
@@ -92,13 +92,13 @@ impl SignedPerm {
         }
     }
 
-    pub fn to_rot(&self) -> FracRot
+    pub fn to_rot(&self) -> IntRot
     {
         let mut m = [[0; 3]; 3];
         for k in 0..3 {
             m[k][self.perm[k] as usize] = self.signs[k];
         }
-        FracRot::from(&m)
+        IntRot::from(&m)
     }
 
     pub fn then(&self, next: &SignedPerm) -> SignedPerm
@@ -114,7 +114,7 @@ impl SignedPerm {
     }
 
     pub fn transform(&self, points: &[V3]) -> Vec<V3>
-    { self.to_rot().transform_prim(points) }
+    { self.to_rot().transform_fracs(points) }
 }
 
 //-------------------------------------------------------------------
@@ -123,22 +123,22 @@ impl SignedPerm {
 const N_GENERATORS: usize = 3;
 lazy_static! {
 
-    static ref ROTATION_GENERATORS: [FracRot; N_GENERATORS] = {
+    static ref ROTATION_GENERATORS: [IntRot; N_GENERATORS] = {
         [
             // x -> y -> z
-            FracRot::from(&[
+            IntRot::from(&[
                 [ 0, 1, 0],
                 [ 0, 0, 1],
                 [ 1, 0, 0],
             ]),
             // x <-> y
-            FracRot::from(&[
+            IntRot::from(&[
                 [ 0, 1, 0],
                 [ 1, 0, 0],
                 [ 0, 0, 1],
             ]),
             // mirror x
-            FracRot::from(&[
+            IntRot::from(&[
                 [-1, 0, 0],
                 [ 0, 1, 0],
                 [ 0, 0, 1],
@@ -274,13 +274,13 @@ mod tests {
             Data { generators, members, compose, action, eye }
         };
 
-        static ref ROTATION_DATA: Data<FracRot> = {
-            type G = FracRot;
-            let eye = FracRot::eye();
+        static ref ROTATION_DATA: Data<IntRot> = {
+            type G = IntRot;
+            let eye = IntRot::eye();
             let generators = &*ROTATION_GENERATORS;
 
             fn compose(a: &G, b: &G) -> G { a.then(b) }
-            fn action(x: &X, g: &G) -> X { g.transform_prim(x) }
+            fn action(x: &X, g: &G) -> X { g.transform_fracs(x) }
             let members = generate_finite_group(generators, compose);
             Data { generators, members, compose, action, eye }
         };
@@ -533,7 +533,7 @@ mod tests {
         // Do they correctly describe the rotations?
         for (rot, perm) in izip!(&ROTATION_DATA.members, &perms) {
             assert_eq!(
-                rot.transform_prim(&INIT_X),
+                rot.transform_fracs(&INIT_X),
                 INIT_X.clone().permuted_by(&perm),
             );
         }
