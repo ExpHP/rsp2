@@ -1,11 +1,11 @@
-use ::{Lattice, Coords};
+use ::{Lattice, Coords, CoordsKind};
 use ::{IntRot, FracOp};
 use super::group::GroupTree;
 
 use ::rsp2_array_types::V3;
 use ::rsp2_soa_ops::{Perm, Permute};
 
-use ::failure::Backtrace;
+use ::failure::{Backtrace, Error};
 
 /// Validate that structure is symmetric under the given operators.
 ///
@@ -15,59 +15,20 @@ pub fn dumb_symmetry_test(
     structure: &Coords,
     ops: &[FracOp],
     tol: f64,
-) -> Result<(), PositionMatchError>
+) -> Result<(), Error>
 {Ok({
     let lattice = structure.lattice();
     let from_fracs = structure.to_fracs();
     let perms = of_spacegroup_for_primitive(structure, ops, tol)?;
 
     for (op, perm) in izip!(ops, perms) {
-        dumb_validate_equivalent(
-            lattice,
-            &op.transform_prim(&from_fracs),
-            &from_fracs.to_vec().permuted_by(&perm),
-            tol,
-        )
+        let transformed_fracs = op.transform_prim(&from_fracs);
+        let transformed = Coords::new(lattice.clone(), CoordsKind::Fracs(transformed_fracs));
+        let permuted = structure.clone().permuted_by(&perm);
+
+        transformed.check_same_cell_and_order(&permuted, tol)?;
     }
 })}
-
-// Slow, and not even always correct
-fn dumb_nearest_distance(
-    lattice: &Lattice,
-    frac_a: &V3,
-    frac_b: &V3,
-) -> f64
-{
-    use ::CoordsKind;
-    let diff = (frac_a - frac_b).map(|x| x - x.round());
-
-    let mut diffs = vec![];
-    for &a in &[-1., 0., 1.] {
-        for &b in &[-1., 0., 1.] {
-            for &c in &[-1., 0., 1.] {
-                diffs.push(diff + V3([a, b, c]));
-            }
-        }
-    }
-
-    let carts = CoordsKind::Fracs(diffs).to_carts(lattice);
-    carts.into_iter().map(|v| v.norm())
-        .min_by(|a, b| a.partial_cmp(b).unwrap()).unwrap()
-}
-
-// Slow, and not even always correct
-fn dumb_validate_equivalent(
-    lattice: &Lattice,
-    frac_a: &[V3],
-    frac_b: &[V3],
-    tol: f64,
-) {
-    assert_eq!(frac_a.len(), frac_b.len());
-    for (a, b) in izip!(frac_a, frac_b) {
-        let d = dumb_nearest_distance(lattice, a, b);
-        assert!(d < tol * (1.0 + 1e-7));
-    }
-}
 
 /// Compute permutations for all operators in a spacegroup.
 pub fn of_spacegroup_for_general(
@@ -149,12 +110,6 @@ pub fn of_spacegroup_for_general_with_meta<M: Ord>(
 
             let to_fracs = from_fracs.iter().map(|v| v * &frac_rot_t + frac_trans).collect::<Vec<_>>();
             let perm = brute_force_with_sort_trick(lattice, metadata, &from_fracs, &to_fracs[..], tol)?;
-            dumb_validate_equivalent(
-                lattice,
-                &to_fracs[..],
-                &from_fracs.to_vec().permuted_by(&perm)[..],
-                tol
-            );
             perm
         }),
         // Other operators: Quickly compose the results from other operators.

@@ -2,6 +2,7 @@ use ::{Lattice, CoordsKind};
 use ::rsp2_soa_ops::{Perm, Permute};
 use ::rsp2_soa_ops::{Part, Partition, Unlabeled};
 use ::rsp2_array_types::{M33, V3, Unvee};
+pub use ::failure::Error as Error;
 
 /// Pairs [`CoordsKind`] together with their [`Lattice`].
 ///
@@ -318,6 +319,73 @@ impl Coords {
             tol,
         )
     }
+}
+
+//--------------------------------------------------------------------------------------------------
+// approximate equality checking
+//
+// There's a lot of knobs to turn here, and eventually it may deserve a builder-type API.
+// For now, we focus on the most common use cases.
+
+impl Coords {
+    /// An approximate equality check which:
+    ///
+    /// * Panics on mismatched length.
+    /// * Does not permit uniform translations or rotations.
+    /// * Does not permit equivalent cells. (lattice matrices must be approximately equal)
+    /// * Does not permit reordering of sites.
+    /// * Permits different periodic images of the same site.
+    ///
+    /// May erroneously fail on heavily skewed unit cells where a significant
+    /// portion of the voronoi cell lies outside of the 27 unit cells around
+    /// the origin.
+    pub fn check_same_cell_and_order(
+        &self,
+        other: &Coords,
+        cart_tol: f64,
+    ) -> Result<(), Error> {
+        check_close!(rel=cart_tol, abs=cart_tol, self.lattice(), other.lattice())?;
+        dumb_validate_equivalent(self.lattice(), &self.to_fracs(), &other.to_fracs(), cart_tol)
+    }
+}
+
+// Slow, and not even always correct
+fn dumb_validate_equivalent(
+    lattice: &Lattice,
+    frac_a: &[V3],
+    frac_b: &[V3],
+    tol: f64,
+) -> Result<(), Error> {
+    assert_eq!(frac_a.len(), frac_b.len());
+    for (a, b) in izip!(frac_a, frac_b) {
+        check_close!(abs=tol, 0.0, dumb_nearest_distance(lattice, a, b))?;
+    }
+    Ok(())
+}
+
+// Slow, and not even always correct
+fn dumb_nearest_distance(
+    lattice: &Lattice,
+    frac_a: &V3,
+    frac_b: &V3,
+) -> f64 {
+    use ::CoordsKind;
+    let diff = (frac_a - frac_b).map(|x| x - x.round());
+
+    let mut diffs = Vec::with_capacity(27);
+    for &a in &[-1., 0., 1.] {
+        for &b in &[-1., 0., 1.] {
+            for &c in &[-1., 0., 1.] {
+                diffs.push(diff + V3([a, b, c]));
+            }
+        }
+    }
+
+    CoordsKind::Fracs(diffs)
+        .to_carts(lattice).into_iter()
+        .map(|v| v.norm())
+        .min_by(|a, b| a.partial_cmp(b).unwrap())
+        .unwrap()
 }
 
 //--------------------------------------------------------------------------------------------------

@@ -130,8 +130,8 @@ impl IntRot {
     pub fn from_cart(lattice: &Lattice, mat: &M33) -> Result<IntRot, ::IntPrecisionError>
     { Self::from_cart_t(lattice, &mat.t()) }
 
-    fn from_cart_t(lattice: &Lattice, cart_t: &M33) -> Result<IntRot, ::IntPrecisionError>
-    { Self::from_frac_t(&(lattice.matrix() * cart_t * lattice.inverse_matrix())) }
+    fn from_cart_t(lattice: &Lattice, &cart_t: &M33) -> Result<IntRot, ::IntPrecisionError>
+    { Self::from_frac_t(&frac_t_from_cart_t(lattice, cart_t)) }
 
     pub fn matrix(&self) -> M33<i32>
     { self.t.t() }
@@ -139,7 +139,7 @@ impl IntRot {
     /// Get the transpose of the cartesian rotation matrix, assuming that
     /// the the operator is expressed in units of the given lattice.
     pub fn cart_t(&self, lattice: &Lattice) -> M33
-    { lattice.inverse_matrix() * self.float_t() * lattice.matrix() }
+    { cart_t_from_frac_t(lattice, self.frac_t()) }
 
     /// Recover the cartesian rotation matrix, assuming that
     /// the the operator is expressed in units of the given lattice.
@@ -147,9 +147,15 @@ impl IntRot {
     { self.cart_t(lattice).t() }
 
     // transposed float matrix
-    pub(crate) fn float_t(&self) -> M33
+    pub(crate) fn frac_t(&self) -> M33
     { self.t.map(Into::into) }
 }
+
+fn frac_t_from_cart_t(lattice: &Lattice, cart_t: M33) -> M33
+{ lattice.matrix() * cart_t * lattice.inverse_matrix() }
+
+fn cart_t_from_frac_t(lattice: &Lattice, frac_t: M33) -> M33
+{ lattice.inverse_matrix() * frac_t * lattice.matrix() }
 
 impl IntRot {
     /// Flipped group operator.
@@ -264,7 +270,7 @@ impl FracOp {
 
 impl IntRot {
     pub fn transform_fracs(&self, fracs: &[V3]) -> Vec<V3>
-    { fracs.iter().map(|v| v * self.float_t()).collect() }
+    { fracs.iter().map(|v| v * self.frac_t()).collect() }
 }
 
 impl<'a> From<&'a [[i32; 3]; 3]> for IntRot {

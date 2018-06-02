@@ -1,22 +1,58 @@
 use ::std::ops::Deref;
 use ::std::path::Path;
+use ::std::io::prelude::*;
 
 use ::shared::util;
 
-extern crate rsp2_integration_test;
 use self::rsp2_integration_test::CheckFile;
+extern crate rsp2_integration_test;
+
+pub use self::failure::Error;
 extern crate failure;
-use self::failure::Error;
+
+use self::path_abs::{FileRead, FileWrite};
 extern crate path_abs;
-use self::path_abs::{FileRead};
+
+use self::rsp2_structure::{Coords, FracOp};
+extern crate rsp2_structure;
+
+extern crate serde;
+
+extern crate serde_json;
+
+use self::rsp2_array_types::{M33, V3};
+extern crate rsp2_array_types;
+
+macro_rules! impl_json {
+    (($Type:ty) [$($methods:ident),*]) => {
+        $( impl_json!{@one ($Type) [$methods]} )*
+    };
+    (@one ($Type:ty) [load]) => {
+        #[allow(unused)]
+        impl $Type {
+            pub fn load(path: impl AsRef<::std::path::Path>) -> Result<Self, $crate::shared::filetypes::Error> {
+                $crate::shared::filetypes::load_json(path)
+            }
+        }
+    };
+    (@one ($Type:ty) [save]) => {
+        #[allow(unused)]
+        impl $Type {
+            pub fn save(&self, path: impl AsRef<::std::path::Path>) -> Result<(), $crate::shared::filetypes::Error> {
+                $crate::shared::filetypes::save_json(path, self)
+            }
+        }
+    }
+}
 
 #[derive(Debug, PartialEq)]
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct Frequencies(pub Vec<f64>);
 impl Deref for Frequencies {
     type Target = Vec<f64>;
     fn deref(&self) -> &Self::Target { &self.0 }
 }
+impl_json!{ (Frequencies)[save, load] }
 
 // for "keyword arguments"
 #[derive(Debug, Clone, Copy)]
@@ -36,13 +72,14 @@ pub struct RamanJsonTolerances {
 }
 
 #[derive(Debug, PartialEq)]
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct RamanJson {
     pub frequency: Frequencies,
     pub average_3d: Vec<f64>,
     pub backscatter: Vec<f64>,
 }
+impl_json!{ (RamanJson)[save, load] }
 
 impl Frequencies {
     pub fn check_against(&self, expected: &Self, tol: FrequencyTolerances) {
@@ -87,12 +124,24 @@ impl MaybeZerolike {
     }
 }
 
+// data affected by choice of primitive structure
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct Primitive {
+    pub frac_ops: Vec<FracOp>,
+    pub cart_rots: Vec<M33>,
+    pub masses: Vec<f64>,
+    #[serde(rename = "structure")]
+    pub coords: Coords,
+    // FIXME move to ForceConstants test
+    pub displacements: Vec<(usize, V3)>, // [disp] -> (prim, v)
+}
+impl_json!{ (Primitive)[save, load] }
+
 impl CheckFile for RamanJson {
     type OtherArgs = RamanJsonTolerances;
 
-    fn read_file(path: &Path) -> Result<Self, Error> {
-        Ok(::serde_json::from_reader(FileRead::read(path)?)?)
-    }
+    fn read_file(path: &Path) -> Result<Self, Error> { Self::load(path) }
 
     fn check_against(&self, expected: &RamanJson, tol: RamanJsonTolerances) {
         self.frequency.check_against(&expected.frequency, tol.frequency);
@@ -119,4 +168,22 @@ impl CheckFile for RamanJson {
             }
         }
     }
+}
+
+// ----------------------------------------------------------------------------------------------
+
+pub fn load_json<T>(path: impl AsRef<Path>) -> Result<T, Error>
+where T: serde::de::DeserializeOwned,
+{
+    let file = FileRead::read(path)?;
+    Ok(serde_json::from_reader(file)?)
+}
+
+pub fn save_json<T>(path: impl AsRef<Path>, obj: &T) -> Result<(), Error>
+where T: ::serde::Serialize,
+{
+    let mut file = FileWrite::create(path)?;
+    serde_json::to_writer(&mut file, obj)?;
+    writeln!(file)?;
+    Ok(())
 }

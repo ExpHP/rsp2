@@ -1,4 +1,3 @@
-#[macro_use]
 extern crate failure;
 use std::fmt;
 
@@ -6,7 +5,23 @@ pub const DEFAULT_NONZERO_TOL: f64 = 1e-9;
 
 #[macro_export]
 macro_rules! assert_close {
-    ($($t:tt)*) => {assert_close_impl!{@parsing [$($t)*] [[@rel $crate::DEFAULT_NONZERO_TOL] [@abs 0.0]]}};
+    ($($t:tt)*) => {
+        assert_close_impl!{
+            @parsing [assert_close] [$($t)*]
+            [[@rel $crate::DEFAULT_NONZERO_TOL] [@abs 0.0]]
+        }
+    };
+}
+
+/// Like `assert_close`, but produces a result.
+#[macro_export]
+macro_rules! check_close {
+    ($($t:tt)*) => {
+        assert_close_impl!{
+            @parsing [check_close] [$($t)*]
+            [[@rel $crate::DEFAULT_NONZERO_TOL] [@abs 0.0]]
+        }
+    };
 }
 
 #[macro_export]
@@ -18,40 +33,69 @@ macro_rules! debug_assert_close {
     }};
 }
 
+#[doc(hidden)]
 #[macro_export]
 macro_rules! assert_close_impl {
-    (@parsing [rel=$tol:expr, $($rest:tt)*] [$($assignment:tt)*]) => {
-        assert_close_impl!(@parsing [$($rest)*] [$($assignment)* [@rel $tol]]);
+    // the reason for $mac is that both assert_close! and check_close! need to parse the
+    // tolerances.  (assert_close! cannot just let check_close! handle this, because
+    // assert_close! needs to know where the format arguments begin)
+    (@parsing [$mac:ident] [rel=$tol:expr, $($rest:tt)*] [$($assignment:tt)*]) => {
+        assert_close_impl!(@parsing [$mac] [$($rest)*] [$($assignment)* [@rel $tol]]);
     };
-    (@parsing [abs=$tol:expr, $($rest:tt)*] [$($assignment:tt)*]) => {
-        assert_close_impl!(@parsing [$($rest)*] [$($assignment)* [@abs $tol]]);
+    (@parsing [$mac:ident] [abs=$tol:expr, $($rest:tt)*] [$($assignment:tt)*]) => {
+        assert_close_impl!(@parsing [$mac] [$($rest)*] [$($assignment)* [@abs $tol]]);
     };
-    (@parsing [$a:expr, $b:expr $(,)*] $assignments:tt) => {
-        assert_close_impl!(@expand $assignments [@comp $a, $b] [@fmt "not nearly equal!"])
+    (@parsing [$mac:ident] [$a:expr, $b:expr $(,)*] $assignments:tt) => {
+        assert_close_impl!(@expand [$mac] $assignments [@comp $a, $b] [@fmt])
     };
-    (@parsing [$a:expr, $b:expr, $($fmt:tt)+] $assignments:tt) => {
-        assert_close_impl!(@expand $assignments [@comp $a, $b] [@fmt $($fmt)+])
+    (@parsing [$mac:ident] [$a:expr, $b:expr, $($fmt:tt)+] $assignments:tt) => {
+        assert_close_impl!(@expand [$mac] $assignments [@comp $a, $b] [@fmt $($fmt)+])
     };
-    (@expand [$($assignment:tt)*] [@comp $a:expr, $b:expr] [@fmt $($fmt:tt)+] ) => {
-        #[allow(unused_mut)]
-        #[allow(unused_assignments)]
-        {
-            let a = $a;
-            let b = $b;
 
-            let mut abs;
-            let mut rel;
-            $(
-                assert_close_impl!{@stmt::assign [abs, rel] $assignment}
-            )*
+    (@expand [check_close] [$($assignment:tt)*] [@comp $a:expr, $b:expr] [@fmt $($fmt:tt)+] ) => {
+        compile_error!{"check_close only takes 2 positional arguments"}
+    };
+    (@expand [check_close] [$($assignment:tt)*] [@comp $a:expr, $b:expr] [@fmt] ) => {{
+        let result = assert_close_impl!(@expand [__shared] [$($assignment)*] [@comp $a, $b] [@fmt]);
+        result.0
+    }};
 
-            if let Err(e) = $crate::CheckClose::check_close(&a, &b, $crate::Tolerances { abs, rel }) {
-                panic!(
+    (@expand [assert_close] [$($assignment:tt)*] [@comp $a:expr, $b:expr] [@fmt] ) => {
+        assert_close_impl!{@expand [assert_close] [$($assignment)*] [@comp $a, $b] [@fmt "not nearly equal!"]}
+    };
+    (@expand [assert_close] [$($assignment:tt)*] [@comp $a:expr, $b:expr] [@fmt $($fmt:tt)+] ) => {{
+        let result = assert_close_impl!(@expand [__shared] [$($assignment)*] [@comp $a, $b] [@fmt]);
+        if let (Err(e), a, b, abs, rel) = result {
+            panic!(
                 "{} (tolerances: rel={}, abs={})\n left: {:?}\nright: {:?}\n{}",
-                 format!($($fmt)*), rel, abs, a, b, e);
-            }
+                format!($($fmt)*), rel, abs, a, b, e,
+            );
         }
-    };
+    }};
+
+    (@expand [__shared] [$($assignment:tt)*] [@comp $a:expr, $b:expr] [@fmt] ) => {{
+        let a = $a;
+        let b = $b;
+        let abs: f64;
+        let rel: f64;
+        ( // a tuple to include other things for use in assert_close!'s formatting
+            #[allow(unused_mut)]
+            #[allow(unused_assignments)]
+            {
+                let mut tmp_abs;
+                let mut tmp_rel;
+                $(
+                    assert_close_impl!{@stmt::assign [tmp_abs, tmp_rel] $assignment}
+                )*
+                abs = tmp_abs;
+                rel = tmp_rel;
+
+                $crate::CheckClose::check_close(&a, &b, $crate::Tolerances { abs, rel })
+            },
+            // (the other tuple items)
+            a, b, abs, rel,
+        )
+    }};
     (@stmt::assign [$abs:ident, $rel:ident] [@abs $tol:expr]) => { $abs = $tol; };
     (@stmt::assign [$abs:ident, $rel:ident] [@rel $tol:expr]) => { $rel = $tol; };
 }
@@ -81,11 +125,18 @@ pub struct Tolerances<T = f64> {
     pub rel: T
 }
 
-#[derive(Debug, Fail)]
+#[derive(Debug)]
 pub struct CheckCloseError<T = f64> {
     pub values: (T, T),
     pub tol: Tolerances<T>,
 }
+
+// avoid `T: Fail` bound
+impl<T: fmt::Debug + Send + Sync + 'static> failure::Fail for CheckCloseError<T> {
+    fn backtrace(&self) -> Option <&::failure::Backtrace> { None }
+    fn cause(&self) -> Option <&::failure::Fail> { None }
+}
+
 impl<T: fmt::Debug> fmt::Display for CheckCloseError<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let (left, right) = &self.values;

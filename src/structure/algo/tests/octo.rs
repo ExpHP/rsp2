@@ -85,7 +85,7 @@ impl SignedPerm {
     pub fn from_rot(rot: &IntRot) -> Self
     {
         // (stupid hat trick...)
-        let v = V3([0.001, 1.0, 2.0]) * &rot.float_t();
+        let v = V3([0.001, 1.0, 2.0]) * &rot.frac_t();
         SignedPerm {
             signs: v.map(|x| x.signum() as i32),
             perm: v.map(|x| x.abs() as i32),

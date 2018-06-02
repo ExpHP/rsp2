@@ -10,6 +10,8 @@ extern crate rsp2_integration_test;
 use ::rsp2_integration_test::CliTest;
 
 extern crate path_abs;
+extern crate rsp2_structure;
+
 use ::path_abs::{PathAbs};
 
 mod shared;

@@ -10,32 +10,22 @@ extern crate serde_derive;
 extern crate serde_json;
 extern crate failure;
 
+#[macro_use]
+mod shared;
+use shared::filetypes::{Primitive};
+
 type FailResult<T> = Result<T, ::failure::Error>;
 use ::std::path::Path;
-use ::std::fs::File;
 
 use ::rsp2_array_types::{M33, V3, Unvee};
-use ::rsp2_structure::{Coords, FracOp};
+use ::rsp2_structure::{Coords};
 use ::rsp2_soa_ops::{Permute};
 
 use ::rsp2_tasks::exposed_for_testing::ForceConstants;
 use ::rsp2_tasks::exposed_for_testing::meta::Mass;
 
-// data affected by choice of primitive structure
 #[derive(Deserialize)]
-#[serde(rename_all = "kebab-case")]
-struct PrimInfo {
-    #[serde(rename =      "frac-ops")] frac_ops: Vec<FracOp>,
-    #[serde(rename =     "cart-rots")] cart_rots: Vec<M33>,
-    #[serde(rename =        "masses")] prim_masses: Vec<f64>,
-    #[serde(rename =     "structure")] prim_coords: Coords,
-    #[serde(rename = "displacements")] prim_displacements: Vec<(usize, V3)>, // [disp] -> (prim, v)
-}
-
-// data affected by choice of supercell
-#[derive(Deserialize)]
-#[serde(rename_all = "kebab-case")]
-struct SuperInfo {
+pub struct ForceSets {
     #[serde(rename =         "sc-dims")] sc_dims: [u32; 3],
     // supercell coordinates and "designated cell indices" are used to make the test
     // robust to changes in supercell ordering convention
@@ -43,19 +33,20 @@ struct SuperInfo {
     #[serde(rename =       "structure")] orig_super_coords: Coords,
     #[serde(rename =      "force-sets")] orig_super_force_sets: Vec<Vec<(usize, V3)>>, // [disp] -> [(super, V3)]
 }
+impl_json!{ (ForceSets)[load] }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "kebab-case")]
 struct OutputForceConstants {
     #[serde(rename = "dense")] orig_force_constants: Vec<Vec<M33>>, // [super][super]
 }
+impl_json!{ (OutputForceConstants)[load] }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "kebab-case")]
 struct OutputDynMat {
     #[serde(rename = "real")] expected_dynmat_real: Vec<Vec<M33>>, // [super][super]
     #[serde(rename = "imag")] expected_dynmat_imag: Vec<Vec<M33>>, // [super][super]
 }
+impl_json!{ (OutputDynMat)[load] }
 
 fn check(
     prim_info: impl AsRef<Path>,
@@ -65,22 +56,26 @@ fn check(
     rel_tol: f64,
     abs_tol: f64,
 ) -> FailResult<()> {
-    let PrimInfo {
-        cart_rots, frac_ops, prim_masses, prim_coords, prim_displacements,
-    } = ::serde_json::from_reader(File::open(prim_info)?)?;
+    let Primitive {
+        cart_rots,
+        frac_ops,
+        masses: prim_masses,
+        coords: prim_coords,
+        displacements: prim_displacements,
+    } = Primitive::load(prim_info)?;
 
-    let SuperInfo {
+    let ForceSets {
         sc_dims, orig_super_coords, orig_super_force_sets, orig_designated_images,
-    } = ::serde_json::from_reader(File::open(super_info)?)?;
+    } = ForceSets::load(super_info)?;
 
     let OutputForceConstants {
         orig_force_constants,
-    } = ::serde_json::from_reader(File::open(expected_fc)?)?;
+    } = OutputForceConstants::load(expected_fc)?;
 
     let OutputDynMat {
         expected_dynmat_real,
         expected_dynmat_imag,
-    } = ::serde_json::from_reader(File::open(expected_dynmat)?)?;
+    } = OutputDynMat::load(expected_dynmat)?;
 
     let (super_coords, sc) = ::rsp2_structure::supercell::diagonal(sc_dims).build(&prim_coords);
 
@@ -188,7 +183,7 @@ fn check(
 fn graphene_denseforce_771() {
     check(
         // * Graphene
-        "tests/resources/force-constants/graphene.primitive.json",
+        "tests/resources/primitive/graphene.json",
         // * Dense force sets
         // * [7, 7, 1] supercell
         "tests/resources/force-constants/graphene-771-dense.super.json",
@@ -203,7 +198,7 @@ fn graphene_denseforce_771() {
 fn graphene_denseforce_111() {
     check(
         // * Graphene
-        "tests/resources/force-constants/graphene.primitive.json",
+        "tests/resources/primitive/graphene.json",
         // * Dense force sets
         // * [1, 1, 1] supercell
         "tests/resources/force-constants/graphene-111-dense.super.json",
@@ -220,7 +215,7 @@ fn graphene_denseforce_111() {
 fn graphene_sparseforce_771() {
     check(
         // * Graphene
-        "tests/resources/force-constants/graphene.primitive.json",
+        "tests/resources/primitive/graphene.json",
         // * Sparse force sets (clipped to zero at 1e-12, ~70% sparse)
         // * [7, 7, 1] supercell
         "tests/resources/force-constants/graphene-771-sparse.super.json",

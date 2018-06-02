@@ -1,4 +1,5 @@
 #![cfg_attr(feature = "nightly", euclidean_division)]
+#![deny(unused_must_use)]
 
 extern crate rsp2_array_utils;
 extern crate rsp2_array_types;
