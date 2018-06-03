@@ -336,22 +336,16 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
         let meta = stored.meta();
 
         let disp_dir = phonopy.displacements(coords, meta.sift())?;
-        let frac_ops = disp_dir.symmetry()?;
-        let cart_rots: Vec<M33> = {
-            frac_ops.iter()
-                .map(|oper| oper.to_rot().cart(&coords.lattice()))
-                .collect()
-        };
+        let cart_ops = disp_dir.symmetry()?;
 
         let ::phonopy::Rsp2StyleDisplacements {
             super_coords, sc, prim_displacements, ..
         } = disp_dir.rsp2_style_displacements()?;
 
         let space_group_deperms: Vec<_> = {
-            ::rsp2_structure::find_perm::frac__of_spacegroup_for_general(
+            ::rsp2_structure::find_perm::of_spacegroup(
                 &super_coords,
-                &frac_ops,
-                &coords.lattice(),
+                &cart_ops,
                 // larger than SYMPREC because the coords we see may may be slightly
                 // different from what spglib saw, but not so large that we risk pairing
                 // the wrong atoms
@@ -387,6 +381,10 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
             &super_coords,
             super_meta.sift(),
         )?;
+
+        let cart_rots: Vec<_> = {
+            cart_ops.iter().map(|c| c.cart_rot()).collect()
+        };
 
         let force_constants = ::math::dynmat::ForceConstants::compute_required_rows(
             &super_displacements,
@@ -916,10 +914,9 @@ pub(crate) fn run_dynmat_test(phonopy_dir: &PathDir) -> FailResult<()>
     let prim_lattice = prim_coords.lattice().clone();
 
     let space_group_deperms: Vec<_> = {
-        ::rsp2_structure::find_perm::frac__of_spacegroup_for_general(
+        ::rsp2_structure::find_perm::of_spacegroup(
             &super_coords,
             &space_group,
-            &prim_lattice,
             1e-1, // FIXME should be slightly larger than configured tol,
                   //       but I forgot where that is stored.
         )?.into_iter().map(|p| p.inverted()).collect()
@@ -943,10 +940,8 @@ pub(crate) fn run_dynmat_test(phonopy_dir: &PathDir) -> FailResult<()>
             }).unzip()
     };
 
-    let cart_rots: Vec<M33> = {
-        space_group.iter()
-            .map(|oper| oper.to_rot().cart(&prim_lattice))
-            .collect()
+    let cart_rots: Vec<_> = {
+        space_group.iter().map(|c| c.cart_rot()).collect()
     };
 
     trace!("Computing designated rows of force constants...");

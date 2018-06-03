@@ -44,7 +44,6 @@ pub fn frac__dumb_symmetry_test(
 //        (which fails if and only if the superlattice breaks the symmetry).
 //        I don't know / have not yet proven whether there may exist symmetry-broken
 //        supercells which DO have a valid permutation representation)
-#[deprecated]
 pub fn of_spacegroup(
     // Arbitrary superstructure (the thing we want to permute)
     coords: &Coords,
@@ -64,6 +63,7 @@ pub fn of_spacegroup(
 }
 
 /// Compute permutations for all operators in a spacegroup.
+#[deprecated]
 pub fn frac__of_spacegroup_for_general(
     // NOTE: This really does require data from both the primitive and supercell.
     //       Justifications are in the `with_meta` variant.
@@ -82,6 +82,7 @@ pub fn frac__of_spacegroup_for_general(
 }
 
 /// Compute permutations for all operators in a spacegroup.
+#[deprecated]
 pub fn frac__of_spacegroup_for_primitive(
     prim_coords: &Coords,
     ops: &[FracOp],

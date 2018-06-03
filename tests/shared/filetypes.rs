@@ -13,14 +13,14 @@ extern crate failure;
 use self::path_abs::{FileRead, FileWrite};
 extern crate path_abs;
 
-use self::rsp2_structure::{Coords, FracOp};
+use self::rsp2_structure::{Coords, CartOp};
 extern crate rsp2_structure;
 
 extern crate serde;
 
 extern crate serde_json;
 
-use self::rsp2_array_types::{M33, V3};
+use self::rsp2_array_types::{V3};
 extern crate rsp2_array_types;
 
 macro_rules! impl_json {
@@ -128,8 +128,7 @@ impl MaybeZerolike {
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Primitive {
-    pub frac_ops: Vec<FracOp>,
-    pub cart_rots: Vec<M33>,
+    pub cart_ops: Vec<CartOp>,
     pub masses: Vec<f64>,
     #[serde(rename = "structure")]
     pub coords: Coords,

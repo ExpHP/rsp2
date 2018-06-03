@@ -32,7 +32,7 @@ use ::std::path::{Path, PathBuf};
 use ::rsp2_fs_util::{TempDir};
 
 use ::rsp2_fs_util::{open, create, copy, hard_link};
-use ::rsp2_structure::{Coords, IntRot, FracTrans, FracOp};
+use ::rsp2_structure::{Coords, IntRot, CartOp};
 use ::rsp2_structure::supercell::{SupercellToken};
 use ::rsp2_soa_ops::{Permute, Perm};
 
@@ -389,7 +389,7 @@ impl<P: AsPath> DirWithDisps<P> {
     })}
 
     /// Gets the spacegroup operators.
-    pub fn symmetry(&self) -> FailResult<Vec<FracOp>>
+    pub fn symmetry(&self) -> FailResult<Vec<CartOp>>
     {
         use cmd::python::SpgDataset;
 

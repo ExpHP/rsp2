@@ -57,8 +57,7 @@ fn check(
     abs_tol: f64,
 ) -> FailResult<()> {
     let Primitive {
-        cart_rots,
-        frac_ops,
+        cart_ops,
         masses: prim_masses,
         coords: prim_coords,
         displacements: prim_displacements,
@@ -111,13 +110,14 @@ fn check(
     };
 
     let super_sg_deperms: Vec<_> = {
-        ::rsp2_structure::find_perm::frac__of_spacegroup_for_general(
+        ::rsp2_structure::find_perm::of_spacegroup(
             &super_coords,
-            &frac_ops,
-            &prim_coords.lattice(),
+            &cart_ops,
             1e-1,
         )?.into_iter().map(|p| p.inverted()).collect()
     };
+
+    let cart_rots = cart_ops.iter().map(|c| c.cart_rot()).collect::<Vec<_>>();
 
     // ---------------------------------
     // ------- Force constants ---------

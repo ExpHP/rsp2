@@ -2,6 +2,7 @@ use ::FailResult;
 use ::meta::Mass;
 use ::rsp2_array_types::{V3, M33, M3};
 use ::rsp2_soa_ops::{Perm, Permute};
+use ::rsp2_structure::CartOp;
 use ::rsp2_structure::supercell::SupercellToken;
 use ::rsp2_newtype_indices::{Idx, Indexed, cast_index};
 use ::std::rc::Rc;
@@ -72,7 +73,7 @@ impl ForceConstants {
         let force_sets: &[BTreeMap<SuperI, V3>] = cast_index(force_sets);
         let force_sets: &Indexed<DispI, [_]> = Indexed::from_raw_ref(force_sets);
 
-        let cart_rots:     &Indexed<OperI, [M33]> = Indexed::from_raw_ref(cart_rots);
+        let cart_rots: &Indexed<OperI, [M33]> = Indexed::from_raw_ref(cart_rots);
         let super_deperms: &Indexed<OperI, [Perm]> = Indexed::from_raw_ref(super_deperms);
 
         let primitive_atoms: Indexed<SuperI, Vec<PrimI>>;
