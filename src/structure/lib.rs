@@ -64,8 +64,6 @@ pub use ::core::structure::NonEquivalentLattice;
 pub use ::element::Element;
 
 // yuck. would rather not expose this yet
-pub use ::oper::symmops::{IntRot, FracTrans, FracOp, CartOp};
-
-pub use ::algo::find_perm::frac__dumb_symmetry_test;
+pub use ::oper::symmops::{IntRot, CartOp};
 
 pub use element::consts as consts;

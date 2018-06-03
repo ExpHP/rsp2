@@ -2,7 +2,6 @@ use ::FailResult;
 use ::meta::Mass;
 use ::rsp2_array_types::{V3, M33, M3};
 use ::rsp2_soa_ops::{Perm, Permute};
-use ::rsp2_structure::CartOp;
 use ::rsp2_structure::supercell::SupercellToken;
 use ::rsp2_newtype_indices::{Idx, Indexed, cast_index};
 use ::std::rc::Rc;

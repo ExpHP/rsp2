@@ -1,10 +1,7 @@
-#![allow(deprecated)] // FIXME
-
 use ::{Coords, CoordsKind, Lattice};
-use ::std::rc::Rc;
 use ::std::fmt;
 
-use ::rsp2_array_types::{V3, M33, M44, M4, V4, mat};
+use ::rsp2_array_types::{V3, M33, mat};
 
 // NOTE: This API is in flux. Some (possibly incorrect) notes:
 //
@@ -44,18 +41,6 @@ pub struct IntRot {
     t: M33<i32>,
 }
 
-#[deprecated]
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
-pub struct FracTrans (
-    V3<i32>,
-);
-
-#[deprecated]
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
-pub struct FracOp {
-    t: Rc<M44<i32>>,
-}
-
 /// A space group operation in cartesian units.
 ///
 /// The cartesian representation allows CartOps to be transferable between
@@ -88,16 +73,6 @@ pub struct CartOp {
     trans: V3,
 }
 
-impl Default for FracOp {
-    fn default() -> Self
-    { Self::eye() }
-}
-
-impl Default for FracTrans {
-    fn default() -> Self
-    { Self::eye() }
-}
-
 impl Default for IntRot {
     fn default() -> Self
     { Self::eye() }
@@ -106,16 +81,6 @@ impl Default for IntRot {
 impl Default for CartOp {
     fn default() -> Self
     { Self::eye() }
-}
-
-impl From<FracTrans> for FracOp {
-    fn from(v: FracTrans) -> Self
-    { Self::new(&Default::default(), &v) }
-}
-
-impl From<IntRot> for FracOp {
-    fn from(r: IntRot) -> Self
-    { Self::new(&r, &Default::default()) }
 }
 
 #[derive(Debug, Fail)]
@@ -240,101 +205,6 @@ impl IntRot {
     { other.then(self) }
 }
 
-impl FracTrans {
-    pub fn eye() -> Self
-    { FracTrans(V3([0, 0, 0])) }
-
-    fn opt_from_raw(raw: V3<i32>) -> Option<Self>
-    {
-        match raw.iter().all(|&x| 0 <= x && x < 12) {
-            true => Some(FracTrans(raw)),
-            false => None,
-        }
-    }
-
-    pub fn from_floats(xs: V3) -> Result<FracTrans, ::IntPrecisionError>
-    { xs.try_map(|x| ::util::Tol(1e-4).unfloat(x * 12.0)).map(FracTrans).map(Self::reduce) }
-
-    fn reduce(self) -> FracTrans
-    { FracTrans(self.0.map(|x| ::util::mod_euc(x, 12))) }
-
-    pub fn from_cart(prim_lattice: &Lattice, cart: V3) -> Result<FracTrans, ::IntPrecisionError>
-    { FracTrans::from_floats(cart / prim_lattice) }
-
-    /// Recover the cartesian translation vector.
-    ///
-    /// This conversion requires the same primitive lattice that was used to compute this
-    /// symmetry operator.
-    pub fn cart(&self, prim_lattice: &Lattice) -> V3
-    { self.frac() * prim_lattice }
-
-    pub fn frac(&self) -> V3
-    { self.0.map(|x| f64::from(x) / 12f64) }
-}
-
-const FRAC_OP_EYE: M44<i32> = M4([
-    V4([1, 0, 0, 0]),
-    V4([0, 1, 0, 0]),
-    V4([0, 0, 1, 0]),
-    V4([0, 0, 0, 1]),
-]);
-
-impl FracOp {
-    pub fn eye() -> Self
-    { Self { t: FRAC_OP_EYE.into() } }
-
-    pub fn new(rot: &IntRot, trans: &FracTrans) -> Self
-    {
-        let mut out = FRAC_OP_EYE;
-        out[0][..3].copy_from_slice(&*rot.t[0]);
-        out[1][..3].copy_from_slice(&*rot.t[1]);
-        out[2][..3].copy_from_slice(&*rot.t[2]);
-        out[3][..3].copy_from_slice(&*trans.0);
-        FracOp { t: out.into() }
-    }
-
-    pub fn to_rot(&self) -> IntRot
-    {
-        let mut out = IntRot::eye();
-        out.t[0].copy_from_slice(&self.t[0][..3]);
-        out.t[1].copy_from_slice(&self.t[1][..3]);
-        out.t[2].copy_from_slice(&self.t[2][..3]);
-        out
-    }
-
-    pub fn to_trans(&self) -> FracTrans
-    {
-        let mut out = FracTrans::eye();
-        out.0.copy_from_slice(&self.t[3][..3]);
-        out
-    }
-}
-
-impl FracOp {
-    /// Flipped group operator.
-    ///
-    /// `a.then(b) == b.of(a)`.  The flipped order is more aligned
-    /// with this library's generally row-centric design.
-    pub fn then(&self, other: &FracOp) -> FracOp
-    {
-        // this is the natural order of application for transposes
-        let mut t = &*self.t * &*other.t;
-
-        // reduce the translation for a unique representation
-        for x in &mut t[3][..3] {
-            *x = ::util::mod_euc(*x, 12);
-        }
-        debug_assert!(t[3][..3].iter().all(|&x| 0 <= x && x < 12));
-        debug_assert_eq!(t[3][3], 1);
-
-        FracOp { t: t.into() }
-    }
-
-    /// Conventional group operator.
-    pub fn of(&self, other: &FracOp) -> FracOp
-    { other.then(self) }
-}
-
 impl CartOp {
     pub fn eye() -> Self
     { Self {
@@ -407,20 +277,6 @@ impl From<[[i32; 3]; 3]> for IntRot {
     { IntRot::from(&m) }
 }
 
-impl FracTrans {
-    pub fn transform_prim_mut(&self, fracs: &mut [V3])
-    { ::util::translate_mut_n3_3(fracs, &self.frac()) }
-}
-
-impl FracOp {
-    pub fn transform_prim(&self, fracs: &[V3]) -> Vec<V3>
-    {
-        let mut out = self.to_rot().transform_fracs(fracs);
-        self.to_trans().transform_prim_mut(&mut out);
-        out
-    }
-}
-
 impl CartOp {
     pub fn transform_carts(&self, carts: &[V3]) -> Vec<V3>
     { carts.iter().map(|v| v * self.rot_t + self.trans).collect() }
@@ -448,12 +304,6 @@ mod serde_impls {
     use ::serde::de::Error;
 
     #[derive(Serialize, Deserialize)]
-    pub struct RawFracOp {
-        rot: IntRot,
-        trans: FracTrans,
-    }
-
-    #[derive(Serialize, Deserialize)]
     pub struct RawCartOp {
         rot: M33,
         trans: V3,
@@ -463,22 +313,6 @@ mod serde_impls {
         fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
             let raw: M33<i32> = self.matrix();
             raw.serialize(serializer)
-        }
-    }
-
-    impl Serialize for FracTrans {
-        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-            let raw: V3<i32> = self.0;
-            raw.serialize(serializer)
-        }
-    }
-
-    impl Serialize for FracOp {
-        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-            RawFracOp {
-                rot: self.to_rot(),
-                trans: self.to_trans(),
-            }.serialize(serializer)
         }
     }
 
@@ -496,21 +330,6 @@ mod serde_impls {
             let raw = M33::<i32>::deserialize(deserializer)?;
             IntRot::opt_new(&raw)
                 .ok_or_else(|| D::Error::custom("matrix not unimodular"))
-        }
-    }
-
-    impl<'de> Deserialize<'de> for FracTrans {
-        fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            let raw = V3::<i32>::deserialize(deserializer)?;
-            FracTrans::opt_from_raw(raw)
-                .ok_or_else(|| D::Error::custom("frac translation out of range"))
-        }
-    }
-
-    impl<'de> Deserialize<'de> for FracOp {
-        fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            let RawFracOp { rot, trans } = RawFracOp::deserialize(deserializer)?;
-            Ok(FracOp::new(&rot, &trans))
         }
     }
 

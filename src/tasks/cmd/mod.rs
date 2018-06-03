@@ -40,7 +40,7 @@ use ::rsp2_slice_math::{vnorm};
 
 use ::slice_of_array::prelude::*;
 use ::rsp2_array_utils::arr_from_fn;
-use ::rsp2_array_types::{V3, M33, Unvee};
+use ::rsp2_array_types::{V3, Unvee};
 use ::rsp2_structure::{Coords, Lattice};
 use ::rsp2_structure::layer::LayersPerUnitCell;
 use ::phonopy::Builder as PhonopyBuilder;
@@ -909,9 +909,8 @@ pub(crate) fn run_dynmat_test(phonopy_dir: &PathDir) -> FailResult<()>
         super_coords, sc, perm_from_phonopy, ..
     } = disp_dir.rsp2_style_displacements()?;
 
-    let (prim_coords, prim_meta) = disp_dir.primitive_structure()?;
+    let (_, prim_meta) = disp_dir.primitive_structure()?;
     let space_group = disp_dir.symmetry()?;
-    let prim_lattice = prim_coords.lattice().clone();
 
     let space_group_deperms: Vec<_> = {
         ::rsp2_structure::find_perm::of_spacegroup(
