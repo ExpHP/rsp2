@@ -66,6 +66,6 @@ pub use ::element::Element;
 // yuck. would rather not expose this yet
 pub use ::oper::symmops::{IntRot, FracTrans, FracOp, CartOp};
 
-pub use ::algo::find_perm::dumb_symmetry_test;
+pub use ::algo::find_perm::frac__dumb_symmetry_test;
 
 pub use element::consts as consts;

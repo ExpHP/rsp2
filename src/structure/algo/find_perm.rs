@@ -1,5 +1,7 @@
+#![allow(deprecated)]
+#![allow(non_snake_case)]
 use ::{Lattice, Coords, CoordsKind};
-use ::{IntRot, FracOp};
+use ::{IntRot, FracOp, CartOp};
 use super::group::GroupTree;
 
 use ::rsp2_array_types::V3;
@@ -11,7 +13,8 @@ use ::failure::{Backtrace, Error};
 ///
 /// Slow, and not even always correct. (the voronoi cell of the lattice
 /// must be fully contained within one cell image in each direction)
-pub fn dumb_symmetry_test(
+#[deprecated]
+pub fn frac__dumb_symmetry_test(
     structure: &Coords,
     ops: &[FracOp],
     tol: f64,
@@ -19,7 +22,7 @@ pub fn dumb_symmetry_test(
 {Ok({
     let lattice = structure.lattice();
     let from_fracs = structure.to_fracs();
-    let perms = of_spacegroup_for_primitive(structure, ops, tol)?;
+    let perms = frac__of_spacegroup_for_primitive(structure, ops, tol)?;
 
     for (op, perm) in izip!(ops, perms) {
         let transformed_fracs = op.transform_prim(&from_fracs);
@@ -31,7 +34,37 @@ pub fn dumb_symmetry_test(
 })}
 
 /// Compute permutations for all operators in a spacegroup.
-pub fn of_spacegroup_for_general(
+///
+/// This method can be called on superstructures so long as pure translations
+/// are not included in the list of operators.  Be aware that if the superlattice
+/// breaks symmetries of the primitive structure, those symmetries might not have
+/// a valid representation as a permutation (and the method will fail).
+//
+// (NOTE: currently, it actually fails even earlier, when trying to construct IntRot
+//        (which fails if and only if the superlattice breaks the symmetry).
+//        I don't know / have not yet proven whether there may exist symmetry-broken
+//        supercells which DO have a valid permutation representation)
+#[deprecated]
+pub fn of_spacegroup(
+    // Arbitrary superstructure (the thing we want to permute)
+    coords: &Coords,
+
+    // Spacegroup operators.
+    //
+    // * Must be closed under composition.
+    // * Must not include pure translations. (this limitation is because the
+    //   the method used to equate two operators only considers the rotations)
+    ops: &[CartOp],
+
+    tol: f64,
+) -> Result<Vec<Perm>, Error>
+{
+    let dummy_meta = vec![(); coords.num_atoms()];
+    of_spacegroup_with_meta(coords, &dummy_meta, ops, tol)
+}
+
+/// Compute permutations for all operators in a spacegroup.
+pub fn frac__of_spacegroup_for_general(
     // NOTE: This really does require data from both the primitive and supercell.
     //       Justifications are in the `with_meta` variant.
 
@@ -42,29 +75,29 @@ pub fn of_spacegroup_for_general(
     // The lattice that the fractional operators operate on.
     prim_lattice: &Lattice,
     tol: f64,
-) -> Result<Vec<Perm>, PositionMatchError>
+) -> Result<Vec<Perm>, Error>
 {
     let dummy_meta = vec![(); coords.num_atoms()];
-    of_spacegroup_for_general_with_meta(coords, &dummy_meta, prim_ops, prim_lattice, tol)
+    frac__of_spacegroup_for_general_with_meta(coords, &dummy_meta, prim_ops, prim_lattice, tol)
 }
 
 /// Compute permutations for all operators in a spacegroup.
-pub fn of_spacegroup_for_primitive(
+pub fn frac__of_spacegroup_for_primitive(
     prim_coords: &Coords,
     ops: &[FracOp],
     tol: f64,
-) -> Result<Vec<Perm>, PositionMatchError>
+) -> Result<Vec<Perm>, Error>
 {
     let dummy_meta = vec![(); prim_coords.num_atoms()];
-    of_spacegroup_for_primitive_with_meta(prim_coords, &dummy_meta, ops, tol)
+    frac__of_spacegroup_for_primitive_with_meta(prim_coords, &dummy_meta, ops, tol)
 }
 
 // NOTE: These versions use the metadata to group the atoms and potentially
 //       elide even more comparisons. Is it effective? No idea! But it comes at
 //       zero extra cost for `M = ()` and hasn't been hurting anyone, so I
 //       figured I'll leave it in.
-
-pub fn of_spacegroup_for_general_with_meta<M: Ord>(
+#[deprecated]
+pub fn frac__of_spacegroup_for_general_with_meta<M: Ord>(
     // NOTE: This really does require data from both the primitive and supercell.
     //       Justifications follow.
 
@@ -83,35 +116,51 @@ pub fn of_spacegroup_for_general_with_meta<M: Ord>(
     prim_lattice: &Lattice,
 
     tol: f64,
-) -> Result<Vec<Perm>, PositionMatchError>
+) -> Result<Vec<Perm>, Error>
+{
+    let cart_ops: Vec<_> = {
+        prim_ops.iter()
+            .map(|f| f.to_rot().to_cart_op_with_frac_trans(f.to_trans().frac(), prim_lattice))
+            .collect()
+    };
+    of_spacegroup_with_meta(coords, metadata, &cart_ops, tol)
+}
+
+pub fn of_spacegroup_with_meta<M: Ord>(
+    // Arbitrary superstructure (the thing we want to permute)
+    coords: &Coords,
+    metadata: &[M],
+
+    // Spacegroup operators.
+    cart_ops: &[CartOp],
+
+    tol: f64,
+) -> Result<Vec<Perm>, Error>
 {Ok({
+    let lattice = coords.lattice();
     let from_fracs = coords.to_fracs();
+
+    // Integer-based spacegroup operators, because we need a form of
+    // the operators that is hashable for the GroupTree composition trick.
+    let int_ops: Vec<_> = {
+        cart_ops.iter()
+            .map(|c| c.int_rot(lattice))
+            .collect::<Result<_, _>>()?
+    };
 
     // Find relations between the group operators and
     // identify a small number of base cases ("generators").
     let tree = GroupTree::from_all_members(
-        prim_ops.to_vec(),
+        int_ops,
         |a, b| a.then(b),
     );
 
     tree.try_compute_homomorphism(
         // Generators: Do a (very expensive!) brute force search.
-        |prim_op| Ok::<_, PositionMatchError>({
-            // convert fractional operator from primitive to supercell units
-            let (lattice, frac_rot_t, frac_trans) = {
-                let cart_rot_t = prim_op.to_rot().cart_t(prim_lattice);
-                let cart_trans = prim_op.to_trans().cart(prim_lattice);
-
-                let lattice = coords.lattice();
-                let frac_rot_t = &(lattice.matrix() * &cart_rot_t) * lattice.inverse_matrix();
-                let frac_trans = cart_trans / lattice;
-                (lattice, frac_rot_t, frac_trans)
-            };
-
-            let to_fracs = from_fracs.iter().map(|v| v * &frac_rot_t + frac_trans).collect::<Vec<_>>();
-            let perm = brute_force_with_sort_trick(lattice, metadata, &from_fracs, &to_fracs[..], tol)?;
-            perm
-        }),
+        |op_ind, _int_op| {
+            let to_fracs = cart_ops[op_ind].transform_fracs(lattice, &from_fracs);
+            brute_force_with_sort_trick(lattice, metadata, &from_fracs, &to_fracs[..], tol)
+        },
         // Other operators: Quickly compose the results from other operators.
         |a, b| Ok({
             // Flip the order, because the permutations we seek
@@ -125,18 +174,20 @@ pub fn of_spacegroup_for_general_with_meta<M: Ord>(
     )?
 })}
 
-pub fn of_spacegroup_for_primitive_with_meta<M: Ord>(
+#[deprecated]
+pub fn frac__of_spacegroup_for_primitive_with_meta<M: Ord>(
     prim_structure: &Coords,
     metadata: &[M],
     ops: &[FracOp],
     tol: f64,
-) -> Result<Vec<Perm>, PositionMatchError>
+) -> Result<Vec<Perm>, Error>
 {
-    of_spacegroup_for_general_with_meta(prim_structure, metadata, ops, prim_structure.lattice(), tol)
+    frac__of_spacegroup_for_general_with_meta(prim_structure, metadata, ops, prim_structure.lattice(), tol)
 }
 
 #[allow(unused)]
-pub(crate) fn of_rotation_with_meta<M: Ord>(
+#[deprecated]
+pub(crate) fn frac__of_rotation_with_meta<M: Ord>(
     structure: &Coords,
     meta: &[M],
     rotation: &IntRot,

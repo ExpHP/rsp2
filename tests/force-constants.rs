@@ -111,7 +111,7 @@ fn check(
     };
 
     let super_sg_deperms: Vec<_> = {
-        ::rsp2_structure::find_perm::of_spacegroup_for_general(
+        ::rsp2_structure::find_perm::frac__of_spacegroup_for_general(
             &super_coords,
             &frac_ops,
             &prim_coords.lattice(),

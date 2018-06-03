@@ -20,11 +20,11 @@ fn test_graphene() {
         cart_rots: _, frac_ops, coords, ..
     } = Primitive::load("tests/resources/primitive/graphene.json").unwrap();
 
-    let perms = find_perm::of_spacegroup_for_primitive(&coords, &frac_ops, 1e-2).unwrap();
+    let perms = find_perm::frac__of_spacegroup_for_primitive(&coords, &frac_ops, 1e-2).unwrap();
     for (op, perm) in zip_eq!(frac_ops, perms) {
         let transformed_fracs = op.transform_prim(&coords.to_fracs());
-        let transformed = coords.clone().with_fracs(transformed_fracs);
-        let permuted = coords.permuted_by(&perm);
+        let transformed = coords.with_fracs(transformed_fracs);
+        let permuted = coords.clone().permuted_by(&perm);
 
         transformed.check_same_cell_and_order(&permuted, 1e-2 * (1.0 + 1e-7)).unwrap();
     }
@@ -37,15 +37,15 @@ fn validation_van_fail() {
         cart_rots: _, frac_ops, coords, ..
     } = Primitive::load("tests/resources/primitive/graphene.json").unwrap();
 
-    let mut perms = find_perm::of_spacegroup_for_primitive(&coords, &frac_ops, 1e-2).unwrap();
+    let mut perms = find_perm::frac__of_spacegroup_for_primitive(&coords, &frac_ops, 1e-2).unwrap();
 
     // make the result incorrect
     perms[5] = perms[5].clone().shift_right(1);
 
     for (op, perm) in zip_eq!(frac_ops, perms) {
         let transformed_fracs = op.transform_prim(&coords.to_fracs());
-        let transformed = coords.clone().with_fracs(transformed_fracs);
-        let permuted = coords.permuted_by(&perm);
+        let transformed = coords.with_fracs(transformed_fracs);
+        let permuted = coords.clone().permuted_by(&perm);
 
         transformed.check_same_cell_and_order(&permuted, 1e-2 * (1.0 + 1e-7)).expect("looney");
     }

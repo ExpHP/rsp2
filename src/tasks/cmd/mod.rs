@@ -348,7 +348,7 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
         } = disp_dir.rsp2_style_displacements()?;
 
         let space_group_deperms: Vec<_> = {
-            ::rsp2_structure::find_perm::of_spacegroup_for_general(
+            ::rsp2_structure::find_perm::frac__of_spacegroup_for_general(
                 &super_coords,
                 &frac_ops,
                 &coords.lattice(),
@@ -916,7 +916,7 @@ pub(crate) fn run_dynmat_test(phonopy_dir: &PathDir) -> FailResult<()>
     let prim_lattice = prim_coords.lattice().clone();
 
     let space_group_deperms: Vec<_> = {
-        ::rsp2_structure::find_perm::of_spacegroup_for_general(
+        ::rsp2_structure::find_perm::frac__of_spacegroup_for_general(
             &super_coords,
             &space_group,
             &prim_lattice,

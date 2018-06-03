@@ -266,9 +266,9 @@ impl FracTrans {
     /// This conversion requires the same primitive lattice that was used to compute this
     /// symmetry operator.
     pub fn cart(&self, prim_lattice: &Lattice) -> V3
-    { self.float() * prim_lattice }
+    { self.frac() * prim_lattice }
 
-    fn float(&self) -> V3
+    pub fn frac(&self) -> V3
     { self.0.map(|x| f64::from(x) / 12f64) }
 }
 
@@ -409,7 +409,7 @@ impl From<[[i32; 3]; 3]> for IntRot {
 
 impl FracTrans {
     pub fn transform_prim_mut(&self, fracs: &mut [V3])
-    { ::util::translate_mut_n3_3(fracs, &self.float()) }
+    { ::util::translate_mut_n3_3(fracs, &self.frac()) }
 }
 
 impl FracOp {

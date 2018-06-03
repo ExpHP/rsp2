@@ -526,7 +526,7 @@ mod tests {
             ROTATION_DATA.members.clone(),
             ROTATION_DATA.compose,
         ).compute_homomorphism(
-            |g| vertex_perm_from_rot(g),
+            |_, g| vertex_perm_from_rot(g),
             |a, b| VERTEX_PERM_OP_DATA.compose(a, b),
         );
 

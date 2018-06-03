@@ -68,12 +68,12 @@ impl<G> GroupTree<G>
     /// `compose(a, b)` should compute `b of a`.
     pub fn compute_homomorphism<H>(
         &self,
-        mut compute: impl FnMut(&G) -> H,
+        mut compute: impl FnMut(usize, &G) -> H,
         mut compose: impl FnMut(&H, &H) -> H,
     ) -> Vec<H>
     {
         self.try_compute_homomorphism(
-            |g| Ok::<_, ()>(compute(g)),
+            |idx, g| Ok::<_, ()>(compute(idx, g)),
             |a, b| Ok::<_, ()>(compose(a, b)),
         ).unwrap()
     }
@@ -81,15 +81,16 @@ impl<G> GroupTree<G>
     /// `compute_homomorphism` for fallible functions.
     pub fn try_compute_homomorphism<E, H>(
         &self,
-        mut compute: impl FnMut(&G) -> StdResult<H, E>,
+        mut compute: impl FnMut(usize, &G) -> StdResult<H, E>,
         mut compose: impl FnMut(&H, &H) -> StdResult<H, E>,
     ) -> StdResult<Vec<H>, E>
     {Ok({
-        let mut out = Vec::with_capacity(self.members.len());
+        let len = self.members.len();
+        let mut out = Vec::with_capacity(len);
 
-        for (g, decomp) in izip!(&self.members, &self.decomps) {
+        for (index, g, decomp) in izip!(0..len, &self.members, &self.decomps) {
             let value = match *decomp {
-                None => compute(g)?,
+                None => compute(index, g)?,
                 Some((a, b)) => compose(&out[a], &out[b])?,
             };
             out.push(value);
