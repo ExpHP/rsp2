@@ -72,7 +72,6 @@ const FNAME_SETTINGS_ARGS: &'static str = "disp.args";
 const FNAME_HELPER_SCRIPT: &'static str = "phonopy";
 const FNAME_CONF_DISPS: &'static str = "disp.conf";
 const FNAME_CONF_BANDS: &'static str = "band.conf";
-const FNAME_CONF_SYMMETRY: &'static str = "phonopy.conf";
 const FNAME_OUT_SYMMETRY: &'static str = "symmetry.yaml";
 
 impl Builder {
