@@ -107,6 +107,7 @@ mod stdout {
     pub fn log(s: &str)
     { log!(LEVEL, "{}", s) }
 
+    #[allow(unused)]
     pub fn is_log_enabled() -> bool
     { log_enabled!(LEVEL) }
 

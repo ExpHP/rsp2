@@ -95,9 +95,11 @@ where
     let stdout = ::serde_json::from_reader(child_stdout)?;
 
     if !child.wait()?.success() {
-        // NOTE: details of the precise error should have already been
-        // written to stderr, so there's not
-        bail!("an error occurred in a python script");
+        let extra = match ::stderr::is_log_enabled() {
+            true => "check the log for a python backtrace",
+            false => "that's all we now",
+        };
+        bail!("an error occurred in a python script; {}", extra);
     }
 
     let _ = stderr_worker.join();
