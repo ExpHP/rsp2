@@ -3,7 +3,7 @@
 
 use ::FailResult;
 use ::rsp2_array_types::{V3, M33};
-use ::rsp2_structure::{Coords};
+use ::rsp2_structure::{Coords, Lattice, IntRot, CartOp};
 
 use super::{call_script_and_communicate};
 
@@ -33,19 +33,42 @@ pub struct SpglibError(String);
 
 impl SpgDataset {
     pub fn compute(coords: &Coords, types: &[u32], symprec: f64) -> FailResult<Self> {
+        let lattice = coords.lattice().clone();
+
         let mut coords = coords.clone();
         coords.ensure_fracs();
+
         let types = types.to_vec();
 
         let input = Input { coords, types, symprec };
         let result: Result<Self, String> = call_script_and_communicate(PY_CALL_SPGLIB, &input)?;
-        result.map_err(SpglibError).map_err(Into::into)
+        result
+            .map(|mut spg| { spg.lattice = Some(lattice); spg })
+            .map_err(|e| SpglibError(e).into())
+    }
+
+    pub fn lattice(&self) -> &Lattice {
+        self.lattice.as_ref()
+            .expect("(BUG!) should have been added on construction")
+    }
+
+    pub fn cart_ops(&self) -> Vec<CartOp> {
+        zip_eq!(&self.rotations, &self.translations)
+            .map(|(frac_rot, &frac_trans)| {
+                IntRot::new(frac_rot)
+                    .to_cart_op_with_frac_trans(frac_trans, self.lattice())
+            })
+            .collect()
     }
 }
 
 #[derive(Deserialize)]
 #[derive(Debug, Clone)]
 pub struct SpgDataset {
+    // (bit of a HACK; added shortly after construction, but not part of what is
+    //  deserialized.  Needed by `cart_ops`)
+    lattice: Option<Lattice>,
+
     #[serde(rename = "number")]
     pub space_group_number: u32,
     #[serde(rename = "international")]

@@ -411,7 +411,7 @@ impl<P: AsPath> DirWithDisps<P> {
             "(BUG in rsp2) spglib found a different spacegroup than phonopy! \
             This must mean rsp2 supplied the wrong input.");
 
-        unimplemented!("get float sg ops")
+        Ok(dataset.cart_ops())
     }
 
     fn _symmetry_precision(&self) -> FailResult<f64>
