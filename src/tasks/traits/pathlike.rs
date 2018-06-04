@@ -101,14 +101,29 @@ impl<'p, P: AsPath + ?Sized> AsPath for &'p P
 /// This is really just an implementation detail, and you should not
 /// worry about it. All types that implement this expose `close()`
 /// and `relocate()` inherent methods that you should use instead.
-pub trait HasTempDir: AsPath {
+pub trait HasTempDir: AsPath + Sized {
     /// Provides `TempDir::close` in generic contexts
     fn temp_dir_close(self) -> IoResult<()>;
     /// Provides `TempDir::into_path` in generic contexts
     fn temp_dir_into_path(self) -> PathBuf;
+    /// Provides `TempDir::recover` in generic contexts
+    fn temp_dir_recover(self);
+
+    /// Provides `TempDir::try_with_recovery` in generic contexts
+    fn temp_dir_try_with_recovery<B, E, F>(self, f: F) -> Result<(Self, B), E>
+    where F: FnOnce(&Self) -> Result<B, E> {
+        match f(&self) {
+            Ok(x) => Ok((self, x)),
+            Err(e) => {
+                self.temp_dir_recover();
+                Err(e)
+            }
+        }
+    }
 }
 
 impl HasTempDir for TempDir {
     fn temp_dir_close(self) -> IoResult<()> { self.close() }
     fn temp_dir_into_path(self) -> PathBuf { self.into_path() }
+    fn temp_dir_recover(self) { self.recover() }
 }

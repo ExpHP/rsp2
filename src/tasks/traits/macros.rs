@@ -85,6 +85,9 @@ macro_rules! impl_dirlike_boilerplate {
 
             fn temp_dir_into_path(self) -> PathBuf
             { self.$member.temp_dir_into_path() }
+
+            fn temp_dir_recover(self)
+            { self.$member.temp_dir_recover() }
         }
 
         // all dir-likes implement AsPath
@@ -120,6 +123,11 @@ macro_rules! impl_dirlike_boilerplate {
                     path.as_path().to_owned()
                 })
             })}
+
+            /// Recover the tempdir if a closure returns Err.
+            pub fn try_with_recovery<B, E, F>(self, f: F) -> Result<(Self, B), E>
+            where F: FnOnce(&Self) -> Result<B, E>,
+            { self.temp_dir_try_with_recovery(f) }
         }
 
         #[allow(dead_code)]

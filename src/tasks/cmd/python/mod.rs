@@ -5,8 +5,9 @@ mod scipy_eigsh;
 mod spglib;
 
 //---------------------------------------------------------
-use ::FailResult;
+use ::{FailResult, FailOk};
 use ::std::process;
+use ::std::io::prelude::*;
 
 const PY_NOOP: &'static str = indoc!(r#"
     #!/usr/bin/env python3
@@ -73,36 +74,45 @@ where
     use ::std::process::Stdio;
 
     let tmp = ::rsp2_fs_util::TempDir::new("rsp2")?;
-    let path = tmp.path().join("script.py");
+    tmp.try_with_recovery(|tmp| FailOk({
+        let path = tmp.path().join("script.py");
 
-    ::std::fs::write(&path, script)?;
+        ::std::fs::write(&path, script)?;
 
-    let mut cmd = process::Command::new("python3");
-    cmd.arg(path);
-    cmd.stdin(Stdio::piped());
-    cmd.stdout(Stdio::piped());
-    cmd.stderr(Stdio::piped());
+        let mut cmd = process::Command::new("python3");
+        cmd.arg(path);
+        cmd.stdin(Stdio::piped());
+        cmd.stdout(Stdio::piped());
+        cmd.stderr(Stdio::piped());
 
-    let mut child = cmd.spawn()?;
-    let child_stdin = child.stdin.take().unwrap();
-    let child_stdout = child.stdout.take().unwrap();
-    let child_stderr = child.stderr.take().unwrap();
+        let mut child = cmd.spawn()?;
+        let child_stdin = child.stdin.take().unwrap();
+        let mut child_stdout = child.stdout.take().unwrap();
+        let child_stderr = child.stderr.take().unwrap();
 
-    let stderr_worker = ::stderr::spawn_log_worker(child_stderr);
+        let stderr_worker = ::stderr::spawn_log_worker(child_stderr);
 
-    ::serde_json::to_writer(child_stdin, stdin_data)?;
+        ::serde_json::to_writer(child_stdin, stdin_data)?;
 
-    let stdout = ::serde_json::from_reader(child_stdout)?;
-
-    if !child.wait()?.success() {
-        let extra = match ::stderr::is_log_enabled() {
-            true => "check the log for a python backtrace",
-            false => "that's all we now",
+        let stdout = {
+            let mut buf = String::new();
+            child_stdout.read_to_string(&mut buf)?;
+            buf
         };
-        bail!("an error occurred in a python script; {}", extra);
-    }
+        // for debugging
+        ::std::fs::write(tmp.path().join("_py_stdout"), &stdout)?;
+        let value = ::serde_json::from_str(&stdout[..])?;
 
-    let _ = stderr_worker.join();
+        if !child.wait()?.success() {
+            let extra = match ::stderr::is_log_enabled() {
+                true => "check the log for a python backtrace",
+                false => "that's all we now",
+            };
+            bail!("an error occurred in a python script; {}", extra);
+        }
 
-    stdout
+        let _ = stderr_worker.join();
+
+        value
+    }))?.1 // tmp.try_with_recovery(...)
 })}

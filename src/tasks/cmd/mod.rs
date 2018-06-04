@@ -336,76 +336,79 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
         let meta = stored.meta();
 
         let disp_dir = phonopy.displacements(coords, meta.sift())?;
-        let cart_ops = disp_dir.symmetry()?;
 
-        let ::phonopy::Rsp2StyleDisplacements {
-            super_coords, sc, prim_displacements, ..
-        } = disp_dir.rsp2_style_displacements()?;
+        disp_dir.try_with_recovery(|disp_dir| FailOk({
+            let cart_ops = disp_dir.symmetry()?;
 
-        let space_group_deperms: Vec<_> = {
-            ::rsp2_structure::find_perm::of_spacegroup(
+            let ::phonopy::Rsp2StyleDisplacements {
+                super_coords, sc, prim_displacements, ..
+            } = disp_dir.rsp2_style_displacements()?;
+
+            let space_group_deperms: Vec<_> = {
+                ::rsp2_structure::find_perm::of_spacegroup(
+                    &super_coords,
+                    &cart_ops,
+                    // larger than SYMPREC because the coords we see may may be slightly
+                    // different from what spglib saw, but not so large that we risk pairing
+                    // the wrong atoms
+                    settings.phonons.symmetry_tolerance * 3.0,
+                )?.into_iter().map(|p| p.inverted()).collect()
+            };
+
+            let super_meta = {
+                // macro to generate a closure, because generic closures don't exist
+                macro_rules! f {
+                    () => { |x: Rc<[_]>| -> Rc<[_]> {
+                        sc.replicate(&x[..]).into()
+                    }};
+                }
+                meta.clone().map(hlist![
+                    f!(),
+                    f!(),
+                    |opt: Option<_>| opt.map(f!()),
+                ])
+            };
+            let super_displacements: Vec<_> = {
+                prim_displacements.iter()
+                    .map(|&(prim, disp)| {
+                        let atom = sc.atom_from_cell(prim, ForceConstants::DESIGNATED_CELL);
+                        (atom, disp)
+                    })
+                    .collect()
+            };
+            let force_sets = do_force_sets_at_disps_for_sparse(
+                pot,
+                &settings.threading,
+                &super_displacements,
                 &super_coords,
-                &cart_ops,
-                // larger than SYMPREC because the coords we see may may be slightly
-                // different from what spglib saw, but not so large that we risk pairing
-                // the wrong atoms
-                settings.phonons.symmetry_tolerance * 3.0,
-            )?.into_iter().map(|p| p.inverted()).collect()
-        };
+                super_meta.sift(),
+            )?;
 
-        let super_meta = {
-            // macro to generate a closure, because generic closures don't exist
-            macro_rules! f {
-                () => { |x: Rc<[_]>| -> Rc<[_]> {
-                    sc.replicate(&x[..]).into()
-                }};
-            }
-            meta.clone().map(hlist![
-                f!(),
-                f!(),
-                |opt: Option<_>| opt.map(f!()),
-            ])
-        };
-        let super_displacements: Vec<_> = {
-            prim_displacements.iter()
-                .map(|&(prim, disp)| {
-                    let atom = sc.atom_from_cell(prim, ForceConstants::DESIGNATED_CELL);
-                    (atom, disp)
-                })
-                .collect()
-        };
-        let force_sets = do_force_sets_at_disps_for_sparse(
-            pot,
-            &settings.threading,
-            &super_displacements,
-            &super_coords,
-            super_meta.sift(),
-        )?;
+            let cart_rots: Vec<_> = {
+                cart_ops.iter().map(|c| c.cart_rot()).collect()
+            };
 
-        let cart_rots: Vec<_> = {
-            cart_ops.iter().map(|c| c.cart_rot()).collect()
-        };
+            let force_constants = ::math::dynmat::ForceConstants::compute_required_rows(
+                &super_displacements,
+                &force_sets,
+                &cart_rots,
+                &space_group_deperms,
+                &sc,
+            )?;
 
-        let force_constants = ::math::dynmat::ForceConstants::compute_required_rows(
-            &super_displacements,
-            &force_sets,
-            &cart_rots,
-            &space_group_deperms,
-            &sc,
-        )?;
+            let dynmat = {
+                force_constants
+                    .gamma_dynmat(&sc, meta.pick())
+                    .hermitianize()
+            };
 
-        let dynmat = {
-            force_constants
-                .gamma_dynmat(&sc, meta.pick())
-                .hermitianize()
-        };
+    //        HACK
+    //        Json(&dynmat.cereal()).save(self.join("dynmat.json"))?;
 
-//        HACK
-//        Json(&dynmat.cereal()).save(self.join("dynmat.json"))?;
-
-        let how_many = self.max_count.min(dynmat.max_sparse_eigensolutions());
-        let (evals, evecs) = dynmat.compute_most_negative_eigensolutions(how_many)?;
-        (evals, evecs, dynmat)
+            let how_many = self.max_count.min(dynmat.max_sparse_eigensolutions());
+            let (evals, evecs) = dynmat.compute_most_negative_eigensolutions(how_many)?;
+            (evals, evecs, dynmat)
+        }))?.1 // disp_dir.try_with_recovery(...)
     })}
 }
 

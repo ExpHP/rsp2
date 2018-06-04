@@ -22,14 +22,14 @@ struct Input {
     symprec: f64,
 }
 
-//-------------------------------------------------------------------------------
-// calling scripts
-
 #[derive(Debug, Fail)]
 #[fail(display = "an error occurred importing the spglib python module")]
 pub struct SpglibAvailabilityError;
 
-//-------------------------------------------------------------------------------
+// Error message produced by spglib.
+#[derive(Debug, Fail)]
+#[fail(display = "{}", _0)]
+pub struct SpglibError(String);
 
 impl SpgDataset {
     pub fn compute(coords: &Coords, types: &[u32], symprec: f64) -> FailResult<Self> {
@@ -38,7 +38,8 @@ impl SpgDataset {
         let types = types.to_vec();
 
         let input = Input { coords, types, symprec };
-        call_script_and_communicate(PY_CALL_SPGLIB, &input)
+        let result: Result<Self, String> = call_script_and_communicate(PY_CALL_SPGLIB, &input)?;
+        result.map_err(SpglibError).map_err(Into::into)
     }
 }
 
