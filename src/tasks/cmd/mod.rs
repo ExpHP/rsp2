@@ -359,14 +359,14 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
             } = disp_dir.rsp2_style_displacements()?;
 
             let space_group_deperms: Vec<_> = {
-                ::rsp2_structure::find_perm::of_spacegroup(
+                ::rsp2_structure::find_perm::spacegroup_deperms(
                     &super_coords,
                     &cart_ops,
                     // larger than SYMPREC because the coords we see may may be slightly
                     // different from what spglib saw, but not so large that we risk pairing
                     // the wrong atoms
                     settings.phonons.symmetry_tolerance * 3.0,
-                )?.into_iter().map(|p| p.inverted()).collect()
+                )?
             };
 
             let super_meta = {
@@ -937,12 +937,12 @@ pub(crate) fn run_dynmat_test(phonopy_dir: &PathDir) -> FailResult<()>
     let space_group = disp_dir.symmetry()?;
 
     let space_group_deperms: Vec<_> = {
-        ::rsp2_structure::find_perm::of_spacegroup(
+        ::rsp2_structure::find_perm::spacegroup_deperms(
             &super_coords,
             &space_group,
             1e-1, // FIXME should be slightly larger than configured tol,
                   //       but I forgot where that is stored.
-        )?.into_iter().map(|p| p.inverted()).collect()
+        )?
     };
 
     let (force_sets, super_displacements): (Vec<_>, Vec<_>) = {

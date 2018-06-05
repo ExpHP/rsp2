@@ -22,6 +22,10 @@
 //! * Rotation matrices
 //! * Permutations of the 8 vertices of the cube on `[-1, 1]^3`
 //!
+//! (note: the permutations referred to by the last bullet are what rsp2 now
+//!  refers to as "copermutations," which I now recognize to be of limited
+//!  value to begin with.  See conventions.md for more details)
+//!
 //! Some interesting facts:
 //!
 //! * While permutations and rotations both are groups, **they compose

@@ -110,11 +110,11 @@ fn check(
     };
 
     let super_sg_deperms: Vec<_> = {
-        ::rsp2_structure::find_perm::of_spacegroup(
+        ::rsp2_structure::find_perm::spacegroup_deperms(
             &super_coords,
             &cart_ops,
             1e-1,
-        )?.into_iter().map(|p| p.inverted()).collect()
+        )?
     };
 
     let cart_rots = cart_ops.iter().map(|c| c.cart_rot()).collect::<Vec<_>>();

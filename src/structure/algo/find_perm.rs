@@ -18,7 +18,10 @@ use ::rsp2_soa_ops::{Perm, Permute};
 
 use ::failure::{Backtrace, Error};
 
-/// Compute permutations for all operators in a spacegroup.
+/// Compute copermutations for all operators in a spacegroup.
+///
+/// Apologies for the invented terminology; see `conventions.md` about the difference
+/// between copermutations and depermutations.
 ///
 /// This method can be called on superstructures so long as pure translations
 /// are not included in the list of operators.  Be aware that if the superlattice
@@ -29,7 +32,7 @@ use ::failure::{Backtrace, Error};
 //        (which fails if and only if the superlattice breaks the symmetry).
 //        I don't know / have not yet proven whether there may exist symmetry-broken
 //        supercells which DO have a valid permutation representation)
-pub fn of_spacegroup(
+pub fn spacegroup_coperms(
     // Arbitrary superstructure (the thing we want to permute)
     coords: &Coords,
 
@@ -44,14 +47,43 @@ pub fn of_spacegroup(
 ) -> Result<Vec<Perm>, Error>
 {
     let dummy_meta = vec![(); coords.num_atoms()];
-    of_spacegroup_with_meta(coords, &dummy_meta, ops, tol)
+    spacegroup_coperms_with_meta(coords, &dummy_meta, ops, tol)
 }
+
+/// Compute depermutations for all operators in a spacegroup.
+///
+/// Apologies for the invented terminology; see `conventions.md` about the difference
+/// between copermutations and depermutations.
+///
+/// This method can be called on superstructures so long as pure translations
+/// are not included in the list of operators.  Be aware that if the superlattice
+/// breaks symmetries of the primitive structure, those symmetries might not have
+/// a valid representation as a permutation (and the method will fail).
+//
+// (NOTE: currently, it actually fails even earlier, when trying to construct IntRot
+//        (which fails if and only if the superlattice breaks the symmetry).
+//        I don't know / have not yet proven whether there may exist symmetry-broken
+//        supercells which DO have a valid permutation representation)
+pub fn spacegroup_deperms(
+    // Arbitrary superstructure (the thing we want to permute)
+    coords: &Coords,
+
+    // Spacegroup operators.
+    //
+    // * Must be closed under composition.
+    // * Must not include pure translations. (this limitation is because the
+    //   the method used to equate two operators only considers the rotations)
+    ops: &[CartOp],
+
+    tol: f64,
+) -> Result<Vec<Perm>, Error>
+{ spacegroup_coperms(coords, ops, tol).map(invert_each) }
 
 // NOTE: This version uses the metadata to group the atoms and potentially
 //       elide even more comparisons. Is it effective? No idea! But it comes at
 //       zero extra cost for `M = ()` and hasn't been hurting anyone, so I
 //       figured I'll leave it in.
-pub fn of_spacegroup_with_meta<M: Ord>(
+pub fn spacegroup_coperms_with_meta<M: Ord>(
     // Arbitrary superstructure (the thing we want to permute)
     coords: &Coords,
     metadata: &[M],
@@ -98,6 +130,21 @@ pub fn of_spacegroup_with_meta<M: Ord>(
         }),
     )?
 })}
+
+pub fn spacegroup_deperms_with_meta<M: Ord>(
+    // Arbitrary superstructure (the thing we want to permute)
+    coords: &Coords,
+    metadata: &[M],
+
+    // Spacegroup operators.
+    cart_ops: &[CartOp],
+
+    tol: f64,
+) -> Result<Vec<Perm>, Error>
+{ spacegroup_coperms_with_meta(coords, metadata, cart_ops, tol).map(invert_each) }
+
+fn invert_each(perms: impl IntoIterator<Item=Perm>) -> Vec<Perm>
+{ perms.into_iter().map(|p| p.inverted()).collect() }
 
 pub(crate) fn brute_force_with_sort_trick<M: Ord>(
     lattice: &Lattice,

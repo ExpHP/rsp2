@@ -34,10 +34,10 @@ fn test_graphene() {
         cart_ops, coords, ..
     } = Primitive::load("tests/resources/primitive/graphene.json").unwrap();
 
-    let perms = find_perm::of_spacegroup(&coords, &cart_ops, 1e-2).unwrap();
-    for (op, perm) in zip_eq!(cart_ops, perms) {
+    let coperms = find_perm::spacegroup_coperms(&coords, &cart_ops, 1e-2).unwrap();
+    for (op, coperm) in zip_eq!(cart_ops, coperms) {
         let transformed = op.transform(&coords);
-        let permuted = coords.clone().permuted_by(&perm);
+        let permuted = coords.clone().permuted_by(&coperm);
 
         transformed.check_same_cell_and_order(&permuted, 1e-2 * (1.0 + 1e-7)).unwrap();
     }
@@ -50,14 +50,14 @@ fn validation_can_fail() {
         cart_ops, coords, ..
     } = Primitive::load("tests/resources/primitive/graphene.json").unwrap();
 
-    let mut perms = find_perm::of_spacegroup(&coords, &cart_ops, 1e-2).unwrap();
+    let mut coperms = find_perm::spacegroup_coperms(&coords, &cart_ops, 1e-2).unwrap();
 
     // make the result incorrect
-    perms[5] = perms[5].clone().shift_right(1);
+    coperms[5] = coperms[5].clone().shift_right(1);
 
-    for (op, perm) in zip_eq!(cart_ops, perms) {
+    for (op, coperm) in zip_eq!(cart_ops, coperms) {
         let transformed = op.transform(&coords);
-        let permuted = coords.clone().permuted_by(&perm);
+        let permuted = coords.clone().permuted_by(&coperm);
 
         transformed.check_same_cell_and_order(&permuted, 1e-2 * (1.0 + 1e-7)).expect("looney");
     }
