@@ -1,5 +1,4 @@
 use ::std::hash::Hash;
-use ::std::result::Result as StdResult;
 
 // NOTE: Currently there is no "group" trait, for a couple of reasons:
 //
@@ -81,9 +80,9 @@ impl<G> GroupTree<G>
     /// `compute_homomorphism` for fallible functions.
     pub fn try_compute_homomorphism<E, H>(
         &self,
-        mut compute: impl FnMut(usize, &G) -> StdResult<H, E>,
-        mut compose: impl FnMut(&H, &H) -> StdResult<H, E>,
-    ) -> StdResult<Vec<H>, E>
+        mut compute: impl FnMut(usize, &G) -> Result<H, E>,
+        mut compose: impl FnMut(&H, &H) -> Result<H, E>,
+    ) -> Result<Vec<H>, E>
     {Ok({
         let len = self.members.len();
         let mut out = Vec::with_capacity(len);
