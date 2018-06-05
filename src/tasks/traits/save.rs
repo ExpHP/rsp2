@@ -1,7 +1,6 @@
 use ::FailResult;
 use ::traits::AsPath;
 use ::meta::Element;
-use ::traits::IsNewtype;
 
 use ::rsp2_structure::Coords;
 use ::rsp2_structure_io::Poscar;
@@ -37,13 +36,10 @@ pub trait Save {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Json<T: ?Sized>(pub T);
 
-unsafe impl<T: ?Sized> IsNewtype<T> for Json<T> { }
-
 /// Utility adapter for `Load`/`Save` that serializes as YAML.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Yaml<T: ?Sized>(pub T);
 
-unsafe impl<T: ?Sized> IsNewtype<T> for Yaml<T> { }
 
 impl<T> Load for Json<T> where T: for<'de> ::serde::Deserialize<'de> {
     fn load(path: impl AsPath) -> FailResult<Json<T>>
