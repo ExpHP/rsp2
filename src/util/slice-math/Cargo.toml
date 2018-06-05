@@ -8,6 +8,7 @@ name = "rsp2-slice-math"
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 description = "For math on variable length slices. Contrast with rsp2-array-types, which is for arrays."
+license = "MIT OR Apache 2.0"
 
 [lib]
 path = "lib.rs"

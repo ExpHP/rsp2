@@ -3,6 +3,11 @@
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 
+# Note: The majority of subcrates are dual-licensed under MIT or Apache 2.0,
+#       but the project as a whole is provided under the GPL.
+#       Please refer to individual subcrate Cargo.tomls and source file headers.
+!!LICENSE-GPL
+
 !!BINARY-SHIM-BIN-ENTRIES
 
 [dependencies]

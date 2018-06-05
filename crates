@@ -222,6 +222,10 @@ def make_callback_lookup(force_workspace, fail):
             # [workspace].  Or not.
             'MAYBE-ITS-A-WORKSPACE': (KIND_SPECIAL, maybe_gen_workspace_line),
 
+            # licenses
+            'LICENSE-PERMISSIVE': (KIND_SPECIAL, gen_constant('license = "MIT OR Apache 2.0"')),
+            'LICENSE-GPL':        (KIND_SPECIAL, gen_constant('license = "GPL-3.0"')),
+
             # FIXME this is waaaaaay too application-specific.
             'BINARY-SHIM-BIN-ENTRIES': (KIND_SPECIAL, macro_subst_for_binary_shims(binary_shim_pairs)),
 
@@ -339,6 +343,7 @@ CARGO_TOML_TEMPLATE = '''
 !!CRATE-NAME-LINE
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
+{license}
 
 [lib]
 path = "lib.rs"
@@ -349,6 +354,35 @@ path = "lib.rs"
 !!NIGHTLY-FEATURE-LINE
 '''[1:]
 
+LICENSE_COMMENT_PERMISSIVE = '''
+/* ************************************************************************ **
+** This file is part of rsp2, and is licensed under EITHER the MIT license  **
+** or the Apache 2.0 license, at your option.                               **
+**                                                                          **
+**     http://www.apache.org/licenses/LICENSE-2.0                           **
+**     http://opensource.org/licenses/MIT                                   **
+**                                                                          **
+** Be aware that not all of rsp2 is provided under this permissive license, **
+** and that the project as a whole is licensed under the GPL 3.0.           **
+** ************************************************************************ */
+'''[1:]
+
+LICENSE_COMMENT_GPL = '''
+/* ********************************************************************** **
+**  This file is part of rsp2.                                            **
+**                                                                        **
+**  rsp2 is free software: you can redistribute it and/or modify it under **
+**  the terms of the GNU General Public License as published by the Free  **
+**  Software Foundation, either version 3 of the License, or (at your     **
+**  option) any later version.                                            **
+**                                                                        **
+**      http://www.gnu.org/licenses/                                      **
+**                                                                        **
+** Do note that, while the whole of rsp2 is licensed under the GPL, many  **
+** parts of it are licensed under more permissive terms.                  **
+** ********************************************************************** */
+'''[1:]
+
 @register
 class New:
     cmd = 'new'
@@ -356,11 +390,13 @@ class New:
 
     @staticmethod
     def configure(sub):
+        sub.add_argument('--license', required=True, choices=['permissive', 'gpl'])
         sub.add_argument('CRATENAME')
         sub.add_argument('DIR')
 
     @staticmethod
     def run(parser, args):
+        license = args.license
 
         if not is_root('.'):
             # (I'm too lazy to work out the correct relative paths
@@ -384,12 +420,17 @@ class New:
         # make the directory
         path.mkdir()
         with open(root_rel_src_toml_path(name), 'w') as f:
-            f.write(CARGO_TOML_TEMPLATE.format(name))
+            toml_license = {
+                'permissive': "!!LICENSE-PERMISSIVE",
+                'gpl': "!!LICENSE-GPL",
+            }[license]
+            f.write(CARGO_TOML_TEMPLATE.format(license=toml_license))
+
         with open(path / 'lib.rs', 'w') as f:
-            f.write('''
-#[test]
-fn it_works() { }
-'''[1:])
+            f.write({
+                'permissive': LICENSE_COMMENT_PERMISSIVE,
+                'gpl': LICENSE_COMMENT_GPL,
+            }[license])
 
         with open_tmp(MASTER_CFG_PATH) as f:
             f.writelines(lines)

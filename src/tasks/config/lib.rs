@@ -1,9 +1,20 @@
+/* ************************************************************************ **
+** This file is part of rsp2, and is licensed under EITHER the MIT license  **
+** or the Apache 2.0 license, at your option.                               **
+**                                                                          **
+**     http://www.apache.org/licenses/LICENSE-2.0                           **
+**     http://opensource.org/licenses/MIT                                   **
+**                                                                          **
+** Be aware that not all of rsp2 is provided under this permissive license, **
+** and that the project as a whole is licensed under the GPL 3.0.           **
+** ************************************************************************ */
+
 #![allow(non_snake_case)]
 
-// Crate where serde_yaml code for the 'tasks' crate is monomorphized,
-// because this is a huge compile time sink.
-//
-// The functions here also make use of serde_ignored to catch typos in the config.
+//! Crate where serde_yaml code for the 'tasks' crate is monomorphized,
+//! because this is a huge compile time sink.
+//!
+//! The functions here also make use of serde_ignored to catch typos in the config.
 
 // NOTE: Please make sure to use the YamlRead trait!
 //       DO NOT USE serde_yaml::from_{reader,value,etc.} OUTSIDE THIS CRATE

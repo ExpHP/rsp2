@@ -8,6 +8,7 @@ name = "rsp2-structure-io"
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 description = "For parsing/writing dumb filetypes."
+license = "MIT OR Apache 2.0"
 
 [lib]
 path = "lib.rs"

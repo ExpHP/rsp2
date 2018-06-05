@@ -3,6 +3,7 @@
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 description = "Fuzzy assertion macros for floats."
+!!LICENSE-PERMISSIVE
 
 [lib]
 path = "lib.rs"

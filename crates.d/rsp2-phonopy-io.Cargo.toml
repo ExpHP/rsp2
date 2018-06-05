@@ -3,6 +3,7 @@
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 description = "Parses/writes some of phonopy's filetypes.  And some of rsp2's own made-up filetypes used around phonopy. Not sure why this exists really. Maybe to save `rsp2-tasks` some compile time?"
+!!LICENSE-PERMISSIVE
 
 [lib]
 path = "lib.rs"

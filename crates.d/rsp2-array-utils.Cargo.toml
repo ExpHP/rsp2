@@ -3,6 +3,7 @@
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 description = "Provides safe abstractions for moving data out of arrays."
+!!LICENSE-PERMISSIVE
 
 [lib]
 path = "lib.rs"

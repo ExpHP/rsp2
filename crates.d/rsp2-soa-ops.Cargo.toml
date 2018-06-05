@@ -3,6 +3,7 @@
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 description = "Common interfaces for partitioning and permuting data."
+!!LICENSE-PERMISSIVE
 
 [lib]
 path = "lib.rs"

@@ -1,16 +1,16 @@
-//
-// File adapted for use by rsp2. Originally from rust-lang/rust.
-//
-// -----------------------------------------------------------------
-// Copyright 2016 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
+/* ************************************************************************ **
+** This file is part of rsp2, and is licensed under EITHER the MIT license  **
+** or the Apache 2.0 license, at your option.                               **
+**                                                                          **
+**     http://www.apache.org/licenses/LICENSE-2.0                           **
+**     http://opensource.org/licenses/MIT                                   **
+**                                                                          **
+** Be aware that not all of rsp2 is provided under this permissive license, **
+** and that the project as a whole is licensed under the GPL 3.0.           **
+** ************************************************************************ */
+
+// File adapted for use by rsp2. Originally from rust-lang/rust,
+// where it was similarly dual-licensed.
 
 use std::fmt::Debug;
 use std::iter::{self, FromIterator};

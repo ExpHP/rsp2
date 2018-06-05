@@ -8,6 +8,7 @@ name = "rsp2-clap"
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 description = "Macros that suck less than clap_app"
+license = "MIT OR Apache 2.0"
 
 [lib]
 path = "lib.rs"

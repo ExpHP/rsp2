@@ -8,6 +8,7 @@ name = "rsp2-minimize"
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 description = "Function minimization algorithms, even in multiple dimensions."
+license = "MIT OR Apache 2.0"
 
 [dependencies]
 itertools = "0.7"
