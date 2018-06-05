@@ -14,7 +14,7 @@ use ::meta::Mass;
 use ::rsp2_array_types::{V3, M33, M3};
 use ::rsp2_soa_ops::{Perm, Permute};
 use ::rsp2_structure::supercell::SupercellToken;
-use ::rsp2_newtype_indices::{Idx, Indexed, cast_index};
+use ::rsp2_newtype_indices::{Idx, Indexed, index_cast};
 use ::std::rc::Rc;
 use ::std::collections::BTreeMap;
 use ::slice_of_array::prelude::*;
@@ -77,10 +77,10 @@ impl ForceConstants {
         // most type annotations in here are not strictly necessary, but serve as a stop-gap measure
         // to ensure that at least *something* close to the public interface stops compiling if the
         // newtyped indices in Context are changed (to remind you to check callers)
-        let super_displacements: &[(SuperI, V3)] = cast_index(super_displacements);
+        let super_displacements: &[(SuperI, V3)] = index_cast(super_displacements);
         let super_displacements: &Indexed<DispI, [_]> = Indexed::from_raw_ref(super_displacements);
 
-        let force_sets: &[BTreeMap<SuperI, V3>] = cast_index(force_sets);
+        let force_sets: &[BTreeMap<SuperI, V3>] = index_cast(force_sets);
         let force_sets: &Indexed<DispI, [_]> = Indexed::from_raw_ref(force_sets);
 
         let cart_rots: &Indexed<OperI, [M33]> = Indexed::from_raw_ref(cart_rots);
@@ -88,7 +88,7 @@ impl ForceConstants {
 
         let primitive_atoms: Indexed<SuperI, Vec<PrimI>>;
         let lattice_points:  Indexed<SuperI, Vec<V3<i32>>>;
-        primitive_atoms = Indexed::from_raw(cast_index(sc.atom_primitive_atoms()));
+        primitive_atoms = Indexed::from_raw(index_cast(sc.atom_primitive_atoms()));
         lattice_points = Indexed::from_raw(sc.atom_lattice_points());
         let primitive_atoms = &primitive_atoms[..];
         let lattice_points = &lattice_points[..];
@@ -694,7 +694,7 @@ impl DynamicalMatrix {
         Cereal {
             dim: self.0.dim,
             complex_blocks: self.0.val.to_vec(),
-            col: cast_index(self.0.col.to_vec()),
+            col: index_cast(self.0.col.to_vec()),
             row_ptr: self.0.row_ptr.raw.to_vec(),
         }
     }

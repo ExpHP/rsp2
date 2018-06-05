@@ -17,13 +17,13 @@ enum Void {}
 pub struct KeepIt(Void);
 pub struct CastIt<V: ?Sized>(PhantomData<V>, Void);
 
-/// Trait for `cast_index`. See that method for details.
+/// Trait for `index_cast`. See the free function for details.
 ///
 /// # Safety
 ///
 /// This is unsafe because it has generic impls that perform transmute.
-pub unsafe trait CastIndex<Result: ?Sized, Disambig: ?Sized> {
-    fn cast_index(self) -> Result
+pub unsafe trait IndexCast<Result: ?Sized, Disambig: ?Sized> {
+    fn index_cast(self) -> Result
     where Self: Sized, Result: Sized,
     { unsafe { mem::transmute_copy(&mem::ManuallyDrop::new(self)) } }
 }
@@ -37,9 +37,9 @@ pub unsafe trait CastIndex<Result: ?Sized, Disambig: ?Sized> {
 /// Rust).  As long as you annotate the output type, and there is only
 /// one index type that changes from the input to the output, type
 /// inference will compute the disambiguator.
-pub fn cast_index<V, Result, Disambig: ?Sized>(value: V) -> Result
-where V: CastIndex<Result, Disambig>,
-{ CastIndex::cast_index(value) }
+pub fn index_cast<V, Result, Disambig: ?Sized>(value: V) -> Result
+where V: IndexCast<Result, Disambig>,
+{ IndexCast::index_cast(value) }
 
 // !!!!!!!!!!!!!!!
 // So... basically there's no way to make this work for a large variety of
@@ -50,7 +50,7 @@ where V: CastIndex<Result, Disambig>,
 // !!!!!!!!!!!!!!!
 
 // base case for a successful cast
-unsafe impl<Src: Idx, Dest: Idx> CastIndex<Dest, KeepIt> for Src {}
+unsafe impl<Src: Idx, Dest: Idx> IndexCast<Dest, KeepIt> for Src {}
 
 // mods are just for organization
 // (and, maybe you have an IDE that can collapse them)
@@ -58,35 +58,35 @@ unsafe impl<Src: Idx, Dest: Idx> CastIndex<Dest, KeepIt> for Src {}
 mod basic {
     use super::*;
 
-    unsafe impl<A1, B1, Dis> CastIndex<(B1, ), (Dis, )> for (A1, )
-    where A1: CastIndex<B1, Dis> {}
+    unsafe impl<A1, B1, Dis> IndexCast<(B1, ), (Dis, )> for (A1, )
+    where A1: IndexCast<B1, Dis> {}
 
-    unsafe impl<A1, A2, B, Dis> CastIndex<(B, A2), (CastIt<Dis>, KeepIt)> for (A1, A2)
-    where A1: CastIndex<B, Dis> {}
+    unsafe impl<A1, A2, B, Dis> IndexCast<(B, A2), (CastIt<Dis>, KeepIt)> for (A1, A2)
+    where A1: IndexCast<B, Dis> {}
 
-    unsafe impl<A1, A2, B, Dis> CastIndex<(A1, B), (KeepIt, CastIt<Dis>)> for (A1, A2)
-    where A2: CastIndex<B, Dis> {}
+    unsafe impl<A1, A2, B, Dis> IndexCast<(A1, B), (KeepIt, CastIt<Dis>)> for (A1, A2)
+    where A2: IndexCast<B, Dis> {}
 
-    unsafe impl<A1, A2, A3, B, Dis> CastIndex<(B, A2, A3), (CastIt<Dis>, KeepIt, KeepIt)> for (A1, A2, A3)
-    where A1: CastIndex<B, Dis> {}
+    unsafe impl<A1, A2, A3, B, Dis> IndexCast<(B, A2, A3), (CastIt<Dis>, KeepIt, KeepIt)> for (A1, A2, A3)
+    where A1: IndexCast<B, Dis> {}
 
-    unsafe impl<A1, A2, A3, B, Dis> CastIndex<(A1, B, A3), (KeepIt, CastIt<Dis>, KeepIt)> for (A1, A2, A3)
-    where A2: CastIndex<B, Dis> {}
+    unsafe impl<A1, A2, A3, B, Dis> IndexCast<(A1, B, A3), (KeepIt, CastIt<Dis>, KeepIt)> for (A1, A2, A3)
+    where A2: IndexCast<B, Dis> {}
 
-    unsafe impl<A1, A2, A3, B, Dis> CastIndex<(A1, A2, B), (KeepIt, KeepIt, CastIt<Dis>)> for (A1, A2, A3)
-    where A3: CastIndex<B, Dis> {}
+    unsafe impl<A1, A2, A3, B, Dis> IndexCast<(A1, A2, B), (KeepIt, KeepIt, CastIt<Dis>)> for (A1, A2, A3)
+    where A3: IndexCast<B, Dis> {}
 
-    unsafe impl<'a, A: ? Sized, B: ? Sized, Dis: ? Sized> CastIndex<&'a B, &'a Dis> for &'a A
-    where A: CastIndex<B, Dis> {}
+    unsafe impl<'a, A: ? Sized, B: ? Sized, Dis: ? Sized> IndexCast<&'a B, &'a Dis> for &'a A
+    where A: IndexCast<B, Dis> {}
 
-    unsafe impl<'a, A: ? Sized, B: ? Sized, Dis: ? Sized> CastIndex<&'a mut B, &'a mut Dis> for &'a mut A
-    where A: CastIndex<B, Dis> {}
+    unsafe impl<'a, A: ? Sized, B: ? Sized, Dis: ? Sized> IndexCast<&'a mut B, &'a mut Dis> for &'a mut A
+    where A: IndexCast<B, Dis> {}
 
-    unsafe impl<A, B, Dis> CastIndex<[B], [Dis]> for [A]
-    where A: CastIndex<B, Dis> {}
+    unsafe impl<A, B, Dis> IndexCast<[B], [Dis]> for [A]
+    where A: IndexCast<B, Dis> {}
 
-    unsafe impl<A, B, Dis> CastIndex<Vec<B>, Vec<Dis>> for Vec<A>
-    where A: CastIndex<B, Dis> {}
+    unsafe impl<A, B, Dis> IndexCast<Vec<B>, Vec<Dis>> for Vec<A>
+    where A: IndexCast<B, Dis> {}
 }
 
 mod collections {
@@ -94,23 +94,23 @@ mod collections {
     use ::std::collections::{HashMap, BTreeMap};
     use ::std::collections::{HashSet, BTreeSet};
 
-    unsafe impl<A, B, V, Dis> CastIndex<BTreeMap<B, V>, BTreeMap<CastIt<Dis>, KeepIt>> for BTreeMap<A, V>
-    where A: CastIndex<B, Dis> {}
+    unsafe impl<A, B, V, Dis> IndexCast<BTreeMap<B, V>, BTreeMap<CastIt<Dis>, KeepIt>> for BTreeMap<A, V>
+    where A: IndexCast<B, Dis> {}
 
-    unsafe impl<A, B, K, Dis> CastIndex<BTreeMap<K, B>, BTreeMap<KeepIt, CastIt<Dis>>> for BTreeMap<K, A>
-    where A: CastIndex<B, Dis> {}
+    unsafe impl<A, B, K, Dis> IndexCast<BTreeMap<K, B>, BTreeMap<KeepIt, CastIt<Dis>>> for BTreeMap<K, A>
+    where A: IndexCast<B, Dis> {}
 
-    unsafe impl<A, B, V, Dis> CastIndex<HashMap<B, V>, HashMap<CastIt<Dis>, KeepIt>> for HashMap<A, V>
-    where A: CastIndex<B, Dis> {}
+    unsafe impl<A, B, V, Dis> IndexCast<HashMap<B, V>, HashMap<CastIt<Dis>, KeepIt>> for HashMap<A, V>
+    where A: IndexCast<B, Dis> {}
 
-    unsafe impl<A, B, K, Dis> CastIndex<HashMap<K, B>, HashMap<KeepIt, CastIt<Dis>>> for HashMap<K, A>
-    where A: CastIndex<B, Dis> {}
+    unsafe impl<A, B, K, Dis> IndexCast<HashMap<K, B>, HashMap<KeepIt, CastIt<Dis>>> for HashMap<K, A>
+    where A: IndexCast<B, Dis> {}
 
-    unsafe impl<A, B, Dis> CastIndex<HashSet<B>, HashSet<Dis>> for HashSet<A>
-    where A: CastIndex<B, Dis> {}
+    unsafe impl<A, B, Dis> IndexCast<HashSet<B>, HashSet<Dis>> for HashSet<A>
+    where A: IndexCast<B, Dis> {}
 
-    unsafe impl<A, B, Dis> CastIndex<BTreeSet<B>, BTreeSet<Dis>> for BTreeSet<A>
-    where A: CastIndex<B, Dis> {}
+    unsafe impl<A, B, Dis> IndexCast<BTreeSet<B>, BTreeSet<Dis>> for BTreeSet<A>
+    where A: IndexCast<B, Dis> {}
 }
 
 #[test]
@@ -120,13 +120,23 @@ fn test_it() {
     newtype_index!(C);
 
     let x: &usize = &0;
-    let _: &A = cast_index(x);
+    let _: &A = index_cast(x);
 
     // explicit disambiguator.  All instances of KeepIt can be inferred.
     let x: &[(f64, Vec<(B, A, f64)>)] = &[];
-    let _: &[(f64, Vec<(B, C, f64)>)] = cast_index::<_, _, &[(_, CastIt<Vec<(_, CastIt<_>, _)>>)]>(x);
+    let _: &[(f64, Vec<(B, C, f64)>)] = index_cast::<_, _, &[(_, CastIt<Vec<(_, CastIt<_>, _)>>)]>(x);
 
     // actually, that disambiguator was not necessary.
     let x: &[(f64, Vec<(B, A, f64)>)] = &[];
-    let _: &[(f64, Vec<(B, C, f64)>)] = cast_index(x);
+    let _: &[(f64, Vec<(B, C, f64)>)] = index_cast(x);
+}
+
+#[allow(unused)] // compiletest
+fn holy_shnozballs_it_even_works_in_generic_contexts<I: Idx, J: Idx>()
+{
+    use ::std::collections::BTreeMap;
+    newtype_index!(B);
+
+    let x: &[(f64, Vec<(B, BTreeMap<usize, I>, f64)>)] = &[];
+    let _: &[(f64, Vec<(B, BTreeMap<usize, J>, f64)>)] = index_cast(x);
 }
