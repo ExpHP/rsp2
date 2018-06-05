@@ -78,7 +78,7 @@ impl TrialDir {
         input: &PathAbs,
     ) -> FailResult<()>
     {Ok({
-        let pot = PotentialBuilder::from_config(&settings.threading, &settings.potential);
+        let pot = PotentialBuilder::from_config(&self, &settings.threading, &settings.potential);
 
         let (optimizable_coords, atom_elements, atom_masses, atom_layers, layer_sc_mats) = {
             read_optimizable_structure(
@@ -388,6 +388,7 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
                 cart_ops.iter().map(|c| c.cart_rot()).collect()
             };
 
+            trace!("Computing sparse force constants");
             let force_constants = ::math::dynmat::ForceConstants::compute_required_rows(
                 &super_displacements,
                 &force_sets,
@@ -396,6 +397,7 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
                 &sc,
             )?;
 
+            trace!("Computing sparse dynamical matrix");
             let dynmat = {
                 force_constants
                     .gamma_dynmat(&sc, meta.pick())
@@ -405,8 +407,10 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
     //        HACK
     //        Json(&dynmat.cereal()).save(self.join("dynmat.json"))?;
 
+            trace!("Diagonalizing dynamical matrix");
             let how_many = self.max_count.min(dynmat.max_sparse_eigensolutions());
             let (evals, evecs) = dynmat.compute_most_negative_eigensolutions(how_many)?;
+            trace!("Done diagonalizing dynamical matrix");
             (evals, evecs, dynmat)
         }))?.1 // disp_dir.try_with_recovery(...)
     })}
@@ -559,6 +563,7 @@ fn do_force_sets_at_disps_for_phonopy<P: AsPath + Send + Sync>(
         }),
     )?;
     eprintln!();
+    trace!("Done computing forces at displacements");
     force_sets
 })}
 
@@ -594,6 +599,7 @@ fn do_force_sets_at_disps_for_sparse(
         })
     )?;
     eprintln!();
+    trace!("Done computing forces at displacements");
     force_sets
 })}
 
@@ -707,13 +713,14 @@ impl TrialDir {
                     use ::std::sync::atomic::{AtomicUsize, Ordering};
                     let counter = AtomicUsize::new(0);
                     let get_meta = meta.sendable();
+                    let me = &self;
 
                     move |pos| {FailOk({
                         let i = counter.fetch_add(1, Ordering::SeqCst);
                         // println!("{:?}", pos.flat().iter().sum::<f64>());
 
                         eprint!("\rdatapoint {:>6} of {}", i, w * h);
-                        PotentialBuilder::from_config(&settings.threading, &settings.potential)
+                        PotentialBuilder::from_config(me, &settings.threading, &settings.potential)
                             .one_off()
                             .compute_grad(
                                 &coords.clone().with_carts(pos.to_vec()),
@@ -792,7 +799,7 @@ impl TrialDir {
         settings: &Settings,
     ) -> FailResult<()>
     {Ok({
-        let pot = PotentialBuilder::from_config(&settings.threading, &settings.potential);
+        let pot = PotentialBuilder::from_config(&self, &settings.threading, &settings.potential);
 
         let (coords, meta, _) = self.read_stored_structure_data("final.structure")?;
 
@@ -823,7 +830,7 @@ impl TrialDir {
         settings: &Settings,
     ) -> FailResult<()>
     {Ok({
-        let pot = PotentialBuilder::from_config(&settings.threading, &settings.potential);
+        let pot = PotentialBuilder::from_config(&self, &settings.threading, &settings.potential);
 
         let stored = self.read_stored_structure("./final.structure")?;
         let phonopy = phonopy_builder_from_settings(&settings.phonons, stored.coords.lattice());

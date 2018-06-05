@@ -20,6 +20,7 @@ use ::rsp2_array_types::{V3, Unvee};
 use ::slice_of_array::prelude::*;
 use ::std::rc::Rc;
 use ::std::collections::BTreeMap;
+use ::cmd::trial::TrialDir;
 
 const DEFAULT_KC_Z_CUTOFF: f64 = 14.0; // (Angstrom?)
 const DEFAULT_KC_Z_MAX_LAYER_SEP: f64 = 4.5; // Angstrom
@@ -350,27 +351,28 @@ impl<'a, M: Clone + 'static> DiffFn<M> for OneOff<'a, M> {
 /// High-level logic
 impl PotentialBuilder {
     pub(crate) fn from_config(
+        trial_dir: &TrialDir,
         threading: &cfg::Threading,
         config: &cfg::PotentialKind,
     ) -> Box<PotentialBuilder> {
         match config {
             cfg::PotentialKind::Rebo => {
                 let lammps_pot = self::lammps::Airebo::Rebo;
-                let pot = self::lammps::Builder::new(threading, lammps_pot);
+                let pot = self::lammps::Builder::new(trial_dir, threading, lammps_pot);
                 Box::new(pot)
             }
             cfg::PotentialKind::Airebo(cfg) => {
                 let lammps_pot = self::lammps::Airebo::from(cfg);
-                let pot = self::lammps::Builder::new(threading, lammps_pot);
+                let pot = self::lammps::Builder::new(trial_dir, threading, lammps_pot);
                 Box::new(pot)
             },
             cfg::PotentialKind::KolmogorovCrespiZ(cfg) => {
                 let lammps_pot = self::lammps::KolmogorovCrespiZ::from(cfg);
-                let pot = self::lammps::Builder::new(threading, lammps_pot);
+                let pot = self::lammps::Builder::new(trial_dir, threading, lammps_pot);
                 Box::new(pot)
             },
             cfg::PotentialKind::KolmogorovCrespiZNew(cfg) => {
-                let rebo = PotentialBuilder::from_config(threading, &cfg::PotentialKind::Rebo);
+                let rebo = PotentialBuilder::from_config(trial_dir, threading, &cfg::PotentialKind::Rebo);
                 let kc_z = self::homestyle::KolmogorovCrespiZ(cfg.clone());
                 let pot = self::helper::Sum(rebo, kc_z);
                 Box::new(pot)
@@ -526,11 +528,12 @@ mod lammps {
     impl<P: Clone> Builder<P>
     {
         pub(crate) fn new(
+            trial_dir: &TrialDir,
             threading: &cfg::Threading,
             potential: P,
         ) -> Self {
             let mut inner = InnerBuilder::new();
-            inner.append_log("lammps.log");
+            inner.append_log(trial_dir.join("lammps.log"));
             inner.threaded(*threading == cfg::Threading::Lammps);
 
             Builder { inner, potential }
