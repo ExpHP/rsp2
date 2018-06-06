@@ -59,18 +59,18 @@ pub struct CartBonds {
     cart_vector: Vec<V3<f64>>,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct FracBond<V = V3<i32>> {
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct FracBond {
     pub from: usize,
     pub to: usize,
-    pub image_diff: V,
+    pub image_diff: V3<i32>,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct CartBond<V = V3<f64>> {
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub struct CartBond {
     pub from: usize,
     pub to: usize,
-    pub cart_vector: V,
+    pub cart_vector: V3,
 }
 
 //=================================================================
@@ -79,32 +79,49 @@ pub trait VeclikeIterator: ExactSizeIterator + DoubleEndedIterator {}
 
 impl<I> VeclikeIterator for I where I: ExactSizeIterator + DoubleEndedIterator {}
 
-pub type FracIter<'a> = Box<VeclikeIterator<Item = FracBond<&'a V3<i32>>> + 'a>;
+pub type FracIter<'a> = Box<VeclikeIterator<Item = FracBond> + 'a>;
 impl<'a> IntoIterator for &'a FracBonds {
-    type Item = FracBond<&'a V3<i32>>;
+    type Item = FracBond;
     type IntoIter = FracIter<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
         Box::new(izip!(
             self.from.iter().cloned(),
             self.to.iter().cloned(),
-            self.image_diff.iter(),
+            self.image_diff.iter().cloned(),
         ).map(|(from, to, image_diff)| FracBond { from, to, image_diff }))
     }
 }
 
-pub type CartIter<'a> = Box<VeclikeIterator<Item = CartBond<&'a V3>> + 'a>;
+pub type CartIter<'a> = Box<VeclikeIterator<Item = CartBond> + 'a>;
 impl<'a> IntoIterator for &'a CartBonds {
-    type Item = CartBond<&'a V3>;
+    type Item = CartBond;
     type IntoIter = CartIter<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
         Box::new(izip!(
             self.from.iter().cloned(),
             self.to.iter().cloned(),
-            self.cart_vector.iter(),
+            self.cart_vector.iter().cloned(),
         ).map(|(from, to, cart_vector)| CartBond { from, to, cart_vector }))
     }
+}
+
+//=================================================================
+
+pub trait BondRange: Copy {
+    fn minimum(self) -> f64;
+    fn maximum(self) -> f64;
+}
+
+impl BondRange for f64 {
+    fn minimum(self) -> f64 { 0.0 }
+    fn maximum(self) -> f64 { self }
+}
+
+impl BondRange for (f64, f64) {
+    fn minimum(self) -> f64 { self.0 }
+    fn maximum(self) -> f64 { self.1 }
 }
 
 //=================================================================
@@ -122,12 +139,12 @@ impl CartBonds {
 impl FracBonds {
     pub fn from_brute_force_very_dumb(
         coords: &Coords,
-        range: f64,
+        range: impl BondRange,
     ) -> FailResult<Self> {
 
         // Construct a supercell large enough to contain all atoms that interact with an atom
         // in the centermost unit cell.
-        let sc_builder = sufficiently_large_centered_supercell(coords.lattice(), range)?;
+        let sc_builder = sufficiently_large_centered_supercell(coords.lattice(), range.maximum())?;
         let (superstructure, sc) = sc_builder.build(coords);
         let centermost_cell = sc.lattice_point_from_cell(sc.center_cell());
 
@@ -145,9 +162,10 @@ impl FracBonds {
             }
 
             for (&cell_to, &site_to, &cart_to) in izip!(&cells, &sites, &carts) {
-                let vector = cart_to - cart_from;
-                if vector.sqnorm() < range * range {
-                    if site_from == site_to {
+                let sqnorm = (cart_to - cart_from).sqnorm();
+                let square = |x| x*x;
+                if square(range.minimum()) <= sqnorm && sqnorm <= square(range.maximum()) {
+                    if (site_from, cell_from) == (site_to, cell_to) {
                         continue;
                     }
                     from.push(site_from);
@@ -223,9 +241,8 @@ fn sufficiently_large_centered_supercell(
     //
     // * Take any two of the lattice vectors; call them `a` and `b`.
     //   Draw a ray from the center of the unit cell which is perpendicular to both
-    //   `a` and `b`. When this ray exits the unit cell, the particular face of the
-    //   periodic boundary that it will exit through will be one spanned by `a` and `b`.
-    //   (that is, the ray will be normal to the surface that it passes through)
+    //   `a` and `b`. When this ray exits the unit cell, it will touch the face of the
+    //   periodic boundary spanned by `a` and `b`. (i.e. the one it is normal to)
     //
     // The key advantage of such a cell is that the closest points on the parallelepiped
     // surface to the cell center must necessarily be among those six "normal ray"
@@ -256,9 +273,20 @@ fn sufficiently_large_centered_supercell(
             // so verify that the correct surface is touched first.
             let dist = |plane| line.t_at_plane_intersection(plane).abs();
             ensure!(
-                // (numerical fuzz doesn't matter here; there are no ties because
-                //  we cannot possibly touch the paralellepiped at a vertex)
-                dist(&good) < f64::min(dist(&bad1), dist(&bad2)),
+                // NOTE: previously this used a strict `<` comparison, with the note:
+                //
+                //      (numerical fuzz doesn't matter here; there are no ties because
+                //       we cannot possibly touch the paralellepiped at a vertex)
+                //
+                // I'm not sure why I thought this. It doesn't need to pass through a vertex for
+                // there to be a tie (it can pass through an edge), and in fact it is easy to
+                // construct a 'small-skew' lattice where this occurs:
+                //
+                //                     [[1 1 0], [0 1 0], [0 0 1]]
+                //
+                // (which is a useful lattice for test cases since it is unimodular)
+                //                                                                   - ML
+                dist(&good) <= f64::min(dist(&bad1), dist(&bad2)) * (1.0 + 1e-4),
                 "cell is too skewed for bond search"
             );
 
@@ -356,3 +384,125 @@ mod geometry {
 }
 
 //=================================================================
+
+#[cfg(test)]
+#[deny(unused)]
+mod tests {
+    use super::*;
+    use ::rsp2_structure::CoordsKind;
+    use ::std::collections::BTreeSet;
+    use ::rsp2_array_types::Envee;
+
+    #[test]
+    fn self_interactions() {
+        //   . . . . .
+        //   . # # # .   o : central atom
+        //   . # o # .   # : in range
+        //   . # # # .   . : too far
+        //   . . . . .
+        let coords = Coords::new(
+            Lattice::orthorhombic(1.0, 1.0, 2.0),
+            CoordsKind::Carts(vec![V3::zero()]),
+        );
+        let range = f64::sqrt(2.0) * 1.1;
+
+        let bonds = FracBonds::from_brute_force_very_dumb(&coords, range).unwrap();
+        let actual = bonds.into_iter().collect::<BTreeSet<_>>();
+        assert_eq!{
+            actual,
+            vec![
+                // should include other images of the atom, but not the atom itself
+                FracBond { from: 0, to: 0, image_diff: V3([ 1,  0, 0]) },
+                FracBond { from: 0, to: 0, image_diff: V3([-1,  0, 0]) },
+                FracBond { from: 0, to: 0, image_diff: V3([ 0,  1, 0]) },
+                FracBond { from: 0, to: 0, image_diff: V3([ 0, -1, 0]) },
+                FracBond { from: 0, to: 0, image_diff: V3([ 1,  1, 0]) },
+                FracBond { from: 0, to: 0, image_diff: V3([ 1, -1, 0]) },
+                FracBond { from: 0, to: 0, image_diff: V3([-1,  1, 0]) },
+                FracBond { from: 0, to: 0, image_diff: V3([-1, -1, 0]) },
+            ].into_iter().collect::<BTreeSet<_>>(),
+        }
+    }
+
+    #[test]
+    fn non_orthogonal_lattice() {
+        // same physical scenario as `self_interactions`, but an equivalent cell is chosen
+        let coords = Coords::new(
+            Lattice::from([
+                [1.0, 1.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 2.0],
+            ]),
+            CoordsKind::Carts(vec![V3::zero()]),
+        );
+        let range = f64::sqrt(2.0) * 1.1;
+
+        let bonds = FracBonds::from_brute_force_very_dumb(&coords, range).unwrap();
+        let actual = bonds.into_iter().collect::<BTreeSet<_>>();
+        
+        // For frac vector v and lattice L:
+        //                         [1 1 0]
+        // L transformed as  L ->  [0 1 0] L,   and the cart vector (v L) must remain fixed,
+        //                         [0 0 1]
+        //                                 [1 -1  0]
+        // so v transforms as   v.T -> v.T [0  1  0]   (subtract first element from second)
+        //                                 [0  0  1]
+        assert_eq!{
+            actual,
+            vec![
+                FracBond { from: 0, to: 0, image_diff: V3([ 1, -1,  0]) },
+                FracBond { from: 0, to: 0, image_diff: V3([-1,  1,  0]) },
+                FracBond { from: 0, to: 0, image_diff: V3([ 0,  1,  0]) },
+                FracBond { from: 0, to: 0, image_diff: V3([ 0, -1,  0]) },
+                FracBond { from: 0, to: 0, image_diff: V3([ 1,  0,  0]) },
+                FracBond { from: 0, to: 0, image_diff: V3([ 1, -2,  0]) },
+                FracBond { from: 0, to: 0, image_diff: V3([-1,  2,  0]) },
+                FracBond { from: 0, to: 0, image_diff: V3([-1,  0,  0]) },
+            ].into_iter().collect::<BTreeSet<_>>(),
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "too skewed")]
+    fn too_skewed() {
+        let lattice = Lattice::from([
+            [1.0, 3.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ]);
+        let coords = CoordsKind::Carts(vec![V3::zero()]);
+        let coords = Coords::new(lattice, coords);
+        FracBonds::from_brute_force_very_dumb(&coords, 1.2).unwrap();
+    }
+
+    #[test]
+    fn both_cutoffs() {
+        // Test on a linear chain of atoms, with both cutoffs enabled.
+        //
+        // There are three atoms per cell, and they each only interact with
+        // the atoms at a distance of 2 away.
+        let coords = Coords::new(
+            Lattice::orthorhombic(10.0, 10.0, 3.0),
+            CoordsKind::Carts(vec![
+                [0.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0],
+                [0.0, 0.0, 2.0],
+            ].envee()),
+        );
+        let range = (1.5, 2.5);
+
+        let bonds = FracBonds::from_brute_force_very_dumb(&coords, range).unwrap();
+        let actual = bonds.into_iter().collect::<BTreeSet<_>>();
+        assert_eq!{
+            actual,
+            vec![
+                FracBond { from: 0, to: 2, image_diff: V3([0, 0,  0]) },
+                FracBond { from: 0, to: 1, image_diff: V3([0, 0, -1]) },
+                FracBond { from: 1, to: 2, image_diff: V3([0, 0, -1]) },
+                FracBond { from: 1, to: 0, image_diff: V3([0, 0,  1]) },
+                FracBond { from: 2, to: 0, image_diff: V3([0, 0,  0]) },
+                FracBond { from: 2, to: 1, image_diff: V3([0, 0,  1]) },
+            ].into_iter().collect::<BTreeSet<_>>(),
+        }
+    }
+}

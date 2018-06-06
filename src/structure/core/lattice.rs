@@ -200,6 +200,12 @@ impl<'a> From<&'a [[f64; 3]; 3]> for Lattice {
     { Lattice::new(&mat::from_array(*m)) }
 }
 
+impl From<[[f64; 3]; 3]> for Lattice {
+    #[inline(always)]
+    fn from(m: [[f64; 3]; 3]) -> Self
+    { Lattice::from(&m) }
+}
+
 // FIXME so far I have managed to accidentally flip the order of virtually
 //       every multiplication with a lattice that I have written, despite my
 //       love of row-based matrices. Maybe the '*' operator is just a bad idea.

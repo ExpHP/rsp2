@@ -493,7 +493,7 @@ mod homestyle {
                         let ::math::crespi::Output {
                             value: part_value,
                             grad_rij: part_grad, ..
-                        } = self.params.crespi_z(*cart_vector);
+                        } = self.params.crespi_z(cart_vector);
 
                         value += part_value;
                         grad[to] += part_grad;
