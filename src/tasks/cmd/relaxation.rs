@@ -26,7 +26,6 @@ use ::hlist_aliases::*;
 
 use ::math::basis::Basis3;
 use ::math::bands::ScMatrix;
-use ::phonopy::Builder as PhonopyBuilder;
 use ::util::ext_traits::OptionResultExt;
 
 use ::slice_of_array::prelude::*;
@@ -46,7 +45,6 @@ pub trait EvLoopDiagonalizer {
         trial: &TrialDir,
         settings: &cfg::Settings,
         pot: &PotentialBuilder,
-        phonopy: &PhonopyBuilder,
         stored: &StoredStructure,
     ) -> FailResult<(Vec<f64>, Basis3, Self::ExtraOut)>;
 }
@@ -62,7 +60,6 @@ impl TrialDir {
         settings: &Settings,
         pot: &PotentialBuilder,
         layer_sc_mats: &Option<Vec<ScMatrix>>,
-        phonopy: &PhonopyBuilder,
         diagonalizer: impl EvLoopDiagonalizer<ExtraOut=ExtraOut>,
         original_coords: Coords,
         meta: HList3<
@@ -97,7 +94,7 @@ impl TrialDir {
 
                 let stored = self.read_stored_structure(&subdir)?;
 
-                diagonalizer.do_post_relaxation_computations(&self, settings, pot, phonopy, &stored)?
+                diagonalizer.do_post_relaxation_computations(&self, settings, pot, &stored)?
             };
 
             trace!("============================");

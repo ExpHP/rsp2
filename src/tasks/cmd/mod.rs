@@ -116,7 +116,6 @@ impl TrialDir {
             "initial.structure", "Initial structure (after lattice optimization)",
             &original_coords, meta.sift(), &layer_sc_mats,
         )?;
-        let phonopy = phonopy_builder_from_settings(&settings.phonons, original_coords.lattice());
 
         // FIXME: Prior to the addition of the sparse solver, the code used to do something like:
         //
@@ -139,7 +138,7 @@ impl TrialDir {
                     let diagonalizer = $diagonalizer;
                     self.do_main_ev_loop(
                         settings, &*pot, &layer_sc_mats,
-                        &phonopy, diagonalizer, original_coords, meta.sift(),
+                        diagonalizer, original_coords, meta.sift(),
                     )
                 }}
             }
@@ -287,21 +286,23 @@ impl EvLoopDiagonalizer for PhonopyDiagonalizer {
         _trial: &TrialDir,
         settings: &Settings,
         pot: &PotentialBuilder,
-        phonopy: &PhonopyBuilder,
         stored: &StoredStructure,
     ) -> FailResult<(Vec<f64>, Basis3, DirWithBands<Box<AsPath>>)>
     {Ok({
         let meta = stored.meta();
         let coords = stored.coords.clone();
 
+        let phonopy = phonopy_builder_from_settings(&settings.phonons, coords.lattice());
         match settings.phonons.disp_finder {
-            cfg::PhononDispFinder::Phonopy { diag: _ } => {},
+            cfg::PhononDispFinder::Phonopy { diag } => {
+                let _ = diag; // already handled during builder construction
+            },
             cfg::PhononDispFinder::Rsp2 => {
                 bail!("'disp-finder: rsp2' and 'eigensolver: phonopy' are incompatible");
             },
         }
 
-        let bands_dir = self.create_bands_dir(&settings.threading, pot, phonopy, &coords, meta.sift())?;
+        let bands_dir = self.create_bands_dir(&settings.threading, pot, &phonopy, &coords, meta.sift())?;
         let (evals, evecs) = bands_dir.eigensystem_at(Q_GAMMA)?;
 
         (evals, evecs, bands_dir)
@@ -348,15 +349,14 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
 
     fn do_post_relaxation_computations(
         &self,
-        trial: &TrialDir,
+        _trial: &TrialDir,
         settings: &Settings,
         pot: &PotentialBuilder,
-        phonopy: &PhonopyBuilder,
         stored: &StoredStructure,
     ) -> FailResult<(Vec<f64>, Basis3, DynamicalMatrix)>
     {Ok({
-        let coords = &stored.coords;
-        let meta = stored.meta();
+        let prim_coords = &stored.coords;
+        let prim_meta = stored.meta();
 
         let compute_deperms = |coords: &_, cart_ops: &_| {
             ::rsp2_structure::find_perm::spacegroup_deperms(
@@ -369,9 +369,22 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
             )
         };
 
+        // (FIXME)
+        // Q: Gee, golly ExpHP! Why does 'eigensolver: sparse' need to care about 'disp_finder'?
+        //    Couldn't this be factored out so that these two config sections are handled more
+        // orthogonally?
+        //
+        // A: Because AHHHHHHHHHGGGHGHGH
+        // A: Because, if you look closely, the two eigensolvers actually use different schemes for
+        //    ordering the sites in the supercell. `eigensolver: phonopy` needs to use the same
+        //    order that phonopy uses, because that's what `BandsBuilder` takes, while
+        //    `eigensolver: sparse` requires order to match the conventions set by SupercellToken.
+        //    (and even if BandsBuilder was made more lenient to allow reordering, we would still
+        //     have the silly problem that `PhonopyDiagonalizer` needs the `DirWithDisps`)
         let (super_coords, prim_displacements, sc, cart_ops) = match settings.phonons.disp_finder {
             cfg::PhononDispFinder::Phonopy { diag: _ } => {
-                let disp_dir = phonopy.displacements(coords, meta.sift())?;
+                let phonopy = phonopy_builder_from_settings(&settings.phonons, prim_coords.lattice());
+                let disp_dir = phonopy.displacements(prim_coords, prim_meta.sift())?;
 
                 let ::phonopy::Rsp2StyleDisplacements {
                     super_coords, sc, prim_displacements, ..
@@ -383,32 +396,26 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
             cfg::PhononDispFinder::Rsp2 => {
                 use self::python::SpgDataset;
 
-                // FIXME: awkwardly duplicated logic. In the phonopy branches, the stuff in
-                //        settings.phonons was used shortly after startup. But in this one
-                //        branch we don't have anything like PhonopyBuilder.
-                //
-                //        On that note, why do we bother carting PhonopyBuilder around rather than
-                //        constructing it in a function like this?
-                let sc_dim = settings.phonons.supercell.dim_for_unitcell(coords.lattice());
-                let (super_coords, sc) = ::rsp2_structure::supercell::diagonal(sc_dim).build(coords);
+                let sc_dim = settings.phonons.supercell.dim_for_unitcell(prim_coords.lattice());
+                let (super_coords, sc) = ::rsp2_structure::supercell::diagonal(sc_dim).build(prim_coords);
                 let cart_ops = {
                     let atom_types: Vec<u32> = {
-                        let elements: Rc<[Element]> = meta.pick();
+                        let elements: Rc<[Element]> = prim_meta.pick();
                         elements.iter().map(|e| e.atomic_number()).collect()
                     };
-                    SpgDataset::compute(coords, &atom_types, settings.phonons.symmetry_tolerance)?
+                    SpgDataset::compute(prim_coords, &atom_types, settings.phonons.symmetry_tolerance)?
                         .cart_ops()
                 };
 
-                let prim_deperms = compute_deperms(&coords, &cart_ops)?;
+                let prim_deperms = compute_deperms(&prim_coords, &cart_ops)?;
                 let prim_stars = ::math::stars::compute_stars(&prim_deperms);
 
                 let prim_displacements = ::math::displacements::compute_displacements(
                     cart_ops.iter().map(|c| {
-                        c.int_rot(coords.lattice()).expect("bad operator from spglib!?")
+                        c.int_rot(prim_coords.lattice()).expect("bad operator from spglib!?")
                     }),
                     &prim_stars,
-                    &coords,
+                    &prim_coords,
                     settings.phonons.displacement_distance,
                 );
                 (super_coords, prim_displacements, sc, cart_ops)
@@ -422,7 +429,7 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
                     sc.replicate(&x[..]).into()
                 }};
             }
-            meta.clone().map(hlist![
+            prim_meta.clone().map(hlist![
                 f!(),
                 f!(),
                 |opt: Option<_>| opt.map(f!()),
@@ -436,10 +443,8 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
                 })
                 .collect()
         };
-        { // XXX
-            let f = trial.create_file("disps").unwrap();
-            ::serde_json::to_writer_pretty(f, &super_displacements).unwrap();
-        }
+        trace!("num spacegroup ops: {}", cart_ops.len());
+        trace!("num displacements:  {}", super_displacements.len());
         let force_sets = do_force_sets_at_disps_for_sparse(
             pot,
             &settings.threading,
@@ -466,7 +471,7 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
         trace!("Computing sparse dynamical matrix");
         let dynmat = {
             force_constants
-                .gamma_dynmat(&sc, meta.pick())
+                .gamma_dynmat(&sc, prim_meta.pick())
                 .hermitianize()
         };
 
@@ -905,7 +910,6 @@ impl TrialDir {
         let pot = PotentialBuilder::from_config(&self, &settings.threading, &settings.potential);
 
         let stored = self.read_stored_structure("./final.structure")?;
-        let phonopy = phonopy_builder_from_settings(&settings.phonons, stored.coords.lattice());
 
         let bonds = settings.bond_radius.map(|bond_radius| FailOk({
             trace!("Computing bonds");
@@ -933,7 +937,7 @@ impl TrialDir {
             macro_rules! use_diagonalizer {
                 ($diagonalizer:expr) => {{
                     $diagonalizer.do_post_relaxation_computations(
-                        &self, settings, &*pot, &phonopy, &stored,
+                        &self, settings, &*pot, &stored,
                     )
                 }}
             }
