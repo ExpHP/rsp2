@@ -284,6 +284,7 @@ impl EvLoopDiagonalizer for PhonopyDiagonalizer {
 
     fn do_post_relaxation_computations(
         &self,
+        _trial: &TrialDir,
         settings: &Settings,
         pot: &PotentialBuilder,
         phonopy: &PhonopyBuilder,
@@ -292,6 +293,13 @@ impl EvLoopDiagonalizer for PhonopyDiagonalizer {
     {Ok({
         let meta = stored.meta();
         let coords = stored.coords.clone();
+
+        match settings.phonons.disp_finder {
+            cfg::PhononDispFinder::Phonopy { diag: _ } => {},
+            cfg::PhononDispFinder::Rsp2 => {
+                bail!("'disp-finder: rsp2' and 'eigensolver: phonopy' are incompatible");
+            },
+        }
 
         let bands_dir = self.create_bands_dir(&settings.threading, pot, phonopy, &coords, meta.sift())?;
         let (evals, evecs) = bands_dir.eigensystem_at(Q_GAMMA)?;
@@ -340,6 +348,7 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
 
     fn do_post_relaxation_computations(
         &self,
+        trial: &TrialDir,
         settings: &Settings,
         pot: &PotentialBuilder,
         phonopy: &PhonopyBuilder,
@@ -349,84 +358,126 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
         let coords = &stored.coords;
         let meta = stored.meta();
 
-        let disp_dir = phonopy.displacements(coords, meta.sift())?;
+        let compute_deperms = |coords: &_, cart_ops: &_| {
+            ::rsp2_structure::find_perm::spacegroup_deperms(
+                coords,
+                cart_ops,
+                // larger than SYMPREC because the coords we see may may be slightly
+                // different from what spglib saw, but not so large that we risk pairing
+                // the wrong atoms
+                settings.phonons.symmetry_tolerance * 3.0,
+            )
+        };
 
-        disp_dir.try_with_recovery(|disp_dir| FailOk({
-            let cart_ops = disp_dir.symmetry()?;
+        let (super_coords, prim_displacements, sc, cart_ops) = match settings.phonons.disp_finder {
+            cfg::PhononDispFinder::Phonopy { diag: _ } => {
+                let disp_dir = phonopy.displacements(coords, meta.sift())?;
 
-            let ::phonopy::Rsp2StyleDisplacements {
-                super_coords, sc, prim_displacements, ..
-            } = disp_dir.rsp2_style_displacements()?;
+                let ::phonopy::Rsp2StyleDisplacements {
+                    super_coords, sc, prim_displacements, ..
+                } = disp_dir.rsp2_style_displacements()?;
 
-            let space_group_deperms: Vec<_> = {
-                ::rsp2_structure::find_perm::spacegroup_deperms(
-                    &super_coords,
-                    &cart_ops,
-                    // larger than SYMPREC because the coords we see may may be slightly
-                    // different from what spglib saw, but not so large that we risk pairing
-                    // the wrong atoms
-                    settings.phonons.symmetry_tolerance * 3.0,
-                )?
-            };
+                let cart_ops = disp_dir.symmetry()?;
+                (super_coords, prim_displacements, sc, cart_ops)
+            },
+            cfg::PhononDispFinder::Rsp2 => {
+                use self::python::SpgDataset;
 
-            let super_meta = {
-                // macro to generate a closure, because generic closures don't exist
-                macro_rules! f {
-                    () => { |x: Rc<[_]>| -> Rc<[_]> {
-                        sc.replicate(&x[..]).into()
-                    }};
-                }
-                meta.clone().map(hlist![
-                    f!(),
-                    f!(),
-                    |opt: Option<_>| opt.map(f!()),
-                ])
-            };
-            let super_displacements: Vec<_> = {
-                prim_displacements.iter()
-                    .map(|&(prim, disp)| {
-                        let atom = sc.atom_from_cell(prim, ForceConstants::DESIGNATED_CELL);
-                        (atom, disp)
-                    })
-                    .collect()
-            };
-            let force_sets = do_force_sets_at_disps_for_sparse(
-                pot,
-                &settings.threading,
-                &super_displacements,
-                &super_coords,
-                super_meta.sift(),
-            )?;
+                // FIXME: awkwardly duplicated logic. In the phonopy branches, the stuff in
+                //        settings.phonons was used shortly after startup. But in this one
+                //        branch we don't have anything like PhonopyBuilder.
+                //
+                //        On that note, why do we bother carting PhonopyBuilder around rather than
+                //        constructing it in a function like this?
+                let sc_dim = settings.phonons.supercell.dim_for_unitcell(coords.lattice());
+                let (super_coords, sc) = ::rsp2_structure::supercell::diagonal(sc_dim).build(coords);
+                let cart_ops = {
+                    let atom_types: Vec<u32> = {
+                        let elements: Rc<[Element]> = meta.pick();
+                        elements.iter().map(|e| e.atomic_number()).collect()
+                    };
+                    SpgDataset::compute(coords, &atom_types, settings.phonons.symmetry_tolerance)?
+                        .cart_ops()
+                };
 
-            let cart_rots: Vec<_> = {
-                cart_ops.iter().map(|c| c.cart_rot()).collect()
-            };
+                let prim_deperms = compute_deperms(&coords, &cart_ops)?;
+                let prim_stars = ::math::stars::compute_stars(&prim_deperms);
 
-            trace!("Computing sparse force constants");
-            let force_constants = ::math::dynmat::ForceConstants::compute_required_rows(
-                &super_displacements,
-                &force_sets,
-                &cart_rots,
-                &space_group_deperms,
-                &sc,
-            )?;
+                let prim_displacements = ::math::displacements::compute_displacements(
+                    cart_ops.iter().map(|c| {
+                        c.int_rot(coords.lattice()).expect("bad operator from spglib!?")
+                    }),
+                    &prim_stars,
+                    &coords,
+                    settings.phonons.displacement_distance,
+                );
+                (super_coords, prim_displacements, sc, cart_ops)
+            },
+        };
 
-            trace!("Computing sparse dynamical matrix");
-            let dynmat = {
-                force_constants
-                    .gamma_dynmat(&sc, meta.pick())
-                    .hermitianize()
-            };
+        let super_meta = {
+            // macro to generate a closure, because generic closures don't exist
+            macro_rules! f {
+                () => { |x: Rc<[_]>| -> Rc<[_]> {
+                    sc.replicate(&x[..]).into()
+                }};
+            }
+            meta.clone().map(hlist![
+                f!(),
+                f!(),
+                |opt: Option<_>| opt.map(f!()),
+            ])
+        };
+        let super_displacements: Vec<_> = {
+            prim_displacements.iter()
+                .map(|&(prim, disp)| {
+                    let atom = sc.atom_from_cell(prim, ForceConstants::DESIGNATED_CELL);
+                    (atom, disp)
+                })
+                .collect()
+        };
+        { // XXX
+            let f = trial.create_file("disps").unwrap();
+            ::serde_json::to_writer_pretty(f, &super_displacements).unwrap();
+        }
+        let force_sets = do_force_sets_at_disps_for_sparse(
+            pot,
+            &settings.threading,
+            &super_displacements,
+            &super_coords,
+            super_meta.sift(),
+        )?;
 
-    //        HACK
-    //        Json(&dynmat.cereal()).save(self.join("dynmat.json"))?;
+        let cart_rots: Vec<_> = {
+            cart_ops.iter().map(|c| c.cart_rot()).collect()
+        };
 
-            trace!("Diagonalizing dynamical matrix");
-            let how_many = self.max_count.min(dynmat.max_sparse_eigensolutions());
-            let (evals, evecs) = dynmat.compute_most_negative_eigensolutions(how_many)?;
-            trace!("Done diagonalizing dynamical matrix");
-            (evals, evecs, dynmat)
-        }))?.1 // disp_dir.try_with_recovery(...)
+        let super_deperms = compute_deperms(&super_coords, &cart_ops)?;
+
+        trace!("Computing sparse force constants");
+        let force_constants = ::math::dynmat::ForceConstants::compute_required_rows(
+            &super_displacements,
+            &force_sets,
+            &cart_rots,
+            &super_deperms,
+            &sc,
+        )?;
+
+        trace!("Computing sparse dynamical matrix");
+        let dynmat = {
+            force_constants
+                .gamma_dynmat(&sc, meta.pick())
+                .hermitianize()
+        };
+
+//        HACK
+//        Json(&dynmat.cereal()).save(self.join("dynmat.json"))?;
+
+        trace!("Diagonalizing dynamical matrix");
+        let how_many = self.max_count.min(dynmat.max_sparse_eigensolutions());
+        let (evals, evecs) = dynmat.compute_most_negative_eigensolutions(how_many)?;
+        trace!("Done diagonalizing dynamical matrix");
+        (evals, evecs, dynmat)
     })}
 }
 
@@ -541,11 +592,16 @@ fn phonopy_builder_from_settings(
     settings: &cfg::Phonons,
     lattice: &Lattice,
 ) -> PhonopyBuilder {
-    PhonopyBuilder::new()
-        .symmetry_tolerance(settings.symmetry_tolerance)
-        .conf("DISPLACEMENT_DISTANCE", format!("{:e}", settings.displacement_distance))
-        .supercell_dim(settings.supercell.dim_for_unitcell(lattice))
-        .conf("DIAG", ".FALSE.")
+    let mut phonopy = {
+        PhonopyBuilder::new()
+            .symmetry_tolerance(settings.symmetry_tolerance)
+            .conf("DISPLACEMENT_DISTANCE", format!("{:e}", settings.displacement_distance))
+            .supercell_dim(settings.supercell.dim_for_unitcell(lattice))
+    };
+    if let cfg::PhononDispFinder::Phonopy { diag } = settings.disp_finder {
+        phonopy = phonopy.diagonal_disps(diag);
+    }
+    phonopy
 }
 
 fn do_force_sets_at_disps_for_phonopy<P: AsPath + Send + Sync>(
@@ -751,6 +807,8 @@ impl TrialDir {
     })}
 }
 
+//=================================================================
+
 // These were historically inherent methods, but the type was relocated to another crate
 extension_trait!{
     SupercellSpecExt for SupercellSpec {
@@ -875,7 +933,7 @@ impl TrialDir {
             macro_rules! use_diagonalizer {
                 ($diagonalizer:expr) => {{
                     $diagonalizer.do_post_relaxation_computations(
-                        settings, &*pot, &phonopy, &stored,
+                        &self, settings, &*pot, &phonopy, &stored,
                     )
                 }}
             }

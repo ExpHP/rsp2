@@ -185,7 +185,11 @@ struct PrimData {
 }
 
 impl<'ctx> Context<'ctx> {
+    // FIXME: It'd be nice if this used the new `Stars` type, but then the trouble is that
+    //        the indices used in the displacements might not be the same indices chosen as
+    //        representatives by `Stars`.
     fn compute_symmetry_info(&self) -> (Indexed<StarI, Vec<StarData>>, Indexed<PrimI, Vec<PrimData>>) {
+
         // Gather displacements for each star of sites.
         //
         // The non-equivalent atoms were discovered by phonopy and taken into account

@@ -41,6 +41,9 @@ pub trait EvLoopDiagonalizer {
 
     fn do_post_relaxation_computations(
         &self,
+        // (even if no impl uses the TrialDir, it is passed around so that files can easily be
+        //  written for debugging purposes)
+        trial: &TrialDir,
         settings: &cfg::Settings,
         pot: &PotentialBuilder,
         phonopy: &PhonopyBuilder,
@@ -94,7 +97,7 @@ impl TrialDir {
 
                 let stored = self.read_stored_structure(&subdir)?;
 
-                diagonalizer.do_post_relaxation_computations(settings, pot, phonopy, &stored)?
+                diagonalizer.do_post_relaxation_computations(&self, settings, pot, phonopy, &stored)?
             };
 
             trace!("============================");

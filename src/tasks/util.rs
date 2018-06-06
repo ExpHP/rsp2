@@ -138,6 +138,12 @@ mod lockfile {
 
 //--------------------------------------------------------
 
+pub trait VeclikeIterator: Iterator + ExactSizeIterator + DoubleEndedIterator + ::std::iter::FusedIterator {}
+impl<I> VeclikeIterator for I
+    where I: Iterator + ExactSizeIterator + DoubleEndedIterator + ::std::iter::FusedIterator {}
+
+//--------------------------------------------------------
+
 pub mod ext_traits {
     use ::path_abs::PathDir;
     use ::std::path::Path;

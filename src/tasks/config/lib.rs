@@ -364,6 +364,9 @@ pub struct Phonons {
     pub symmetry_tolerance: f64,
     pub displacement_distance: f64,
 
+    #[serde(default = "_phonons__disp_finder")]
+    pub disp_finder: PhononDispFinder,
+
     #[serde(default = "_phonons__eigensolver")]
     pub eigensolver: PhononEigenSolver,
 
@@ -387,11 +390,16 @@ pub struct Phonons {
     pub supercell: SupercellSpec,
 }
 fn _phonons__eigensolver() -> PhononEigenSolver { PhononEigenSolver::Phonopy { save_bands: false } }
+fn _phonons__disp_finder() -> PhononDispFinder { PhononDispFinder::Rsp2 }
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub enum PhononEigenSolver {
+    /// Diagonalize the dynamical matrix by having phonopy compute `band.hdf5`,
+    /// computing all eigensolutions.
+    ///
+    /// **Cannot be used with `disp-finder: rsp2`.**
     #[serde(rename_all = "kebab-case")]
     Phonopy {
         /// Save the directory from the last phonopy computation,
@@ -399,6 +407,8 @@ pub enum PhononEigenSolver {
         #[serde(default = "_phonon_eigen_solver__phonopy__save_bands")]
         save_bands: bool,
     },
+
+    /// Diagonalize the dynamical matrix using ARPACK through Scipy.
     #[serde(rename_all = "kebab-case")]
     Sparse {
         /// Solve for up to this many solutions when looking for imaginary modes.
@@ -409,6 +419,30 @@ pub enum PhononEigenSolver {
     },
 }
 fn _phonon_eigen_solver__phonopy__save_bands() -> bool { false }
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum PhononDispFinder {
+    /// Use `phonopy --disp` to compute the displacements.
+    ///
+    /// Phonopy is battle-tested and fairly clever at choosing displacements, but has
+    /// difficulty handling larger structures (>800 atoms).
+    #[serde(rename_all = "kebab-case")]
+    Phonopy {
+        /// Phonopy's DIAG option. This makes it select fewer displacements.
+        #[serde(default = "_phonon_disp_finder__phonopy__diag")]
+        diag: bool,
+    },
+
+    /// Use built-in methods to compute the displacements.
+    ///
+    /// This isn't very clever, and is maybe comparable to phonopy's `DIAG = .FALSE.`
+    ///
+    /// **Cannot be used with `eigensolver: phonopy`.**
+    Rsp2,
+}
+fn _phonon_disp_finder__phonopy__diag() -> bool { true }
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]

@@ -112,6 +112,9 @@ impl Builder {
     pub fn supercell_dim(self, dim: [u32; 3]) -> Self
     { self.conf("DIM", dim.iter().join(" ")) }
 
+    pub fn diagonal_disps(self, value: bool) -> Self
+    { self.conf("DIAG", fortran_bool(value)) }
+
     fn args_from_settings(&self) -> Args
     {
         let mut out = vec![];
@@ -688,10 +691,7 @@ impl<'moveck, 'p, P: AsPath> BandsBuilder<'moveck, 'p, P> {
                 //       points. Considering how large the band output is, I'll take my chances!
                 //          - ML
                 conf.insert("BAND_POINTS".to_string(), "1".to_string());
-                conf.insert("EIGENVECTORS".to_string(), match self.eigenvectors {
-                    true => ".TRUE.".to_string(),
-                    false => ".FALSE.".to_string(),
-                });
+                conf.insert("EIGENVECTORS".to_string(), fortran_bool(self.eigenvectors).to_string());
                 Conf(conf).save(dir.join(FNAME_CONF_BANDS))?;
             }
 
@@ -882,6 +882,13 @@ fn round_checked(x: f64, tol: f64) -> FailResult<i32>
     ensure!((r - x).abs() < tol, "not nearly integral: {}", x);
     r as i32
 })}
+
+fn fortran_bool(b: bool) -> &'static str {
+    match b {
+        true => ".TRUE.",
+        false => ".FALSE.",
+    }
+}
 
 pub(crate) fn log_stdio_and_wait(
     mut cmd: ::std::process::Command,

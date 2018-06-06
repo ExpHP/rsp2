@@ -5,3 +5,5 @@ pub(crate) mod basis;
 pub(crate) mod dynmat;
 pub(crate) mod crespi;
 pub(crate) mod sparse;
+pub(crate) mod stars;
+pub(crate) mod displacements;

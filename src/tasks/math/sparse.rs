@@ -27,10 +27,6 @@ use ::std::ops::{Range, Add, AddAssign};
 use ::num_traits::Zero;
 use ::rsp2_newtype_indices::{Idx, Indexed};
 
-pub trait VeclikeIterator: Iterator + ExactSizeIterator + DoubleEndedIterator + ::std::iter::FusedIterator {}
-impl<I> VeclikeIterator for I
-where I: Iterator + ExactSizeIterator + DoubleEndedIterator + ::std::iter::FusedIterator {}
-
 //=============================================================================================
 
 /// Coordinate format.
