@@ -74,6 +74,9 @@ impl<T, R: Idx, C: Idx> RawCoo<T, R, C> {
         let (row, col) = (col, row);
         RawCoo { dim, val, row, col }
     }
+
+    pub fn nnz_with_duplicates(&self) -> usize
+    { self.val.len() }
 }
 
 impl<T, R: Idx, C: Idx> Add for RawCoo<T, R, C> {
@@ -288,6 +291,9 @@ impl<T, R: Idx, C: Idx> RawCsr<T, R, C> {
     pub fn row_ranges(&self) -> Indexed<R, Vec<Range<usize>>> {
         self.row_ptr.raw.windows(2).map(|w| w[0]..w[1]).collect()
     }
+
+    pub fn nnz(&self) -> usize
+    { self.col.len() }
 }
 
 impl<T, R: Idx, C: Idx> RawCsr<T, R, C> {
@@ -351,6 +357,10 @@ impl<T, R: Idx, C: Idx> RawBee<T, R, C> {
         ensure!(map.values().filter_map(|m| m.keys().max()).max().unwrap().index() < dim.1, "col out of range");
         Ok(())
     }
+
+    /// NOTE: Not O(1), as it must gather up individual counts per-row.
+    pub fn nnz(&self) -> usize
+    { self.map.values().map(|m| m.len()).sum() }
 }
 
 impl<T, R: Idx, C: Idx> RawBee<T, R, C> {

@@ -389,8 +389,8 @@ pub struct Phonons {
     /// right eigensolutions at gamma, it might indicate a bug in rsp2's potentials)
     pub supercell: SupercellSpec,
 }
-fn _phonons__eigensolver() -> PhononEigenSolver { PhononEigenSolver::Phonopy { save_bands: false } }
-fn _phonons__disp_finder() -> PhononDispFinder { PhononDispFinder::Rsp2 }
+fn _phonons__eigensolver() -> PhononEigenSolver { PhononEigenSolver::Phonopy { save_bands: _phonon_eigen_solver__phonopy__save_bands() } }
+fn _phonons__disp_finder() -> PhononDispFinder { PhononDispFinder::Phonopy { diag: _phonon_disp_finder__phonopy__diag() } }
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]

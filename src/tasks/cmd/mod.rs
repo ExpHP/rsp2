@@ -478,6 +478,12 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
 //        HACK
 //        Json(&dynmat.cereal()).save(self.join("dynmat.json"))?;
 
+        {
+            let max_size = (|(a, b)| a * b)(dynmat.0.dim);
+            let nnz = dynmat.0.nnz();
+            let density = nnz as f64 / max_size as f64;
+            trace!("nnz: {} out of {} blocks (matrix density: {:.3e})", nnz, max_size, density);
+        }
         trace!("Diagonalizing dynamical matrix");
         let how_many = self.max_count.min(dynmat.max_sparse_eigensolutions());
         let (evals, evecs) = dynmat.compute_most_negative_eigensolutions(how_many)?;
