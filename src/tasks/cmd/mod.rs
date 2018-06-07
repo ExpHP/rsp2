@@ -297,7 +297,7 @@ impl EvLoopDiagonalizer for PhonopyDiagonalizer {
             cfg::PhononDispFinder::Phonopy { diag } => {
                 let _ = diag; // already handled during builder construction
             },
-            cfg::PhononDispFinder::Rsp2 => {
+            cfg::PhononDispFinder::Rsp2 { .. } => {
                 bail!("'disp-finder: rsp2' and 'eigensolver: phonopy' are incompatible");
             },
         }
@@ -393,7 +393,7 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
                 let cart_ops = disp_dir.symmetry()?;
                 (super_coords, prim_displacements, sc, cart_ops)
             },
-            cfg::PhononDispFinder::Rsp2 => {
+            cfg::PhononDispFinder::Rsp2 { ref directions } => {
                 use self::python::SpgDataset;
 
                 let sc_dim = settings.phonons.supercell.dim_for_unitcell(prim_coords.lattice());
@@ -411,6 +411,7 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
                 let prim_stars = ::math::stars::compute_stars(&prim_deperms);
 
                 let prim_displacements = ::math::displacements::compute_displacements(
+                    directions,
                     cart_ops.iter().map(|c| {
                         c.int_rot(prim_coords.lattice()).expect("bad operator from spglib!?")
                     }),

@@ -12,7 +12,7 @@
 // File adapted for use by rsp2. Originally from rust-lang/rust,
 // where it was similarly dual-licensed.
 
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 use std::iter::{self, FromIterator};
 use std::slice;
 use std::marker::PhantomData;
@@ -37,7 +37,7 @@ use std::mem;
 /// * Methods of `Clone`, `PartialEq`, `Eq`, `PartialOrd`, and `Ord` behave
 ///   identically to how they would for usizes.
 /// * `Hash` and `Debug` impls must not panic.
-pub unsafe trait Idx: Copy + 'static + Eq + Debug + Ord + Hash + Send + Sync {
+pub unsafe trait Idx: Copy + 'static + Eq + Debug + Display + Ord + Hash + Send + Sync {
     fn new(idx: usize) -> Self;
     fn index(self) -> usize;
 }

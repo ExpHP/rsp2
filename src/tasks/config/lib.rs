@@ -440,9 +440,29 @@ pub enum PhononDispFinder {
     /// This isn't very clever, and is maybe comparable to phonopy's `DIAG = .FALSE.`
     ///
     /// **Cannot be used with `eigensolver: phonopy`.**
-    Rsp2,
+    Rsp2 {
+        #[serde(default = "_phonon_disp_finder__rsp2__directions")]
+        directions: PhononDispFinderRsp2Directions,
+    }
 }
 fn _phonon_disp_finder__phonopy__diag() -> bool { true }
+fn _phonon_disp_finder__rsp2__directions() -> PhononDispFinderRsp2Directions { PhononDispFinderRsp2Directions::Diag }
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
+#[serde(rename_all="kebab-case")]
+pub enum PhononDispFinderRsp2Directions {
+    /// Comparable to phonopy with `DIAG = .FALSE.`
+    Axial,
+    /// Comparable to phonopy with `DIAG = .TRUE.`
+    Diag,
+    /// (Experimental) Diagonal displacements with fractional coords up to 2.
+    #[serde(rename = "diag-2")]
+    Diag2,
+    /// (Debug) Try all three of them and report how many they find, in an attempt
+    /// to answer the question "is diag-2 worthless?"
+    Survey,
+}
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]

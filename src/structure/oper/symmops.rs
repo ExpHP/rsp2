@@ -40,7 +40,7 @@ use ::rsp2_array_types::{V3, M33, mat};
 ///  of different unit cells, or between primitive cells and supercells)
 ///
 /// In this form, it is not capable of being applied to coordinate data.
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct IntRot {
     /// The transpose of the rotation matrix in fractional coords.
     /// (equivalently (given rsp2's other conventions), one might say this
@@ -214,6 +214,13 @@ impl IntRot {
     /// Conventional group operator.
     pub fn of(&self, other: &IntRot) -> IntRot
     { other.then(self) }
+}
+
+impl ::std::ops::Mul<V3<i32>> for IntRot {
+    type Output = V3<i32>;
+
+    fn mul(self, v: V3<i32>) -> Self::Output
+    { v * self.t }
 }
 
 impl CartOp {

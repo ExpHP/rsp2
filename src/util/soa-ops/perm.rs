@@ -52,7 +52,7 @@ impl Perm {
     pub fn len(&self) -> usize
     { self.inv.0.len() }
 
-    /// Compute the `Perm` that, when applied to the input slice, would sort it.
+    /// Compute the `Perm` that, when applied to the input slice, would (stably) sort it.
     pub fn argsort<T: Ord>(xs: &[T]) -> Perm
     { Perm { inv: PermVec::argsort(xs).inverted() } }
 
@@ -546,6 +546,30 @@ mod tests {
             assert_eq!(drop_history.borrow().len(), 5);
         }
         assert_eq!(drop_history.borrow().len(), 5);
+    }
+
+    #[test]
+    fn argsort_is_stable()
+    {
+        use ::rand::Rng;
+
+        // a long vector of only two unique values; a prime target for stability checks
+        let n = 300;
+        let values: Vec<_> = (0..n).map(|_| ::rand::thread_rng().gen_range(0, 2)).collect();
+
+        let perm = Perm::argsort(&values);
+        let permuted_indices = (0..n).collect::<Vec<_>>().permuted_by(&perm);
+        let permuted_values = values.permuted_by(&perm);
+
+        let error = format!("not your lucky day, Mister one-in-{:e}", 2f64.powi(n));
+        let first_one = permuted_values.iter().position(|&x| x == 1).expect(&error);
+
+        let is_strictly_sorted = |xs: &[_]| xs.windows(2).all(|w| w[0] < w[1]);
+        assert!(is_strictly_sorted(&permuted_indices[..first_one]));
+        assert!(is_strictly_sorted(&permuted_indices[first_one..]));
+
+        let error = format!("DEFINITELY not your lucky day, Mister one-in-{}-factorial!!", n);
+        assert!(!is_strictly_sorted(&permuted_indices[..]), "{}", error);
     }
 
     #[test]
