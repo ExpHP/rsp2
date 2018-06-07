@@ -12,6 +12,7 @@
 ** parts of it are licensed under more permissive terms.                  **
 ** ********************************************************************** */
 #![allow(unused_unsafe)]
+#![deny(unused_must_use)]
 
 extern crate slice_of_array;
 extern crate rsp2_structure;
@@ -88,6 +89,9 @@ pub struct Lammps<P: Potential> {
     // See the documentation of `build` for more info.
     original_num_atoms: usize,
     original_init_info: InitInfo,
+
+    // Determines the next command for updating.
+    update_fsm: UpdateFsm,
 }
 
 struct MaybeDirty<T> {
@@ -184,7 +188,101 @@ pub struct Builder {
     append_log: Option<PathBuf>,
     threaded: bool,
     auto_adjust_lattice: bool,
+    update_style: UpdateStyle,
 }
+
+//------------------------------------------
+
+/// Configuration for how to tell LAMMPS to update.
+#[derive(Debug, Clone)]
+pub enum UpdateStyle {
+    /// `run $n`. `run 0` is a safe way to do a full update.
+    /// The n is configurable only for debugging purposes.
+    Run(u32),
+    /// `run 1 pre no post no` (`run 0 post no` on first call)
+    Fast {
+        /// Check against the `run 0` results for debugging purposes.
+        validate_every: Option<u32>,
+    },
+}
+
+// Determines the next `run` command for updating Lammps.
+#[derive(Debug, Clone)]
+enum UpdateFsm {
+    Run(u32),
+    FastUninit {
+        validate_every: Option<u32>,
+    },
+    Fast {
+        validate_next: Option<u32>,
+        validate_every: Option<u32>,
+    },
+}
+
+#[derive(Debug, Clone)]
+struct UpdateAction {
+    command: String,
+    validate_against: Option<String>,
+}
+
+impl UpdateAction {
+    fn command(command: impl ToString) -> Self {
+        UpdateAction { command: command.to_string(), validate_against: None }
+    }
+}
+
+impl UpdateStyle {
+    fn initial_fsm(&self) -> UpdateFsm {
+        match *self {
+            UpdateStyle::Run(n) => UpdateFsm::Run(n),
+            UpdateStyle::Fast { validate_every } => UpdateFsm::FastUninit { validate_every },
+        }
+    }
+}
+
+impl UpdateFsm {
+    fn step(&mut self) -> UpdateAction {
+        let action = self._action();
+        *self = self._next();
+        action
+    }
+
+    fn _action(&self) -> UpdateAction {
+        match self {
+            UpdateFsm::Run(n) => UpdateAction::command(format!("run {}", n)),
+            UpdateFsm::FastUninit { .. } => UpdateAction::command("run 0 post no"),
+            UpdateFsm::Fast { validate_next: Some(0), .. } => {
+                UpdateAction {
+                    command: "run 1 pre no post no".into(),
+                    validate_against: Some("run 0".into()),
+                }
+            },
+            UpdateFsm::Fast { .. } => UpdateAction::command("run 1 pre no post no"),
+        }
+    }
+
+    fn _next(&self) -> Self {
+        match *self {
+            // steady states
+            UpdateFsm::Run(_) |
+            UpdateFsm::Fast { validate_next: None, .. }
+            => self.clone(),
+
+            // reset the counter
+            UpdateFsm::FastUninit { validate_every } |
+            UpdateFsm::Fast { validate_next: Some(0), validate_every } => {
+                let validate_next = validate_every;
+                UpdateFsm::Fast { validate_next, validate_every }
+            },
+            // tick the counter
+            UpdateFsm::Fast { validate_next: Some(n), validate_every } => {
+                UpdateFsm::Fast { validate_next: Some(n - 1), validate_every }
+            },
+        }
+    }
+}
+
+//------------------------------------------
 
 impl Default for Builder {
     fn default() -> Self
@@ -196,6 +294,7 @@ impl Builder {
     { Builder {
         append_log: None,
         threaded: true,
+        update_style: UpdateStyle::Run(0),
         auto_adjust_lattice: true,
     }}
 
@@ -214,6 +313,9 @@ impl Builder {
 
     pub fn threaded(&mut self, value: bool) -> &mut Self
     { self.threaded = value; self }
+
+    pub fn update_style(&mut self, value: UpdateStyle) -> &mut Self
+    { self.update_style = value; self }
 
     /// Call out to the LAMMPS C API to create an instance of Lammps,
     /// and configure it according to this builder.
@@ -330,6 +432,8 @@ impl<'a, M: Clone> Potential for &'a (Potential<Meta=M> + 'a) {
     { (&**self).atom_types(coords, meta) }
 }
 
+//-------------------------------------------
+
 /// Data describing the commands which need to be sent to lammps to initialize
 /// atom types and the potential.
 #[derive(Debug, Clone)]
@@ -416,6 +520,8 @@ impl fmt::Display for AtomTypeRange {
     }
 }
 
+//-------------------------------------------
+
 /// Type used for stringy arguments to a Lammps command,
 /// which takes care of quoting for interior whitespace.
 ///
@@ -480,7 +586,6 @@ impl<'a, D: fmt::Display> fmt::Display for JoinDisplay<'a, D> {
     })}
 }
 
-
 //-------------------------------------------
 // Initializing the LAMMPS C API object.
 //
@@ -500,6 +605,7 @@ impl<P: Potential> Lammps<P>
             original_init_info,
             original_num_atoms,
             auto_adjust_lattice: builder.auto_adjust_lattice,
+            update_fsm: builder.update_style.initial_fsm(),
         }
     })}
 
@@ -666,8 +772,29 @@ impl<P: Potential> Lammps<P> {
                 self.send_lmp_carts()?;
             }
 
-            self.ptr.borrow_mut().command("run 0")?;
+            self.update_lammps_with_run_command()?;
             self.structure.mark_clean();
+        }
+    })}
+
+    fn update_lammps_with_run_command(&mut self) -> FailResult<()>
+    {Ok({
+        let action = self.update_fsm.step();
+        self.ptr.borrow_mut().command(&action.command)?;
+
+//        assert_eq!(
+//            &self.read_lmp_carts()?[..],
+//            self.structure.get().0.as_carts_cached().unwrap(),
+//        );
+
+        if let Some(validate_cmd) = action.validate_against {
+            let fast_forces = self.compute_force()?;
+            self.ptr.borrow_mut().command(&validate_cmd)?;
+            let safe_forces = self.compute_force()?;
+
+            for (a, b) in fast_forces.into_iter().zip(safe_forces) {
+                assert_eq!(a, b);
+            }
         }
     })}
 
@@ -690,6 +817,12 @@ impl<P: Potential> Lammps<P> {
         assert_eq!(carts.len(), self.ptr.borrow_mut().get_natoms());
 
         unsafe { self.ptr.borrow_mut().scatter_atoms_f("x", carts.unvee_ref().flat()) }?;
+    })}
+
+    fn read_lmp_carts(&mut self) -> FailResult<Vec<V3>>
+    {Ok({
+        let grad = unsafe { self.ptr.borrow_mut().gather_atoms_f("x", 3)? };
+        grad.nest::<[_; 3]>().to_vec().envee()
     })}
 
     fn send_lmp_lattice(&mut self) -> FailResult<()>

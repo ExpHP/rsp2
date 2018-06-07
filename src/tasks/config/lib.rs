@@ -144,6 +144,9 @@ pub struct Settings {
 
     #[serde(default)]
     pub ev_loop: EvLoop,
+
+    #[serde(default)]
+    pub lammps_update_style: LammpsUpdateStyle,
 }
 derive_yaml_read!{Settings}
 
@@ -290,6 +293,8 @@ pub struct EnergyPlotSettings {
     //pub phonons: Phonons,
 
     pub potential: PotentialKind,
+    #[serde(default)]
+    pub lammps_update_style: LammpsUpdateStyle,
 }
 derive_yaml_read!{EnergyPlotSettings}
 
@@ -479,6 +484,23 @@ pub enum Threading {
     Lammps,
     Rayon,
     Serial,
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
+#[serde(rename_all="kebab-case")]
+pub enum LammpsUpdateStyle {
+    /// Use `run 0` to notify LAMMPS of updates.
+    Safe,
+    /// (Experimental) Use `run 1 pre no post no` to notify LAMMPS of updates
+    Fast,
+    /// (Debug) Use `run n` to notify LAMMPS of updates. Ideally identical to "safe".
+    Run(u32),
+    /// (Debug) Like `fast`, but validates against `safe` every `n` computations.
+    Paranoid(u32),
+}
+impl Default for LammpsUpdateStyle {
+    fn default() -> Self { LammpsUpdateStyle::Safe }
 }
 
 #[derive(Serialize, Deserialize)]

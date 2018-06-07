@@ -398,29 +398,37 @@ impl<'a, M: Clone + 'static> DiffFn<M> for OneOff<'a, M> {
 
 /// High-level logic
 impl PotentialBuilder {
-    pub(crate) fn from_config(
+    pub(crate) fn from_root_config(
+        trial_dir: &TrialDir,
+        cfg: &cfg::Settings,
+    ) -> Box<PotentialBuilder> {
+        Self::from_config_parts(trial_dir, &cfg.threading, &cfg.lammps_update_style, &cfg.potential)
+    }
+
+    pub(crate) fn from_config_parts(
         trial_dir: &TrialDir,
         threading: &cfg::Threading,
+        update_style: &cfg::LammpsUpdateStyle,
         config: &cfg::PotentialKind,
     ) -> Box<PotentialBuilder> {
         match config {
             cfg::PotentialKind::Rebo => {
                 let lammps_pot = self::lammps::Airebo::Rebo;
-                let pot = self::lammps::Builder::new(trial_dir, threading, lammps_pot);
+                let pot = self::lammps::Builder::new(trial_dir, threading, update_style, lammps_pot);
                 Box::new(pot)
             }
             cfg::PotentialKind::Airebo(cfg) => {
                 let lammps_pot = self::lammps::Airebo::from(cfg);
-                let pot = self::lammps::Builder::new(trial_dir, threading, lammps_pot);
+                let pot = self::lammps::Builder::new(trial_dir, threading, update_style, lammps_pot);
                 Box::new(pot)
             },
             cfg::PotentialKind::KolmogorovCrespiZ(cfg) => {
                 let lammps_pot = self::lammps::KolmogorovCrespiZ::from(cfg);
-                let pot = self::lammps::Builder::new(trial_dir, threading, lammps_pot);
+                let pot = self::lammps::Builder::new(trial_dir, threading, update_style, lammps_pot);
                 Box::new(pot)
             },
             cfg::PotentialKind::KolmogorovCrespiZNew(cfg) => {
-                let rebo = PotentialBuilder::from_config(trial_dir, threading, &cfg::PotentialKind::Rebo);
+                let rebo = PotentialBuilder::from_config_parts(trial_dir, threading, update_style, &cfg::PotentialKind::Rebo);
                 let kc_z = self::homestyle::KolmogorovCrespiZ(cfg.clone());
                 let pot = self::helper::Sum(rebo, kc_z);
                 Box::new(pot)
@@ -555,6 +563,7 @@ mod lammps {
     use ::rsp2_lammps_wrap::{InitInfo, AtomType, PairCommand};
     use ::rsp2_lammps_wrap::Builder as InnerBuilder;
     use ::rsp2_lammps_wrap::Potential as LammpsPotential;
+    use ::rsp2_lammps_wrap::UpdateStyle;
 
     /// A bundle of everything we need to initialize a Lammps API object.
     ///
@@ -578,11 +587,18 @@ mod lammps {
         pub(crate) fn new(
             trial_dir: &TrialDir,
             threading: &cfg::Threading,
+            update_style: &cfg::LammpsUpdateStyle,
             potential: P,
         ) -> Self {
             let mut inner = InnerBuilder::new();
             inner.append_log(trial_dir.join("lammps.log"));
             inner.threaded(*threading == cfg::Threading::Lammps);
+            inner.update_style(match *update_style {
+                cfg::LammpsUpdateStyle::Safe => UpdateStyle::Run(0),
+                cfg::LammpsUpdateStyle::Run(n) => UpdateStyle::Run(n),
+                cfg::LammpsUpdateStyle::Fast => UpdateStyle::Fast { validate_every: None },
+                cfg::LammpsUpdateStyle::Paranoid(n) => UpdateStyle::Fast { validate_every: Some(n) },
+            });
 
             Builder { inner, potential }
         }
@@ -656,15 +672,9 @@ mod lammps {
             Rebo,
         }
 
-        #[derive(Debug, Clone)]
-        pub struct Rebo;
-
         impl<'a> From<&'a cfg::PotentialAirebo> for Airebo {
             fn from(cfg: &'a cfg::PotentialAirebo) -> Self {
-                let cfg::PotentialAirebo {
-                    lj_sigma, lj_enabled, torsion_enabled,
-                } = *cfg;
-
+                let cfg::PotentialAirebo { lj_sigma, lj_enabled, torsion_enabled } = *cfg;
                 Airebo::Airebo {
                     lj_sigma: lj_sigma.unwrap_or(DEFAULT_AIREBO_LJ_SIGMA),
                     lj_enabled: lj_enabled.unwrap_or(DEFAULT_AIREBO_LJ_ENABLED),

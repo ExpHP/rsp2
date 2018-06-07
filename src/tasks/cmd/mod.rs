@@ -92,7 +92,7 @@ impl TrialDir {
         input: &PathAbs,
     ) -> FailResult<()>
     {Ok({
-        let pot = PotentialBuilder::from_config(&self, &settings.threading, &settings.potential);
+        let pot = PotentialBuilder::from_root_config(&self, &settings);
 
         let (optimizable_coords, atom_elements, atom_masses, atom_layers, layer_sc_mats) = {
             read_optimizable_structure(
@@ -813,7 +813,7 @@ impl TrialDir {
                         // println!("{:?}", pos.flat().iter().sum::<f64>());
 
                         eprint!("\rdatapoint {:>6} of {}", i, w * h);
-                        PotentialBuilder::from_config(me, &settings.threading, &settings.potential)
+                        PotentialBuilder::from_config_parts(me, &settings.threading, &settings.lammps_update_style, &settings.potential)
                             .one_off()
                             .compute_grad(
                                 &coords.clone().with_carts(pos.to_vec()),
@@ -894,7 +894,7 @@ impl TrialDir {
         settings: &Settings,
     ) -> FailResult<()>
     {Ok({
-        let pot = PotentialBuilder::from_config(&self, &settings.threading, &settings.potential);
+        let pot = PotentialBuilder::from_root_config(&self, &settings);
 
         let (coords, meta, _) = self.read_stored_structure_data("final.structure")?;
 
@@ -925,7 +925,7 @@ impl TrialDir {
         settings: &Settings,
     ) -> FailResult<()>
     {Ok({
-        let pot = PotentialBuilder::from_config(&self, &settings.threading, &settings.potential);
+        let pot = PotentialBuilder::from_root_config(&self, &settings);
 
         let stored = self.read_stored_structure("./final.structure")?;
 
