@@ -216,7 +216,7 @@ impl_dyn_clone_detail!{
 /// A `DiffFn` may contain pre-computed or cached data that is only valid for
 /// certain structures.  Most code that handles `DiffFns` must handle them
 /// opaquely, so generally speaking, *all code that uses a `DiffFn`* is subject
-/// to *union of the limitations across all of the implementations.*
+/// to the *union of the limitations across all of the implementations.*
 ///
 /// (...not a huge deal since all uses and all implementations are local to this crate)
 pub trait DiffFn<Meta> {
@@ -239,12 +239,18 @@ pub trait DiffFn<Meta> {
         Ok(force)
     }
 
+    // REMINDER TO SELF: The API only does one displacement at a time because the code that uses
+    //                   it is general over serial iteration vs parallel iteration.
     /// Compute the change in force when displacing an atom, in a sparse representation.
     ///
     /// The default implementation works from the dense representation of the forces, meaning
     /// it is inherently at least `O(num_atoms)`. This method is present on the trait because some
     /// potentials (e.g. those based on a bond graph) may be capable of providing optimized
     /// implementations that only do `O(output.len())` work on large structures.
+    ///
+    /// The default implementation computes two forces every time it is called.  The first one is
+    /// redundant and can be avoided by using `compute_sparse_force_set_with_original_force`
+    /// instead.
     ///
     /// Some potentials may assume that `original` has zero force.
     fn compute_sparse_force_set(
@@ -257,11 +263,39 @@ pub trait DiffFn<Meta> {
     {
         let mut coords = original_coords.clone();
 
-        ensure_only_carts(&mut coords); // ... see the long doc comment on this method.
+        ensure_only_carts(&mut coords);
 
-        // FIXME this is going to get recomputed frequently unless we change the signature.
         let original_force = self.compute_force(&coords, meta.clone())?;
+
+        self.compute_sparse_force_set_with_original_force(
+            &coords, meta.clone(), &original_force, displacement,
+        )
+    }
+
+    // Two-step form of `compute_sparse_force_set` that elides repeated recomputations
+    // of the original forces.
+    //
+    // The helper function `ensure_only_carts` must have been called prior to computing
+    // `original_force`. This is checked.
+    fn compute_sparse_force_set_with_original_force(
+        &mut self,
+        // The coords that were given to `compute_force` when `original_force` was computed,
+        // without any modification since (even cache-related).
+        original_coords: &Coords,
+        meta: Meta,
+        original_force: &[V3],
+        displacement: (usize, V3),
+    ) -> FailResult<BTreeMap<usize, V3>>
+    where Meta: Clone,
+    {
+        assert!(
+            original_coords.as_fracs_cached().is_none(),
+            "(BUG) ensure_only_carts was not used prior to computing original force!",
+        );
+
+        let mut coords = original_coords.clone();
         coords.carts_mut()[displacement.0] += displacement.1;
+
         let displaced_force = self.compute_force(&coords, meta)?;
 
         let diffs = {
@@ -271,7 +305,7 @@ pub trait DiffFn<Meta> {
                 //  * is deterministic, and
                 //  * implements a cutoff radius,
                 //
-                // ...then with the help of the "ensure_only_carts" call above, even this
+                // ...then with the help of the "ensure_only_carts", even this
                 // exact equality check should be effective at sparsifying the data.
                 //
                 // Which is good, because it's tough to define an approximate scale for comparison
@@ -279,8 +313,8 @@ pub trait DiffFn<Meta> {
                 .map(|(atom, (old, new))| (atom, new - old))
                 .filter(|&(_, v)| v != V3::zero())
 
-                // this one is a closer approximation of phonopy, producing a dense matrix with
-                // just the new forces (assuming the old ones are zero)
+            // this one is a closer approximation of phonopy, producing a dense matrix with
+            // just the new forces (assuming the old ones are zero)
 //                .map(|(atom, (_old, new))| (atom, new))
         };
         Ok(diffs.collect())
@@ -344,7 +378,7 @@ impl<'d, Meta> DiffFn<Meta> for Box<DiffFn<Meta> + 'd> {
 ///     assert_eq!(v1, v2);
 /// }
 /// ```
-fn ensure_only_carts(coords: &mut Coords) {
+pub fn ensure_only_carts(coords: &mut Coords) {
     // The signature of `carts_mut()` guarantees that it drops all fractional data;
     // it could not be correct otherwise.
     let _ = coords.carts_mut();

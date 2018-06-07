@@ -664,11 +664,20 @@ fn do_force_sets_at_disps_for_sparse(
 
     trace!("Computing forces at displacements");
 
+    let original_forces;
+    let coords = {
+        let mut coords = coords.clone();
+
+        self::potential::ensure_only_carts(&mut coords); // see that function's doc comment
+        original_forces = pot.one_off().compute_force(&coords, meta.sift())?;
+        coords
+    };
+
     let counter = ::util::AtomicCounter::new();
     let num_displacements = displacements.len();
     let force_sets = use_potential_maybe_with_rayon(
         pot,
-        coords,
+        &coords,
         &meta.sift(),
         threading == &cfg::Threading::Rayon,
         displacements,
@@ -677,7 +686,9 @@ fn do_force_sets_at_disps_for_sparse(
             eprint!("\rdisp {} of {}", i + 1, num_displacements);
             ::std::io::stderr().flush().unwrap();
 
-            diff_fn.compute_sparse_force_set(coords, meta, displacement)?
+            diff_fn.compute_sparse_force_set_with_original_force(
+                &coords, meta, &original_forces, displacement,
+            )?
         })
     )?;
     eprintln!();
