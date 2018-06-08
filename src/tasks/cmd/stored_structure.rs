@@ -38,6 +38,10 @@ impl StoredStructure {
     pub fn meta(&self) -> HList3<Rc<[Element]>, Rc<[Mass]>, Option<Rc<[Layer]>>> {
         hlist![self.elements.clone(), self.masses.clone(), self.layers.clone()]
     }
+
+    pub fn path_is_structure(path: impl AsPath) -> bool {
+        path.join("meta.json").exists() && path.join("POSCAR").exists()
+    }
 }
 
 #[derive(Serialize, Deserialize)]

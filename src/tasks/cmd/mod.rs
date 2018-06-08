@@ -73,6 +73,8 @@ use math::dynmat::ForceConstants;
 use cmd::potential::CommonMeta;
 use math::dynmat::DynamicalMatrix;
 use traits::save::Json;
+use std::ffi::OsStr;
+use std::ffi::OsString;
 
 const SAVE_BANDS_DIR: &'static str = "gamma-bands";
 
@@ -267,8 +269,8 @@ impl TrialDir {
         (stored.coords, meta, stored.layer_sc_matrices)
     })}
 
-    fn read_stored_structure(&self, dir_name: &str) -> FailResult<StoredStructure>
-    { Load::load(self.join(dir_name)) }
+    fn read_stored_structure(&self, dir_name: impl AsRef<OsStr>) -> FailResult<StoredStructure>
+    { Load::load(self.join(dir_name.as_ref())) }
 }
 
 struct PhonopyDiagonalizer {
@@ -926,11 +928,10 @@ impl TrialDir {
     pub(crate) fn rerun_ev_analysis(
         self,
         settings: &Settings,
+        stored: StoredStructure,
     ) -> FailResult<()>
     {Ok({
         let pot = PotentialBuilder::from_root_config(&self, &settings);
-
-        let stored = self.read_stored_structure("./final.structure")?;
 
         let bonds = settings.bond_radius.map(|bond_radius| FailOk({
             trace!("Computing bonds");
@@ -1276,4 +1277,26 @@ fn masses_by_config(
             None => ::common::default_element_mass(element).map(Mass),
         })
         .collect::<Result<Vec<_>, _>>()?.into()
+})}
+
+/// Heuristically accept either a trial directory, or a structure directory within one
+pub(crate) fn resolve_trial_or_structure_path(
+    path: &PathAbs,
+    default_subdir: impl AsRef<OsStr>, // used when a trial directory is supplied
+) -> FailResult<(TrialDir, StoredStructure)>
+{Ok({
+    let structure_name: OsString;
+    let trial_path: PathDir;
+    if StoredStructure::path_is_structure(&path) {
+        let parent = path.parent().ok_or_else(|| format_err!("no parent for structure dir"))?;
+        structure_name = path.file_name().unwrap().into();
+        trial_path = PathDir::new(parent)?;
+    } else {
+        trial_path = PathDir::new(path)?;
+        structure_name = default_subdir.as_ref().into();
+    }
+
+    let trial = TrialDir::from_existing(&trial_path)?;
+    let structure = trial.read_stored_structure(structure_name)?;
+    (trial, structure)
 })}

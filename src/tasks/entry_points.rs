@@ -226,18 +226,19 @@ pub fn rerun_analysis() {
         let (app, de) = CliDeserialize::augment_clap_app({
             ::clap::App::new("rsp2-rerun-analysis")
                 .args(&[
-                    arg!( trial_dir=TRIAL_DIR "existing trial directory"),
+                    arg!( dir=DIR "existing trial directory, or a structure directory within one"),
                 ])
         });
         let matches = app.get_matches();
         let () = de.resolve_args(&matches)?;
 
-        let trial = PathDir::new(matches.expect_value_of("trial_dir"))?;
-        let trial = TrialDir::from_existing(&trial)?;
+        let dir = PathDir::new(matches.expect_value_of("dir"))?;
+        let (trial, structure) = ::cmd::resolve_trial_or_structure_path(&dir, "final.structure")?;
+
         logfile.start(PathFile::new(trial.new_logfile_path()?)?)?;
 
         let settings = trial.read_settings()?;
-        trial.rerun_ev_analysis(&settings)
+        trial.rerun_ev_analysis(&settings, structure)
     });
 }
 
