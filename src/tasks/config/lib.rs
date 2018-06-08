@@ -495,7 +495,7 @@ pub enum LammpsUpdateStyle {
     /// (Experimental) Use `run 1 pre no post no` to notify LAMMPS of updates
     Fast,
     /// (Debug) Use `run n` to notify LAMMPS of updates. Ideally identical to "safe".
-    Run(u32),
+    Run { n: u32, pre: bool, post: bool },
     /// (Debug) Like `fast`, but validates against `safe` every `n` computations.
     Paranoid(u32),
 }

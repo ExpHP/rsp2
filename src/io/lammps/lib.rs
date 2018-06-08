@@ -198,18 +198,21 @@ pub struct Builder {
 pub enum UpdateStyle {
     /// `run $n`. `run 0` is a safe way to do a full update.
     /// The n is configurable only for debugging purposes.
-    Run(u32),
+    Run { n: u32, pre: bool, post: bool },
     /// `run 1 pre no post no` (`run 0 post no` on first call)
     Fast {
         /// Check against the `run 0` results for debugging purposes.
         validate_every: Option<u32>,
     },
 }
+impl UpdateStyle {
+    pub fn safe() -> Self { UpdateStyle::Run { n: 0, pre: true, post: true } }
+}
 
 // Determines the next `run` command for updating Lammps.
 #[derive(Debug, Clone)]
 enum UpdateFsm {
-    Run(u32),
+    Run { n: u32, pre: bool, post: bool },
     FastUninit {
         validate_every: Option<u32>,
     },
@@ -234,7 +237,7 @@ impl UpdateAction {
 impl UpdateStyle {
     fn initial_fsm(&self) -> UpdateFsm {
         match *self {
-            UpdateStyle::Run(n) => UpdateFsm::Run(n),
+            UpdateStyle::Run { n, pre, post } => UpdateFsm::Run { n, pre, post },
             UpdateStyle::Fast { validate_every } => UpdateFsm::FastUninit { validate_every },
         }
     }
@@ -248,8 +251,17 @@ impl UpdateFsm {
     }
 
     fn _action(&self) -> UpdateAction {
-        match self {
-            UpdateFsm::Run(n) => UpdateAction::command(format!("run {}", n)),
+        struct YesNo(bool);
+        impl fmt::Display for YesNo {
+            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                write!(f, "{}", if self.0 { "yes" } else { "no" })
+            }
+        }
+
+        match *self {
+            UpdateFsm::Run { n, pre, post } => {
+                UpdateAction::command(format!("run {} pre {} post {}", n, YesNo(pre), YesNo(post)))
+            },
             UpdateFsm::FastUninit { .. } => UpdateAction::command("run 0 post no"),
             UpdateFsm::Fast { validate_next: Some(0), .. } => {
                 UpdateAction {
@@ -264,7 +276,7 @@ impl UpdateFsm {
     fn _next(&self) -> Self {
         match *self {
             // steady states
-            UpdateFsm::Run(_) |
+            UpdateFsm::Run { .. } |
             UpdateFsm::Fast { validate_next: None, .. }
             => self.clone(),
 
@@ -294,7 +306,7 @@ impl Builder {
     { Builder {
         append_log: None,
         threaded: true,
-        update_style: UpdateStyle::Run(0),
+        update_style: UpdateStyle::safe(),
         auto_adjust_lattice: true,
     }}
 
@@ -814,17 +826,9 @@ impl<P: Potential> Lammps<P> {
     fn send_lmp_carts(&mut self) -> FailResult<()>
     {Ok({
         let carts = self.structure.get().0.to_carts();
-        assert_eq!(carts.len(), self.ptr.borrow_mut().get_natoms());
-
         unsafe { self.ptr.borrow_mut().scatter_atoms_f("x", carts.unvee_ref().flat()) }?;
     })}
-
-    fn read_lmp_carts(&mut self) -> FailResult<Vec<V3>>
-    {Ok({
-        let grad = unsafe { self.ptr.borrow_mut().gather_atoms_f("x", 3)? };
-        grad.nest::<[_; 3]>().to_vec().envee()
-    })}
-
+    
     fn send_lmp_lattice(&mut self) -> FailResult<()>
     {Ok({
         let [

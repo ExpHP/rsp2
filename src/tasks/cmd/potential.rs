@@ -594,10 +594,22 @@ mod lammps {
             inner.append_log(trial_dir.join("lammps.log"));
             inner.threaded(*threading == cfg::Threading::Lammps);
             inner.update_style(match *update_style {
-                cfg::LammpsUpdateStyle::Safe => UpdateStyle::Run(0),
-                cfg::LammpsUpdateStyle::Run(n) => UpdateStyle::Run(n),
-                cfg::LammpsUpdateStyle::Fast => UpdateStyle::Fast { validate_every: None },
-                cfg::LammpsUpdateStyle::Paranoid(n) => UpdateStyle::Fast { validate_every: Some(n) },
+                cfg::LammpsUpdateStyle::Safe => UpdateStyle::safe(),
+                cfg::LammpsUpdateStyle::Run{ n, pre, post } => {
+                    warn_once!("lammps-update-style: run' is only for debugging purposes");
+                    UpdateStyle::Run{ n, pre, post }
+                },
+                cfg::LammpsUpdateStyle::Fast => {
+                    warn_once!(
+                        "'lammps-update-style: fast' is experimental and, as far as I \
+                        can tell, extremely broken"
+                    );
+                    UpdateStyle::Fast { validate_every: None }
+                },
+                cfg::LammpsUpdateStyle::Paranoid(n) => {
+                    warn_once!("lammps-update-style: paranoid' is only for debugging purposes");
+                    UpdateStyle::Fast { validate_every: Some(n) }
+                },
             });
 
             Builder { inner, potential }
