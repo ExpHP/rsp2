@@ -331,7 +331,7 @@ where Meta: Clone + 'static,
 /// advantage of reliable properties of the structures produced by displacements.
 pub trait DispFn {
     /// Compute the change in force caused by the displacement.
-    fn compute_dense_force_delta(&mut self, disp: (usize, V3)) -> FailResult<Vec<V3>>;
+    fn compute_dense_force(&mut self, disp: (usize, V3)) -> FailResult<Vec<V3>>;
 
     /// Compute the change in force caused by the displacement, in a sparse representation.
     ///
@@ -361,7 +361,7 @@ fn sparse_force_from_dense_deterministic(
     original_force: &[V3],
     disp: (usize, V3),
 ) -> FailResult<BTreeMap<usize, V3>> {
-    let displaced_force = disp_fn.compute_dense_force_delta(disp)?;
+    let displaced_force = disp_fn.compute_dense_force(disp)?;
 
     let diffs = {
         zip_eq!(original_force, displaced_force).enumerate()
@@ -518,7 +518,7 @@ mod helper {
     impl<Meta> DispFn for DefaultDispFn<Meta>
     where Meta: Clone,
     {
-        fn compute_dense_force_delta(&mut self, disp: (usize, V3)) -> FailResult<Vec<V3>>
+        fn compute_dense_force(&mut self, disp: (usize, V3)) -> FailResult<Vec<V3>>
         {Ok({
             let mut carts = self.equilibrium_carts.to_vec();
             carts[disp.0] += disp.1;
@@ -646,7 +646,11 @@ mod lammps {
                     UpdateStyle { n, pre, post }
                 },
                 cfg::LammpsUpdateStyle::Fast => {
-                    warn_once!("'lammps-update-style: fast' is experimental");
+                    warn_once!("\
+                        'lammps-update-style: fast' is experimental, and has a known crippling \
+                        bug (it may feed LAMMPS images of sites other than the ones LAMMPS is \
+                        expecting)\
+                    ");
                     UpdateStyle::fast()
                 },
             });
@@ -690,6 +694,24 @@ mod lammps {
             let lmp = self.inner.build(lammps_pot, coords.clone(), meta)?;
             Ok(Box::new(MyDiffFn::<M>(lmp)) as Box<_>)
         }
+
+        pub(crate) fn lammps_disp_fn(&self, coords: &Coords, meta: M) -> FailResult<Box<DispFn>>
+        {
+            struct MyDispFn<Q: LammpsPotential>(::rsp2_lammps_wrap::DispFn<Q>);
+            impl<Mm: Clone + 'static, Q: LammpsPotential<Meta=Mm>> DispFn for MyDispFn<Q> {
+                fn compute_dense_force(&mut self, disp: (usize, V3)) -> FailResult<Vec<V3>>
+                { self.0.compute_force_at_disp(disp) }
+
+                fn compute_sparse_force_delta(&mut self, disp: (usize, V3)) -> FailResult<BTreeMap<usize, V3>>
+                {
+                    let orig_force = self.0.equilibrium_force();
+                    sparse_force_from_dense_deterministic(self, &orig_force, disp)
+                }
+            }
+
+            let lmp_disp_fn = self.inner.build_disp_fn(self.potential.clone(), coords.clone(), meta)?;
+            Ok(Box::new(MyDispFn(lmp_disp_fn)) as Box<_>)
+        }
     }
 
     impl<M: Clone + 'static, P: Clone + LammpsPotential<Meta=M> + Send + Sync + 'static> PotentialBuilder<M> for Builder<P>
@@ -700,11 +722,8 @@ mod lammps {
         fn initialize_diff_fn(&self, coords: &Coords, meta: M) -> FailResult<Box<DiffFn<M>>>
         { self.lammps_diff_fn(coords, meta) }
 
-        fn initialize_disp_fn(&self, coords: &Coords, meta: P::Meta) -> FailResult<Box<DispFn>>
-        {
-            // FIXME optimize
-            default_initialize_disp_fn(self, coords, meta)
-        }
+        fn initialize_disp_fn(&self, coords: &Coords, meta: M) -> FailResult<Box<DispFn>>
+        { self.lammps_disp_fn(coords, meta) }
     }
 
     impl_dyn_clone_detail!{

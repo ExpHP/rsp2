@@ -672,11 +672,7 @@ fn do_force_sets_at_disps_for_sparse(
     let mut disp_fn = pot.initialize_disp_fn(&coords, meta.sift())?;
 
     // this no longer has the option of using rayon because the speed gain from
-    // disabling neighbor list updates in LAMMPS is far greater, and it is difficult to
-    // write a threadsafe wrapper around that optimization which is correct.
-    //
-    // (for instance, displacements must be computed using the remapped coordinates
-    //  produced by lammps, to avoid invalidating its bins)
+    // disabling neighbor list updates in LAMMPS is far greater
     let force_sets = {
         displacements.iter()
             .enumerate()

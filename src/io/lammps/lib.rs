@@ -316,6 +316,12 @@ impl Builder {
     pub fn build<P>(&self, potential: P, initial_coords: Coords, initial_meta: P::Meta) -> FailResult<Lammps<P>>
     where P: Potential,
     { Lammps::from_builder(self, potential, initial_coords, initial_meta) }
+
+    /// Create a `DispFn`, an alternative to `Lammps` which is optimized for computing
+    /// forces at displacements.
+    pub fn build_disp_fn<P>(&self, potential: P, equilibrium_coords: Coords, equilibrium_meta: P::Meta) -> FailResult<DispFn<P>>
+    where P: Potential,
+    { DispFn::from_builder(self, potential, equilibrium_coords, equilibrium_meta) }
 }
 
 /// Initialize LAMMPS, do nothing of particular value, and exit.
@@ -978,6 +984,55 @@ pub mod potential {
             pair_commands: vec![PairCommand::pair_style("none")],
         }}
     }
+}
+
+//-------------------------------------------
+
+/// An alternative to `Lammps` which is optimized for computing forces at displacements.
+///
+/// (Long story short, it was easier to write a wrapper type that handles the
+/// coordinates correctly, rather than to try and build this functionality into `Lammps`)
+pub struct DispFn<P: Potential> {
+    lammps: Lammps<P>,
+    // the carts produced by lammps after first building the neighbor list.
+    //
+    // These might be slightly different from the original coords (namely, they may be
+    // mapped into the unit cell, and the mapping process will also cause sites within
+    // the cell to change by a ULP or two).
+    //
+    // We use these as the original coords (instead of the original user input) to avoid
+    // invalidating the data structures of lammps, which may rely on these particular images
+    // of the atoms being chosen.
+    equilibrium_carts: Vec<V3>,
+    equilibrium_force: Vec<V3>,
+}
+
+impl<P: Potential> DispFn<P> {
+    fn from_builder(builder: &Builder, potential: P, coords: Coords, meta: P::Meta) -> FailResult<Self>
+    {Ok({
+        let mut builder = builder.clone();
+        builder.update_style(UpdateStyle { n: 1, pre: false, post: true });
+
+        let mut lammps = Lammps::from_builder(&builder, potential, coords, meta)?;
+
+        // this will build neighbor lists (modifying the coordinates in the process)
+        let equilibrium_force = lammps.compute_force()?;
+
+        let equilibrium_carts = lammps.read_raw_lmp_carts()?;
+
+        DispFn { lammps, equilibrium_carts, equilibrium_force }
+    })}
+
+    pub fn compute_force_at_disp(&mut self, disp: (usize, V3)) -> FailResult<Vec<V3>>
+    {Ok({
+        let mut carts = self.equilibrium_carts.clone();
+        carts[disp.0] += disp.1;
+        self.lammps.set_carts(&carts)?;
+        self.lammps.compute_force()?
+    })}
+
+    pub fn equilibrium_force(&self) -> Vec<V3>
+    { self.equilibrium_force.clone() }
 }
 
 //-------------------------------------------
