@@ -642,6 +642,7 @@ impl<P: Potential> Lammps<P>
                 true => "processors * * *",
                 false => "processors 1 1 1",
             },
+            "neigh_modify delay 0",         // disable delay for a safer `run pre no`
             "atom_style atomic",            // attributes to store per-atom
             "thermo_modify lost error",     // don't let atoms disappear without telling us
             "atom_modify map array",        // store all positions in an array

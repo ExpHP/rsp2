@@ -646,11 +646,7 @@ mod lammps {
                     UpdateStyle { n, pre, post }
                 },
                 cfg::LammpsUpdateStyle::Fast => {
-                    warn_once!("\
-                        'lammps-update-style: fast' is experimental, and has a known crippling \
-                        bug (it may feed LAMMPS images of sites other than the ones LAMMPS is \
-                        expecting)\
-                    ");
+                    warn_once!("'lammps-update-style: fast' is experimental");
                     UpdateStyle::fast()
                 },
             });

@@ -492,7 +492,12 @@ pub enum Threading {
 pub enum LammpsUpdateStyle {
     /// Use `run 0` to notify LAMMPS of updates.
     Safe,
-    /// (Experimental) Use `run 1 pre no post no` to notify LAMMPS of updates
+    /// (Experimental) Use `run 1 pre no post no` to notify LAMMPS of updates.
+    ///
+    /// To make this a bit safer, the delay on neighbor update checks is removed.
+    /// (However, if an atom is not at the same image where LAMMPS would prefer to find it,
+    /// then the optimization is defeated, and neighbor lists will end up being built
+    /// every step...)
     Fast,
     /// (Debug) Use a custom `run _ pre _ post _` to notify LAMMPS of updates.
     Run { n: u32, pre: bool, post: bool },
