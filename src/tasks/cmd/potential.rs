@@ -604,6 +604,8 @@ mod lammps {
                     UpdateStyle::fast()
                 },
             });
+            // XXX
+//            inner.data_trace_dir(Some(trial_dir.join("lammps-data-trace")));
 
             Builder { inner, potential }
         }

@@ -96,6 +96,8 @@ pub struct Lammps<P: Potential> {
 
     // Determines the next command for updating.
     update_fsm: UpdateFsm,
+
+    data_trace_dir: Option<PathBuf>,
 }
 
 struct MaybeDirty<T> {
@@ -193,6 +195,7 @@ pub struct Builder {
     threaded: bool,
     auto_adjust_lattice: bool,
     update_style: UpdateStyle,
+    data_trace_dir: Option<PathBuf>,
 }
 
 //------------------------------------------
@@ -265,6 +268,7 @@ impl Builder {
         threaded: true,
         update_style: UpdateStyle::safe(),
         auto_adjust_lattice: true,
+        data_trace_dir: None,
     }}
 
     /// Toggles extremely small corrections automatically made to the lattice.
@@ -285,6 +289,9 @@ impl Builder {
 
     pub fn update_style(&mut self, value: UpdateStyle) -> &mut Self
     { self.update_style = value; self }
+
+    pub fn data_trace_dir(&mut self, value: Option<impl AsRef<Path>>) -> &mut Self
+    { self.data_trace_dir = value.map(|p| p.as_ref().to_owned()); self }
 
     /// Call out to the LAMMPS C API to create an instance of Lammps,
     /// and configure it according to this builder.
@@ -575,6 +582,7 @@ impl<P: Potential> Lammps<P>
             original_num_atoms,
             auto_adjust_lattice: builder.auto_adjust_lattice,
             update_fsm: builder.update_style.initial_fsm(),
+            data_trace_dir: builder.data_trace_dir.clone(),
         }
     })}
 
@@ -748,8 +756,18 @@ impl<P: Potential> Lammps<P> {
 
     fn update_lammps_with_run_command(&mut self) -> FailResult<()>
     {Ok({
+        let iter = self.update_fsm.iter;
+
+        if let Some(dir) = &self.data_trace_dir {
+            self.write_data_trace_fileset(dir, &format!("{:04}-a", iter));
+        }
+
         let action = self.update_fsm.step();
         self.ptr.borrow_mut().command(&action)?;
+
+        if let Some(dir) = &self.data_trace_dir {
+            self.write_data_trace_fileset(dir, &format!("{:04}-b", iter));
+        }
     })}
 
     fn send_lmp_types(&mut self) -> FailResult<()>
@@ -829,6 +847,24 @@ impl<P: Potential> Lammps<P> {
         check("number of atoms has", original_num_atoms, coords.num_atoms())?;
         check("masses have", original_masses, &masses)?;
         check("pair potential commands have", original_pair_commands, &pair_commands)?;
+    })}
+
+    fn write_data_trace_fileset(&self, dir: &Path, filename_prefix: &str) {
+        let _ = self._write_data_trace_fileset(dir, filename_prefix);
+    }
+
+    fn _write_data_trace_fileset(&self, dir: &Path, filename_prefix: &str) -> FailResult<()>
+    {Ok({
+        use ::std::fs;
+        use ::std::io::Write;
+
+        fs::create_dir_all(dir)?;
+        let file = |ext: &str| {
+            fs::File::create(dir.join(format!("{}.{}", filename_prefix, ext)))
+        };
+        writeln!(file("lmp.carts")?, "{:?}", self.read_raw_lmp_carts()?)?;
+        writeln!(file("lmp.force")?, "{:?}", self.read_raw_lmp_force()?)?;
+        writeln!(file("cached.carts")?, "{:?}", self.structure.get().0.to_carts())?;
     })}
 }
 
