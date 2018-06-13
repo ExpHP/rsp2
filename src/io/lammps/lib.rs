@@ -198,63 +198,47 @@ pub struct Builder {
 //------------------------------------------
 
 /// Configuration for how to tell LAMMPS to update.
+///
+/// `run $n`. `run 0` is a safe way to do a full update.
 #[derive(Debug, Clone)]
-pub enum UpdateStyle {
-    /// `run $n`. `run 0` is a safe way to do a full update.
-    /// The n is configurable only for debugging purposes.
-    Run { n: u32, pre: bool, post: bool },
-    /// `run 1 pre no post no` (`run 0 post no` on first call)
-    Fast {
-        /// Check against the `run 0` results for debugging purposes.
-        validate_every: Option<u32>,
-    },
+pub struct UpdateStyle {
+    /// The N in `run N pre PRE post POST`
+    pub n: u32,
+    /// `pre yes` or `pre no`. Notice Lammps overrides this on the first call
+    /// to always be true.
+    pub pre: bool,
+    pub post: bool,
 }
+
 impl UpdateStyle {
-    pub fn safe() -> Self { UpdateStyle::Run { n: 0, pre: true, post: true } }
+    pub fn safe() -> Self { UpdateStyle { n: 0, pre: true, post: true } }
+    pub fn fast() -> Self { UpdateStyle { n: 1, pre: false, post: false } }
 }
 
 // Determines the next `run` command for updating Lammps.
+//
+// Now that we always use the same command, the implementation is trivial.
+// It only exists as a holdover from an earlier, less trivial design.
 #[derive(Debug, Clone)]
-enum UpdateFsm {
-    Run { n: u32, pre: bool, post: bool },
-    FastUninit {
-        validate_every: Option<u32>,
-    },
-    Fast {
-        validate_next: Option<u32>,
-        validate_every: Option<u32>,
-    },
-}
-
-#[derive(Debug, Clone)]
-struct UpdateAction {
-    command: String,
-    validate_against: Option<String>,
-}
-
-impl UpdateAction {
-    fn command(command: impl ToString) -> Self {
-        UpdateAction { command: command.to_string(), validate_against: None }
-    }
+struct UpdateFsm {
+    iter: u32,
+    style: UpdateStyle,
 }
 
 impl UpdateStyle {
     fn initial_fsm(&self) -> UpdateFsm {
-        match *self {
-            UpdateStyle::Run { n, pre, post } => UpdateFsm::Run { n, pre, post },
-            UpdateStyle::Fast { validate_every } => UpdateFsm::FastUninit { validate_every },
-        }
+        UpdateFsm { iter: 0, style: self.clone() }
     }
 }
 
 impl UpdateFsm {
-    fn step(&mut self) -> UpdateAction {
+    fn step(&mut self) -> String {
         let action = self._action();
-        *self = self._next();
+        self.iter += 1;
         action
     }
 
-    fn _action(&self) -> UpdateAction {
+    fn _action(&self) -> String {
         struct YesNo(bool);
         impl fmt::Display for YesNo {
             fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -262,39 +246,8 @@ impl UpdateFsm {
             }
         }
 
-        match *self {
-            UpdateFsm::Run { n, pre, post } => {
-                UpdateAction::command(format!("run {} pre {} post {}", n, YesNo(pre), YesNo(post)))
-            },
-            UpdateFsm::FastUninit { .. } => UpdateAction::command("run 0 post no"),
-            UpdateFsm::Fast { validate_next: Some(0), .. } => {
-                UpdateAction {
-                    command: "run 1 pre no post no".into(),
-                    validate_against: Some("run 0".into()),
-                }
-            },
-            UpdateFsm::Fast { .. } => UpdateAction::command("run 1 pre no post no"),
-        }
-    }
-
-    fn _next(&self) -> Self {
-        match *self {
-            // steady states
-            UpdateFsm::Run { .. } |
-            UpdateFsm::Fast { validate_next: None, .. }
-            => self.clone(),
-
-            // reset the counter
-            UpdateFsm::FastUninit { validate_every } |
-            UpdateFsm::Fast { validate_next: Some(0), validate_every } => {
-                let validate_next = validate_every;
-                UpdateFsm::Fast { validate_next, validate_every }
-            },
-            // tick the counter
-            UpdateFsm::Fast { validate_next: Some(n), validate_every } => {
-                UpdateFsm::Fast { validate_next: Some(n - 1), validate_every }
-            },
-        }
+        let UpdateStyle { n, pre, post } = self.style;
+        format!("run {} pre {} post {}", n, YesNo(pre), YesNo(post))
     }
 }
 
@@ -796,22 +749,7 @@ impl<P: Potential> Lammps<P> {
     fn update_lammps_with_run_command(&mut self) -> FailResult<()>
     {Ok({
         let action = self.update_fsm.step();
-        self.ptr.borrow_mut().command(&action.command)?;
-
-//        assert_eq!(
-//            &self.read_lmp_carts()?[..],
-//            self.structure.get().0.as_carts_cached().unwrap(),
-//        );
-
-        if let Some(validate_cmd) = action.validate_against {
-            let fast_forces = self.compute_force()?;
-            self.ptr.borrow_mut().command(&validate_cmd)?;
-            let safe_forces = self.compute_force()?;
-
-            for (a, b) in fast_forces.into_iter().zip(safe_forces) {
-                assert_eq!(a, b);
-            }
-        }
+        self.ptr.borrow_mut().command(&action)?;
     })}
 
     fn send_lmp_types(&mut self) -> FailResult<()>

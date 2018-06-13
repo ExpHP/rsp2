@@ -494,10 +494,8 @@ pub enum LammpsUpdateStyle {
     Safe,
     /// (Experimental) Use `run 1 pre no post no` to notify LAMMPS of updates
     Fast,
-    /// (Debug) Use `run n` to notify LAMMPS of updates. Ideally identical to "safe".
+    /// (Debug) Use a custom `run _ pre _ post _` to notify LAMMPS of updates.
     Run { n: u32, pre: bool, post: bool },
-    /// (Debug) Like `fast`, but validates against `safe` every `n` computations.
-    Paranoid(u32),
 }
 impl Default for LammpsUpdateStyle {
     fn default() -> Self { LammpsUpdateStyle::Safe }
