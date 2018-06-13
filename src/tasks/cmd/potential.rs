@@ -25,7 +25,7 @@ use ::meta::{Mass, Element};
 use ::meta::prelude::*;
 #[allow(unused)] // rustc bug
 use ::rsp2_soa_ops::{Part, Partition};
-use ::rsp2_structure::{Coords, consts};
+use ::rsp2_structure::{Coords, consts, CoordsKind, Lattice};
 use ::rsp2_structure::layer::Layers;
 use ::rsp2_tasks_config as cfg;
 #[allow(unused)] // rustc bug
@@ -136,6 +136,11 @@ pub trait PotentialBuilder<Meta = CommonMeta>
         })))
     }
 
+    /// Create a DispFn, a non-threadsafe object that can compute many displacements very quickly.
+    fn initialize_disp_fn(&self, equilibrium_coords: &Coords, meta: Meta) -> FailResult<Box<DispFn>>
+    where Meta: Clone + 'static,
+    ;
+
     /// Convenience adapter for one-off computations.
     ///
     /// The output type is a DiffFn instance that will initialize the true `DiffFn`
@@ -197,12 +202,13 @@ where Meta: Clone + 'static,
     { (**self).initialize_diff_fn(coords, meta) }
 
     fn initialize_flat_diff_fn(&self, coords: &Coords, meta: Meta) -> FailResult<Box<DynFlatDiffFn<'static>>>
-    where Meta: Clone + 'static
     { (**self).initialize_flat_diff_fn(coords, meta) }
 
     fn one_off(&self) -> OneOff<'_, Meta>
-    where Meta: Clone,
     { (**self).one_off() }
+
+    fn initialize_disp_fn(&self, equilibrium_coords: &Coords, meta: Meta) -> FailResult<Box<DispFn>>
+    { (**self).initialize_disp_fn(equilibrium_coords, meta) }
 }
 
 impl_dyn_clone_detail!{
@@ -238,87 +244,6 @@ pub trait DiffFn<Meta> {
         for v in &mut force { *v = -*v; }
         Ok(force)
     }
-
-    // REMINDER TO SELF: The API only does one displacement at a time because the code that uses
-    //                   it is general over serial iteration vs parallel iteration.
-    /// Compute the change in force when displacing an atom, in a sparse representation.
-    ///
-    /// The default implementation works from the dense representation of the forces, meaning
-    /// it is inherently at least `O(num_atoms)`. This method is present on the trait because some
-    /// potentials (e.g. those based on a bond graph) may be capable of providing optimized
-    /// implementations that only do `O(output.len())` work on large structures.
-    ///
-    /// The default implementation computes two forces every time it is called.  The first one is
-    /// redundant and can be avoided by using `compute_sparse_force_set_with_original_force`
-    /// instead.
-    ///
-    /// Some potentials may assume that `original` has zero force.
-    fn compute_sparse_force_set(
-        &mut self,
-        original_coords: &Coords,
-        meta: Meta,
-        displacement: (usize, V3),
-    ) -> FailResult<BTreeMap<usize, V3>>
-    where Meta: Clone,
-    {
-        let mut coords = original_coords.clone();
-
-        ensure_only_carts(&mut coords);
-
-        let original_force = self.compute_force(&coords, meta.clone())?;
-
-        self.compute_sparse_force_set_with_original_force(
-            &coords, meta.clone(), &original_force, displacement,
-        )
-    }
-
-    // Two-step form of `compute_sparse_force_set` that elides repeated recomputations
-    // of the original forces.
-    //
-    // The helper function `ensure_only_carts` must have been called prior to computing
-    // `original_force`. This is checked.
-    fn compute_sparse_force_set_with_original_force(
-        &mut self,
-        // The coords that were given to `compute_force` when `original_force` was computed,
-        // without any modification since (even cache-related).
-        original_coords: &Coords,
-        meta: Meta,
-        original_force: &[V3],
-        displacement: (usize, V3),
-    ) -> FailResult<BTreeMap<usize, V3>>
-    where Meta: Clone,
-    {
-        assert!(
-            original_coords.as_fracs_cached().is_none(),
-            "(BUG) ensure_only_carts was not used prior to computing original force!",
-        );
-
-        let mut coords = original_coords.clone();
-        coords.carts_mut()[displacement.0] += displacement.1;
-
-        let displaced_force = self.compute_force(&coords, meta)?;
-
-        let diffs = {
-            zip_eq!(original_force, displaced_force).enumerate()
-                // assuming that the potential...
-                //
-                //  * is deterministic, and
-                //  * implements a cutoff radius,
-                //
-                // ...then with the help of the "ensure_only_carts", even this
-                // exact equality check should be effective at sparsifying the data.
-                //
-                // Which is good, because it's tough to define an approximate scale for comparison
-                // here, as the forces are the end-result of catastrophic cancellations.
-                .map(|(atom, (old, new))| (atom, new - old))
-                .filter(|&(_, v)| v != V3::zero())
-
-            // this one is a closer approximation of phonopy, producing a dense matrix with
-            // just the new forces (assuming the old ones are zero)
-//                .map(|(atom, (_old, new))| (atom, new))
-        };
-        Ok(diffs.collect())
-    }
 }
 
 // necessary for combinators like sum
@@ -340,6 +265,9 @@ impl<'d, Meta> DiffFn<Meta> for Box<DiffFn<Meta> + 'd> {
     { (**self).compute_force(coords, meta) }
 }
 
+// FIXME: this is no longer used, but another comment in this file refers to its
+//        doc comment for explanation.  The relevant details should be moved there.
+//
 /// Ensure that carts are available on a Coords, and that fracs are **not** available.
 ///
 /// **TL;DR:**  Its usage in `compute_force_set` makes it feasible to use exact equality
@@ -378,10 +306,73 @@ impl<'d, Meta> DiffFn<Meta> for Box<DiffFn<Meta> + 'd> {
 ///     assert_eq!(v1, v2);
 /// }
 /// ```
+#[allow(unused)]
 pub fn ensure_only_carts(coords: &mut Coords) {
     // The signature of `carts_mut()` guarantees that it drops all fractional data;
     // it could not be correct otherwise.
     let _ = coords.carts_mut();
+}
+
+// default impl for initialize_disp_fn, which cannot be inlined because it needs `Self: Sized`
+pub fn default_initialize_disp_fn<Meta>(
+    pot: &PotentialBuilder<Meta>,
+    equilibrium_coords: &Coords,
+    meta: Meta,
+) -> FailResult<Box<DispFn>>
+where Meta: Clone + 'static,
+{ Ok(Box::new(helper::DefaultDispFn::initialize(equilibrium_coords, meta, pot)?)) }
+
+//-------------------------------------
+
+/// This is `FnMut((usize, V3)) -> FailResult<(f64, Vec<V3>)>` with convenience methods.
+///
+/// A `DispFn` usually has been initialized with the equilibrium structure, and may contain
+/// pre-computed equilibrium forces. It may behave differently from a DiffFn in order to take
+/// advantage of reliable properties of the structures produced by displacements.
+pub trait DispFn {
+    /// Compute the change in force caused by the displacement.
+    fn compute_dense_force_delta(&mut self, disp: (usize, V3)) -> FailResult<Vec<V3>>;
+
+    /// Compute the change in force caused by the displacement, in a sparse representation.
+    ///
+    /// This is not required to be identical to `compute_dense_force_delta`; the two methods
+    /// may differ in assumptions (e.g. one method might treat the equilibrium structure as
+    /// having zero force).
+    fn compute_sparse_force_delta(&mut self, disp: (usize, V3)) -> FailResult<BTreeMap<usize, V3>>;
+}
+
+/// Implements sparse force sets in terms of dense force sets.
+///
+/// Assumes `compute_dense_force_delta` produces values that only differ from the
+/// original forces in a neighborhood of the displacement. This can be true if
+/// the potential...
+///
+///  * is deterministic,
+///  * implements a cutoff radius, and
+///  * does not recklessly adjust coordinates
+///
+/// ...so that with the help of the "ensure_only_carts", even this
+/// exact equality check should be effective at sparsifying the data.
+///
+/// Which is good, because it's tough to define an approximate scale for comparison
+/// here, as the forces are the end-result of catastrophic cancellations.
+fn sparse_force_from_dense_deterministic(
+    disp_fn: &mut DispFn,
+    original_force: &[V3],
+    disp: (usize, V3),
+) -> FailResult<BTreeMap<usize, V3>> {
+    let displaced_force = disp_fn.compute_dense_force_delta(disp)?;
+
+    let diffs = {
+        zip_eq!(original_force, displaced_force).enumerate()
+            .map(|(atom, (old, new))| (atom, new - old))
+            .filter(|&(_, v)| v != V3::zero())
+
+        // this one is a closer approximation of phonopy, producing a dense matrix with
+        // just the new forces (assuming the old ones are zero)
+//                .map(|(atom, (_old, new))| (atom, new))
+    };
+    Ok(diffs.collect())
 }
 
 //-------------------------------------
@@ -463,6 +454,9 @@ mod helper {
             let b_diff_fn = self.1.initialize_diff_fn(coords, meta.clone())?;
             Ok(Box::new(Sum(a_diff_fn, b_diff_fn)))
         }
+
+        fn initialize_disp_fn(&self, _: &Coords, _: M) -> FailResult<Box<DispFn>>
+        { unimplemented!() }
     }
 
     impl_dyn_clone_detail!{
@@ -489,6 +483,55 @@ mod helper {
                 *out_vec += b_vec;
             }
             Ok((value, grad))
+        }
+    }
+
+    //--------------------------------
+
+    pub struct DefaultDispFn<Meta> {
+        // this is carts instead of Coords for the same reason that `ensure_only_carts` exists;
+        // see that function
+        equilibrium_carts: Vec<V3>,
+        lattice: Lattice,
+        equilibrium_force: Vec<V3>,
+        meta: Meta,
+        diff_fn: Box<DiffFn<Meta>>,
+    }
+
+    impl<Meta> DefaultDispFn<Meta>
+    where Meta: Clone + 'static,
+    {
+        pub fn initialize(equilibrium_coords: &Coords, meta: Meta, pot: &PotentialBuilder<Meta>) -> FailResult<Self>
+        {Ok({
+            let lattice = equilibrium_coords.lattice().clone();
+            let equilibrium_carts = equilibrium_coords.to_carts();
+
+            let equilibrium_coords = Coords::new(lattice.clone(), CoordsKind::Carts(equilibrium_carts.clone()));
+
+            let mut diff_fn = pot.initialize_diff_fn(&equilibrium_coords, meta.clone())?;
+            let equilibrium_force = diff_fn.compute_force(&equilibrium_coords, meta.clone())?;
+
+            DefaultDispFn { lattice, equilibrium_carts, equilibrium_force, meta, diff_fn }
+        })}
+    }
+
+    impl<Meta> DispFn for DefaultDispFn<Meta>
+    where Meta: Clone,
+    {
+        fn compute_dense_force_delta(&mut self, disp: (usize, V3)) -> FailResult<Vec<V3>>
+        {Ok({
+            let mut carts = self.equilibrium_carts.to_vec();
+            carts[disp.0] += disp.1;
+
+            let coords = CoordsKind::Carts(carts);
+            let coords = Coords::new(self.lattice.clone(), coords);
+            self.diff_fn.compute_force(&coords, self.meta.clone())?
+        })}
+
+        fn compute_sparse_force_delta(&mut self, disp: (usize, V3)) -> FailResult<BTreeMap<usize, V3>>
+        {
+            let orig_force = self.equilibrium_force.clone();
+            sparse_force_from_dense_deterministic(self, &orig_force, disp)
         }
     }
 }
@@ -547,6 +590,9 @@ mod homestyle {
 
             fn_body(self, coords, meta)
         }
+
+        fn initialize_disp_fn(&self, coords: &Coords, meta: CommonMeta) -> FailResult<Box<DispFn>>
+        { default_initialize_disp_fn(self, coords, meta) }
     }
 
     impl_dyn_clone_detail!{
@@ -653,6 +699,12 @@ mod lammps {
 
         fn initialize_diff_fn(&self, coords: &Coords, meta: M) -> FailResult<Box<DiffFn<M>>>
         { self.lammps_diff_fn(coords, meta) }
+
+        fn initialize_disp_fn(&self, coords: &Coords, meta: P::Meta) -> FailResult<Box<DispFn>>
+        {
+            // FIXME optimize
+            default_initialize_disp_fn(self, coords, meta)
+        }
     }
 
     impl_dyn_clone_detail!{
@@ -1015,7 +1067,7 @@ pub mod test {
     #[derive(Debug, Clone)]
     pub struct Zero;
 
-    impl<Meta: Clone> PotentialBuilder<Meta> for Zero {
+    impl<Meta: Clone + 'static> PotentialBuilder<Meta> for Zero {
         fn initialize_diff_fn<'a>(&self, _: &Coords, _: Meta) -> FailResult<Box<DiffFn<Meta>>>
         {
             struct Diff;
@@ -1026,10 +1078,13 @@ pub mod test {
             }
             Ok(Box::new(Diff) as Box<_>)
         }
+
+        fn initialize_disp_fn(&self, coords: &Coords, meta: Meta) -> FailResult<Box<DispFn>>
+        { default_initialize_disp_fn(self, coords, meta) }
     }
 
     impl_dyn_clone_detail!{
-        impl[M: Clone] DynCloneDetail<M> for Zero { ... }
+        impl[M: Clone + 'static] DynCloneDetail<M> for Zero { ... }
     }
 
     // ---------------
@@ -1046,13 +1101,16 @@ pub mod test {
     }
 
     /// ConvergeTowards can also serve as its own PotentialBuilder.
-    impl<Meta: Clone> PotentialBuilder<Meta> for ConvergeTowards {
+    impl<Meta: Clone + 'static> PotentialBuilder<Meta> for ConvergeTowards {
         fn initialize_diff_fn(&self, _: &Coords, _: Meta) -> FailResult<Box<DiffFn<Meta>>>
         { Ok(Box::new(self.clone()) as Box<_>) }
+
+        fn initialize_disp_fn(&self, coords: &Coords, meta: Meta) -> FailResult<Box<DispFn>>
+        { default_initialize_disp_fn(self, coords, meta) }
     }
 
     impl_dyn_clone_detail!{
-        impl[Meta: Clone] DynCloneDetail<Meta> for ConvergeTowards { ... }
+        impl[Meta: Clone + 'static] DynCloneDetail<Meta> for ConvergeTowards { ... }
     }
 
     impl<M> DiffFn<M> for ConvergeTowards {
@@ -1127,7 +1185,7 @@ pub mod test {
     #[derive(Debug, Clone)]
     pub struct Chainify;
 
-    impl<Meta: Clone> PotentialBuilder<Meta> for Chainify {
+    impl<Meta: Clone + 'static> PotentialBuilder<Meta> for Chainify {
         fn initialize_diff_fn(&self, initial_coords: &Coords, _: Meta) -> FailResult<Box<DiffFn<Meta>>>
         {
             let na = initial_coords.num_atoms();
@@ -1141,10 +1199,13 @@ pub mod test {
             );
             Ok(Box::new(ConvergeTowards::new(target)) as Box<_>)
         }
+
+        fn initialize_disp_fn(&self, coords: &Coords, meta: Meta) -> FailResult<Box<DispFn>>
+        { default_initialize_disp_fn(self, coords, meta) }
     }
 
     impl_dyn_clone_detail!{
-        impl[Meta: Clone] DynCloneDetail<Meta> for Chainify { ... }
+        impl[Meta: Clone + 'static] DynCloneDetail<Meta> for Chainify { ... }
     }
 
     // ---------------

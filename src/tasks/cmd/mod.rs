@@ -656,7 +656,7 @@ fn do_force_sets_at_disps_for_phonopy<P: AsPath + Send + Sync>(
 
 fn do_force_sets_at_disps_for_sparse(
     pot: &PotentialBuilder,
-    threading: &cfg::Threading,
+    _threading: &cfg::Threading,
     displacements: &[(usize, V3)],
     coords: &Coords,
     meta: HList2<
@@ -669,33 +669,25 @@ fn do_force_sets_at_disps_for_sparse(
 
     trace!("Computing forces at displacements");
 
-    let original_forces;
-    let coords = {
-        let mut coords = coords.clone();
+    let mut disp_fn = pot.initialize_disp_fn(&coords, meta.sift())?;
 
-        self::potential::ensure_only_carts(&mut coords); // see that function's doc comment
-        original_forces = pot.one_off().compute_force(&coords, meta.sift())?;
-        coords
+    // this no longer has the option of using rayon because the speed gain from
+    // disabling neighbor list updates in LAMMPS is far greater, and it is difficult to
+    // write a threadsafe wrapper around that optimization which is correct.
+    //
+    // (for instance, displacements must be computed using the remapped coordinates
+    //  produced by lammps, to avoid invalidating its bins)
+    let force_sets = {
+        displacements.iter()
+            .enumerate()
+            .map(|(i, &disp)| {
+                eprint!("\rdisp {} of {}", i + 1, displacements.len());
+                ::std::io::stderr().flush().unwrap();
+
+                disp_fn.compute_sparse_force_delta(disp)
+            })
+            .collect::<Result<_, _>>()?
     };
-
-    let counter = ::util::AtomicCounter::new();
-    let num_displacements = displacements.len();
-    let force_sets = use_potential_maybe_with_rayon(
-        pot,
-        &coords,
-        &meta.sift(),
-        threading == &cfg::Threading::Rayon,
-        displacements,
-        |diff_fn: &mut DiffFn<_>, meta, &displacement: &(usize, V3)| FailOk({
-            let i = counter.inc();
-            eprint!("\rdisp {} of {}", i + 1, num_displacements);
-            ::std::io::stderr().flush().unwrap();
-
-            diff_fn.compute_sparse_force_set_with_original_force(
-                &coords, meta, &original_forces, displacement,
-            )?
-        })
-    )?;
     eprintln!();
     trace!("Done computing forces at displacements");
     force_sets
