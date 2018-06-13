@@ -16,6 +16,10 @@ use ::FailResult;
 use ::std::sync::Mutex;
 use ::std::os::raw::{c_int, c_void, c_double, c_char};
 
+macro_rules! api_trace {
+    ($($t:tt)*) => { log!(target: ::API_TRACE_TARGET, ::API_TRACE_LEVEL, $($t)*) };
+}
+
 // Lammps exposes no API to obtain the error message length so we have to guess.
 const MAX_ERROR_BYTES: usize = 4096;
 
@@ -153,19 +157,13 @@ impl LammpsOwner {
     })}
 }
 
-mod cli { // name shows up in log output
-    pub fn trace(cmd: &str) {
-        trace!("{}", cmd);
-    }
-}
-
 //------------------------------
 // the basics
 impl LammpsOwner {
     /// Invokes `lammps_command`.
     pub fn command(&mut self, cmd: &str) -> FailResult<()>
     {Ok({
-        cli::trace(cmd);
+        api_trace!("lammps_command({:p}, {})", self.ptr, cmd);
 
         // FIXME: I still don't know if I'm supposed to free the output or not.
         // NOTE:  This returns "the command name" as a 'char *'.
@@ -196,6 +194,7 @@ impl LammpsOwner {
 
     pub fn get_natoms(&mut self) -> usize
     {
+        api_trace!("lammps_get_natoms({:p})", self.ptr);
         let out = unsafe { ::lammps_sys::lammps_get_natoms(self.ptr) } as usize;
         self.assert_no_error();
         out
@@ -218,6 +217,11 @@ impl LammpsOwner {
     ) -> FailResult<()>
     {Ok({
         let Skews { xy, yz, xz } = skews;
+        api_trace!(
+            "lammps_reset_box({:p}, {:?}, {:?}, {}, {}, {})",
+            self.ptr, low, high, xy, yz, xz,
+        );
+
         ::lammps_sys::lammps_reset_box(
             self.ptr,
             low.as_mut_ptr(),
@@ -273,6 +277,7 @@ impl LammpsOwner {
     {
         use ::lammps_sys::{lammps_get_last_error_message, lammps_has_error};
 
+        api_trace!("lammps_has_error({:p})", self.ptr);
         let has_error = unsafe { lammps_has_error(self.ptr) } != 0;
         if !has_error {
             return None;
@@ -282,6 +287,7 @@ impl LammpsOwner {
         let mut buf = vec![0u8; MAX_ERROR_BYTES + 1];
 
         let severity_int = unsafe {
+            api_trace!("lammps_get_last_error_message({:p}, (out), {})", self.ptr, MAX_ERROR_BYTES);
             lammps_get_last_error_message(
                 self.ptr,
                 buf.as_mut_ptr() as *mut c_char,
@@ -367,10 +373,13 @@ impl LammpsOwner {
 
         assert_eq!(buf.len() % natoms, 0);
         let count = buf.len() / natoms;
+        let ty = ty.into();
+
+        api_trace!("lammps_gather_atoms({:p}, {}, {}, {}, (out))", self.ptr, name, ty, count);
 
         with_temporary_c_str(name, |name| {
             ::lammps_sys::lammps_gather_atoms(
-                self.ptr, name, ty.into(), count as c_int,
+                self.ptr, name, ty, count as c_int,
                 buf.as_mut_ptr() as *mut c_void,
             );
         });
@@ -434,13 +443,17 @@ impl LammpsOwner {
         data: &mut [T]
     ) -> FailResult<()>
     {Ok({
+
         let natoms = self.get_natoms();
         assert_eq!(data.len() % natoms, 0);
         let count = data.len() / natoms;
+        let ty = ty.into();
+
+        api_trace!("lammps_scatter_atoms({:p}, {}, {}, {}, (data))", self.ptr, name, ty, count);
 
         with_temporary_c_str(name, |name| {
             ::lammps_sys::lammps_scatter_atoms(
-                self.ptr, name, ty.into(), count as c_int,
+                self.ptr, name, ty, count as c_int,
                 data.as_mut_ptr() as *mut c_void,
             );
         });
@@ -462,23 +475,8 @@ impl LammpsOwner {
     //       like this could possibly actually cause UB; I just have no idea how.
     pub unsafe fn extract_compute_0d(&mut self, name: &str) -> FailResult<f64>
     {Ok({
-        let out_ptr = with_temporary_c_str(name, |name| {
-            unsafe { ::lammps_sys::lammps_extract_compute(
-                self.ptr, name,
-                ComputeStyle::Global.into(),
-                ComputeType::Scalar.into(),
-            )}
-        }) as *mut c_double;
-
-        // NOTE: Known cases where this produces Err:
-        // * None so far.
-        self.pop_error_as_result()?;
-
-        // NOTE: Known cases where the pointer is NULL:
-        // * (bug in lammps-wrap) Name provided does not belong to a compute.
-        unsafe { out_ptr.as_ref() }
-            .cloned()
-            .unwrap_or_else(|| panic!("could not extract {:?}", name))
+        self.extract_compute_any_d(name, ComputeStyle::Global, ComputeType::Scalar)?
+            .clone()
     })}
 
     // Read a vector compute, possibly computing it in the process.
@@ -493,22 +491,43 @@ impl LammpsOwner {
         len: usize,
     ) -> FailResult<Vec<f64>>
     {Ok({
-        let out_ptr = with_temporary_c_str(name, |name| {
-            unsafe { ::lammps_sys::lammps_extract_compute(
-                self.ptr, name,
-                style.into(),
-                ComputeType::Vector.into(),
-            )}
-        }) as *mut c_double;
-
-        // NOTE: See extract_compute_0d for a breakdown of the error cases.
-        self.pop_error_as_result()?;
-        let p =
-            out_ptr.as_ref()
-            .ok_or_else(|| format_err!("Could not extract {:?}", name))?;
+        let p = self.extract_compute_any_d(name, style, ComputeType::Vector)?;
 
         ::std::slice::from_raw_parts(p, len)
             .iter().map(|&c| c as f64).collect()
+    })}
+
+    // CAUTION: Note the unbound lifetime!!! This is only to factor out the null check;
+    //          the output is NOT valid for arbitrary lifetimes!
+    //          (so make sure to copy the output into an owned form ASAP)
+    unsafe fn extract_compute_any_d<'unbound>(
+        &mut self,
+        name: &str,
+        style: ComputeStyle,
+        ty: ComputeType,
+    ) -> FailResult<&'unbound c_double>
+    {Ok({
+        let style: c_int = style.into();
+        let ty: c_int = ty.into();
+
+        api_trace!(
+            "lammps_extract_compute({:p}, {}, {}, {})",
+            self.ptr, name, style, ty,
+        );
+
+        let out_ptr = with_temporary_c_str(name, |name| {
+            unsafe { ::lammps_sys::lammps_extract_compute(self.ptr, name, style, ty)}
+        }) as *mut c_double;
+
+
+        // NOTE: Known cases where this produces Err:
+        // * None so far.
+        self.pop_error_as_result()?;
+
+        // NOTE: Known cases where the pointer is NULL:
+        // * (bug in lammps-wrap) Name provided does not belong to a compute.
+        out_ptr.as_ref()
+            .unwrap_or_else(|| panic!("Could not extract {:?}", name))
     })}
 }
 

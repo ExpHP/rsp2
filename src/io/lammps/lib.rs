@@ -25,10 +25,14 @@ extern crate chrono;
 
 use ::failure::Backtrace;
 use ::rsp2_array_types::{V3, Unvee, Envee};
+use ::log::LogLevel;
 
 pub type FailResult<T> = Result<T, ::failure::Error>;
 
 use std::fmt;
+
+pub const API_TRACE_TARGET: &'static str = concat!(module_path!(), "::c_api");
+pub const API_TRACE_LEVEL: LogLevel = LogLevel::Trace;
 
 /// An error thrown by the LAMMPS C API.
 #[derive(Debug, Fail)]
@@ -828,7 +832,7 @@ impl<P: Potential> Lammps<P> {
         let carts = self.structure.get().0.to_carts();
         unsafe { self.ptr.borrow_mut().scatter_atoms_f("x", carts.unvee_ref().flat()) }?;
     })}
-    
+
     fn send_lmp_lattice(&mut self) -> FailResult<()>
     {Ok({
         let [
@@ -919,6 +923,23 @@ fn next_after(from: f64, to: f64) -> f64 {
 }
 
 //-------------------------------------------
+// direct reading of lammps' internal state, without side-effects (I hope)
+
+impl<P: Potential> Lammps<P> {
+    fn read_raw_lmp_carts(&self) -> FailResult<Vec<V3>>
+    {Ok({
+        let x = unsafe { self.ptr.borrow_mut().gather_atoms_f("x", 3)? };
+        x.nest::<[_; 3]>().to_vec().envee()
+    })}
+
+    fn read_raw_lmp_force(&self) -> FailResult<Vec<V3>>
+    {Ok({
+        let x = unsafe { self.ptr.borrow_mut().gather_atoms_f("f", 3)? };
+        x.nest::<[_; 3]>().to_vec().envee()
+    })}
+}
+
+//-------------------------------------------
 // gathering output from lammps
 //
 // NOTE: Every method here should call update_computation().
@@ -937,9 +958,7 @@ impl<P: Potential> Lammps<P> {
     pub fn compute_force(&mut self) -> FailResult<Vec<V3>>
     {Ok({
         self.update_computation()?;
-
-        let grad = unsafe { self.ptr.borrow_mut().gather_atoms_f("f", 3)? };
-        grad.nest::<[_; 3]>().to_vec().envee()
+        self.read_raw_lmp_force()?
     })}
 
     /// Get the gradient, possibly performing some computations if necessary.
