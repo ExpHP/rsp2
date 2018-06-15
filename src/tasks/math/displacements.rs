@@ -116,16 +116,15 @@ fn _compute_displacements<DispI: Idx, SiteI: Idx, OperI: Idx, StarI: Idx>(
         'three: while current_basis.len() < 3 {
             // Find best remaining choice that isn't redundant.
             let choice = {
+                // !! FIXME !!
+                //
                 // Strictly speaking, choices from previous iterations of the `'three` loop could
                 // render an arbitrary number of directions from each "star" of directions
                 // redundant, requiring us to re-sort the choices to find the new next best choice.
                 //
-                // However, I can hardly imagine a scenario where that would actually lead to us
-                // making a suboptimal selection. The only time it could even *theoretically* happen
-                // is on the second iteration of the 'three loop.
+                // It has now been seen that this actually occurs on AB graphene.
                 //
-                // So we just greedily take the first linearly independent choice without
-                // worrying about the linear dependence of its starmates.
+                // !! FIXME !!
                 let mut choice = best_choices.next().expect("(BUG) ran out of choices!");
                 while !is_lindep_with(&current_basis, choice) {
                     choice = best_choices.next().expect("(BUG) ran out of choices!");
@@ -148,10 +147,7 @@ fn _compute_displacements<DispI: Idx, SiteI: Idx, OperI: Idx, StarI: Idx>(
             // Update `current_basis`.
             for positive in new_positives {
                 if !is_lindep_with(&current_basis, positive) {
-                    // (this edge case is a prerequisite for the theoretical "suboptimal selection"
-                    // scenario described in the big comment above. But *even then*, it does not
-                    // guarantee that our choices were suboptimal)
-                    debug!("(I wonder if this edge case ever happens. Hello? Can anyone hear me?)");
+                    // (when this happens it could mean our greedy selection was suboptimal)
                     continue;
                 }
                 current_basis.push(positive);
