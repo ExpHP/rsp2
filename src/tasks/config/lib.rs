@@ -492,9 +492,15 @@ pub enum LammpsUpdateStyle {
     /// (However, if an atom is not at the same image where LAMMPS would prefer to find it,
     /// then the optimization is defeated, and neighbor lists will end up being built
     /// every step...)
-    Fast,
+    #[serde(rename_all="kebab-case")]
+    Fast {
+        sync_positions_every: u32,
+    },
     /// (Debug) Use a custom `run _ pre _ post _` to notify LAMMPS of updates.
-    Run { n: u32, pre: bool, post: bool },
+    #[serde(rename_all="kebab-case")]
+    Run {
+        n: u32, pre: bool, post: bool, sync_positions_every: u32,
+    },
 }
 impl Default for LammpsUpdateStyle {
     fn default() -> Self { LammpsUpdateStyle::Safe }

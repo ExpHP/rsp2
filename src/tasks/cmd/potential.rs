@@ -641,13 +641,13 @@ mod lammps {
             inner.threaded(*threading == cfg::Threading::Lammps);
             inner.update_style(match *update_style {
                 cfg::LammpsUpdateStyle::Safe => UpdateStyle::safe(),
-                cfg::LammpsUpdateStyle::Run{ n, pre, post } => {
+                cfg::LammpsUpdateStyle::Run{ n, pre, post, sync_positions_every } => {
                     warn_once!("lammps-update-style: run' is only for debugging purposes");
-                    UpdateStyle { n, pre, post }
+                    UpdateStyle { n, pre, post, sync_positions_every }
                 },
-                cfg::LammpsUpdateStyle::Fast => {
+                cfg::LammpsUpdateStyle::Fast { sync_positions_every } => {
                     warn_once!("'lammps-update-style: fast' is experimental");
-                    UpdateStyle::fast()
+                    UpdateStyle::fast(sync_positions_every)
                 },
             });
             // XXX

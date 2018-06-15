@@ -211,11 +211,21 @@ pub struct UpdateStyle {
     /// to always be true.
     pub pre: bool,
     pub post: bool,
+    /// Send exact positions at this interval. (`0` = never)
+    ///
+    /// On other steps, read back the previous positions from Lammps and add the relative
+    /// change.  This is less likely to trigger neighbor list updates for `pre no`, but
+    /// rounding errors will lead to an accumulation of numerical discrepancies between the
+    /// input structure and the one seen by lammps.
+    pub sync_positions_every: u32,
 }
 
 impl UpdateStyle {
-    pub fn safe() -> Self { UpdateStyle { n: 0, pre: true, post: true } }
-    pub fn fast() -> Self { UpdateStyle { n: 1, pre: false, post: false } }
+    pub fn safe() -> Self
+    { UpdateStyle { n: 0, pre: true, post: true, sync_positions_every: 1 } }
+
+    pub fn fast(sync_positions_every: u32) -> Self
+    { UpdateStyle { n: 1, pre: false, post: false, sync_positions_every } }
 }
 
 // Determines the next `run` command for updating Lammps.
@@ -228,6 +238,15 @@ struct UpdateFsm {
     style: UpdateStyle,
 }
 
+#[derive(Debug, Clone)]
+struct UpdateAction {
+    command: String,
+    positions: UpdatePositions,
+}
+
+#[derive(Debug, Copy, Clone)]
+enum UpdatePositions { Relative, Absolute }
+
 impl UpdateStyle {
     fn initial_fsm(&self) -> UpdateFsm {
         UpdateFsm { iter: 0, style: self.clone() }
@@ -235,13 +254,13 @@ impl UpdateStyle {
 }
 
 impl UpdateFsm {
-    fn step(&mut self) -> String {
+    fn step(&mut self) -> UpdateAction {
         let action = self._action();
         self.iter += 1;
         action
     }
 
-    fn _action(&self) -> String {
+    fn _action(&self) -> UpdateAction {
         struct YesNo(bool);
         impl fmt::Display for YesNo {
             fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -249,8 +268,18 @@ impl UpdateFsm {
             }
         }
 
-        let UpdateStyle { n, pre, post } = self.style;
-        format!("run {} pre {} post {}", n, YesNo(pre), YesNo(post))
+        let UpdateStyle { n, pre, post, sync_positions_every } = self.style;
+        let positions = match (self.iter, sync_positions_every) {
+            (0, 0) => UpdatePositions::Absolute,
+            (_, 0) => UpdatePositions::Relative,
+            (i, m) => match i % m {
+                0 => UpdatePositions::Absolute,
+                _ => UpdatePositions::Relative,
+            },
+        };
+        let command = format!("run {} pre {} post {}", n, YesNo(pre), YesNo(post));
+
+        UpdateAction { positions, command }
     }
 }
 
@@ -732,6 +761,9 @@ impl<P: Potential> Lammps<P> {
                 self.check_data_set_in_stone(coords, meta)?;
             }
 
+            let iter = self.update_fsm.iter;
+            let UpdateAction { command, positions: update_positions } = self.update_fsm.step();
+
             // Only send data that has changed from the cache.
             // This is done because it appears that lammps does some form of
             // caching as well (lattice modifications in particular appear
@@ -753,24 +785,21 @@ impl<P: Potential> Lammps<P> {
             }
 
             if self.structure.is_projection_dirty(|&(ref c, _)| c.as_carts_cached().unwrap()) {
-                self.send_lmp_carts()?;
+                self.send_lmp_carts(update_positions)?;
             }
 
-            self.update_lammps_with_run_command()?;
+            self.update_lammps_with_command(iter, &command)?;
             self.structure.mark_clean();
         }
     })}
 
-    fn update_lammps_with_run_command(&mut self) -> FailResult<()>
+    fn update_lammps_with_command(&mut self, iter: u32, command: &str) -> FailResult<()>
     {Ok({
-        let iter = self.update_fsm.iter;
-
         if let Some(dir) = &self.data_trace_dir {
             self.write_data_trace_fileset(dir, &format!("{:04}-a", iter));
         }
 
-        let action = self.update_fsm.step();
-        self.ptr.borrow_mut().command(&action)?;
+        self.ptr.borrow_mut().command(command)?;
 
         if let Some(dir) = &self.data_trace_dir {
             self.write_data_trace_fileset(dir, &format!("{:04}-b", iter));
@@ -790,10 +819,27 @@ impl<P: Potential> Lammps<P> {
         unsafe { self.ptr.borrow_mut().scatter_atoms_i("type", &types) }?;
     })}
 
-    fn send_lmp_carts(&mut self) -> FailResult<()>
+    fn send_lmp_carts(&mut self, style: UpdatePositions) -> FailResult<()>
     {Ok({
-        let carts = self.structure.get().0.to_carts();
-        unsafe { self.ptr.borrow_mut().scatter_atoms_f("x", carts.unvee_ref().flat()) }?;
+        let new_user_carts = self.structure.get().0.as_carts_cached().expect("(BUG)");
+
+        let new_lmp_carts = match style {
+            UpdatePositions::Absolute => new_user_carts.to_vec(),
+            UpdatePositions::Relative => {
+                let old_user_coords = &self.structure.last_clean().expect("(BUG) first step can't be relative").0;
+                let old_user_carts = old_user_coords.as_carts_cached().expect("(BUG)");
+                let mut lmp_carts = self.read_raw_lmp_carts()?;
+
+                { // scope mut borrow.  NLL, come save us!
+                    let iter = old_user_carts.iter().zip(new_user_carts).zip(&mut lmp_carts);
+                    for ((old_user, new_user), lmp) in iter {
+                        *lmp += new_user - old_user;
+                    }
+                }
+                lmp_carts
+            }
+        };
+        unsafe { self.ptr.borrow_mut().scatter_atoms_f("x", new_lmp_carts.unvee_ref().flat()) }?;
     })}
 
     fn send_lmp_lattice(&mut self) -> FailResult<()>
@@ -1012,7 +1058,7 @@ impl<P: Potential> DispFn<P> {
     fn from_builder(builder: &Builder, potential: P, coords: Coords, meta: P::Meta) -> FailResult<Self>
     {Ok({
         let mut builder = builder.clone();
-        builder.update_style(UpdateStyle { n: 1, pre: false, post: true });
+        builder.update_style(UpdateStyle { n: 1, pre: false, post: false, sync_positions_every: 1 });
 
         let mut lammps = Lammps::from_builder(&builder, potential, coords, meta)?;
 
