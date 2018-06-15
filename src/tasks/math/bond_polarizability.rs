@@ -35,17 +35,21 @@ pub struct PolConstant {
 // NOTE: there are also constant factors out front based on input light frequency
 //       and stuff, so this only gives proportional intensities
 fn raman_prefactor(
-    frequency: f64,
+    mode_frequency: f64,
     temperature: f64,
 ) -> f64 {
-    assert_ne!(frequency, 0.0);
-
     // (hbar / k_b) in [K] per [cm-1]
     let hk = 0.22898852319;
 
-    let bose_occupation = 1.0 + 1.0 / f64::exp_m1(hk * frequency / temperature);
-
-    bose_occupation / frequency
+    let expm1 = f64::exp_m1(hk * mode_frequency / temperature);
+    if expm1 == 0.0 {
+        // this would happen if the mode_frequency was exactly zero,
+        // but acoustic modes are obviously not raman active.
+        0.0
+    } else {
+        let bose_occupation = 1.0 + 1.0 / expm1;
+        bose_occupation / mode_frequency
+    }
 }
 
 #[derive(EnumMap)]
