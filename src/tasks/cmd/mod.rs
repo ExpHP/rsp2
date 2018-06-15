@@ -157,9 +157,9 @@ impl TrialDir {
                     _do_not_drop_the_bands_dir = Some(final_bands_dir);
                     (coords, ev_analysis)
                 },
-                Sparse { max_count } => {
+                Sparse { } => {
                     let (coords, ev_analysis, dynmat) = {
-                        do_ev_loop!(SparseDiagonalizer { max_count })?
+                        do_ev_loop!(SparseDiagonalizer { })?
                     };
                     _do_not_drop_the_bands_dir = None;
 
@@ -343,9 +343,7 @@ impl PhonopyDiagonalizer {
     })}
 }
 
-struct SparseDiagonalizer {
-    max_count: usize,
-}
+struct SparseDiagonalizer { }
 impl EvLoopDiagonalizer for SparseDiagonalizer {
     type ExtraOut = DynamicalMatrix;
 
@@ -491,8 +489,7 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
             trace!("nnz: {} out of {} blocks (matrix density: {:.3e})", nnz, max_size, density);
         }
         trace!("Diagonalizing dynamical matrix");
-        let how_many = self.max_count.min(dynmat.max_sparse_eigensolutions());
-        let (evals, evecs) = dynmat.compute_most_negative_eigensolutions(how_many)?;
+        let (evals, evecs) = dynmat.compute_negative_eigensolutions()?;
         trace!("Done diagonalizing dynamical matrix");
         (evals, evecs, dynmat)
     })}
@@ -963,9 +960,9 @@ impl TrialDir {
                     };
                     (evals, evecs)
                 },
-                Sparse { max_count } => {
+                Sparse { } => {
                     let (evals, evecs, _) = {
-                        use_diagonalizer!(SparseDiagonalizer { max_count } )?
+                        use_diagonalizer!(SparseDiagonalizer { } )?
                     };
                     (evals, evecs)
                 },
@@ -988,6 +985,8 @@ impl TrialDir {
             &stored.layer_sc_matrices,
             &evals, &evecs, &bonds,
         )?;
+
+        write_eigen_info_for_humans(&ev_analysis, &mut |s| FailOk(info!("{}", s)))?;
 
         self.write_ev_analysis_output_files(settings, &*pot, &ev_analysis)?;
     })}
@@ -1061,7 +1060,7 @@ pub(crate) fn run_dynmat_test(phonopy_dir: &PathDir) -> FailResult<()>
         println!("{:?}", our_dynamical_matrix.0.to_coo().map(|c| c.0).into_dense());
 
         trace!("Computing eigensolutions...");
-        let (low, _low_basis) = our_dynamical_matrix.compute_most_negative_eigensolutions(3)?;
+        let (low, _low_basis) = our_dynamical_matrix.compute_negative_eigensolutions()?;
         let (high, _high_basis) = our_dynamical_matrix.compute_most_extreme_eigensolutions(3)?;
         trace!("Done computing eigensolutions...");
 

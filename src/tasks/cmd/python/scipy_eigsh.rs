@@ -66,9 +66,12 @@ pub(super) const PY_CHECK_SCIPY_AVAILABILITY: &'static str = indoc!(r#"
 const PY_CALL_EIGSH: &'static str = include_str!("call-eigsh.py");
 
 #[derive(Serialize)]
+#[serde(rename_all = "kebab-case")]
 struct Input {
     matrix: ::math::dynmat::Cereal,
     kw: PyKw,
+    // permits non-convergence exceptions
+    allow_fewer_solutions: bool,
 }
 
 #[allow(dead_code)]
@@ -157,20 +160,78 @@ impl DynamicalMatrix {
         3 * self.0.dim.0 - 2
     }
 
-    pub fn compute_most_negative_eigensolutions(&self, how_many: usize) -> FailResult<(Vec<f64>, Basis3)> {
-        call_eigsh(&Input {
+    /// Clip `how_many` for the max possible value for sparse solver methods.
+    pub fn clip_how_many(&self, how_many: usize) -> usize {
+        usize::min(how_many, self.max_sparse_eigensolutions())
+    }
+
+    pub fn compute_negative_eigensolutions(&self) -> FailResult<(Vec<f64>, Basis3)> {
+        trace!("Computing most negative eigensolutions.");
+
+        let how_many = 5;
+
+        let most_negative = call_eigsh(&Input {
             matrix: self.cereal(),
+            allow_fewer_solutions: true,
             kw: PyKw {
-                how_many: Some(how_many),
                 which: Some(Which::MostNegative),
+                how_many: Some(self.clip_how_many(how_many)),
+                // A fixed, hard limit.  The idea here is that large negative eigenvalues
+                // will hopefully be found quickly, and small negative eigenvalues may take
+                // unreasonably long to converge without shift-invert mode.
+                max_iter: Some(30),
                 ..Default::default()
             },
-        })
+        })?;
+
+        if most_negative.0.len() > 0 {
+            return Ok(most_negative);
+        }
+
+        // None converged.  Perhaps there are no negative modes, and the
+        // acoustic ones may be causing trouble for convergence.
+
+        // Shift-invert should be able to find the acoustics quickly, and possibly
+        // small negative modes in addition to them.
+        trace!("Nothing converged! Computing low-frequency negative eigensolutions using shift-invert mode.");
+        let small_negative = call_eigsh(&Input {
+            matrix: self.cereal(),
+            allow_fewer_solutions: true,
+            kw: PyKw {
+                // NOTE: this will favor with greatest precedence the acoustic eigenvalues,
+                //       followed by those which are increasingly negative.
+                shift_invert_target: Some(0.0), // something larger than reasonable for acoustics
+                shift_invert_mode: Some(ShiftInvertMode::Normal),
+                which: Some(Which::MostNegative),
+
+                // (look for more modes, to give some headroom beyond the acoustics)
+                how_many: Some(self.clip_how_many(how_many + 5)),
+
+                // (from what I can tell after a couple of runs on a 2000 atom system, a majority
+                //  of eigensolutions are found in the first few iterations, and almost nothing
+                //  extra is found by continuing to search afterward.  That said, we might as well
+                //  do a few dozen iters, because my exploration was not very intensive, and the
+                //  initial LU decomposition for shift-inversion is by far the most expensive step)
+                max_iter: Some(30),
+
+                ..Default::default()
+            },
+        })?;
+
+        match small_negative.0.len() {
+            0 => {
+                // This is surprising; we'd expect to at least see acoustics!
+                warn!("Nothing was found in the shift-invert search!")
+            },
+            _ => trace!("Done using shift-invert mode."),
+        }
+        Ok(small_negative)
     }
 
     pub fn compute_most_extreme_eigensolutions(&self, how_many: usize) -> FailResult<(Vec<f64>, Basis3)> {
         call_eigsh(&Input {
             matrix: self.cereal(),
+            allow_fewer_solutions: false,
             kw: PyKw {
                 how_many: Some(how_many),
                 ..Default::default()

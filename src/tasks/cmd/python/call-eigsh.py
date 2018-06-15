@@ -16,6 +16,7 @@ import sys
 import numpy as np
 import scipy.sparse
 import scipy.sparse.linalg as spla
+from scipy.sparse.linalg.eigen.arpack import ArpackNoConvergence
 
 import time
 
@@ -25,6 +26,7 @@ def info(s):
     print(s, file=sys.stderr); sys.stderr.flush(); time.sleep(0)
 
 d = json.load(sys.stdin)
+allow_non_convergence = d.pop('allow-fewer-solutions')
 kw = d.pop('kw')
 m = d.pop('matrix')
 assert not d
@@ -49,7 +51,18 @@ m = scipy.sparse.bsr_matrix(
     shape=tuple(3*x for x in m['dim']),
 ).tocsc()
 
-(vals, vecs) = scipy.sparse.linalg.eigsh(m, **kw)
+try:
+    (vals, vecs) = scipy.sparse.linalg.eigsh(m, **kw)
+
+# This can quite easily happen if, say, we use shift-invert mode with
+# which='SA' (most negative), and request more eigenvalues than the
+# amount that actually exists with eigenvalue < sigma.
+except ArpackNoConvergence as e:
+    if allow_non_convergence:
+        vals = e.eigenvalues
+        vecs = e.eigenvectors
+    else:
+        raise
 
 real = vecs.real.T.tolist()
 imag = vecs.imag.T.tolist()

@@ -416,10 +416,18 @@ impl GammaSystemAnalysis {
 
         if let Some(EvRamanTensors(tensors)) = &self.ev_raman_tensors {
             let raman_column = |name: &str, data: &[f64]| {
+                // NOTE: intensity can be "negative" for negative modes.  This clearly is
+                //       not physical, but we also don't care about intensities of such modes,
+                //       so simply set them to zero.
+                let data = data.iter().map(|&x| f64::max(0.0, x)).collect_vec();
                 // NOTE: raman_intensities are currently missing some scale factors
                 //       so they are just normalized for now.
                 let max = data.iter().fold(0.0, |acc, &x| f64::max(acc, x));
-                let data = data.iter().map(|x| x / max).collect_vec();
+                let data = if max == 0.0 {
+                    vec![0.0; data.len()]
+                } else {
+                    data.into_iter().map(|x| x / max).collect_vec()
+                };
                 let painter: Box<PaintAs<_, f64>> = match mode {
                     ColumnsMode::ForHumans => Box::new({
                         use ::ansi_term::Colour::*;
