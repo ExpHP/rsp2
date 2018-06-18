@@ -46,6 +46,7 @@
 use ::FailResult;
 use ::math::basis::{Basis3, Ket3};
 
+#[allow(unused)] // rustc bug
 use ::slice_of_array::prelude::*;
 use super::{call_script_and_communicate};
 
@@ -63,15 +64,60 @@ pub(super) const PY_CHECK_SCIPY_AVAILABILITY: &'static str = indoc!(r#"
     import scipy.sparse.linalg as spla
 "#);
 
-const PY_CALL_EIGSH: &'static str = include_str!("call-eigsh.py");
+const PY_CALL: &'static str = include_str!("call.py");
+const PY_NEGATIVE: &'static str = include_str!("negative.py");
+const AUX: &'static [(&'static str, &'static str)] = &[
+    ("_rsp2", include_str!("_rsp2.py")),
+];
 
-#[derive(Serialize)]
-#[serde(rename_all = "kebab-case")]
-struct Input {
-    matrix: ::math::dynmat::Cereal,
-    kw: PyKw,
-    // permits non-convergence exceptions
-    allow_fewer_solutions: bool,
+type Frequency = f64;
+
+mod scripts {
+    use super::*;
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "kebab-case")]
+    pub(super) struct Eigsh {
+        pub(super) matrix: ::math::dynmat::Cereal,
+        pub(super) kw: PyKw,
+        // permits non-convergence exceptions
+        pub(super) allow_fewer_solutions: bool,
+    }
+
+    impl Eigsh {
+        pub(super) fn invoke(self) -> FailResult<(Vec<Frequency>, Basis3)> {
+            call_script_and_communicate(PY_CALL, AUX, self)
+                .and_then(read_py_output)
+        }
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "kebab-case")]
+    pub(super) struct Negative {
+        pub(super) matrix: ::math::dynmat::Cereal,
+        pub(super) shift_invert_attempts: u32,
+    }
+
+    impl Negative {
+        pub(super) fn invoke(self) -> FailResult<(Vec<Frequency>, Basis3)> {
+            call_script_and_communicate(PY_NEGATIVE, AUX, self)
+                .and_then(read_py_output)
+        }
+    }
+
+    fn read_py_output(esols: (Vec<f64>, (Vec<Vec<f64>>, Vec<Vec<f64>>))) -> FailResult<(Vec<Frequency>, Basis3)> {
+        let (vals, (real, imag)) = esols;
+
+        let mut kets = vec![];
+        for (real, imag) in zip_eq!(real, imag) {
+            let real = real.nest().to_vec();
+            let imag = imag.nest().to_vec();
+            kets.push(Ket3 { real, imag });
+        }
+        let freqs = vals.into_iter().map(eigenvalue_to_frequency).collect();
+
+        Ok((freqs, Basis3(kets)))
+    }
 }
 
 #[allow(dead_code)]
@@ -122,28 +168,6 @@ struct PyKw {
 //-------------------------------------------------------------------------------
 // calling scripts
 
-// Returns:
-// - frequencies (not eigenvalues)
-// - eigenvectors
-fn call_eigsh(input: &Input) -> FailResult<(Vec<f64>, Basis3)> {
-
-    let (vals, (real, imag)) = call_script_and_communicate(PY_CALL_EIGSH, input)?;
-    // annotate types to select Deserialize impl
-    let _: &Vec<f64> = &vals;
-    let _: &Vec<Vec<f64>> = &real;
-    let _: &Vec<Vec<f64>> = &imag;
-
-    let mut kets = vec![];
-    for (real, imag) in zip_eq!(real, imag) {
-        let real = real.nest().to_vec();
-        let imag = imag.nest().to_vec();
-        kets.push(Ket3 { real, imag });
-    }
-    let freqs = vals.into_iter().map(eigenvalue_to_frequency).collect();
-
-    Ok((freqs, Basis3(kets)))
-}
-
 #[derive(Debug, Fail)]
 #[fail(display = "an error occurred importing numpy and scipy")]
 pub struct ScipyAvailabilityError;
@@ -157,7 +181,7 @@ impl DynamicalMatrix {
     ///
     /// (inherent limitation of the method used by ARPACK)
     pub fn max_sparse_eigensolutions(&self) -> usize {
-        3 * self.0.dim.0 - 2
+        3 * self.0.dim.0 - 1
     }
 
     /// Clip `how_many` for the max possible value for sparse solver methods.
@@ -165,78 +189,31 @@ impl DynamicalMatrix {
         usize::min(how_many, self.max_sparse_eigensolutions())
     }
 
-    pub fn compute_negative_eigensolutions(&self) -> FailResult<(Vec<f64>, Basis3)> {
+    /// Intended to be used during relaxation.
+    ///
+    /// *Attempts* to produce a set of eigenkets containing many or all of the non-acoustic modes of
+    /// negative eigenvalue (possibly along with other modes that do not meet this condition);
+    /// however, it may very well miss some.
+    ///
+    /// If none of the modes produced are negative, then it is safe (-ish) to assume that the matrix
+    /// has no such eigenmodes.  (At least, that is the intent!)
+    pub fn compute_negative_eigensolutions(&self, shift_invert_attempts: u32) -> FailResult<(Vec<f64>, Basis3)> {
         trace!("Computing most negative eigensolutions.");
-
-        let how_many = 5;
-
-        let most_negative = call_eigsh(&Input {
-            matrix: self.cereal(),
-            allow_fewer_solutions: true,
-            kw: PyKw {
-                which: Some(Which::MostNegative),
-                how_many: Some(self.clip_how_many(how_many)),
-                // A fixed, hard limit.  The idea here is that large negative eigenvalues
-                // will hopefully be found quickly, and small negative eigenvalues may take
-                // unreasonably long to converge without shift-invert mode.
-                max_iter: Some(30),
-                ..Default::default()
-            },
-        })?;
-
-        if most_negative.0.len() > 0 {
-            return Ok(most_negative);
-        }
-
-        // None converged.  Perhaps there are no negative modes, and the
-        // acoustic ones may be causing trouble for convergence.
-
-        // Shift-invert should be able to find the acoustics quickly, and possibly
-        // small negative modes in addition to them.
-        trace!("Nothing converged! Computing low-frequency negative eigensolutions using shift-invert mode.");
-        let small_negative = call_eigsh(&Input {
-            matrix: self.cereal(),
-            allow_fewer_solutions: true,
-            kw: PyKw {
-                // NOTE: this will favor with greatest precedence the acoustic eigenvalues,
-                //       followed by those which are increasingly negative.
-                shift_invert_target: Some(0.0), // something larger than reasonable for acoustics
-                shift_invert_mode: Some(ShiftInvertMode::Normal),
-                which: Some(Which::MostNegative),
-
-                // (look for more modes, to give some headroom beyond the acoustics)
-                how_many: Some(self.clip_how_many(how_many + 5)),
-
-                // (from what I can tell after a couple of runs on a 2000 atom system, a majority
-                //  of eigensolutions are found in the first few iterations, and almost nothing
-                //  extra is found by continuing to search afterward.  That said, we might as well
-                //  do a few dozen iters, because my exploration was not very intensive, and the
-                //  initial LU decomposition for shift-inversion is by far the most expensive step)
-                max_iter: Some(30),
-
-                ..Default::default()
-            },
-        })?;
-
-        match small_negative.0.len() {
-            0 => {
-                // This is surprising; we'd expect to at least see acoustics!
-                warn!("Nothing was found in the shift-invert search!")
-            },
-            _ => trace!("Done using shift-invert mode."),
-        }
-        Ok(small_negative)
+        scripts::Negative {
+            shift_invert_attempts,
+            matrix: self.cereal()
+        }.invoke()
     }
 
     pub fn compute_most_extreme_eigensolutions(&self, how_many: usize) -> FailResult<(Vec<f64>, Basis3)> {
-        call_eigsh(&Input {
+        scripts::Eigsh {
             matrix: self.cereal(),
             allow_fewer_solutions: false,
             kw: PyKw {
                 how_many: Some(how_many),
                 ..Default::default()
             },
-        })
+        }.invoke()
     }
 }
 

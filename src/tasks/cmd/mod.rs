@@ -157,9 +157,9 @@ impl TrialDir {
                     _do_not_drop_the_bands_dir = Some(final_bands_dir);
                     (coords, ev_analysis)
                 },
-                Sparse { } => {
+                Sparse { shift_invert_attempts } => {
                     let (coords, ev_analysis, dynmat) = {
-                        do_ev_loop!(SparseDiagonalizer { })?
+                        do_ev_loop!(SparseDiagonalizer { shift_invert_attempts })?
                     };
                     _do_not_drop_the_bands_dir = None;
 
@@ -343,7 +343,9 @@ impl PhonopyDiagonalizer {
     })}
 }
 
-struct SparseDiagonalizer { }
+struct SparseDiagonalizer {
+    shift_invert_attempts: u32,
+}
 impl EvLoopDiagonalizer for SparseDiagonalizer {
     type ExtraOut = DynamicalMatrix;
 
@@ -398,6 +400,8 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
 
                 let sc_dim = settings.phonons.supercell.dim_for_unitcell(prim_coords.lattice());
                 let (super_coords, sc) = ::rsp2_structure::supercell::diagonal(sc_dim).build(prim_coords);
+
+                trace!("Computing symmetry");
                 let cart_ops = {
                     let atom_types: Vec<u32> = {
                         let elements: Rc<[Element]> = prim_meta.pick();
@@ -407,6 +411,7 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
                         .cart_ops()
                 };
 
+                trace!("Computing deperms in primitive cell");
                 let prim_deperms = compute_deperms(&prim_coords, &cart_ops)?;
                 let prim_stars = ::math::stars::compute_stars(&prim_deperms);
 
@@ -461,6 +466,7 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
             cart_ops.iter().map(|c| c.cart_rot()).collect()
         };
 
+        trace!("Computing deperms in supercell");
         let super_deperms = compute_deperms(&super_coords, &cart_ops)?;
 
         trace!("Computing sparse force constants");
@@ -478,9 +484,8 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
                 .gamma_dynmat(&sc, prim_meta.pick())
                 .hermitianize()
         };
-
-//        HACK
-//        Json(&dynmat.cereal()).save(self.join("dynmat.json"))?;
+        // HACK
+        Json(dynmat.cereal()).save(_trial.join("gamma-dynmat.json"))?;
 
         {
             let max_size = (|(a, b)| a * b)(dynmat.0.dim);
@@ -489,7 +494,7 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
             trace!("nnz: {} out of {} blocks (matrix density: {:.3e})", nnz, max_size, density);
         }
         trace!("Diagonalizing dynamical matrix");
-        let (evals, evecs) = dynmat.compute_negative_eigensolutions()?;
+        let (evals, evecs) = dynmat.compute_negative_eigensolutions(self.shift_invert_attempts)?;
         trace!("Done diagonalizing dynamical matrix");
         (evals, evecs, dynmat)
     })}
@@ -960,9 +965,9 @@ impl TrialDir {
                     };
                     (evals, evecs)
                 },
-                Sparse { } => {
+                Sparse { shift_invert_attempts } => {
                     let (evals, evecs, _) = {
-                        use_diagonalizer!(SparseDiagonalizer { } )?
+                        use_diagonalizer!(SparseDiagonalizer { shift_invert_attempts } )?
                     };
                     (evals, evecs)
                 },
@@ -1060,7 +1065,8 @@ pub(crate) fn run_dynmat_test(phonopy_dir: &PathDir) -> FailResult<()>
         println!("{:?}", our_dynamical_matrix.0.to_coo().map(|c| c.0).into_dense());
 
         trace!("Computing eigensolutions...");
-        let (low, _low_basis) = our_dynamical_matrix.compute_negative_eigensolutions()?;
+        let shift_invert_attempts = 4;
+        let (low, _low_basis) = our_dynamical_matrix.compute_negative_eigensolutions(shift_invert_attempts)?;
         let (high, _high_basis) = our_dynamical_matrix.compute_most_extreme_eigensolutions(3)?;
         trace!("Done computing eigensolutions...");
 

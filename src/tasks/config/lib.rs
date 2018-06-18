@@ -415,9 +415,13 @@ pub enum PhononEigenSolver {
 
     /// Diagonalize the dynamical matrix using ARPACK through Scipy.
     #[serde(rename_all = "kebab-case")]
-    Sparse {},
+    Sparse {
+        #[serde(default = "_phonon_eigen_solver__sparse__shift_invert_attempts")]
+        shift_invert_attempts: u32,
+    },
 }
 fn _phonon_eigen_solver__phonopy__save_bands() -> bool { false }
+fn _phonon_eigen_solver__sparse__shift_invert_attempts() -> u32 { 4 }
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]

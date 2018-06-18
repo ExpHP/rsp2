@@ -52,7 +52,7 @@ impl SpgDataset {
         let types = types.to_vec();
 
         let input = Input { coords, types, symprec };
-        let result: Result<Self, String> = call_script_and_communicate(PY_CALL_SPGLIB, &input)?;
+        let result: Result<Self, String> = call_script_and_communicate(PY_CALL_SPGLIB, &[], &input)?;
         result
             .map(|mut spg| { spg.lattice = Some(lattice); spg })
             .map_err(|e| SpglibError(e).into())
