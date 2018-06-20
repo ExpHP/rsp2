@@ -2,5 +2,5 @@
 extern crate rsp2_tasks;
 
 fn main() {
-    ::rsp2_tasks::entry_points::dynmat_test();
+    ::rsp2_tasks::entry_points::dynmat_test("rsp2-dynmat-test");
 }

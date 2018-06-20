@@ -97,9 +97,9 @@ def try_shift_invert(m, shift_invert_attempts):
         count.bad.ortho_bad = 0 # tried to orthogonalize, got a non-eigenvector
         count.bad.ortho_fail = 0 # tried to orthogonalize, and failed
 
-        for (i, ev) in enumerate(evecs):
+        for (eval, ev) in zip(evals, evecs):
             # Is it ACTUALLY an eigenvector?
-            if not is_good_evec(m, ev):
+            if not is_good_esol(m, eval, ev):
                 count.bad.wrong += 1
                 continue
 
@@ -112,7 +112,7 @@ def try_shift_invert(m, shift_invert_attempts):
             ortho_ev = mgs_step(ev, found_evecs)
 
             # We didn't ruin it, did we?
-            if not is_good_evec(m, ortho_ev):
+            if not is_good_esol(m, eval, ortho_ev):
                 count.bad.ortho_bad += 1
                 continue
 
@@ -123,7 +123,7 @@ def try_shift_invert(m, shift_invert_attempts):
             # ship it
             count.good += 1
             found_evecs.append(ortho_ev)
-            found_evals.append(evals[i])
+            found_evals.append(eval)
 
         counts.append(count)
 
@@ -143,8 +143,8 @@ def try_shift_invert(m, shift_invert_attempts):
     perm = np.argsort(found_evals)
     evals = np.array(found_evals)[perm]
     evecs = np.array(found_evecs)[perm]
-    for v in evecs:
-        if not is_good_evec(m, v):
+    for val, v in zip(evals, evecs):
+        if not is_good_esol(m, val, v):
             np.save('bad-mat.npy', m)
             np.save('bad-vec.npy', v)
             assert False, "bad evec"
@@ -207,21 +207,26 @@ def par(a, b_hat):
 
 def acousticness(v_hat):
     sum = np.reshape(v_hat, (-1, 3)).sum(axis=0)
-    return np.vdot(sum, sum)
+    return abs(np.vdot(sum, sum))
 
 def normalize(v):
     return v / np.sqrt(np.vdot(v, v))
 
 def is_overlapping(a_hat, b_hat):
-    return np.abs(np.vdot(a_hat, b_hat)) > OVERLAP_THRESH
+    return abs(np.vdot(a_hat, b_hat)) > OVERLAP_THRESH
 
-def is_good_evec(m, v):
-    assert abs(abs(np.vdot(v, v)) - 1) < 1e-12
-    return (
-        False
-        or acousticness(v) > 1. - 1e-3
-        or abs(abs(np.vdot(normalize(m @ v), v)) - 1.0) < 1e-2
-    )
+def is_good_esol(m, eval, evec):
+    assert abs(abs(np.vdot(evec, evec)) - 1) < 1e-12
+    return lazy_any([
+        lambda: acousticness(evec) > 1. - 1e-3,
+        lambda: lazy_all([
+            lambda: abs(abs(np.vdot(normalize(m @ evec), evec)) - 1.0) < 1e-2,
+            lambda: (np.abs(m @ evec - eval * evec) < TOL * 10).all(),
+        ])
+    ])
+
+def lazy_any(it): return any(pred() for pred in it)
+def lazy_all(it): return all(pred() for pred in it)
 
 # If shift-invert hasn't produced anything satisfactory, try regular mode.
 # From what I've seen, this always produces legitimate solutions, but generally

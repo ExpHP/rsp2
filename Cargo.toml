@@ -37,6 +37,10 @@ path = "src/binary-shims/rsp2-save-bands-after-the-fact.rs"
 name = "rsp2-shear-plot"
 path = "src/binary-shims/rsp2-shear-plot.rs"
 
+[[bin]]
+name = "rsp2-sparse-analysis"
+path = "src/binary-shims/rsp2-sparse-analysis.rs"
+
 
 [dependencies]
 

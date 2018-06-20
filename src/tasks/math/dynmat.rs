@@ -371,25 +371,9 @@ impl<'ctx> Context<'ctx> {
 
         // now that all equations have been built, we can "densify" the force matrices.
         // (with respect to equations; not the entire supercell, of course!)
-        let num_eqns = all_displacements.len();
         let all_forces = {
             all_sparse_forces.into_iter()
                 .map(|(atom, force_map)| {
-                    if force_map.len() < num_eqns {
-                        // rare circumstance --> chance for bitrot.
-                        // Leave a note, but don't spam.
-                        //
-                        // (NOTE: This appeared on one of the first structures I tested it on,
-                        //        which I certainly did not expect to see. This condition could
-                        //        also indicate an issue with the force sets, so I've upgraded it
-                        //        to a warning to increase visibility)
-                        warn_once!("\
-                            Found atoms with nonzero forces at some rotations, but not others. \
-                            This is expected to be a rare circumstance! \
-                            (strongest force magnitude: {})\
-                        ", force_map.values().map(|v| v.norm()).fold(0.0, f64::max));
-                    }
-
                     let mut force_vec = Indexed::from_elem(V3::zero(), &all_displacements);
                     for (eqn, v3) in force_map {
                         force_vec[eqn] = v3;

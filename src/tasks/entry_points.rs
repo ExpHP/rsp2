@@ -19,8 +19,10 @@ use ::cmd::trial::{TrialDir, NewTrialDirArgs};
 use ::cmd::StructureFileType;
 use ::path_abs::{PathDir, PathFile, PathAbs};
 use ::std::ffi::OsStr;
+use ::traits::Load;
 use ::ui::logging::{init_global_logger, SetGlobalLogfile};
 use ::ui::cfg_merging::ConfigSources;
+use ::cmd::stored_structure::StoredStructure;
 use ::ui::cli_deserialize::CliDeserialize;
 use ::util::ext_traits::{ArgMatchesExt};
 
@@ -155,7 +157,7 @@ fn check_for_deps() -> FailResult<()> {
 // -------------------------------------------------------------------------------------
 
 // %% CRATES: binary: rsp2 %%
-pub fn rsp2() {
+pub fn rsp2(_bin_name: &str) {
     wrap_result_main(|logfile| {
         let (app, de) = CliDeserialize::augment_clap_app({
             app_from_crate!(", ")
@@ -178,10 +180,10 @@ pub fn rsp2() {
 }
 
 // %% CRATES: binary: rsp2-shear-plot %%
-pub fn shear_plot() {
+pub fn shear_plot(bin_name: &str) {
     wrap_result_main(|logfile| {
         let (app, de) = CliDeserialize::augment_clap_app({
-            ::clap::App::new("rsp2-shear-plot")
+            ::clap::App::new(bin_name)
                 .args(&[
                     arg!( input=FORCES_DIR "phonopy forces dir (try --save-bands in main script)"),
                 ])
@@ -200,10 +202,10 @@ pub fn shear_plot() {
 }
 
 // %% CRATES: binary: rsp2-save-bands-after-the-fact %%
-pub fn save_bands_after_the_fact() {
+pub fn save_bands_after_the_fact(bin_name: &str) {
     wrap_result_main(|logfile| {
         let (app, de) = CliDeserialize::augment_clap_app({
-            ::clap::App::new("rsp2-save-bands")
+            ::clap::App::new(bin_name)
                 .args(&[
                     arg!( trial_dir=TRIAL_DIR "existing trial directory"),
                 ])
@@ -221,10 +223,10 @@ pub fn save_bands_after_the_fact() {
 }
 
 // %% CRATES: binary: rsp2-rerun-analysis %%
-pub fn rerun_analysis() {
+pub fn rerun_analysis(bin_name: &str) {
     wrap_result_main(|logfile| {
         let (app, de) = CliDeserialize::augment_clap_app({
-            ::clap::App::new("rsp2-rerun-analysis")
+            ::clap::App::new(bin_name)
                 .args(&[
                     arg!( dir=DIR "existing trial directory, or a structure directory within one"),
                 ])
@@ -242,11 +244,51 @@ pub fn rerun_analysis() {
     });
 }
 
+// FIXME it is kind of dumb having both this and rerun-analysis.
+//       the trouble is they take different input; rerun-analysis rediagonalizes the entire
+//       system using phonopy (and thus needs access to settings to know the potential),
+//       while this requires the eigensolutions as input.
+// %% CRATES: binary: rsp2-sparse-analysis %%
+pub fn sparse_analysis(bin_name: &str) {
+    wrap_result_main(|logfile| {
+        let (app, de) = CliDeserialize::augment_clap_app({
+            ::clap::App::new(bin_name)
+                .args(&[
+                    arg!( dir=DIR "structure in directory format"),
+                    arg!( eigensols=EIGENSOLS "eigensolutions file"),
+                    arg!(*output [--output][-o]=EIGENSOLS "output directory. Existing files will be clobbered."),
+                    arg!( log [--log]=LOGFILE "append to this logfile"),
+                ])
+        });
+        let matches = app.get_matches();
+        let () = de.resolve_args(&matches)?;
+
+        let structure = StoredStructure::load(matches.expect_value_of("dir"))?;
+
+        if let Some(path) = matches.value_of("log") {
+            logfile.start(PathFile::create(path)?)?; // (NOTE: create does not truncate)
+        }
+
+        let (evals, evecs) = {
+            let path = PathFile::new(matches.expect_value_of("eigensols"))?;
+            unimplemented!();
+        };
+
+        // reminder: does not fail on existing
+        let outdir = PathDir::create(matches.expect_value_of("output"))?;
+
+        let analysis = ::cmd::run_sparse_analysis(structure, evals, evecs)?;
+
+        ::cmd::write_ev_analysis_output_files(&outdir, &analysis)?;
+        Ok(())
+    });
+}
+
 // %% CRATES: binary: rsp2-bond-test %%
-pub fn bond_test() {
+pub fn bond_test(bin_name: &str) {
     wrap_result_main(|_logfile| {
         let (app, de) = CliDeserialize::augment_clap_app({
-            ::clap::App::new("rsp2-bond-test")
+            ::clap::App::new(bin_name)
                 .args(&[
                     arg!( input=STRUCTURE ""),
                 ])
@@ -269,10 +311,10 @@ pub fn bond_test() {
 }
 
 // %% CRATES: binary: rsp2-dynmat-test %%
-pub fn dynmat_test() {
+pub fn dynmat_test(bin_name: &str) {
     wrap_result_main(|logfile| {
         let (app, de) = CliDeserialize::augment_clap_app({
-            ::clap::App::new("rsp2-dynmat-test")
+            ::clap::App::new(bin_name)
                 .args(&[
                     arg!( input=PHONOPY_DIR ""),
                 ])

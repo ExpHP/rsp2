@@ -33,6 +33,7 @@ use ::rsp2_array_types::{V3, M3, dot};
 ///
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case")]
 pub struct FracBonds {
     // used for sanity checks
     num_atoms: usize,
@@ -52,6 +53,7 @@ pub struct FracBonds {
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case")]
 pub struct CartBonds {
     num_atoms: usize, // used for sanity checks
     from: Vec<usize>,

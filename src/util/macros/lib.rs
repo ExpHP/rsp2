@@ -57,17 +57,25 @@ where
     a.zip(b)
 }
 
+// do something only the first time the macro is encountered
 #[macro_export]
-macro_rules! _log_once_impl {
-    ($mac:ident!($($arg:tt)*)) => {{
+macro_rules! once {
+    ($($tok:tt)*) => {{
         use std::sync::{Once, ONCE_INIT};
         static ONCE: Once = ONCE_INIT;
-        ONCE.call_once(|| {
+        ONCE.call_once(|| { $($tok)* });
+    }};
+}
+
+#[macro_export]
+macro_rules! _log_once_impl {
+    ($mac:ident!($($arg:tt)*)) => {
+        once!{
             // Explicitly label one-time messages to discourage reasoning
             // along the lines of "well it didn't say anything THIS time"
             $mac!("{} (this message will not be shown again)", format_args!($($arg)*));
-        });
-    }};
+        }
+    };
 }
 
 #[macro_export]

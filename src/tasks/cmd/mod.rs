@@ -26,8 +26,8 @@ mod ev_analyses;
 use self::trial::TrialDir;
 pub(crate) mod trial;
 
-use self::stored_structure::StoredStructure;
-mod stored_structure;
+pub(crate) use self::stored_structure::StoredStructure;
+pub(crate) mod stored_structure;
 
 use self::relaxation::EvLoopDiagonalizer;
 mod relaxation;
@@ -47,6 +47,7 @@ use ::meta::{Element, Mass, Layer};
 use ::util::ext_traits::{OptionResultExt, PathNiceExt};
 use ::math::basis::Basis3;
 use ::math::bonds::{FracBonds};
+use self::acoustic_search::ModeKind;
 
 use ::path_abs::{PathAbs, PathArc, PathFile, PathDir};
 use ::rsp2_structure::consts::CARBON;
@@ -116,7 +117,7 @@ impl TrialDir {
 
         self.write_stored_structure(
             "initial.structure", "Initial structure (after lattice optimization)",
-            &original_coords, meta.sift(), &layer_sc_mats,
+            &original_coords, meta.sift(), layer_sc_mats.as_ref().map(|x| &x[..]),
         )?;
 
         // FIXME: Prior to the addition of the sparse solver, the code used to do something like:
@@ -139,7 +140,7 @@ impl TrialDir {
                 ($diagonalizer:expr) => {{
                     let diagonalizer = $diagonalizer;
                     self.do_main_ev_loop(
-                        settings, &*pot, &layer_sc_mats,
+                        settings, &*pot, layer_sc_mats.as_ref().map(|x| &x[..]),
                         diagonalizer, original_coords, meta.sift(),
                     )
                 }}
@@ -173,60 +174,61 @@ impl TrialDir {
 
         self.write_stored_structure(
             "final.structure", "Final structure",
-            &coords, meta.sift(), &layer_sc_mats,
+            &coords, meta.sift(), layer_sc_mats.as_ref().map(|x| &x[..]),
         )?;
 
         write_eigen_info_for_machines(&ev_analysis, self.create_file("eigenvalues.final")?)?;
 
-        self.write_ev_analysis_output_files(settings, &*pot, &ev_analysis)?;
+        write_ev_analysis_output_files(&self, &ev_analysis)?;
+        self.write_summary_file(settings, &*pot, &ev_analysis)?;
     })}
+}
 
-    fn write_ev_analysis_output_files(
-        &self,
-        settings: &Settings,
-        pot: &PotentialBuilder,
-        eva: &GammaSystemAnalysis,
-    ) -> FailResult<()>
-    {Ok({
-        if let (Some(frequency), Some(raman)) = (&eva.ev_frequencies, &eva.ev_raman_tensors) {
-            #[derive(Serialize)]
-            #[serde(rename_all = "kebab-case")]
-            struct Output {
-                frequency: Vec<f64>,
-                average_3d: Vec<f64>,
-                backscatter: Vec<f64>,
-            }
-            use ::math::bond_polarizability::LightPolarization::*;
-            ::serde_json::to_writer(self.create_file("raman.json")?, &Output {
-                frequency: frequency.0.to_vec(),
-                average_3d: raman.0.iter().map(|t| t.integrate_intensity(&Average)).collect(),
-                backscatter: raman.0.iter().map(|t| t.integrate_intensity(&BackscatterZ)).collect(),
-            })?;
+pub(crate) fn write_ev_analysis_output_files(
+    dir: &PathDir,
+    eva: &GammaSystemAnalysis,
+) -> FailResult<()>
+{Ok({
+    use path_abs::FileWrite;
+
+    if let (Some(frequency), Some(raman)) = (&eva.ev_frequencies, &eva.ev_raman_tensors) {
+        #[derive(Serialize)]
+        #[serde(rename_all = "kebab-case")]
+        struct Output {
+            frequency: Vec<f64>,
+            average_3d: Vec<f64>,
+            backscatter: Vec<f64>,
+        }
+        use ::math::bond_polarizability::LightPolarization::*;
+        ::serde_json::to_writer(FileWrite::create(dir.join("raman.json"))?, &Output {
+            frequency: frequency.0.to_vec(),
+            average_3d: raman.0.iter().map(|t| t.integrate_intensity(&Average)).collect(),
+            backscatter: raman.0.iter().map(|t| t.integrate_intensity(&BackscatterZ)).collect(),
+        })?;
+    }
+
+    if let (Some(sc_mats), Some(unfold_probs)) = (&eva.layer_sc_mats, &eva.unfold_probs) {
+        #[derive(Serialize)]
+        #[serde(rename_all = "kebab-case")]
+        struct Output {
+            layer_sc_dims: Vec<[u32; 3]>,
+            layer_q_indices: Vec<Vec<[u32; 3]>>,
+            layer_ev_q_probs: Vec<Vec<Vec<f64>>>,
         }
 
-        if let (Some(sc_mats), Some(unfold_probs)) = (&eva.layer_sc_mats, &eva.unfold_probs) {
-            #[derive(Serialize)]
-            #[serde(rename_all = "kebab-case")]
-            struct Output {
-                layer_sc_dims: Vec<[u32; 3]>,
-                layer_q_indices: Vec<Vec<[u32; 3]>>,
-                layer_ev_q_probs: Vec<Vec<Vec<f64>>>,
-            }
+        ::serde_json::to_writer(FileWrite::create(dir.join("unfold.json"))?, &Output {
+            layer_sc_dims: sc_mats.0.iter().map(|m| m.periods).collect(),
+            layer_q_indices: {
+                unfold_probs.layer_unfolders.iter()
+                    .map(|u| u.q_indices().to_vec())
+                    .collect()
+            },
+            layer_ev_q_probs: unfold_probs.layer_ev_q_probs.clone(),
+        })?;
+    }
+})}
 
-            ::serde_json::to_writer(self.create_file("unfold.json")?, &Output {
-                layer_sc_dims: sc_mats.0.iter().map(|m| m.periods).collect(),
-                layer_q_indices: {
-                    unfold_probs.layer_unfolders.iter()
-                        .map(|u| u.q_indices().to_vec())
-                        .collect()
-                },
-                layer_ev_q_probs: unfold_probs.layer_ev_q_probs.clone(),
-            })?;
-        }
-
-        self.write_summary_file(settings, pot, eva)?;
-    })}
-
+impl TrialDir {
     // log when writing stored structures, especially during loops
     // (to remove any doubt about the iteration number)
     fn write_stored_structure(
@@ -239,10 +241,24 @@ impl TrialDir {
             Rc<[Mass]>,
             Option<Rc<[Layer]>>,
         >,
-        layer_sc_mats: &Option<Vec<ScMatrix>>, // FIXME awkward
+        layer_sc_mats: Option<&[ScMatrix]>, // FIXME awkward
     ) -> FailResult<()>
     {Ok({
         let path = self.join(dir_name);
+
+        // TODO: should take this as an input argument, and also pass it around through
+        //       relaxation and potential
+        let frac_bonds = {
+            // HACK
+            // (no code is supposed to be reading settings.yaml outside of entry points,
+            //  but I don't want to add a Settings argument. The proper fix is to fix
+            //  the above todo)
+            let settings: Settings = self.read_settings()?;
+            settings.bond_radius.map(|bond_radius| FailOk({
+                trace!("needlessly computing frac bonds (FIXME)");
+                FracBonds::from_brute_force_very_dumb(coords, bond_radius)?
+            })).fold_ok()?
+        };
 
         trace!("Writing '{}'", path.nice());
         StoredStructure {
@@ -251,7 +267,8 @@ impl TrialDir {
             elements: meta.pick(),
             masses: meta.pick(),
             layers: meta.pick(),
-            layer_sc_matrices: layer_sc_mats.clone(),
+            layer_sc_matrices: layer_sc_mats.map(ToOwned::to_owned),
+            frac_bonds,
         }.save(path)?
     })}
 
@@ -469,6 +486,16 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
         trace!("Computing deperms in supercell");
         let super_deperms = compute_deperms(&super_coords, &cart_ops)?;
 
+        // XXX
+        visualize_sparse_force_sets(
+            &_trial,
+            &super_coords,
+            &super_displacements,
+            &super_deperms,
+            &cart_ops,
+            &force_sets,
+        )?;
+
         trace!("Computing sparse force constants");
         let force_constants = ::math::dynmat::ForceConstants::compute_required_rows(
             &super_displacements,
@@ -500,30 +527,86 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
     })}
 }
 
+
+use ::rsp2_soa_ops::{Perm, Permute};
+use ::rsp2_structure::CartOp;
+// FIXME incorrect for nontrivial supercells. Should use primitive stars and translate
+//       the displaced atom to the correct image after rotation. (this would be easiest to
+//       do using the functionality in the ForceConstants code)
+fn visualize_sparse_force_sets(
+    trial: &TrialDir,
+    super_coords: &Coords,
+    super_disps: &[(usize, V3)],
+    super_deperms: &[Perm],
+    cart_ops: &[CartOp],
+    force_sets: &[BTreeMap<usize, V3>],
+) -> FailResult<()>
+{Ok({
+    use ::rsp2_structure::consts;
+    use ::rsp2_structure_io::Poscar;
+
+    let subdir = trial.join("visualize-forces");
+    if let Ok(dir) = PathDir::new(&subdir) {
+        dir.remove_all()?;
+    }
+    let subdir = PathDir::create(subdir)?;
+
+    let super_stars = ::math::stars::compute_stars(super_deperms);
+
+    for (disp_i, (&(displaced, _), map)) in zip_eq!(super_disps, force_sets).enumerate() {
+        let disp_dir = PathDir::create(subdir.join(format!("{:04}", disp_i)))?;
+
+        let mut original_elements = vec![consts::CARBON; super_coords.len()];
+        for &affected in map.keys() {
+            original_elements[affected] = consts::OXYGEN;
+        }
+        original_elements[displaced] = consts::NITROGEN;
+
+        let star_i = super_stars.assignments()[displaced];
+        for &oper_i in super_stars[star_i].opers_from_rep(displaced) {
+            let coords = cart_ops[oper_i].transform(&super_coords);
+            let coords = coords.permuted_by(&super_deperms[oper_i]);
+            let elements = original_elements.clone().permuted_by(&super_deperms[oper_i]);
+
+            // (coalesce groups so vesta doesn't barf)
+            let perm = Perm::argsort(&elements);
+            let coords = coords.permuted_by(&perm);
+            let elements = elements.permuted_by(&perm);
+
+            // HACK
+            let mut coords = coords;
+            for v in coords.carts_mut() {
+                v[2] *= -1.0;
+            }
+
+            Poscar {
+                comment: format!("displacement {}, sg operator {}", disp_i, oper_i),
+                coords,
+                elements,
+            }.save(disp_dir.join(format!("{:03}.vasp", oper_i)))?;
+        }
+
+    }
+})}
+
+
 // wrapper around the gamma_system_analysis module which handles all the newtype conversions
 fn run_gamma_system_analysis(
-    settings: &Settings,
-    pot: &PotentialBuilder,
     coords: &Coords,
     meta: HList3<
         Rc<[Element]>,
         Rc<[Mass]>,
         Option<Rc<[Layer]>>,
     >,
-    layer_sc_mats: &Option<Vec<ScMatrix>>,
+    layer_sc_mats: Option<&[ScMatrix]>,
     evals: &[f64],
     evecs: &Basis3,
-    bonds: &Option<FracBonds>,
+    bonds: Option<&FracBonds>,
+    mode_classifications: Option<&[ModeKind]>,
 ) -> FailResult<GammaSystemAnalysis> {
     use self::ev_analyses::*;
 
     let cart_bonds = bonds.as_ref().map(|b| b.to_cart_bonds(coords));
-
-    // (this is more or less part of the analysis, but it is not done there
-    //  because it requires a couple more calls to the potential)
-    let classifications = acoustic_search::perform_acoustic_search(
-        pot, &evals, &evecs, &coords, meta.sift(), &settings.acoustic_search,
-    )?;
 
     let atom_elements: Rc<[Element]> = meta.pick();
     let atom_masses: Rc<[Mass]> = meta.pick();
@@ -533,9 +616,9 @@ fn run_gamma_system_analysis(
 
     gamma_system_analysis::Input {
         atom_layers: atom_layers.map(AtomLayers),
-        layer_sc_mats: layer_sc_mats.clone().map(LayerScMatrices),
+        layer_sc_mats: layer_sc_mats.map(|x| LayerScMatrices(x.to_vec())),
         atom_masses: Some(AtomMasses(atom_masses)),
-        ev_classifications: Some(EvClassifications(classifications)),
+        ev_classifications: mode_classifications.map(|x| EvClassifications(x.to_vec())),
         atom_elements: Some(AtomElements(atom_elements.to_vec())),
         atom_coords: Some(AtomCoordinates(coords.clone())),
         ev_frequencies: Some(EvFrequencies(evals.to_vec())),
@@ -981,21 +1064,50 @@ impl TrialDir {
         trace!("============================");
         trace!("Finished diagonalization");
 
+        trace!("Classifying eigensolutions");
+        let classifications = acoustic_search::perform_acoustic_search(
+            &pot, &evals, &evecs, &stored.coords, stored.meta().sift(), &settings.acoustic_search,
+        )?;
+
         trace!("Computing eigensystem info");
 
         let ev_analysis = run_gamma_system_analysis(
-            &settings, &pot,
             &stored.coords,
             stored.meta().sift(),
-            &stored.layer_sc_matrices,
-            &evals, &evecs, &bonds,
+            stored.layer_sc_matrices.as_ref().map(|x| &x[..]),
+            &evals, &evecs,
+            bonds.as_ref(),
+            Some(&classifications[..]),
         )?;
 
         write_eigen_info_for_humans(&ev_analysis, &mut |s| FailOk(info!("{}", s)))?;
 
-        self.write_ev_analysis_output_files(settings, &*pot, &ev_analysis)?;
+        write_ev_analysis_output_files(&self, &ev_analysis)?;
     })}
 }
+
+//=================================================================
+
+pub(crate) fn run_sparse_analysis(
+    structure: StoredStructure,
+    evals: &[f64],
+    evecs: &Basis3,
+) -> FailResult<GammaSystemAnalysis>
+{Ok({
+    trace!("Computing eigensystem info");
+    let ev_analysis = run_gamma_system_analysis(
+        &structure.coords,
+        structure.meta().sift(),
+        structure.layer_sc_matrices.as_ref().map(|x| &x[..]),
+        &evals, &evecs,
+        structure.frac_bonds.as_ref(),
+        None, // ev_classifications
+    )?;
+
+    write_eigen_info_for_humans(&ev_analysis, &mut |s| FailOk(info!("{}", s)))?;
+
+    ev_analysis
+})}
 
 //=================================================================
 
@@ -1135,6 +1247,7 @@ pub(crate) fn read_optimizable_structure(
     input: impl AsPath,
 ) -> FailResult<(
     // FIXME train wreck output
+    // TODO could contain bonds read from .structure
     ScalableCoords,
     Rc<[Element]>,
     Rc<[Mass]>,

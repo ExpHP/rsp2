@@ -2,5 +2,5 @@
 extern crate rsp2_tasks;
 
 fn main() {
-    ::rsp2_tasks::entry_points::save_bands_after_the_fact("rsp2-save-bands-after-the-fact");
+    ::rsp2_tasks::entry_points::sparse_analysis("rsp2-sparse-analysis");
 }

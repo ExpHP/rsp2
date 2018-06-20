@@ -59,7 +59,7 @@ impl TrialDir {
         &self,
         settings: &Settings,
         pot: &PotentialBuilder,
-        layer_sc_mats: &Option<Vec<ScMatrix>>,
+        layer_sc_mats: Option<&[ScMatrix]>,
         diagonalizer: impl EvLoopDiagonalizer<ExtraOut=ExtraOut>,
         original_coords: Coords,
         meta: HList3<
@@ -84,12 +84,21 @@ impl TrialDir {
 
             trace!("============================");
 
+            // FIXME: only the CartBonds need to be recomputed each iteration;
+            //       we could keep the FracBonds around between iterations.
+            let bonds = settings.bond_radius.map(|bond_radius| FailOk({
+                trace!("Computing bonds");
+                FracBonds::from_brute_force_very_dumb(&coords, bond_radius)?
+            })).fold_ok()?;
+
             let (evals, evecs, extra_out) = {
                 let subdir = format!("ev-loop-{:02}.1.structure", iteration);
                 self.write_stored_structure(
                     &subdir,
                     &format!("Structure after CG round {}", iteration),
-                    &coords, meta.sift(), layer_sc_mats,
+                    &coords, meta.sift(),
+                    layer_sc_mats,
+                    //Some(&bonds), // FIXME should be argument
                 )?;
 
                 let stored = self.read_stored_structure(&subdir)?;
@@ -100,17 +109,19 @@ impl TrialDir {
             trace!("============================");
             trace!("Finished diagonalization");
 
-            // FIXME: only the CartBonds need to be recomputed each iteration;
-            //       we could keep the FracBonds around between iterations.
-            let bonds = settings.bond_radius.map(|bond_radius| FailOk({
-                trace!("Computing bonds");
-                FracBonds::from_brute_force_very_dumb(&coords, bond_radius)?
-            })).fold_ok()?;
-
+            let classifications = super::acoustic_search::perform_acoustic_search(
+                pot, &evals, &evecs,
+                &coords, meta.sift(),
+                &settings.acoustic_search,
+            )?;
             trace!("Computing eigensystem info");
 
             let ev_analysis = super::run_gamma_system_analysis(
-                &settings, pot, &coords, meta.sift(), &layer_sc_mats, &evals, &evecs, &bonds,
+                &coords, meta.sift(),
+                layer_sc_mats.as_ref().map(|x| &x[..]),
+                &evals, &evecs,
+                bonds.as_ref(),
+                Some(&classifications[..]),
             )?;
 
             {
