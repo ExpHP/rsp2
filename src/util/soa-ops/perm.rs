@@ -118,7 +118,7 @@ impl Perm {
     pub fn into_raw_inv(self) -> Vec<usize>
     { self.inv.0 }
 
-    #[cfg_attr(feature = "nightly", must_use = "not an in-place operation")]
+    #[must_use = "not an in-place operation"]
     pub fn inverted(&self) -> Perm
     {
         // (the inverse of the inverse is... you know...)
@@ -225,7 +225,7 @@ impl PermVec {
     }
 
     // Checks invariants required by Perm for unsafe code.
-    #[cfg_attr(feature = "nightly", must_use = "doesn't assert")]
+    #[must_use = "doesn't assert"]
     fn validate_data(xs: &[usize]) -> bool {
         let mut vec = xs.to_vec();
         vec.sort();
@@ -244,7 +244,7 @@ impl PermVec {
         PermVec::validate_data(&self.0);
     }
 
-    #[cfg_attr(feature = "nightly", must_use = "not an in-place operation")]
+    #[must_use = "not an in-place operation"]
     fn inverted(&self) -> Self
     {
         let mut inv = vec![::std::usize::MAX; self.0.len()]; // [Src] -> Dest

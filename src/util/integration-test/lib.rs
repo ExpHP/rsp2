@@ -29,21 +29,8 @@ use ::std::ffi::{OsStr, OsString};
 use ::std::process::Command;
 pub type Result<T> = ::std::result::Result<T, Error>;
 
-// thin layer that explodes on drop
-// FIXME remove once we have must_use on functions
+#[must_use]
 pub struct CliTest {
-    inner: Option<CliTestInner>,
-}
-
-impl Drop for CliTest {
-    fn drop(&mut self) {
-        if !::std::thread::panicking() {
-            panic!("CliTest was not run!")
-        }
-    }
-}
-
-pub struct CliTestInner {
     cmd: Vec<OsString>,
     expect_success: Option<bool>,
     checkers: Vec<DirChecker>,
@@ -52,20 +39,18 @@ pub struct CliTestInner {
 impl Default for CliTest {
     fn default() -> Self {
         CliTest {
-            inner: Some(CliTestInner {
-                cmd: vec![
-                    "cargo",
-                    "run",
-                    #[cfg(not(debug_assertions))]
-                    "--release",
-                    "--quiet",
-                    "--",
-                ].into_iter()
-                    .map(OsString::from)
-                    .collect(),
-                expect_success: Some(true),
-                checkers: vec![],
-            }),
+            cmd: vec![
+                "cargo",
+                "run",
+                #[cfg(not(debug_assertions))]
+                "--release",
+                "--quiet",
+                "--",
+            ].into_iter()
+                .map(OsString::from)
+                .collect(),
+            expect_success: Some(true),
+            checkers: vec![],
         }
     }
 }
@@ -73,15 +58,12 @@ impl Default for CliTest {
 pub type DirChecker = Box<Fn(&PathDir) -> Result<()>>;
 
 impl CliTest {
-    #[cfg_attr(feature = "nightly", must_use)]
     pub fn cargo_binary(name: impl AsRef<OsStr>) -> Self {
         let manifest_dir = PathDir::current_dir().unwrap();
 
         let test = CliTest {
-            inner: Some(CliTestInner {
-                cmd: vec![],
-                ..Self::default().into_inner()
-            }),
+            cmd: vec![],
+            ..Self::default()
         };
 
         let test = test.arg("cargo").arg("run");
@@ -94,28 +76,24 @@ impl CliTest {
             .arg("--")
     }
 
-    #[cfg_attr(feature = "nightly", must_use)]
     pub fn arg(mut self, arg: impl AsRef<OsStr>) -> Self {
-        self.inner.as_mut().unwrap().cmd.push(arg.as_ref().into());
+        self.cmd.push(arg.as_ref().into());
         self
     }
 
-    #[cfg_attr(feature = "nightly", must_use)]
     pub fn args<S: AsRef<OsStr>>(mut self, args: &[S]) -> Self {
-        self.inner.as_mut().unwrap().cmd.extend(args.into_iter().map(OsString::from));
+        self.cmd.extend(args.into_iter().map(OsString::from));
         self
     }
 
-    #[cfg_attr(feature = "nightly", must_use)]
     pub fn check<F>(mut self, checker: F) -> Self
     where F: Fn(&PathDir) -> Result<()> + 'static,
     {
-        self.inner.as_mut().unwrap().checkers.push(Box::new(checker));
+        self.checkers.push(Box::new(checker));
         self
     }
 
     /// `check` with a standard trait-based implementation.
-    #[cfg_attr(feature = "nightly", must_use)]
     pub fn check_file<T: CheckFile>(
         self,
         path_in_trial: &Path,
@@ -133,15 +111,8 @@ impl CliTest {
         self.check(checker)
     }
 
-    fn disarm(self) { ::std::mem::forget(self) }
-    fn into_inner(mut self) -> CliTestInner {
-        let inner = self.inner.take().unwrap();
-        self.disarm();
-        inner
-    }
-
     pub fn run(self) -> Result<()> {
-        let inner = self.into_inner();
+        let CliTest { cmd, checkers, expect_success } = self;
 
         let _tmp = TempDir::new("rsp2")?;
         let tmp = PathDir::new(_tmp.path())?;
@@ -151,7 +122,7 @@ impl CliTest {
         let stdout_path = tmp.join("__captured_stdout");
         let stderr_path = tmp.join("__captured_stderr");
         let status = {
-            let mut args = inner.cmd;
+            let mut args = cmd;
             let bin = args.remove(0);
 
             Command::new(&bin)
@@ -165,22 +136,15 @@ impl CliTest {
         print!("{}", FileRead::read(stdout_path)?.read_string()?);
         eprint!("{}", FileRead::read(stderr_path)?.read_string()?);
 
-        if let Some(success) = inner.expect_success {
+        if let Some(success) = expect_success {
             assert_eq!(success, status.success(), "{}", status);
         }
 
-        for checker in inner.checkers {
+        for checker in checkers {
             checker(&tmp)?;
         }
         Ok(())
     }
-}
-
-#[test]
-#[should_panic(expected = "was not run")]
-#[cfg(not(feature = "nightly"))]
-fn cli_test_must_be_run() {
-    CliTest::cargo_binary("lol");
 }
 
 pub trait CheckFile: Sized + Debug + PartialEq + ::std::panic::RefUnwindSafe {

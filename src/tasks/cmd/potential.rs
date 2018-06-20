@@ -103,7 +103,7 @@ pub trait PotentialBuilder<Meta = CommonMeta>
     /// Use `true` to recommend the creation of threads, and `false` to discourage it.
     ///
     /// The default implementation just ignores the call.
-    #[cfg_attr(feature = "nightly", must_use = "this is not an in-place mutation!")]
+    #[must_use = "this is not an in-place mutation!"]
     fn threaded(&self, _threaded: bool) -> Box<PotentialBuilder<Meta>>
     { self.box_clone() }
 
