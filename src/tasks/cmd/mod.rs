@@ -16,8 +16,6 @@
 
 pub(crate) mod integrate_2d;
 
-use self::potential::{PotentialBuilder, DiffFn};
-mod potential;
 
 use self::ev_analyses::GammaSystemAnalysis;
 use self::param_optimization::ScalableCoords;
@@ -38,15 +36,18 @@ pub(crate) mod python;
 
 use ::{FailResult, FailOk};
 use ::rsp2_tasks_config::{self as cfg, Settings, NormalizationMode, SupercellSpec};
-use ::traits::{AsPath};
+use ::traits::{AsPath, Load, Save};
 use ::phonopy::{DirWithBands, DirWithDisps, DirWithForces};
 
-use ::traits::{Load, Save};
 use ::meta::prelude::*;
 use ::meta::{Element, Mass, Layer};
 use ::util::ext_traits::{OptionResultExt, PathNiceExt};
-use ::math::basis::Basis3;
-use ::math::bonds::{FracBonds};
+use ::math::{
+    basis::{Basis3},
+    bonds::{FracBonds},
+    bands::{ScMatrix},
+    dynmat::{ForceConstants, DynamicalMatrix},
+};
 use self::acoustic_search::ModeKind;
 
 use ::path_abs::{PathAbs, PathArc, PathFile, PathDir};
@@ -59,23 +60,20 @@ use ::rsp2_array_types::{V3, Unvee};
 use ::rsp2_structure::{Coords, Lattice};
 use ::rsp2_structure::layer::LayersPerUnitCell;
 use ::phonopy::Builder as PhonopyBuilder;
-use ::math::bands::ScMatrix;
 
 use ::rsp2_fs_util::{rm_rf};
 
-use ::std::io::{Write};
-use ::std::rc::Rc;
+use ::std::{
+    io::{Write},
+    ffi::{OsStr, OsString},
+    collections::{BTreeMap},
+    rc::{Rc},
+};
 
 use ::itertools::Itertools;
-
 use ::hlist_aliases::*;
-use std::collections::BTreeMap;
-use math::dynmat::ForceConstants;
-use cmd::potential::CommonMeta;
-use math::dynmat::DynamicalMatrix;
-use traits::save::Json;
-use std::ffi::OsStr;
-use std::ffi::OsString;
+use ::potential::{PotentialBuilder, DiffFn, CommonMeta};
+use ::traits::save::Json;
 
 const SAVE_BANDS_DIR: &'static str = "gamma-bands";
 

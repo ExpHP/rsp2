@@ -10,7 +10,7 @@
 ** ************************************************************************ */
 
 use ::FailResult;
-use super::potential::{PotentialBuilder};
+use ::potential::{PotentialBuilder};
 
 use ::meta::prelude::*;
 use ::meta::{Mass, Element};

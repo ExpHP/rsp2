@@ -1,7 +1,7 @@
 
 
 use ::{FailResult};
-use ::cmd::potential::{PotentialBuilder, DiffFn};
+use ::potential::{PotentialBuilder, DiffFn};
 use ::hlist_aliases::*;
 use ::meta::prelude::*;
 use ::meta::{Mass, Element};

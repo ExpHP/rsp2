@@ -87,6 +87,7 @@ mod phonopy;
 mod math;
 mod ui;
 pub mod meta;
+mod potential;
 
 pub mod entry_points;
 
