@@ -138,3 +138,33 @@ impl HasTempDir for TempDir {
     fn temp_dir_into_path(self) -> PathBuf { self.into_path() }
     fn temp_dir_recover(self) { self.recover() }
 }
+
+#[cfg(test)]
+#[deny(unused)]
+mod tests {
+    use super::*;
+    use ::phonopy::DirWithBands;
+
+    // check use cases I need to work
+    #[test]
+    #[should_panic(expected = "compiletest")]
+    fn things_expected_to_impl_aspath() {
+        use ::std::rc::Rc;
+        use ::std::sync::Arc;
+
+        (|| panic!("This is a compiletest"))();
+
+        // clonable TempDirs
+        let x: DirWithBands<TempDir> = (|| panic!())();
+        let x = x.map_dir(Rc::new);
+        let _ = x.clone();
+
+        // sharable TempDirs
+        let x: DirWithBands<TempDir> = (|| panic!())();
+        let x = x.map_dir(Arc::new);
+        let _: &(Send + Sync) = &x;
+
+        // erased types, for conditional deletion
+        let _: DirWithBands<Box<AsPath>> = x.map_dir(|e| Box::new(e) as _);
+    }
+}

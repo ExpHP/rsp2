@@ -993,30 +993,3 @@ impl_dirlike_boilerplate!{
     member: self.dir
     other_members: []
 }
-
-#[cfg(test)]
-#[deny(unused)]
-mod tests {
-    use super::*;
-
-    // check use cases I need to work
-    #[allow(unused)]
-    fn things_expected_to_impl_aspath() {
-        use ::std::rc::Rc;
-        use ::std::sync::Arc;
-        panic!("This is a compiletest; it should not be executed.");
-
-        // clonable TempDirs
-        let x: DirWithBands<TempDir> = panic!();
-        let x = x.map_dir(Rc::new);
-        let _ = x.clone();
-
-        // sharable TempDirs
-        let x: DirWithBands<TempDir> = panic!();
-        let x = x.map_dir(Arc::new);
-        let _: &(Send + Sync) = &x;
-
-        // erased types, for conditional deletion
-        let _: DirWithBands<Box<AsPath>> = x.map_dir(|e| Box::new(e) as _);
-    }
-}
