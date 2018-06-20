@@ -59,7 +59,7 @@ impl TrialDir {
         &self,
         settings: &Settings,
         pot: &PotentialBuilder,
-        layer_sc_mats: Option<&[ScMatrix]>,
+        layer_sc_mats: Option<Rc<[ScMatrix]>>,
         diagonalizer: impl EvLoopDiagonalizer<ExtraOut=ExtraOut>,
         original_coords: Coords,
         meta: HList3<
@@ -97,7 +97,7 @@ impl TrialDir {
                     &subdir,
                     &format!("Structure after CG round {}", iteration),
                     &coords, meta.sift(),
-                    layer_sc_mats,
+                    layer_sc_mats.clone(),
                     //Some(&bonds), // FIXME should be argument
                 )?;
 
@@ -118,10 +118,10 @@ impl TrialDir {
 
             let ev_analysis = super::run_gamma_system_analysis(
                 &coords, meta.sift(),
-                layer_sc_mats.as_ref().map(|x| &x[..]),
+                layer_sc_mats.clone(),
                 &evals, &evecs,
                 bonds.as_ref(),
-                Some(&classifications[..]),
+                Some(classifications),
             )?;
 
             {
@@ -137,7 +137,7 @@ impl TrialDir {
             self.write_stored_structure(
                 &format!("ev-loop-{:02}.2.structure", iteration),
                 &format!("Structure after eigenmode-chasing round {}", iteration),
-                &coords, meta.sift(), layer_sc_mats,
+                &coords, meta.sift(), layer_sc_mats.clone(),
             )?;
 
             warn_on_improvable_lattice_params(pot, &coords, meta.sift())?;
@@ -295,13 +295,7 @@ fn do_eigenvector_chase(
         },
         cfg::EigenvectorChase::Acgsd(cg_settings) => {
             let evecs: Vec<_> = bad_evecs.iter().map(|&(_, ev)| ev).collect();
-            do_cg_along_evecs(
-                pot,
-                cg_settings,
-                coords,
-                meta.sift(),
-                &evecs[..],
-            )?
+            do_cg_along_evecs(pot, cg_settings, coords, meta.sift(), &evecs[..])?
         },
     }
 })}

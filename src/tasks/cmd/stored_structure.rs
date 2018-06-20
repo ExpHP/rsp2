@@ -36,7 +36,7 @@ pub struct StoredStructure {
     pub elements: Rc<[Element]>,
     pub layers: Option<Rc<[Layer]>>,
     pub masses: Rc<[Mass]>,
-    pub layer_sc_matrices: Option<Vec<ScMatrix>>,
+    pub layer_sc_matrices: Option<Rc<[ScMatrix]>>,
     pub frac_bonds: Option<FracBonds>,
 }
 
@@ -54,7 +54,7 @@ impl StoredStructure {
 struct StoredStructureMeta {
     pub layers: Option<Rc<[Layer]>>,
     pub masses: Rc<[Mass]>,
-    pub layer_sc_matrices: Option<Vec<ScMatrix>>,
+    pub layer_sc_matrices: Option<Rc<[ScMatrix]>>,
 }
 
 impl Save for StoredStructure {

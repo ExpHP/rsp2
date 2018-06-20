@@ -95,7 +95,7 @@ pub(crate) fn perform_acoustic_search(
         Rc<[Mass]>,
     >,
     settings: &cfg::AcousticSearch,
-) -> FailResult<Vec<ModeKind>>
+) -> FailResult<Rc<[ModeKind]>>
 {Ok({
     let &cfg::AcousticSearch {
         expected_non_translations,
@@ -209,5 +209,6 @@ pub(crate) fn perform_acoustic_search(
 
     kinds.into_iter()
         .map(|opt| opt.expect("bug! every index should have been accounted for"))
-        .collect()
+        .collect::<Vec<_>>()
+        .into()
 })}

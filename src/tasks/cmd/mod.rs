@@ -117,7 +117,7 @@ impl TrialDir {
 
         self.write_stored_structure(
             "initial.structure", "Initial structure (after lattice optimization)",
-            &original_coords, meta.sift(), layer_sc_mats.as_ref().map(|x| &x[..]),
+            &original_coords, meta.sift(), layer_sc_mats.clone(),
         )?;
 
         // FIXME: Prior to the addition of the sparse solver, the code used to do something like:
@@ -140,7 +140,7 @@ impl TrialDir {
                 ($diagonalizer:expr) => {{
                     let diagonalizer = $diagonalizer;
                     self.do_main_ev_loop(
-                        settings, &*pot, layer_sc_mats.as_ref().map(|x| &x[..]),
+                        settings, &*pot, layer_sc_mats.clone(),
                         diagonalizer, original_coords, meta.sift(),
                     )
                 }}
@@ -174,7 +174,7 @@ impl TrialDir {
 
         self.write_stored_structure(
             "final.structure", "Final structure",
-            &coords, meta.sift(), layer_sc_mats.as_ref().map(|x| &x[..]),
+            &coords, meta.sift(), layer_sc_mats.clone(),
         )?;
 
         write_eigen_info_for_machines(&ev_analysis, self.create_file("eigenvalues.final")?)?;
@@ -241,7 +241,7 @@ impl TrialDir {
             Rc<[Mass]>,
             Option<Rc<[Layer]>>,
         >,
-        layer_sc_mats: Option<&[ScMatrix]>, // FIXME awkward
+        layer_sc_matrices: Option<Rc<[ScMatrix]>>, // FIXME awkward
     ) -> FailResult<()>
     {Ok({
         let path = self.join(dir_name);
@@ -267,7 +267,7 @@ impl TrialDir {
             elements: meta.pick(),
             masses: meta.pick(),
             layers: meta.pick(),
-            layer_sc_matrices: layer_sc_mats.map(ToOwned::to_owned),
+            layer_sc_matrices,
             frac_bonds,
         }.save(path)?
     })}
@@ -278,7 +278,7 @@ impl TrialDir {
     ) -> FailResult<(
         Coords,
         HList3<Rc<[Element]>, Rc<[Mass]>, Option<Rc<[Layer]>>>,
-        Option<Vec<ScMatrix>>,
+        Option<Rc<[ScMatrix]>>,
     )>
     {Ok({
         let stored = self.read_stored_structure(dir_name)?;
@@ -598,11 +598,11 @@ fn run_gamma_system_analysis(
         Rc<[Mass]>,
         Option<Rc<[Layer]>>,
     >,
-    layer_sc_mats: Option<&[ScMatrix]>,
+    layer_sc_mats: Option<Rc<[ScMatrix]>>,
     evals: &[f64],
     evecs: &Basis3,
     bonds: Option<&FracBonds>,
-    mode_classifications: Option<&[ModeKind]>,
+    mode_classifications: Option<Rc<[ModeKind]>>,
 ) -> FailResult<GammaSystemAnalysis> {
     use self::ev_analyses::*;
 
@@ -1074,10 +1074,10 @@ impl TrialDir {
         let ev_analysis = run_gamma_system_analysis(
             &stored.coords,
             stored.meta().sift(),
-            stored.layer_sc_matrices.as_ref().map(|x| &x[..]),
+            stored.layer_sc_matrices.clone(),
             &evals, &evecs,
             bonds.as_ref(),
-            Some(&classifications[..]),
+            Some(classifications),
         )?;
 
         write_eigen_info_for_humans(&ev_analysis, &mut |s| FailOk(info!("{}", s)))?;
@@ -1098,7 +1098,7 @@ pub(crate) fn run_sparse_analysis(
     let ev_analysis = run_gamma_system_analysis(
         &structure.coords,
         structure.meta().sift(),
-        structure.layer_sc_matrices.as_ref().map(|x| &x[..]),
+        structure.layer_sc_matrices.clone(),
         &evals, &evecs,
         structure.frac_bonds.as_ref(),
         None, // ev_classifications
@@ -1252,7 +1252,7 @@ pub(crate) fn read_optimizable_structure(
     Rc<[Element]>,
     Rc<[Mass]>,
     Option<Rc<[Layer]>>,
-    Option<Vec<ScMatrix>>,
+    Option<Rc<[ScMatrix]>>,
 )> {
     let input = input.as_path();
 
@@ -1260,7 +1260,7 @@ pub(crate) fn read_optimizable_structure(
     let out_elements: Rc<[Element]>;
     let out_masses: Rc<[Mass]>;
     let out_layers: Option<Rc<[Layer]>>;
-    let out_sc_mats: Option<Vec<ScMatrix>>;
+    let out_sc_mats: Option<Rc<[ScMatrix]>>;
     match file_format {
         StructureFileType::Poscar => {
             use ::rsp2_structure_io::Poscar;
@@ -1294,6 +1294,7 @@ pub(crate) fn read_optimizable_structure(
                     .into_iter()
                     .map(|(matrix, periods, _)| ScMatrix::new(&matrix, &periods))
                     .collect_vec()
+                    .into()
             });
 
             out_layers = Some(layer_builder.atom_layers().into_iter().map(Layer).collect::<Vec<_>>().into());
