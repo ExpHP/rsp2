@@ -12,11 +12,12 @@
 use ::FailResult;
 use ::std::fmt;
 use ::std::time;
-use ::log::{Log, Level, Record};
+use ::log::{Log, Record};
 use ::path_abs::{FileWrite, PathFile};
+use ::fern::colors;
 
-pub use self::fern::{CapturableStderr, DelayedLogFile, GLOBAL_LOGFILE};
-mod fern {
+pub use self::loggers::{CapturableStderr, DelayedLogFile, GLOBAL_LOGFILE};
+mod loggers {
     use super::*;
     use ::std::sync::RwLock;
     use ::std::io::prelude::*;
@@ -95,6 +96,14 @@ pub fn init_global_logger() -> FailResult<SetGlobalLogfile>
 {
     let log_mod_setting = ::env::log_mod()?;
 
+    let colors = colors::ColoredLevelConfig {
+        error: colors::Color::BrightRed,
+        warn:  colors::Color::Yellow, // non-bright yellow is orange in many color schemes
+        info:  colors::Color::BrightCyan,
+        debug: colors::Color::BrightYellow,
+        trace: colors::Color::Cyan,
+    };
+
     // NOTE
     // It might seem silly that we are setting up the initial logging filter by
     // tweaking the env_logger filter rather than calling the `level` and `level_for`
@@ -104,10 +113,6 @@ pub fn init_global_logger() -> FailResult<SetGlobalLogfile>
     //
     // env_logger::filter does not expose a list of targets and level filters, so this
     // is our only option at the moment.
-    //
-    // FIXME ...at this point, it seems to me that we are no longer deriving any
-    //       benefit at all from using fern, and thus might as well just write a
-    //       single implementor of Log.  That's a yak to be shaved another time...
     let env_filter = {
         ::env_logger::filter::Builder::new()
             .parse("debug")
@@ -123,7 +128,7 @@ pub fn init_global_logger() -> FailResult<SetGlobalLogfile>
     let start = time::Instant::now();
     let fern = ::fern::Dispatch::new()
         .format(move |out, message, record| {
-            let message = fmt_log_message_lines(message, record, start.elapsed(), log_mod_setting);
+            let message = fmt_log_message_lines(message, &colors, record, start.elapsed(), log_mod_setting);
 
             out.finish(format_args!("{}", message))
         })
@@ -151,21 +156,6 @@ pub fn init_test_logger() {
     let _ = init_global_logger();
 }
 
-#[derive(Debug, Copy, Clone)]
-pub struct ColorizedLevel(pub Level);
-impl fmt::Display for ColorizedLevel {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let style = match self.0 {
-            Level::Error => ::ansi_term::Colour::Red.bold(),
-            Level::Warn  => ::ansi_term::Colour::Red.normal(),
-            Level::Info  => ::ansi_term::Colour::Cyan.bold(),
-            Level::Debug => ::ansi_term::Colour::Yellow.dimmed(),
-            Level::Trace => ::ansi_term::Colour::Cyan.normal(),
-        };
-        write!(f, "[{:>5}]", ::ui::color::gpaint(style, self.0))
-    }
-}
-
 /// Returned by `init_global_logger` to remind you to set the logfile once possible.
 /// (which can be done by calling the `start` method)
 #[must_use = "The logfile has not been set up!"]
@@ -177,6 +167,7 @@ impl SetGlobalLogfile {
 
 fn fmt_log_message_lines(
     message: &fmt::Arguments,
+    colors: &::fern::colors::ColoredLevelConfig,
     record: &Record,
     elapsed: time::Duration,
     log_mod_setting: bool,
@@ -189,14 +180,14 @@ fn fmt_log_message_lines(
     // Break into lines, format the first, and pad the rest.
     let first = lines.next().unwrap_or("");
     let mut out = vec![format!(
-        "[{:>4}.{:03}s]{}{} {}",
+        "[{:>4}.{:03}s]{}[{:>5}] {}",
         elapsed.as_secs(),
         elapsed.subsec_nanos() / 1_000_000,
         match log_mod_setting {
             true => format!("[{}]", record.target()),
             false => format!(""),
         },
-        ColorizedLevel(record.level()),
+        colors.color(record.level()),
         first,
     )];
 
