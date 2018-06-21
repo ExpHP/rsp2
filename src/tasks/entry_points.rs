@@ -293,6 +293,7 @@ pub fn bond_test(bin_name: &str) {
             ::clap::App::new(bin_name)
                 .args(&[
                     arg!( input=STRUCTURE ""),
+                    arg!( cart [--cart] "output CartBonds instead of FracBonds")
                 ])
         });
         let matches = app.get_matches();
@@ -305,8 +306,11 @@ pub fn bond_test(bin_name: &str) {
         let coords = coords.construct(); // reckless
 
         let bonds = ::math::bonds::FracBonds::from_brute_force_very_dumb(&coords, 1.8)?;
-        let bonds = bonds.to_cart_bonds(&coords);
-        ::serde_json::to_writer(::std::io::stdout(), &bonds)?;
+        match matches.is_present("cart") {
+            true => ::serde_json::to_writer(::std::io::stdout(), &bonds.to_cart_bonds(&coords))?,
+            false => ::serde_json::to_writer(::std::io::stdout(), &bonds)?,
+        }
+
         println!(); // flush, dammit
         Ok(())
     });
