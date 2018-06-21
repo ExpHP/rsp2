@@ -55,6 +55,7 @@ extern crate rsp2_kets;
 extern crate path_abs;
 extern crate serde_ignored;
 extern crate serde_yaml;
+extern crate env_logger;
 extern crate num_traits;
 #[macro_use] extern crate serde_json;
 #[macro_use] extern crate serde_derive;
@@ -116,9 +117,9 @@ mod errors {
 mod stdout {
     use ::FailResult;
     use ::std::{process::ChildStdout, thread, io::{BufReader, BufRead}};
-    use ::log::LogLevel;
+    use ::log::Level;
 
-    const LEVEL: LogLevel = LogLevel::Info;
+    const LEVEL: Level = Level::Info;
 
     pub fn log(s: &str)
     { log!(LEVEL, "{}", s) }
@@ -142,9 +143,9 @@ mod stdout {
 mod stderr {
     use ::FailResult;
     use ::std::{process::ChildStderr, thread, io::{BufReader, BufRead}};
-    use ::log::LogLevel;
+    use ::log::Level;
 
-    const LEVEL: LogLevel = LogLevel::Warn;
+    const LEVEL: Level = Level::Warn;
 
     pub fn log(s: &str)
     { log!(LEVEL, "{}", s) }
@@ -180,15 +181,9 @@ mod env {
         r => r,
     }}
 
-    /// Verbosity, as a signed integer env var.
-    ///
-    /// This is an env var for ease of implementation, so that the fern logger
-    /// can be started eagerly rather than waiting until after we parse arguments.
-    pub fn verbosity() -> FailResult<i32>
+    pub fn rust_log() -> FailResult<String>
     {Ok({
-        nonempty_var("RSP2_VERBOSITY")?
-            .unwrap_or_else(|| "0".into())
-            .parse::<i32>()?
+        var("RUST_LOG")?.unwrap_or(String::new())
     })}
 
     /// Show module names in log output.

@@ -133,10 +133,6 @@ pub mod settings {
     }
 }
 
-impl Settings {
-    pub fn has_verbosity(&self, _level: i32) -> bool { true } // FIXME
-}
-
 /* ****************************************
 
 # Hagar CG_DESCENT formulas

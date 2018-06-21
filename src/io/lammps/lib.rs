@@ -25,14 +25,14 @@ extern crate chrono;
 
 use ::failure::Backtrace;
 use ::rsp2_array_types::{V3, Unvee, Envee};
-use ::log::LogLevel;
+use ::log::Level;
 
 pub type FailResult<T> = Result<T, ::failure::Error>;
 
 use std::fmt;
 
 pub const API_TRACE_TARGET: &'static str = concat!(module_path!(), "::c_api");
-pub const API_TRACE_LEVEL: LogLevel = LogLevel::Trace;
+pub const API_TRACE_LEVEL: Level = Level::Trace;
 
 /// An error thrown by the LAMMPS C API.
 #[derive(Debug, Fail)]

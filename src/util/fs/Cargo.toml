@@ -16,7 +16,7 @@ path = "lib.rs"
 [dependencies]
 failure = "0.1"
 tempdir = "0.3"
-log = "0.3"
+log = "0.4"
 
 [features]
 nightly = ["beta"]

@@ -24,7 +24,7 @@ slice-of-array = "0.2"
 ordered-float = "0.5"
 itertools = "0.7"
 lazy_static = "0.2"
-log = "0.3"
+log = "0.4"
 serde = { version = "1.0.63", features = ["rc"] } 
 serde_derive = "1.0.47"
 

@@ -12,7 +12,7 @@ license = "MIT OR Apache 2.0"
 
 [dependencies]
 itertools = "0.7"
-log = "0.3"
+log = "0.4"
 ordered-float = "0.5"
 rand = "0.3"
 serde = { version = "1.0.63", features = ["rc"] } 
@@ -29,7 +29,7 @@ failure = "0.1"
 
 # FIXME make this dev-dependencies once rust-lang-nursery/rls#169 is fixed
 # FIXME use fern for less hax?
-env_logger = "0.4"
+env_logger = "0.5.10"
 
 [features]
 nightly = ["beta", "rsp2-array-utils/nightly", "rsp2-assert-close/nightly", "rsp2-slice-math/nightly", "rsp2-util-macros/nightly"]

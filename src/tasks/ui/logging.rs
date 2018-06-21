@@ -12,8 +12,7 @@
 use ::FailResult;
 use ::std::fmt;
 use ::std::time;
-use ::log::{LogLevel, LogRecord};
-use ::fern::FernLog;
+use ::log::{Log, Level, Record};
 use ::path_abs::{FileWrite, PathFile};
 
 pub use self::fern::{CapturableStderr, DelayedLogFile, GLOBAL_LOGFILE};
@@ -22,16 +21,16 @@ mod fern {
     use ::std::sync::RwLock;
     use ::std::io::prelude::*;
 
-    /// Fern logger that uses `eprintln!`.
+    /// Logger that uses `eprintln!`.
     ///
-    /// This is NOT the same as using `::std::io::stderr()`, because that would
-    /// not get captured properly by the unit test harness.
+    /// This is NOT the same as handing `::std::io::stderr()` to `fern::Dispatch::chain`,
+    /// because that would not get captured properly by the unit test harness.
     pub struct CapturableStderr;
 
-    impl FernLog for CapturableStderr {
-        fn log_args(&self, payload: &fmt::Arguments, _original: &LogRecord) {
-            eprintln!("{}", payload);
-        }
+    impl Log for CapturableStderr {
+        fn enabled(&self, _: &::log::Metadata) -> bool { true }
+        fn log(&self, record: &Record) { eprintln!("{}", record.args()); }
+        fn flush(&self) {}
     }
 
     /// A log file for fern that can be created *after* logger initialization.
@@ -53,46 +52,38 @@ mod fern {
                 }
                 *file = Some(path.append()?);
             } else {
-                // PoisonError. In the highly unlikely event this occurs, something else
-                // will probably catch it. If we try to be a hero, we risk a double-panic.
+                // PoisonError. In the highly unlikely event that this occurs, something else will
+                // probably catch it. And if we try to be a hero, we risk a double-panic,
+                // especially since Drop impls may use the logging facilities.
             }
             Ok(())
         }
     }
 
-    impl FernLog for &'static DelayedLogFile {
-        fn log_args(&self, payload: &fmt::Arguments, _original: &LogRecord) {
+    impl Log for DelayedLogFile {
+        fn enabled(&self, _: &::log::Metadata) -> bool { true }
+
+        fn log(&self, record: &Record) {
             if let Ok(mut file) = self.file_rw.write() {
                 if let Some(mut file) = (*file).as_mut() {
-                    let _ = writeln!(file, "{}", payload);
+                    // ignore error for same reasons as ignoring PoisonError (see above).
+                    //
+                    // (`Display::fmt` might also double-panic, but that's the Drop impl's fault
+                    //  for trying to format something that can panic!)
+                    let _ = writeln!(file, "{}", record.args());
                 }
-            } else {
-                // PoisonError. In the highly unlikely event this occurs, something else
-                // will probably catch it. If we try to be a hero, we risk a double-panic.
-            }
+            } // ignore PoisonError silently for reasons documented above
+        }
+
+        fn flush(&self) {
+            if let Ok(mut file) = self.file_rw.write() {
+                if let Some(mut file) = (*file).as_mut() {
+                    // ignore error for same reasons as ignoring PoisonError (see above)
+                    let _ = file.flush();
+                }
+            } // ignore PoisonError silently for reasons documented above
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-enum Verbosity { Default, Loud, MyEarsHurt }
-
-impl Default for Verbosity {
-    fn default() -> Self { Verbosity::Default }
-}
-
-impl Verbosity {
-    /// Any integer will be accepted; the level will be truncated
-    /// to the most extreme value supported.
-    fn from_int(level: i32) -> Self
-    { match level {
-        level if level < 1 => Verbosity::Default,
-        1 => Verbosity::Loud,
-        _ => Verbosity::MyEarsHurt,
-    }}
-
-    pub fn from_env() -> FailResult<Self>
-    { ::env::verbosity().map(Self::from_int) }
 }
 
 /// Set the global logger, enabling the use of `log!()` macros.
@@ -102,38 +93,44 @@ impl Verbosity {
 /// "unused variable" lint to help remind you to do this once possible.
 pub fn init_global_logger() -> FailResult<SetGlobalLogfile>
 {
-    use ::log::LogLevelFilter as L;
-    use self::Verbosity as V;
-
-    let verbosity = V::from_env()?;
     let log_mod_setting = ::env::log_mod()?;
 
+    // NOTE
+    // It might seem silly that we are setting up the initial logging filter by
+    // tweaking the env_logger filter rather than calling the `level` and `level_for`
+    // methods on fern::Dispatch.  The reason is because fern's filter uses AND logic
+    // (a message must successfully pass through ALL filters individually), but I want
+    // RUST_LOG to be capable of *increasing* the verbosity.
+    //
+    // env_logger::filter does not expose a list of targets and level filters, so this
+    // is our only option at the moment.
+    //
+    // FIXME ...at this point, it seems to me that we are no longer deriving any
+    //       benefit at all from using fern, and thus might as well just write a
+    //       single implementor of Log.  That's a yak to be shaved another time...
+    let env_filter = {
+        ::env_logger::filter::Builder::new()
+            .parse("debug")
+            .parse("rsp2_tasks=trace")
+            .parse("rsp2_minimize=trace")
+            .parse("rsp2_phonopy_io=trace")
+            .parse("rsp2_minimize::hager_ls=debug")
+            .parse("rsp2_minimize::exact_ls=debug")
+            .parse(&::env::rust_log()?)
+            .build()
+    };
+
     let start = time::Instant::now();
-    let mut fern = ::fern::Dispatch::new();
-    fern =
-        fern.format(move |out, message, record| {
+    let fern = ::fern::Dispatch::new()
+        .format(move |out, message, record| {
             let message = fmt_log_message_lines(message, record, start.elapsed(), log_mod_setting);
 
             out.finish(format_args!("{}", message))
         })
-        .level(L::Debug)
-        .level_for("rsp2_tasks", L::Trace)
-        .level_for("rsp2_minimize", L::Trace)
-        .level_for("rsp2_phonopy_io", L::Trace)
-        .level_for("rsp2_minimize::hager_ls", match verbosity {
-            V::Default => L::Debug,
-            V::Loud |
-            V::MyEarsHurt => L::Trace,
-        })
-        .level_for("rsp2_minimize::exact_ls", match verbosity {
-            V::Default |
-            V::Loud => L::Debug,
-            V::MyEarsHurt => L::Trace,
-        })
-        // Yes, this really is deliberately boxing a reference (a 'static one).
-        // The reason is simply because chain asks for a Box.
-        .chain(Box::new(&*GLOBAL_LOGFILE) as Box<FernLog>)
-        .chain(Box::new(CapturableStderr) as Box<FernLog>);
+        .filter(move |metadata| env_filter.enabled(metadata))
+        .chain(&*GLOBAL_LOGFILE as &Log)
+        .chain(Box::new(CapturableStderr) as Box<Log>)
+        ;
 
     fern.apply()?;
 
@@ -155,15 +152,15 @@ pub fn init_test_logger() {
 }
 
 #[derive(Debug, Copy, Clone)]
-pub struct ColorizedLevel(pub LogLevel);
+pub struct ColorizedLevel(pub Level);
 impl fmt::Display for ColorizedLevel {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let style = match self.0 {
-            LogLevel::Error => ::ansi_term::Colour::Red.bold(),
-            LogLevel::Warn  => ::ansi_term::Colour::Red.normal(),
-            LogLevel::Info  => ::ansi_term::Colour::Cyan.bold(),
-            LogLevel::Debug => ::ansi_term::Colour::Yellow.dimmed(),
-            LogLevel::Trace => ::ansi_term::Colour::Cyan.normal(),
+            Level::Error => ::ansi_term::Colour::Red.bold(),
+            Level::Warn  => ::ansi_term::Colour::Red.normal(),
+            Level::Info  => ::ansi_term::Colour::Cyan.bold(),
+            Level::Debug => ::ansi_term::Colour::Yellow.dimmed(),
+            Level::Trace => ::ansi_term::Colour::Cyan.normal(),
         };
         write!(f, "[{:>5}]", ::ui::color::gpaint(style, self.0))
     }
@@ -180,7 +177,7 @@ impl SetGlobalLogfile {
 
 fn fmt_log_message_lines(
     message: &fmt::Arguments,
-    record: &LogRecord,
+    record: &Record,
     elapsed: time::Duration,
     log_mod_setting: bool,
 ) -> String {

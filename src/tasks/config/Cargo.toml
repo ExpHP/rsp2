@@ -16,7 +16,7 @@ path = "lib.rs"
 [dependencies]
 rsp2-minimize = { path = "../../minimize" }
 
-log = "0.3"
+log = "0.4"
 failure = "0.1"
 serde = { version = "1.0.63", features = ["rc"] } 
 serde_derive = "1.0.47"

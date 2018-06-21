@@ -34,6 +34,7 @@ path = "lib.rs"
 !!rsp2-kets
 !!rand
 !!log
+!!env-logger
 !!failure
 !!fern
 !!extension-trait

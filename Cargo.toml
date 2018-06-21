@@ -70,9 +70,9 @@ rsp2-newtype-indices = { path = "src/util/newtype-indices" }
 rand = "0.3"
 serde_json = "1"
 serde_yaml = "0.7"
-log = "0.3"
-fern = "0.4"
-env_logger = "0.4"
+log = "0.4"
+fern = "0.5"
+env_logger = "0.5.10"
 clap = "2"
 rsp2-kets = { version = "0.3.6", git = "https://github.com/ExpHP/rsp2-kets", features = ["serde"] } 
 slice-of-array = "0.2"
