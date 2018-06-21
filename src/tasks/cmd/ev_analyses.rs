@@ -181,9 +181,16 @@ macro_rules! wrap_maybe_compute {
                 $(
                     let $arg = match $arg {
                         Some(x) => x,
-                        None => return Ok(None),
+                        None => {
+                            trace!{
+                                "not computing {} due to missing requirement {}",
+                                stringify!($Thing), stringify!($Arg),
+                            }
+                            return Ok(None);
+                        },
                     };
                 )*
+                trace!{"computing {}", stringify!($Thing)}
                 Ok(Some(compute($($arg),*)?))
             }
 
@@ -207,8 +214,12 @@ pub mod ev_acousticness {
         let hlist_pat![ev_eigenvectors] = list;
         let ev_eigenvectors = match ev_eigenvectors {
             Some(x) => x,
-            None => return Ok(None),
+            None => {
+                trace!{"not computing EvAcousticness due to missing requirement EvEigenvectors"}
+                return Ok(None);
+            },
         };
+        trace!{"computing EvAcousticness"}
         Ok(Some(compute(ev_eigenvectors)?))
     }
 
