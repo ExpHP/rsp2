@@ -117,6 +117,7 @@ pub fn init_global_logger() -> FailResult<SetGlobalLogfile>
         ::env_logger::filter::Builder::new()
             .parse("debug")
             .parse("rsp2_tasks=trace")
+            .parse("rsp2_tasks::ev_analysis=debug")
             .parse("rsp2_minimize=trace")
             .parse("rsp2_phonopy_io=trace")
             .parse("rsp2_minimize::hager_ls=debug")
