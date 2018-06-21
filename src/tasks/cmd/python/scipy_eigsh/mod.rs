@@ -44,18 +44,11 @@
 //! So there you have it.
 
 use ::FailResult;
-use ::math::basis::{Basis3, Ket3};
+use ::math::basis::{Basis3};
 
 #[allow(unused)] // rustc bug
 use ::slice_of_array::prelude::*;
 use super::{call_script_and_communicate};
-
-// Conversion factor phonopy uses to scale the eigenvalues to THz angular momentum.
-//    = sqrt(eV/amu)/angstrom/(2*pi)/THz
-const SQRT_EIGENVALUE_TO_THZ: f64 = 15.6333043006705;
-//    = THz / (c / cm)
-const THZ_TO_WAVENUMBER: f64 = 33.3564095198152;
-const SQRT_EIGENVALUE_TO_WAVENUMBER: f64 = SQRT_EIGENVALUE_TO_THZ * THZ_TO_WAVENUMBER;
 
 pub(super) const PY_CHECK_SCIPY_AVAILABILITY: &'static str = indoc!(r#"
     #!/usr/bin/env python3
@@ -74,6 +67,7 @@ type Frequency = f64;
 
 mod scripts {
     use super::*;
+    use filetypes::eigensols;
 
     #[derive(Serialize)]
     #[serde(rename_all = "kebab-case")]
@@ -105,18 +99,9 @@ mod scripts {
         }
     }
 
-    fn read_py_output(esols: (Vec<f64>, (Vec<Vec<f64>>, Vec<Vec<f64>>))) -> FailResult<(Vec<Frequency>, Basis3)> {
-        let (vals, (real, imag)) = esols;
-
-        let mut kets = vec![];
-        for (real, imag) in zip_eq!(real, imag) {
-            let real = real.nest().to_vec();
-            let imag = imag.nest().to_vec();
-            kets.push(Ket3 { real, imag });
-        }
-        let freqs = vals.into_iter().map(eigenvalue_to_frequency).collect();
-
-        Ok((freqs, Basis3(kets)))
+    fn read_py_output(raw: eigensols::Raw) -> FailResult<(Vec<Frequency>, Basis3)> {
+        let esols = raw.into_eigensols()?;
+        Ok((esols.frequencies, esols.eigenvectors))
     }
 }
 
@@ -215,8 +200,4 @@ impl DynamicalMatrix {
             },
         }.invoke()
     }
-}
-
-fn eigenvalue_to_frequency(val: f64) -> f64 {
-    f64::sqrt(f64::abs(val)) * f64::signum(val) * SQRT_EIGENVALUE_TO_WAVENUMBER
 }

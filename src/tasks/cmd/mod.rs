@@ -24,8 +24,7 @@ mod ev_analyses;
 use self::trial::TrialDir;
 pub(crate) mod trial;
 
-pub(crate) use self::stored_structure::StoredStructure;
-pub(crate) mod stored_structure;
+pub(crate) use ::filetypes::stored_structure::StoredStructure;
 
 use self::relaxation::EvLoopDiagonalizer;
 mod relaxation;
@@ -77,7 +76,6 @@ use ::traits::save::Json;
 
 const SAVE_BANDS_DIR: &'static str = "gamma-bands";
 
-// FIXME needs a better home
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub enum StructureFileType {
     Poscar,
@@ -1305,8 +1303,6 @@ pub(crate) fn read_optimizable_structure(
             }
         },
         StructureFileType::StoredStructure => {
-            use ::cmd::stored_structure::StoredStructure;
-
             let StoredStructure {
                 coords, elements, layers, masses, layer_sc_matrices, ..
             } = Load::load(input.as_path())?;

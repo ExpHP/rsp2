@@ -18,7 +18,7 @@ use super::{write_eigen_info_for_humans, write_eigen_info_for_machines};
 
 use ::{FailResult, FailOk};
 use ::rsp2_tasks_config::{self as cfg, Settings};
-use ::cmd::stored_structure::StoredStructure;
+use ::filetypes::stored_structure::StoredStructure;
 use ::potential::{PotentialBuilder, DiffFn, DynFlatDiffFn};
 use ::meta::prelude::*;
 use ::meta::{Mass, Element, Layer};

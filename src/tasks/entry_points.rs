@@ -22,7 +22,7 @@ use ::std::ffi::OsStr;
 use ::traits::Load;
 use ::ui::logging::{init_global_logger, SetGlobalLogfile};
 use ::ui::cfg_merging::ConfigSources;
-use ::cmd::stored_structure::StoredStructure;
+use ::filetypes::{StoredStructure, Eigensols};
 use ::ui::cli_deserialize::CliDeserialize;
 use ::util::ext_traits::{ArgMatchesExt};
 
@@ -250,6 +250,7 @@ pub fn rerun_analysis(bin_name: &str) {
 //       while this requires the eigensolutions as input.
 // %% CRATES: binary: rsp2-sparse-analysis %%
 pub fn sparse_analysis(bin_name: &str) {
+
     wrap_result_main(|logfile| {
         let (app, de) = CliDeserialize::augment_clap_app({
             ::clap::App::new(bin_name)
@@ -271,13 +272,14 @@ pub fn sparse_analysis(bin_name: &str) {
 
         let (evals, evecs) = {
             let path = PathFile::new(matches.expect_value_of("eigensols"))?;
-            unimplemented!();
+            let Eigensols { frequencies, eigenvectors } = Load::load(path)?;
+            (frequencies, eigenvectors)
         };
 
         // reminder: does not fail on existing
         let outdir = PathDir::create(matches.expect_value_of("output"))?;
 
-        let analysis = ::cmd::run_sparse_analysis(structure, evals, evecs)?;
+        let analysis = ::cmd::run_sparse_analysis(structure, &evals, &evecs)?;
 
         ::cmd::write_ev_analysis_output_files(&outdir, &analysis)?;
         Ok(())

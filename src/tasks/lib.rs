@@ -88,6 +88,7 @@ mod math;
 mod ui;
 pub mod meta;
 mod potential;
+mod filetypes;
 
 pub mod entry_points;
 

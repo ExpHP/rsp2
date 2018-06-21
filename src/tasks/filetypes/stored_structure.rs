@@ -51,7 +51,7 @@ impl StoredStructure {
 }
 
 #[derive(Serialize, Deserialize)]
-struct StoredStructureMeta {
+struct Meta {
     pub layers: Option<Rc<[Layer]>>,
     pub masses: Rc<[Mass]>,
     pub layer_sc_matrices: Option<Rc<[ScMatrix]>>,
@@ -70,7 +70,7 @@ impl Save for StoredStructure {
         let masses = masses.clone();
         let layer_sc_matrices = layer_sc_matrices.clone();
 
-        Json(StoredStructureMeta { layers, masses, layer_sc_matrices }).save(dir.join(FNAME_META))?;
+        Json(Meta { layers, masses, layer_sc_matrices }).save(dir.join(FNAME_META))?;
 
         if let Some(frac_bonds) = frac_bonds {
             Json(frac_bonds).save(dir.join(FNAME_FRAC_BONDS))?;
@@ -89,7 +89,7 @@ impl Load for StoredStructure {
 
         let Poscar { comment: title, coords, elements } = Load::load(dir.join(FNAME_STRUCTURE))?;
         let Json(meta) = Load::load(dir.join(FNAME_META))?;
-        let StoredStructureMeta { layers, masses, layer_sc_matrices } = meta;
+        let Meta { layers, masses, layer_sc_matrices } = meta;
         let frac_bonds = if dir.join(FNAME_FRAC_BONDS).exists() {
             let Json(bonds) = Load::load(dir.join(FNAME_FRAC_BONDS))?;
             Some(bonds)
