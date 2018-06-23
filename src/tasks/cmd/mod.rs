@@ -887,8 +887,12 @@ impl TrialDir {
                         // println!("{:?}", pos.flat().iter().sum::<f64>());
 
                         eprint!("\rdatapoint {:>6} of {}", i, w * h);
-                        PotentialBuilder::from_config_parts(me, &settings.threading, &settings.lammps_update_style, &settings.potential)
-                            .one_off()
+                        PotentialBuilder::from_config_parts(
+                            Some(me),
+                            &settings.threading,
+                            &settings.lammps_update_style,
+                            &settings.potential,
+                        ).one_off()
                             .compute_grad(
                                 &coords.clone().with_carts(pos.to_vec()),
                                 get_meta().sift(),
@@ -1103,6 +1107,57 @@ pub(crate) fn run_sparse_analysis(
     write_eigen_info_for_humans(&ev_analysis, &mut |s| FailOk(info!("{}", s)))?;
 
     ev_analysis
+})}
+
+//=================================================================
+
+pub(crate) fn run_plot_vdw(
+    pot: &cfg::PotentialKind,
+    z: f64,
+    rs: &[f64],
+) -> FailResult<()>
+{Ok({
+    use ::rsp2_structure::{CoordsKind};
+    let threading = cfg::Threading::Lammps;
+
+    let lammps_update_style = cfg::LammpsUpdateStyle::Fast { sync_positions_every: 1 };
+    let pot = PotentialBuilder::from_config_parts(None, &threading, &lammps_update_style, pot);
+
+    let lattice = {
+        let a = rs.iter().fold(0.0, |a, &b| f64::max(a, b)) + 20.0;
+        let c = z + 20.0;
+        Lattice::orthorhombic(a, a, c)
+    };
+    let (direction, direction_perp) = {
+        let mut v = V3(::rand::random());
+        v[2] = 0.0;
+        let dir = v.unit();
+        let perp = V3([dir[1], -dir[0], 0.0]); // dir rotated by 90
+        (dir, perp)
+    };
+    let get_coords = |r: f64| {
+        let rho = f64::sqrt(r * r - z * z);
+        assert!(rho.is_finite());
+
+        let pos = rho * direction + V3([0.0, 0.0, z]);
+        Coords::new(lattice.clone(), CoordsKind::Carts(vec![V3::zero(), pos]))
+    };
+
+    let masses: Rc<[Mass]> = vec![Mass(::common::default_element_mass(CARBON).unwrap()); 2].into();
+    let elements: Rc<[Element]> = vec![CARBON; 2].into();
+    let meta = hlist![masses, elements];
+
+    let mut diff_fn = pot.initialize_diff_fn(&get_coords(rs[0]), meta.sift())?;
+
+    println!("# R Value Fpar Fperp Fz");
+    for &r in rs {
+        let coords = get_coords(r);
+        let (value, grad) = diff_fn.compute(&coords, meta.sift())?;
+        let f = -grad[1];
+        let f_par = V3::dot(&f, &direction);
+        let f_perp = V3::dot(&f, &direction_perp);
+        println!("  {} {} {:e} {:e} {:e}", r, value, f_par, f_perp, f[2]);
+    }
 })}
 
 //=================================================================

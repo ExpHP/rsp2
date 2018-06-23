@@ -120,6 +120,16 @@ impl ConfigSources {
         self.0.into_iter()
             .fold(empty, |a, b| dumb_config_merge(a, b.yaml))
     }
+
+    pub fn deserialize<T: YamlRead>(self) -> FailResult<T> {
+        // (NOTE: This is a Rube Goldberg machine of yaml conversions, all to have nice error
+        //        messages. It goes to a Value and then to a string (as that's the easiest way to
+        //        get a Read, which is required to have value paths appear in error messages),
+        //        from which it will be parsed back into a Value in rsp2-tasks-config, etc...)
+        let value = self.into_effective_yaml();
+        let s = ::serde_yaml::to_string(&value)?;
+        YamlRead::from_reader(s.as_bytes())
+    }
 }
 
 /// A simplistic config-merging function which operates directly on the yaml representation,

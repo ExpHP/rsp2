@@ -341,11 +341,11 @@ impl PotentialBuilder {
         trial_dir: &TrialDir,
         cfg: &cfg::Settings,
     ) -> Box<PotentialBuilder> {
-        Self::from_config_parts(trial_dir, &cfg.threading, &cfg.lammps_update_style, &cfg.potential)
+        Self::from_config_parts(Some(trial_dir), &cfg.threading, &cfg.lammps_update_style, &cfg.potential)
     }
 
     pub(crate) fn from_config_parts(
-        trial_dir: &TrialDir,
+        trial_dir: Option<&TrialDir>,
         threading: &cfg::Threading,
         update_style: &cfg::LammpsUpdateStyle,
         config: &cfg::PotentialKind,

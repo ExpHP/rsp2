@@ -58,11 +58,11 @@ where F: FnOnce(SetGlobalLogfile) -> FailResult<()>,
     });
 }
 
-impl CliDeserialize for NewTrialDirArgs {
+struct ConfigArgs(ConfigSources);
+
+impl CliDeserialize for ConfigArgs {
     fn _augment_clap_app<'a, 'b>(app: clap::App<'a, 'b>) -> clap::App<'a, 'b> {
         app.args(&[
-            arg!(*trial_dir [-o][--output]=OUTDIR "output trial directory"),
-            arg!( force [-f][--force] "replace existing output directories"),
             arg!(*config [-c][--config]=CONFIG... "\
                 config yaml, provided as either a filepath, or as an embedded literal \
                 (via syntax described below). \
@@ -81,9 +81,23 @@ impl CliDeserialize for NewTrialDirArgs {
         ])
     }
 
+
+    fn _resolve_args(m: &clap::ArgMatches) -> FailResult<Self>
+    { ConfigSources::resolve_from_args(m.expect_values_of("config")).map(ConfigArgs) }
+}
+
+impl CliDeserialize for NewTrialDirArgs {
+    fn _augment_clap_app<'a, 'b>(app: clap::App<'a, 'b>) -> clap::App<'a, 'b> {
+        let app = app.args(&[
+            arg!(*trial_dir [-o][--output]=OUTDIR "output trial directory"),
+            arg!( force [-f][--force] "replace existing output directories"),
+        ]);
+        ConfigArgs::_augment_clap_app(app)
+    }
+
     fn _resolve_args(m: &clap::ArgMatches) -> FailResult<Self>
     { Ok(NewTrialDirArgs {
-        config_sources: ConfigSources::resolve_from_args(m.expect_values_of("config"))?,
+        config_sources: ConfigArgs::_resolve_args(m)?.0,
         err_if_existing: !m.is_present("force"),
         // FIXME factor out 'absolute()'
         trial_dir: PathDir::current_dir()?.join(m.expect_value_of("trial_dir")),
@@ -332,5 +346,36 @@ pub fn dynmat_test(bin_name: &str) {
         let _ = logfile; // no trial dir
 
         ::cmd::run_dynmat_test(&input)
+    });
+}
+
+// %% CRATES: binary: rsp2-plot-vdw %%
+pub fn plot_vdw(bin_name: &str) {
+    wrap_result_main(|logfile| {
+        let (app, de) = CliDeserialize::augment_clap_app({
+            ::clap::App::new(bin_name)
+                .args(&[
+                    arg!(*z [-z]=ZSEP "z separation"),
+                    arg!( r_min [--r-min]=RMIN ""),
+                    arg!( r_max [--r-max]=RMAX ""),
+                    arg!( steps [--steps]=RSTEP ""),
+                ])
+        });
+        let matches = app.get_matches();
+        let ConfigArgs(config) = de.resolve_args(&matches)?;
+
+        let _ = logfile; // no trial dir
+
+        let z: f64 = matches.expect_value_of("z").parse()?;
+        let r_min: f64 = matches.value_of("r_min").map_or(Ok(z), str::parse)?;
+        let r_max: f64 = matches.value_of("r_max").unwrap_or("15.0").parse()?;
+        let steps: u32 = matches.value_of("steps").unwrap_or("200").parse()?;
+
+        let rs = (0..steps).map(|i| {
+            let alpha = i as f64 / (steps as f64 - 1.0);
+            r_min * (1.0 - alpha) + r_max * alpha
+        }).collect::<Vec<_>>();
+
+        ::cmd::run_plot_vdw(&config.deserialize()?, z, &rs[..])
     });
 }

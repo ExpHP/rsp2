@@ -318,6 +318,7 @@ pub enum PotentialKind {
     /// Arranges atoms into a chain along the first lattice vector.
     #[serde(rename = "test-func-chainify")] TestChainify,
 }
+derive_yaml_read!{PotentialKind}
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -334,13 +335,16 @@ pub struct PotentialAirebo {
 #[derive(Debug, Clone, PartialEq, Default)]
 #[serde(rename_all = "kebab-case")]
 pub struct PotentialKolmogorovCrespiZ {
-    // NOTE: defaults are not here because they are defined in rsp2_tasks,
+    // NOTE: some defaults are not here because they are defined in rsp2_tasks,
     //       which depends on this crate
+    #[serde(default = "_potential_kolmogorov_crespi_z__rebo")]
+    pub rebo: bool,
     /// Cutoff radius (Angstrom?)
     pub cutoff: Option<f64>,
     /// Separations larger than this are regarded as vacuum and do not interact. (Angstrom)
     pub max_layer_sep: Option<f64>,
 }
+fn _potential_kolmogorov_crespi_z__rebo() -> bool { true }
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq, Default)]

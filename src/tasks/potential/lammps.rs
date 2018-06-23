@@ -67,13 +67,15 @@ fn assert_lammps_builder_send_sync() {
 impl<P: Clone> Builder<P>
 {
     pub(crate) fn new(
-        trial_dir: &TrialDir,
+        trial_dir: Option<&TrialDir>,
         threading: &cfg::Threading,
         update_style: &cfg::LammpsUpdateStyle,
         potential: P,
     ) -> Self {
         let mut inner = InnerBuilder::new();
-        inner.append_log(trial_dir.join("lammps.log"));
+        if let Some(trial_dir) = trial_dir {
+            inner.append_log(trial_dir.join("lammps.log"));
+        }
         inner.threaded(*threading == cfg::Threading::Lammps);
         inner.update_style(match *update_style {
             cfg::LammpsUpdateStyle::Safe => UpdateStyle::safe(),
@@ -267,6 +269,7 @@ mod kc_z {
     /// Uses `pair_style kolmogorov/crespi/z`.
     #[derive(Debug, Clone, Default)]
     pub struct KolmogorovCrespiZ {
+        rebo: bool,
         cutoff: f64,
         // max distance between interacting layers.
         // used to identify vacuum separation.
@@ -278,8 +281,9 @@ mod kc_z {
 
     impl<'a> From<&'a cfg::PotentialKolmogorovCrespiZ> for KolmogorovCrespiZ {
         fn from(cfg: &'a cfg::PotentialKolmogorovCrespiZ) -> Self {
-            let cfg::PotentialKolmogorovCrespiZ { cutoff, max_layer_sep } = *cfg;
+            let cfg::PotentialKolmogorovCrespiZ { rebo, cutoff, max_layer_sep } = *cfg;
             KolmogorovCrespiZ {
+                rebo,
                 cutoff: cutoff.unwrap_or(DEFAULT_KC_Z_CUTOFF),
                 max_layer_sep: max_layer_sep.unwrap_or(DEFAULT_KC_Z_MAX_LAYER_SEP),
             }
@@ -368,19 +372,36 @@ mod kc_z {
             //     pair_style hybrid/overlay rebo kolmogorov/crespi/z 20 &
             //                 kolmogorov/crespi/z 20 kolmogorov/crespi/z 20
             let mut pair_commands = vec![];
-            pair_commands.push({
-                let mut cmd = PairCommand::pair_style("hybrid/overlay").arg("rebo");
+            pair_commands.push((|| { // iife
+                let mut cmd = PairCommand::pair_style("hybrid/overlay");
+                let mut has_coeffs = false;
+                if self.rebo {
+                    cmd = cmd.arg("rebo");
+                    has_coeffs = true;
+                }
                 for _ in &interacting_pairs {
                     cmd = cmd.arg("kolmogorov/crespi/z").arg(self.cutoff);
+                    has_coeffs = true;
                 }
-                cmd
-            });
 
-            pair_commands.push({
-                PairCommand::pair_coeff(.., ..)
-                    .args(&["rebo", "CH.airebo"])
-                    .args(&vec!["C"; layers.len()])
-            });
+                // hybrid/overlay without at least one potential is invalid.
+                // (hey, I don't make the rules)
+                // FIXME: This would be cleaner with a type dedicated to handle hybrid/overlay
+                if !has_coeffs {
+                    // NOTE: returns to iife inside `push(...)`
+                    return PairCommand::pair_style("none");
+                }
+
+                cmd
+            })());
+
+            if self.rebo {
+                pair_commands.push({
+                    PairCommand::pair_coeff(.., ..)
+                        .args(&["rebo", "CH.airebo"])
+                        .args(&vec!["C"; layers.len()])
+                });
+            }
 
             // If there is a single kcz term, then the pair_coeff command is:
             //
