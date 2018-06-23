@@ -84,7 +84,8 @@ gen_each!{
             { One::one() }
 
             /// Matrix inverse.
-            #[deprecated = "use `inv(&matrix)` (also `mat::inv(&matrix)`)"]
+            ///
+            /// It is recommended to write this as `M33::inv(m)` or etc. rather than `m.inv()`.
             #[inline(always)]
             pub fn inv(&self) -> Self
             where Self: Inv,

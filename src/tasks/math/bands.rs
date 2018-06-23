@@ -12,7 +12,7 @@
 use ::rsp2_structure::{CoordsKind, Lattice, Coords};
 use ::rsp2_kets::{Ket, KetRef, Rect};
 use ::rsp2_array_utils::{arr_from_fn};
-use ::rsp2_array_types::{V3, M33, dot, mat};
+use ::rsp2_array_types::{V3, M33, dot, inv};
 
 use ::std::f64::consts::PI;
 use ::itertools::Itertools;
@@ -212,8 +212,8 @@ impl GammaUnfolder {
                 //  - supercell reciprocal lattice vectors (which we are trying to project onto)
                 let sc_lattice = superstructure.lattice().matrix();
                 let sc_inverse = superstructure.lattice().inverse_matrix();
-                let ref pc_lattice = &mat::inv(&sc_matrix.matrix.map(|x| x as f64)) * sc_lattice;
-                let ref pc_inverse = mat::inv(pc_lattice);
+                let ref pc_lattice = &inv(&sc_matrix.matrix.map(|x| x as f64)) * sc_lattice;
+                let ref pc_inverse = inv(pc_lattice);
                 let ref sc_recip = sc_inverse.t();
                 let ref pc_recip = pc_inverse.t();
 

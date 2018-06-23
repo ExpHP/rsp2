@@ -61,9 +61,7 @@ gen_each!{
 
             /// Get the inner product of two vectors.
             ///
-            /// This is also available as the free function `dot`, and to be honest
-            /// there's really no reason to prefer this form...
-            #[deprecated = "use `dot(&a, &b)` (also `vee::dot(&a, &b)`)"]
+            /// It is recommended you write this as `V3::dot(a, b)`, rather than `a.dot(b)`.
             #[inline(always)]
             pub fn dot(&self, other: &Self) -> ScalarT<Self>
             where Self: Dot,
@@ -101,13 +99,13 @@ gen_each!{
             #[inline]
             pub fn par(&self, r: &Self) -> Self
             where X: Field + PrimitiveFloat,
-            { r * (dot(self, r) / dot(r, r)) }
+            { r * ($Vn::dot(self, r) / $Vn::dot(r, r)) }
 
             /// Get the part of the vector that is perpendicular to `r`.
             ///
             /// Be aware that chained calls to `perp` can have **spectacularly bad**
             /// numerical stability issues; you cannot trust that `c.perp(a).perp(b)`
-            /// is even *remotely* orthogonal to `a`.
+            /// is even *remotely* orthogonal to `a` unless `b` is orthogonal to `a`.
             /// (for 3d vectors, try `c.par(a.cross(b))` instead.)
             #[inline]
             pub fn perp(&self, r: &Self) -> Self
