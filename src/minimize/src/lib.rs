@@ -27,7 +27,8 @@ extern crate rand;
 extern crate ordered_float;
 #[cfg(test)] extern crate env_logger;
 
-#[cfg(test)] pub(crate) mod test_functions;
+pub mod test;
+
 pub(crate) mod util;
 pub(crate) mod stop_condition;
 pub mod acgsd;

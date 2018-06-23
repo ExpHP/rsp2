@@ -308,90 +308,201 @@ pub mod n_dee {
         }
     }
 
+    pub mod work {
+        use super::*;
+
+        pub enum PathConfig {
+            Random {
+                num_points: usize,
+                domain_min: Vec<f64>,
+                domain_max: Vec<f64>,
+            },
+            Fixed(Vec<Vec<f64>>),
+        }
+
+        pub enum RefinementMode {
+            Double, // double the number of points each step
+            Linear, // do 1 point per vertex, then 2, then 3...
+        }
+
+        pub struct BasePath(Vec<Vec<f64>>);
+
+        impl PathConfig {
+            pub fn generate(&self) -> BasePath {
+                BasePath({
+                    match *self {
+                        PathConfig::Random {
+                            num_points, ref domain_min, ref domain_max,
+                        } => {
+                            assert_eq!(domain_min.len(), domain_max.len());
+                            assert!(num_points > 1, "{}", num_points);
+                            (0..num_points)
+                                .map(|_| {
+                                    (0..domain_min.len()).map(|i| {
+                                        let min = domain_min[i];
+                                        let max = domain_max[i];
+                                        ::util::random::uniform(min, max)
+                                    }).collect()
+                                })
+                                .collect()
+                        },
+                        PathConfig::Fixed(ref points) => {
+                            assert!(points.len() > 1, "{}", points.len());
+                            points.clone()
+                        },
+                    }
+                })
+            }
+
+            /// Adds an extra point if necessary to close the curve.
+            ///
+            /// (the length returned by this *may or may not* be equal
+            /// to the length of the path produced by `generate`)
+            pub fn generate_closed(&self) -> BasePath {
+                let BasePath(mut points) = self.generate();
+                if &points[0] != points.last().expect("checked in generate") {
+                    let first = points[0].clone();
+                    points.push(first);
+                }
+                BasePath(points)
+            }
+        }
+
+        impl RefinementMode {
+            pub fn densities(&self) -> impl Iterator<Item=usize> {
+                use ::itertools::iterate;
+                match *self {
+                    RefinementMode::Double => Box::new(iterate(1usize, |x| 2 * x)) as Box<Iterator<Item=_>>,
+                    RefinementMode::Linear => Box::new(0usize..) as Box<Iterator<Item=_>>,
+                }
+            }
+        }
+
+        impl BasePath {
+            pub fn is_closed(&self) -> bool {
+                &self.0[0] == self.0.last().expect("cannot construct len 0 BasePath")
+            }
+
+            pub fn start(&self) -> Vec<f64> { self.0[0].clone() }
+            pub fn end(&self) -> Vec<f64> { self.0.last().expect("").clone() }
+
+            pub fn with_density(&self, density: usize) -> Vec<Vec<f64>> {
+                use ::std::iter::once;
+
+                assert_ne!(density, 0);
+                assert!(self.0.len() > 0);
+
+                let BasePath(vertices) = self;
+                vertices.windows(2).flat_map(move |window| {
+                    let prev = &window[0];
+                    let next = &window[1];
+                    (0..density).map(move |i| {
+                        let alpha = i as f64 / density as f64;
+                        zip_eq!(prev, next)
+                            .map(|(&p, &n)| (1.0 - alpha) * p + alpha * n)
+                            .collect()
+                    })
+                // finish the final segment
+                }).chain(once(vertices.last().expect("").clone())).collect()
+            }
+        }
+
+        pub fn compute_work_along_path<D>(mut diff: D, path: &[Vec<f64>]) -> f64
+        where D: OnceDifferentiable,
+        {
+            use ::itertools::Itertools;
+            use ::rsp2_slice_math::{v,V,vdot};
+            path.iter().tuple_windows().map(|(cur, prev)| {
+                let V(mid) = (v(cur) + v(prev)) / 2.0;
+                let V(displacement) = v(cur) - v(prev);
+
+                let gradient = diff.gradient(&mid);
+                -1.0 * vdot(&gradient, &displacement)
+            }).sum()
+        }
+    }
+
     // these are for specificity;
     // no good using a test function if it isn't correct!
     #[deny(dead_code)]
     #[cfg(test)]
     mod tests {
         use super::OnceDifferentiable;
-        struct Params {
-            initial_points: u32,
-            max_refines: u32,
-            domain_min: Vec<f64>,
-            domain_max: Vec<f64>,
+        use super::work::{PathConfig, RefinementMode};
+        use super::work::compute_work_along_path;
+
+        pub struct MaxRefines(pub u32);
+
+        pub fn test_conservativity<D>(
+            path: &PathConfig,
+            refine_mode: RefinementMode,
+            max_refines: MaxRefines,
+            abs_tol: f64,
+            mut diff: D,
+        ) where D: super::OnceDifferentiable
+        {
+            use ::std::fmt::Write;
+
+            let path = path.generate_closed();
+
+            let mut computed_values = vec![];
+            for density in refine_mode.densities().take(max_refines.0 as usize) {
+                let work = compute_work_along_path(&mut diff, &path.with_density(density));
+                computed_values.push(work);
+                if work < abs_tol {
+                    return;
+                }
+            }
+
+            let last_3 = &computed_values[computed_values.len() - 3..];
+            let mut s = String::new();
+            let _ = writeln!(&mut s, "Non-conservative?");
+            let _ = writeln!(&mut s, " Convergents: {:e}", last_3[0]);
+            let _ = writeln!(&mut s, "              {:e}", last_3[1]);
+            let _ = writeln!(&mut s, "              {:e}", last_3[2]);
+            panic!("{}", s);
         }
 
-        impl Params {
-            fn random_point(&self) -> Vec<f64> {
-                (0..self.domain_min.len()).map(|i| {
-                    let min = self.domain_min[i];
-                    let max = self.domain_max[i];
-                    ::util::random::uniform(min, max)
-                }).collect()
+        /// NOTE: Not suitable for closed paths (where the integral should be zero)
+        ///       because it uses a relative tolerance.  Use `test_conservativity` instead.
+        pub fn test_work_value<D>(
+            path: &PathConfig,
+            refine_mode: RefinementMode,
+            max_refines: MaxRefines,
+            rel_tol: f64,
+            mut diff: D,
+        ) where D: super::OnceDifferentiable
+        {
+            use ::std::fmt::Write;
+            let path = path.generate();
+            if path.is_closed() {
+                warn!{"\
+                    test_work_value was used on a closed path. \
+                    Please use `test_conservativity` instead.\
+                "}
             }
 
-            fn test_conservativity<D>(
-                &self,
-                abs_tol: f64,
-                mut diff: D,
-            ) where D: super::OnceDifferentiable
-            {
-                use ::std::fmt::Write;
+            let initial_value = diff.value(&path.start());
+            let final_value = diff.value(&path.end());
+            let mut computed_values = vec![];
+            for density in refine_mode.densities().take(max_refines.0 as usize) {
+                let work = compute_work_along_path(&mut diff, &path.with_density(density));
+                let computed = initial_value + work;
+                computed_values.push(computed);
 
-                let mut path = (0..self.initial_points-1).map(|_| self.random_point()).collect::<Vec<_>>();
-                let first = path[0].clone(); path.push(first);
-
-                let mut computed_values = vec![];
-                for _ in 0..self.max_refines {
-                    let work = compute_work_along_path(&mut diff, &path);
-                    computed_values.push(work);
-                    if work < abs_tol {
-                        return;
-                    }
-                    path = refine_path(&path);
+                if (final_value - computed).abs() < rel_tol * final_value.abs() {
+                    return;
                 }
-
-                let last_3 = &computed_values[computed_values.len() - 3..];
-                let mut s = String::new();
-                let _ = writeln!(&mut s, "Non-conservative?");
-                let _ = writeln!(&mut s, " Convergents: {:e}", last_3[0]);
-                let _ = writeln!(&mut s, "              {:e}", last_3[1]);
-                let _ = writeln!(&mut s, "              {:e}", last_3[2]);
-                panic!("{}", s);
             }
 
-            fn test_work_value<D>(
-                &self,
-                rel_tol: f64,
-                mut diff: D,
-            )
-            where D: super::OnceDifferentiable
-            {
-                use ::std::fmt::Write;
-                let mut path = (0..self.initial_points).map(|_| self.random_point()).collect::<Vec<_>>();
-
-                let initial_value = diff.value(&path[0]);
-                let final_value = diff.value(path.last().unwrap());
-                let mut computed_values = vec![];
-                for _ in 0..self.max_refines {
-                    let computed = initial_value + compute_work_along_path(&mut diff, &path);
-                    computed_values.push(computed);
-
-                    if (final_value - computed).abs() < rel_tol * final_value.abs() {
-                        return;
-                    }
-                    path = refine_path(&path);
-                }
-
-                let last_3 = &computed_values[computed_values.len() - 3..];
-                let mut s = String::new();
-                let _ = writeln!(&mut s, "Value-gradient mismatch?");
-                let _ = writeln!(&mut s, "          Actual value: {:e}", final_value);
-                let _ = writeln!(&mut s, " Convergents from work: {:e}", last_3[0]);
-                let _ = writeln!(&mut s, "                        {:e}", last_3[1]);
-                let _ = writeln!(&mut s, "                        {:e}", last_3[2]);
-                panic!("{}", s);
-            }
+            let last_3 = &computed_values[computed_values.len() - 3..];
+            let mut s = String::new();
+            let _ = writeln!(&mut s, "Value-gradient mismatch?");
+            let _ = writeln!(&mut s, "          Actual value: {:e}", final_value);
+            let _ = writeln!(&mut s, " Convergents from work: {:e}", last_3[0]);
+            let _ = writeln!(&mut s, "                        {:e}", last_3[1]);
+            let _ = writeln!(&mut s, "                        {:e}", last_3[2]);
+            panic!("{}", s);
         }
 
         fn refine_path(path: &[Vec<f64>]) -> Vec<Vec<f64>>
@@ -408,20 +519,6 @@ pub mod n_dee {
             new
         }
 
-        fn compute_work_along_path<D>(mut diff: D, path: &[Vec<f64>]) -> f64
-        where D: OnceDifferentiable,
-        {
-            use ::itertools::Itertools;
-            use ::rsp2_slice_math::{v,V,vdot};
-            path.iter().tuple_windows().map(|(cur, prev)| {
-                let V(mid) = (v(cur) + v(prev)) / 2.0;
-                let V(displacement) = v(cur) - v(prev);
-
-                let gradient = diff.gradient(&mid);
-                -1.0 * vdot(&gradient, &displacement)
-            }).sum()
-        }
-
         #[test]
         fn trid_minimum() {
             let mut trid = super::Trid(10);
@@ -435,22 +532,32 @@ pub mod n_dee {
 
         #[test]
         fn trid_conservative() {
-            Params {
-                initial_points: 5,
-                max_refines: 8,
-                domain_min: vec![-10.0; 10],
-                domain_max: vec![ 10.0; 10],
-            }.test_conservativity(1e-6, super::Trid(10));
+            test_conservativity(
+                &PathConfig::Random {
+                    num_points: 5,
+                    domain_min: vec![-10.0; 10],
+                    domain_max: vec![ 10.0; 10],
+                },
+                RefinementMode::Double,
+                MaxRefines(8),
+                1e-6,
+                super::Trid(10),
+            )
         }
 
         #[test]
         fn trid_value_vs_grad() {
-            Params {
-                initial_points: 5,
-                max_refines: 8,
-                domain_min: vec![-10.0; 10],
-                domain_max: vec![ 10.0; 10],
-            }.test_work_value(1e-6, super::Trid(10));
+            test_work_value(
+                &PathConfig::Random {
+                    num_points: 5,
+                    domain_min: vec![-10.0; 10],
+                    domain_max: vec![ 10.0; 10],
+                },
+                RefinementMode::Double,
+                MaxRefines(8),
+                1e-6,
+                super::Trid(10)
+            )
         }
 
         #[test]
@@ -476,18 +583,22 @@ pub mod n_dee {
             let ndim = 10;
             let min_value = -40.0;
             let min_radius = 1.25;
-            let lj = super::HyperLennardJones { ndim, min_value, min_radius };
 
-            Params {
-                // FIXME The work integral converges slowly for lj,
-                //       leading to spurious failures, so I had to
-                //       loosen the constraints a bit.
-                //       Perhaps Gaussian quadrature could help.
-                initial_points: 4,            // 5 originally
-                max_refines: 10,              // 8
-                domain_min: vec![ 0.5; ndim], // vec![ 0.1; ndim]
-                domain_max: vec![ 2.0; ndim], // vec![ 3.0; ndim]
-            }.test_conservativity(1e-4, lj);  // 1e-6
+            test_conservativity(
+                &PathConfig::Random {
+                    // FIXME The work integral converges slowly for lj,
+                    //       leading to spurious failures, so I had to
+                    //       loosen the constraints a bit.
+                    //       Perhaps Gaussian quadrature could help.
+                    num_points: 4,                // 5 originally
+                    domain_min: vec![ 0.5; ndim], // vec![ 0.1; ndim]
+                    domain_max: vec![ 2.0; ndim], // vec![ 3.0; ndim]
+                },
+                RefinementMode::Double,
+                MaxRefines(10),              // 8 originally
+                1e-4,                        // 1e-6 originally
+                super::HyperLennardJones { ndim, min_value, min_radius },
+            )
         }
 
         #[test]
@@ -495,18 +606,22 @@ pub mod n_dee {
             let ndim = 10;
             let min_value = -40.0;
             let min_radius = 1.25;
-            let lj = super::HyperLennardJones { ndim, min_value, min_radius };
 
-            Params {
-                // FIXME The work integral converges slowly for lj,
-                //       leading to spurious failures, so I had to
-                //       loosen the constraints a bit.
-                //       Perhaps Gaussian quadrature could help.
-                initial_points: 4,            // 5 originally
-                max_refines: 10,              // 8
-                domain_min: vec![ 0.5; ndim], // vec![ 0.1; ndim]
-                domain_max: vec![ 2.0; ndim], // vec![ 3.0; ndim]
-            }.test_work_value(1e-4, lj);      // 1e-6
+            test_work_value(
+                &PathConfig::Random {
+                    // FIXME The work integral converges slowly for lj,
+                    //       leading to spurious failures, so I had to
+                    //       loosen the constraints a bit.
+                    //       Perhaps Gaussian quadrature could help.
+                    num_points: 4,                // 5 originally
+                    domain_min: vec![ 0.5; ndim], // vec![ 0.1; ndim]
+                    domain_max: vec![ 2.0; ndim], // vec![ 3.0; ndim]
+                },
+                RefinementMode::Double,
+                MaxRefines(10),  // 8 originally
+                1e-4,            // 1e-6 originally
+                super::HyperLennardJones { ndim, min_value, min_radius },
+            )
         }
 
         // TODO test Product, Sum, Recenter
