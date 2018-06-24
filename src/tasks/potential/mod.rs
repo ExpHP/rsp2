@@ -379,6 +379,22 @@ impl PotentialBuilder {
 }
 
 //-------------------------------------
+// interop with other crates in rsp2
+
+pub struct Rsp2MinimizeDiffFnShim {
+    pub ndim: usize,
+    pub diff_fn: Box<DynFlatDiffFn<'static>>
+}
+
+impl<'a> ::rsp2_minimize::test::n_dee::OnceDifferentiable for Rsp2MinimizeDiffFnShim {
+    fn ndim(&self) -> usize
+    { self.ndim }
+
+    fn diff(&mut self, pos: &[f64]) -> (f64, Vec<f64>)
+    { (*self.diff_fn)(pos).unwrap() }
+}
+
+//-------------------------------------
 // Implementations
 
 // (these are down here because they depend on the macro defined above)

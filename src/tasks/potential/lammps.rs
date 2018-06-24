@@ -89,7 +89,11 @@ impl<P: Clone> Builder<P>
             },
         });
         // XXX
-//        inner.data_trace_dir(Some(trial_dir.join("lammps-data-trace")));
+        inner.data_trace_dir(Some({
+            trial_dir.map(|t| t.as_path().to_owned())
+                .unwrap_or(::std::env::current_dir().unwrap())
+                .join("lammps-data-trace")
+        }));
 
         Builder { inner, potential }
     }
@@ -444,6 +448,7 @@ mod kc_z {
     pub struct KolmogorovCrespiZ {
         rebo: bool,
         cutoff: f64,
+        cutoff_interval: Option<f64>,
         // max distance between interacting layers.
         // used to identify vacuum separation.
         max_layer_sep: f64,
@@ -454,10 +459,13 @@ mod kc_z {
 
     impl<'a> From<&'a cfg::PotentialKolmogorovCrespiZ> for KolmogorovCrespiZ {
         fn from(cfg: &'a cfg::PotentialKolmogorovCrespiZ) -> Self {
-            let cfg::PotentialKolmogorovCrespiZ { rebo, cutoff, max_layer_sep } = *cfg;
+            let cfg::PotentialKolmogorovCrespiZ {
+                rebo, cutoff, max_layer_sep, cutoff_interval,
+            } = *cfg;
             KolmogorovCrespiZ {
                 rebo,
                 cutoff: cutoff.unwrap_or(DEFAULT_KC_Z_CUTOFF),
+                cutoff_interval,
                 max_layer_sep: max_layer_sep.unwrap_or(DEFAULT_KC_Z_MAX_LAYER_SEP),
             }
         }
@@ -545,7 +553,7 @@ mod kc_z {
                     pair_style: PairStyle::named("rebo"),
                     pair_coeffs: vec![{
                         PairCoeff::new(.., ..)
-                            .args(&["rebo", "CH.airebo"])
+                            .arg("CH.airebo")
                             .args(&vec!["C"; layers.len()])
                     }],
                 });
@@ -553,7 +561,13 @@ mod kc_z {
 
             for &(i, j) in &interacting_pairs {
                 overlay.push(overlay::Item {
-                    pair_style: PairStyle::named("kolmogorov/crespi/z").arg(self.cutoff),
+                    pair_style: {
+                        let mut cmd = PairStyle::named("kolmogorov/crespi/z").arg(self.cutoff);
+                        if let Some(cutoff_interval) = self.cutoff_interval {
+                            cmd = cmd.arg(cutoff_interval);
+                        }
+                        cmd
+                    },
                     pair_coeffs: vec![{
                         PairCoeff::new(i, j)
                             .arg("CC.KC")

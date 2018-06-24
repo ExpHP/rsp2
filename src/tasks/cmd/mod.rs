@@ -1129,9 +1129,8 @@ pub(crate) fn run_plot_vdw(
         Lattice::orthorhombic(a, a, c)
     };
     let (direction, direction_perp) = {
-        let mut v = V3(::rand::random());
-        v[2] = 0.0;
-        let dir = v.unit();
+        // a randomly generated direction, but the same between runs
+        let dir = V3([0.2268934438759319, 0.5877271759538497, 0.0]).unit();
         let perp = V3([dir[1], -dir[0], 0.0]); // dir rotated by 90
         (dir, perp)
     };
@@ -1157,6 +1156,61 @@ pub(crate) fn run_plot_vdw(
         let f_par = V3::dot(&f, &direction);
         let f_perp = V3::dot(&f, &direction_perp);
         println!("  {} {} {:e} {:e} {:e}", r, value, f_par, f_perp, f[2]);
+    }
+})}
+
+pub(crate) fn run_converge_vdw(
+    pot: &cfg::PotentialKind,
+    z: f64,
+    (r_min, r_max): (f64, f64),
+) -> FailResult<()>
+{Ok({
+    use ::rsp2_structure::{CoordsKind};
+    let threading = cfg::Threading::Lammps;
+
+    let lammps_update_style = cfg::LammpsUpdateStyle::Fast { sync_positions_every: 1 };
+    let pot = PotentialBuilder::from_config_parts(None, &threading, &lammps_update_style, pot);
+
+    let lattice = Lattice::orthorhombic(40.0, 40.0, 40.0);
+    let (direction, direction_perp) = {
+        // a randomly generated direction, but the same between runs
+        let dir = V3([0.2268934438759319, 0.5877271759538497, 0.0]).unit();
+        let perp = V3([dir[1], -dir[0], 0.0]); // dir rotated by 90
+        (dir, perp)
+    };
+    let get_coords = |r: f64| {
+        let rho = f64::sqrt(r * r - z * z);
+        assert!(rho.is_finite());
+
+        let pos = rho * direction + V3([0.0, 0.0, z]);
+        Coords::new(lattice.clone(), CoordsKind::Carts(vec![V3::zero(), pos]))
+    };
+
+    let masses: Rc<[Mass]> = vec![Mass(::common::default_element_mass(CARBON).unwrap()); 2].into();
+    let elements: Rc<[Element]> = vec![CARBON; 2].into();
+    let meta = hlist![masses, elements];
+
+    let mut diff_fn = pot.initialize_diff_fn(&get_coords(r_min), meta.sift())?;
+
+    let value_1 = diff_fn.compute_value(&get_coords(r_min), meta.sift())?;
+    let value_2 = diff_fn.compute_value(&get_coords(r_max), meta.sift())?;
+    let d_value = value_2 - value_1;
+
+    use ::rsp2_minimize::test::n_dee::{work};
+    let path = work::PathConfig::Fixed(vec![
+        get_coords(r_min).to_carts().flat().to_vec(),
+        get_coords(r_max).to_carts().flat().to_vec(),
+    ]).generate();
+    println!("# Density Work DValue");
+    for density in work::RefinementMode::Double.densities().take(20) {
+        let work = work::compute_work_along_path(
+            ::potential::Rsp2MinimizeDiffFnShim {
+                ndim: 6,
+                diff_fn: pot.initialize_flat_diff_fn(&get_coords(r_min), meta.sift())?,
+            },
+            &path.with_density(density),
+        );
+        println!("# {} {} {}", density, work, d_value);
     }
 })}
 

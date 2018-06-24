@@ -343,6 +343,12 @@ pub struct PotentialKolmogorovCrespiZ {
     pub cutoff: Option<f64>,
     /// Separations larger than this are regarded as vacuum and do not interact. (Angstrom)
     pub max_layer_sep: Option<f64>,
+
+    /// Enable a smooth cutoff starting at `r = cutoff - cutoff_interval` and ending at
+    /// `r = cutoff`.
+    ///
+    /// NOTE: This requires a patched lammps.
+    pub cutoff_interval: Option<f64>,
 }
 fn _potential_kolmogorov_crespi_z__rebo() -> bool { true }
 

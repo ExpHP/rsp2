@@ -379,3 +379,28 @@ pub fn plot_vdw(bin_name: &str) {
         ::cmd::run_plot_vdw(&config.deserialize()?, z, &rs[..])
     });
 }
+
+// %% CRATES: binary: rsp2-converge-vdw %%
+pub fn converge_vdw(bin_name: &str) {
+    wrap_result_main(|logfile| {
+        let (app, de) = CliDeserialize::augment_clap_app({
+            ::clap::App::new(bin_name)
+                .args(&[
+                    arg!(*z [-z]=ZSEP "z separation"),
+                    arg!( r_min [--r-min]=RMIN ""),
+                    arg!( r_max [--r-max]=RMAX ""),
+                    arg!( steps [--steps]=RSTEP ""),
+                ])
+        });
+        let matches = app.get_matches();
+        let ConfigArgs(config) = de.resolve_args(&matches)?;
+
+        let _ = logfile; // no trial dir
+
+        let z: f64 = matches.expect_value_of("z").parse()?;
+        let r_min: f64 = matches.value_of("r_min").map_or(Ok(z), str::parse)?;
+        let r_max: f64 = matches.value_of("r_max").unwrap_or("15.0").parse()?;
+
+        ::cmd::run_converge_vdw(&config.deserialize()?, z, (r_min, r_max))
+    });
+}
