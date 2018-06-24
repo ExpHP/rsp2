@@ -171,8 +171,9 @@ impl_dyn_clone_detail!{
 mod tests {
     use super::*;
     use ::FailOk;
-    use rsp2_structure::{Lattice, CoordsKind};
-    use ::rsp2_array_types::Envee;
+    use ::rsp2_structure::{Lattice, CoordsKind};
+    use ::rsp2_array_types::{Envee, Unvee};
+    use ::slice_of_array::prelude::*;
 
     #[test]
     fn converge_towards() {

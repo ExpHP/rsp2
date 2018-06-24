@@ -161,8 +161,10 @@ impl LammpsOwner {
 // the basics
 impl LammpsOwner {
     /// Invokes `lammps_command`.
-    pub fn command(&mut self, cmd: &str) -> FailResult<()>
+    pub fn command<S: ToString>(&mut self, cmd: S) -> FailResult<()>
     {Ok({
+        let cmd = &cmd.to_string()[..];
+
         api_trace!("lammps_command({:p}, {})", self.ptr, cmd);
 
         // FIXME: I still don't know if I'm supposed to free the output or not.
@@ -187,10 +189,8 @@ impl LammpsOwner {
     ///
     /// That is to say, it does NOT invoke `lammps_command_list`.
     /// (Though one should sincerely *hope* this difference does not matter...)
-    pub fn commands<S: ToString>(&mut self, cmds: &[S]) -> FailResult<()>
-    {Ok({
-        for s in cmds { self.command(&s.to_string())?; }
-    })}
+    pub fn commands<S: ToString>(&mut self, cmds: impl IntoIterator<Item=S>) -> FailResult<()>
+    { cmds.into_iter().try_for_each(|s| self.command(s)) }
 
     pub fn get_natoms(&mut self) -> usize
     {

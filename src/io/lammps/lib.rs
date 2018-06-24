@@ -453,33 +453,44 @@ pub struct InitInfo {
     pub masses: Vec<f64>,
 
     /// Lammps commands to initialize the pair potentials.
-    pub pair_commands: Vec<PairCommand>,
+    pub pair_style: PairStyle,
+
+    /// Lammps commands to initialize the pair potentials.
+    pub pair_coeffs: Vec<PairCoeff>,
 }
 
-/// Represents commands allowed to appear in `InitInfo.pair_commands`.
+/// Represents a `pair_style` command.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PairCommand {
-    PairStyle(Arg, Vec<Arg>),
-    PairCoeff(AtomTypeRange, AtomTypeRange, Vec<Arg>),
-}
+pub struct PairStyle(pub Arg, pub Vec<Arg>);
+/// Represents a `pair_coeff` command.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PairCoeff(pub AtomTypeRange, pub AtomTypeRange, pub Vec<Arg>);
 
-impl PairCommand {
-    pub fn pair_style(name: impl ToString) -> Self
-    { PairCommand::PairStyle(Arg::from(name), vec![]) }
+impl PairStyle {
+    pub fn named(name: impl ToString) -> Self
+    { PairStyle(Arg::from(name), vec![]) }
 
-    pub fn pair_coeff<I, J>(i: I, j: J) -> Self
-    where AtomTypeRange: From<I> + From<J>,
-    { PairCommand::PairCoeff(i.into(), j.into(), vec![]) }
+    pub fn name(&self) -> &str
+    { &(self.0).0 }
 
     /// Append an argument
     pub fn arg(mut self, arg: impl ToString) -> Self
-    {
-        match &mut self {
-            PairCommand::PairCoeff(_, _, v) => v,
-            PairCommand::PairStyle(_, v) => v,
-        }.push(Arg::from(arg));
-        self
-    }
+    { self.1.push(Arg::from(arg)); self }
+
+    /// Append several uniformly-typed arguments
+    pub fn args<As>(self, args: As) -> Self
+    where As: IntoIterator, As::Item: ToString,
+    { args.into_iter().fold(self, Self::arg) }
+}
+
+impl PairCoeff {
+    pub fn new<I, J>(i: I, j: J) -> Self
+    where AtomTypeRange: From<I> + From<J>,
+    { PairCoeff(i.into(), j.into(), vec![]) }
+
+    /// Append an argument
+    pub fn arg(mut self, arg: impl ToString) -> Self
+    { self.2.push(Arg::from(arg)); self }
 
     /// Append several uniformly-typed arguments
     pub fn args<As>(self, args: As) -> Self
@@ -559,22 +570,24 @@ impl fmt::Display for Arg {
     { write!(f, "{}", self.0) }
 }
 
-impl fmt::Display for PairCommand {
+impl fmt::Display for PairStyle {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result
     {Ok({
-        fn ws_join(items: &[Arg]) -> JoinDisplay<'_, Arg> {
-            JoinDisplay { items, sep: " " }
-        }
-
-        match self {
-            PairCommand::PairStyle(name, args) => {
-                write!(f, "pair_style {} {}", name, ws_join(args))?;
-            },
-            PairCommand::PairCoeff(i, j, args) => {
-                write!(f, "pair_coeff {} {} {}", i, j, ws_join(args))?;
-            },
-        }
+        let PairStyle(name, args) = self;
+        write!(f, "pair_style {} {}", name, ws_join(args))?;
     })}
+}
+
+impl fmt::Display for PairCoeff {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result
+    {Ok({
+        let PairCoeff(i, j, args) = self;
+        write!(f, "pair_coeff {} {} {}", i, j, ws_join(args))?;
+    })}
+}
+
+fn ws_join(items: &[Arg]) -> JoinDisplay<'_, Arg> {
+    JoinDisplay { items, sep: " " }
 }
 
 // Utility Display adapter for writing a separator between items.
@@ -688,14 +701,15 @@ impl<P: Potential> Lammps<P>
         ])?;
 
         {
-            let InitInfo { masses, pair_commands } = init_info;
+            let InitInfo { masses, pair_style, pair_coeffs } = init_info;
 
             lmp.command(&format!("create_box {} sim", masses.len()))?;
             for (i, mass) in (1..).zip(masses) {
                 lmp.command(&format!("mass {} {}", i, mass))?;
             }
 
-            lmp.commands(pair_commands)?;
+            lmp.command(pair_style)?;
+            lmp.commands(pair_coeffs)?;
         }
 
         // garbage initial positions
@@ -886,12 +900,13 @@ impl<P: Potential> Lammps<P> {
                 format!("{} changed since build()\n was: {:?}\n now: {:?}", msg, was, now));
             Ok(())
         }
-        let InitInfo { masses, pair_commands } = self.potential.init_info(coords, meta);
+        let InitInfo { masses, pair_style, pair_coeffs } = self.potential.init_info(coords, meta);
         let Lammps {
             original_num_atoms,
             original_init_info: InitInfo {
                 masses: ref original_masses,
-                pair_commands: ref original_pair_commands,
+                pair_style: ref original_pair_style,
+                pair_coeffs: ref original_pair_coeffs,
             },
             ..
         } = *self;
@@ -899,7 +914,8 @@ impl<P: Potential> Lammps<P> {
         check("number of atom types has", original_masses.len(), masses.len())?;
         check("number of atoms has", original_num_atoms, coords.num_atoms())?;
         check("masses have", original_masses, &masses)?;
-        check("pair potential commands have", original_pair_commands, &pair_commands)?;
+        check("pair_style command has", original_pair_style, &pair_style)?;
+        check("pair_coeff commands have", original_pair_coeffs, &pair_coeffs)?;
     })}
 
     fn write_data_trace_fileset(&self, dir: &Path, filename_prefix: &str) {
@@ -1028,7 +1044,8 @@ pub mod potential {
         fn init_info(&self, _: &Coords, (): &()) -> InitInfo
         { InitInfo {
             masses: vec![1.0],
-            pair_commands: vec![PairCommand::pair_style("none")],
+            pair_style: PairStyle::named("none"),
+            pair_coeffs: vec![],
         }}
     }
 }

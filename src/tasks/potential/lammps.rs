@@ -35,7 +35,7 @@ use ::std::rc::Rc;
 use ::std::collections::BTreeMap;
 use ::cmd::trial::TrialDir;
 
-use ::rsp2_lammps_wrap::{InitInfo, AtomType, PairCommand};
+use ::rsp2_lammps_wrap::{InitInfo, AtomType, PairStyle, PairCoeff};
 use ::rsp2_lammps_wrap::Builder as InnerBuilder;
 use ::rsp2_lammps_wrap::Potential as LammpsPotential;
 use ::rsp2_lammps_wrap::UpdateStyle;
@@ -161,9 +161,184 @@ impl<M: Clone + 'static, P: Clone + LammpsPotential<Meta=M> + Send + Sync + 'sta
 }
 
 impl_dyn_clone_detail!{
-        impl[M: Clone + 'static, P: Clone + LammpsPotential<Meta=M> + Send + Sync + 'static]
-        DynCloneDetail<M> for Builder<P> { ... }
+    impl[M: Clone + 'static, P: Clone + LammpsPotential<Meta=M> + Send + Sync + 'static]
+    DynCloneDetail<M> for Builder<P> { ... }
+}
+
+pub use self::overlay::Overlay;
+mod overlay {
+    use super::*;
+
+    /// Helper type for composing the commands for a `pair_style hybrid/overlay` potential.
+    ///
+    /// It takes in pair commands for a bunch of potentials, and spits out what actually needs
+    /// to be written to use them in a hybrid/overlay potential.
+    #[derive(Debug, Clone)]
+    pub struct Overlay {
+        items: Vec<Item>,
+
+        // Disambiguation indices to be used in `pair_coeff` commands.
+        // (hybrid/overlay requires the pair_coeff commands to have additional index fields
+        //  if and only if there are multiple styles with the same name).
+        //
+        // invariant: Correctly describes `items` at all times.
+        indices: Vec<Option<u32>>,
     }
+
+    #[derive(Debug, Clone)]
+    pub struct Item {
+        pub pair_style: PairStyle,
+        pub pair_coeffs: Vec<PairCoeff>,
+    }
+
+    impl Item {
+        fn is_same_style(&self, other: &Item) -> bool {
+            self.pair_style.name() == other.pair_style.name()
+        }
+    }
+
+    impl Overlay {
+        /// Create a hybrid/overlay that implicitly begins with "pair_coeff * * none".
+        pub fn new() -> Self {
+            let mut me = Overlay {
+                items: vec![],
+                indices: vec![],
+            };
+            me.set_none(.., ..);
+            me
+        }
+
+        /// Append a new potential.
+        ///
+        /// This cannot be used to insert `pair_coeff i j none` commands.
+        /// For that, see `set_none`.
+        pub fn push(&mut self, new_item: Item) -> &mut Self
+        {
+            { // scope &. NLL, come save us!!
+                let name = new_item.pair_style.name();
+                assert_ne!(name, "none", "attempted to push() pair_style none");
+                assert_ne!(name, "hybrid", "attempted to nest hybrid potentials");
+                assert_ne!(name, "hybrid/overlay", "attempted to nest hybrid potentials");
+            }
+
+            { // scope &mut. NLL, please visit soon!!
+                // If there are any duplicates at all of a style, its first occurrence should have
+                // index 1.
+                let mut iter = zip_eq!(&mut self.items, &mut self.indices);
+                if let Some((_, index)) = iter.find(|(x, _)| x.is_same_style(&new_item)) {
+                    debug_assert!(*index == None || *index == Some(1));
+                    *index = Some(1);
+                };
+            }
+
+            let new_index = {
+                zip_eq!(&self.items, &self.indices)
+                    .rfind(|(x, _)| x.is_same_style(&new_item))
+                    .map(|(_, index)| index.expect("") + 1)
+            };
+            self.indices.push(new_index);
+            self.items.push(new_item);
+            self
+        }
+
+        /// Inserts a `pair_coeff i j none` command to erase all previously added
+        /// interactions between the given atom types.
+        pub fn set_none<I, J>(&mut self, i: I, j: J) -> &mut Self
+        where ::rsp2_lammps_wrap::AtomTypeRange: From<I> + From<J>
+        {
+            self.indices.push(None); // "pair_coeff i j none" never uses disambiguation indices
+            self.items.push(Item {
+                pair_style: PairStyle::named("none"),
+                pair_coeffs: vec![PairCoeff::new(i, j)],
+            });
+            self
+        }
+
+        pub fn init_info(&self) -> (PairStyle, Vec<PairCoeff>) {
+            // `pair_style hybrid/overlay` throws errors without at least one entry.
+            if self.items.is_empty() {
+                // (this is correct because we always start with `pair_coeff * * none`.
+                // Were that not the case, then we might want to still fail (with a better message),
+                // for consistency with how Lammps fails on pairs missing coefficients)
+                return (PairStyle::named("none"), vec![]);
+            }
+
+            let pair_style = {
+                let mut pair_style = PairStyle::named("hybrid/overlay");
+                for item in &self.items {
+                    if item.pair_style.name() != "none" {
+                        pair_style = pair_style.arg(item.pair_style.name());
+                    }
+                    pair_style = pair_style.args(&item.pair_style.1);
+                }
+                pair_style
+            };
+
+            let pair_coeffs = {
+                zip_eq!(&self.items, &self.indices)
+                    .flat_map(|(item, index)| {
+                        item.pair_coeffs.iter().cloned().map(move |PairCoeff(i, j, old_args)| {
+                            let mut coeff = PairCoeff::new(i, j).arg(item.pair_style.name());
+                            if let Some(index) = index {
+                                coeff = coeff.arg(index);
+                            }
+                            coeff.args(old_args)
+                        })
+                    })
+                    .collect()
+            };
+
+            (pair_style, pair_coeffs)
+        }
+    }
+
+    #[test]
+    fn smoke_test() {
+        let ty = |n| AtomType::new(n);
+
+        let (pair_style, pair_coeffs) = {
+            Overlay::new()
+                // include a potential with at least 3 repeats
+                .push(Item {
+                    pair_style: PairStyle::named("a"),
+                    pair_coeffs: vec![PairCoeff::new(ty(1), ty(2)).arg("1.0")],
+                })
+                // include a potential with no repeats
+                .push(Item {
+                    pair_style: PairStyle::named("b").arg("3"),
+                    pair_coeffs: vec![PairCoeff::new(ty(1), ty(3))],
+                })
+                // include a `pair_coeff none`
+                .set_none(ty(1), ty(1))
+                .push(Item {
+                    pair_style: PairStyle::named("a"),
+                    pair_coeffs: vec![PairCoeff::new(ty(2), ty(3)).arg("1.1")],
+                })
+                .push(Item {
+                    pair_style: PairStyle::named("a"),
+                    pair_coeffs: vec![PairCoeff::new(ty(3), ty(3)).arg("1.2")],
+                })
+                .init_info()
+        };
+
+        assert_eq!(
+            pair_style,
+            PairStyle::named("hybrid/overlay").args(vec!["a", "b", "3", "a", "a"]),
+        );
+        assert_eq!(
+            pair_coeffs,
+            vec![
+                PairCoeff::new(.., ..).arg("none"),
+                PairCoeff::new(ty(1), ty(2)).arg("a").arg("1").arg("1.0"),
+                PairCoeff::new(ty(1), ty(3)).arg("b"),
+                PairCoeff::new(ty(1), ty(1)).arg("none"),
+                PairCoeff::new(ty(2), ty(3)).arg("a").arg("2").arg("1.1"),
+                PairCoeff::new(ty(3), ty(3)).arg("a").arg("3").arg("1.2"),
+            ],
+        );
+    }
+}
+
 
 pub use self::airebo::Airebo;
 mod airebo {
@@ -241,21 +416,19 @@ mod airebo {
                 only_unique_mass(consts::HYDROGEN),
                 only_unique_mass(consts::CARBON),
             ];
-            let pair_commands = match *self {
-                Airebo::Airebo { lj_sigma, lj_enabled, torsion_enabled } => vec![
-                    PairCommand::pair_style("airebo/omp")
+            let pair_style = match *self {
+                Airebo::Airebo { lj_sigma, lj_enabled, torsion_enabled } => {
+                    PairStyle::named("airebo/omp")
                         .arg(lj_sigma)
                         .arg(boole(lj_enabled))
                         .arg(boole(torsion_enabled))
-                    ,
-                    PairCommand::pair_coeff(.., ..).args(&["CH.airebo", "H", "C"]),
-                ],
-                Airebo::Rebo => vec![
-                    PairCommand::pair_style("rebo/omp"),
-                    PairCommand::pair_coeff(.., ..).args(&["CH.airebo", "H", "C"]),
-                ],
+                },
+                Airebo::Rebo => PairStyle::named("rebo/omp"),
             };
-            InitInfo { masses, pair_commands }
+            let pair_coeffs = vec![
+                PairCoeff::new(.., ..).args(&["CH.airebo", "H", "C"]),
+            ];
+            InitInfo { masses, pair_style, pair_coeffs }
         }
     }
 
@@ -304,7 +477,7 @@ mod kc_z {
         fn classify_gap(&self, gap: f64) -> GapKind
         {
             if gap <= self.max_layer_sep { GapKind::Interacting }
-                else { GapKind::Vacuum }
+            else { GapKind::Vacuum }
         }
     }
 
@@ -336,14 +509,12 @@ mod kc_z {
                 Some(layers) => layers,
             };
 
-            {
-                // stupid limitation of current design.  To fix it we really just need
-                // to add an extra atom type.
-                assert!(
-                    elements.iter().cloned().all(|x| x == consts::CARBON),
-                    "KCZ does not yet support the inclusion of non-carbon elements"
-                );
-            }
+            // stupid limitation of current design.  To fix it we really just need
+            // to add an extra atom type.
+            assert!(
+                elements.iter().cloned().all(|x| x == consts::CARBON),
+                "KCZ does not yet support the inclusion of non-carbon elements"
+            );
 
             let masses: Vec<f64> = {
                 let layer_part = Part::from_ord_keys(layers.by_atom());
@@ -357,7 +528,7 @@ mod kc_z {
                         OnlyUniqueResult::NoValues => unreachable!(),
                     })
                     .collect();
-                m
+                m // without this binding it thinks the borrow of `layer_part` outlives the block
             };
 
             let interacting_pairs: Vec<_> = {
@@ -367,71 +538,33 @@ mod kc_z {
                     .unwrap_or_else(|e| panic!("{}", e))
             };
 
-            // Need to specify kc/z once for each interacting pair of layers. e.g.:
-            //
-            //     pair_style hybrid/overlay rebo kolmogorov/crespi/z 20 &
-            //                 kolmogorov/crespi/z 20 kolmogorov/crespi/z 20
-            let mut pair_commands = vec![];
-            pair_commands.push((|| { // iife
-                let mut cmd = PairCommand::pair_style("hybrid/overlay");
-                let mut has_coeffs = false;
-                if self.rebo {
-                    cmd = cmd.arg("rebo");
-                    has_coeffs = true;
-                }
-                for _ in &interacting_pairs {
-                    cmd = cmd.arg("kolmogorov/crespi/z").arg(self.cutoff);
-                    has_coeffs = true;
-                }
-
-                // hybrid/overlay without at least one potential is invalid.
-                // (hey, I don't make the rules)
-                // FIXME: This would be cleaner with a type dedicated to handle hybrid/overlay
-                if !has_coeffs {
-                    // NOTE: returns to iife inside `push(...)`
-                    return PairCommand::pair_style("none");
-                }
-
-                cmd
-            })());
+            let mut overlay = Overlay::new();
 
             if self.rebo {
-                pair_commands.push({
-                    PairCommand::pair_coeff(.., ..)
-                        .args(&["rebo", "CH.airebo"])
-                        .args(&vec!["C"; layers.len()])
+                overlay.push(overlay::Item {
+                    pair_style: PairStyle::named("rebo"),
+                    pair_coeffs: vec![{
+                        PairCoeff::new(.., ..)
+                            .args(&["rebo", "CH.airebo"])
+                            .args(&vec!["C"; layers.len()])
+                    }],
                 });
             }
 
-            // If there is a single kcz term, then the pair_coeff command is:
-            //
-            //       pair_coeff 1 2 kolmogorov/crespi/z CC.KC C C
-            //
-            // If there are more than one, then the pair_coeff commands need integer labels.
-            // Also, you still need elements for all atom types; these can be set to NULL.
-            //
-            //                                          v--this
-            //       pair_coeff 1 2 kolmogorov/crespi/z 1 CC.KC C C NULL
-            //       pair_coeff 1 3 kolmogorov/crespi/z 2 CC.KC C NULL C
-            //       pair_coeff 2 3 kolmogorov/crespi/z 3 CC.KC NULL C C
-            //
-            // Although I think I prefer not using NULL, because it appears to me that this
-            // internally sets the type to '-1' and this is NEVER CHECKED, IF YOU USE IT
-            // THEN IT JUST SEGFAULTS, WTF, WHY ON EARTH WOULD YOU ASSIGN A SPECIAL VALUE
-            // FOR SOME CASE AND THEN NEVER ACTUALLY CHECK FOR IT!? WHY!? WHY!? WHYYYY!?!
-            //                                       - ML
-            for (cmd_n, &(i, j)) in interacting_pairs.iter().enumerate() {
-                let cmd = PairCommand::pair_coeff(i, j);
-                let cmd = match interacting_pairs.len() {
-                    1 => cmd.arg("kolmogorov/crespi/z"),
-                    _ => cmd.arg("kolmogorov/crespi/z").arg(cmd_n + 1),
-                };
-                let cmd = cmd.arg("CC.KC");
-                let cmd = cmd.args(vec!["C"; layers.len()]); // ...let's not use NULL.
-                pair_commands.push(cmd);
-            };
+            for &(i, j) in &interacting_pairs {
+                overlay.push(overlay::Item {
+                    pair_style: PairStyle::named("kolmogorov/crespi/z").arg(self.cutoff),
+                    pair_coeffs: vec![{
+                        PairCoeff::new(i, j)
+                            .arg("CC.KC")
+                            .args(vec!["C"; layers.len()])
+                    }],
+                });
+            }
 
-            InitInfo { masses, pair_commands }
+            let (pair_style, pair_coeffs) = overlay.init_info();
+
+            InitInfo { masses, pair_style, pair_coeffs }
         }
     }
 
