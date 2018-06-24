@@ -19,21 +19,16 @@ use super::{write_eigen_info_for_humans, write_eigen_info_for_machines};
 use ::{FailResult, FailOk};
 use ::rsp2_tasks_config::{self as cfg, Settings};
 use ::filetypes::stored_structure::StoredStructure;
-use ::potential::{PotentialBuilder, DiffFn, DynFlatDiffFn};
-use ::meta::prelude::*;
-use ::meta::{Mass, Element, Layer};
+use ::potential::{self, PotentialBuilder, DiffFn, DynFlatDiffFn};
+use ::meta::{self, prelude::*};
 use ::hlist_aliases::*;
 
 use ::math::basis::Basis3;
-use ::math::bands::ScMatrix;
-use ::util::ext_traits::OptionResultExt;
 
 use ::slice_of_array::prelude::*;
 use ::rsp2_slice_math::{v, V, vdot};
 use ::rsp2_array_types::{V3};
 use ::rsp2_structure::{Coords};
-use ::std::rc::Rc;
-use math::bonds::FracBonds;
 
 pub trait EvLoopDiagonalizer {
     type ExtraOut;
@@ -59,13 +54,14 @@ impl TrialDir {
         &self,
         settings: &Settings,
         pot: &PotentialBuilder,
-        layer_sc_mats: Option<Rc<[ScMatrix]>>,
         diagonalizer: impl EvLoopDiagonalizer<ExtraOut=ExtraOut>,
         original_coords: Coords,
-        meta: HList3<
-            Rc<[Element]>,
-            Rc<[Mass]>,
-            Option<Rc<[Layer]>>,
+        meta: HList5<
+            meta::SiteElements,
+            meta::SiteMasses,
+            Option<meta::SiteLayers>,
+            Option<meta::LayerScMatrices>,
+            Option<meta::FracBonds>,
         >,
     ) -> FailResult<(Coords, GammaSystemAnalysis, ExtraOut)>
     {
@@ -84,21 +80,12 @@ impl TrialDir {
 
             trace!("============================");
 
-            // FIXME: only the CartBonds need to be recomputed each iteration;
-            //       we could keep the FracBonds around between iterations.
-            let bonds = settings.bond_radius.map(|bond_radius| FailOk({
-                trace!("Computing bonds");
-                FracBonds::from_brute_force_very_dumb(&coords, bond_radius)?
-            })).fold_ok()?;
-
             let (evals, evecs, extra_out) = {
                 let subdir = format!("ev-loop-{:02}.1.structure", iteration);
                 self.write_stored_structure(
                     &subdir,
                     &format!("Structure after CG round {}", iteration),
                     &coords, meta.sift(),
-                    layer_sc_mats.clone(),
-                    //Some(&bonds), // FIXME should be argument
                 )?;
 
                 let stored = self.read_stored_structure(&subdir)?;
@@ -117,11 +104,7 @@ impl TrialDir {
             trace!("Computing eigensystem info");
 
             let ev_analysis = super::run_gamma_system_analysis(
-                &coords, meta.sift(),
-                layer_sc_mats.clone(),
-                &evals, &evecs,
-                bonds.as_ref(),
-                Some(classifications),
+                &coords, meta.sift(), &evals, &evecs, Some(classifications),
             )?;
 
             {
@@ -137,7 +120,7 @@ impl TrialDir {
             self.write_stored_structure(
                 &format!("ev-loop-{:02}.2.structure", iteration),
                 &format!("Structure after eigenmode-chasing round {}", iteration),
-                &coords, meta.sift(), layer_sc_mats.clone(),
+                &coords, meta.sift(),
             )?;
 
             warn_on_improvable_lattice_params(pot, &coords, meta.sift())?;
@@ -163,10 +146,7 @@ impl TrialDir {
         settings: &Settings,
         pot: &PotentialBuilder,
         coords: Coords,
-        meta: HList2<
-            Rc<[Element]>,
-            Rc<[Mass]>,
-        >,
+        meta: potential::CommonMeta,
         ev_analysis: &GammaSystemAnalysis,
         evals: &[f64],
         evecs: &Basis3,
@@ -188,11 +168,7 @@ impl TrialDir {
             n => {
                 trace!("Chasing {} bad eigenvectors...", n);
                 let structure = do_eigenvector_chase(
-                    pot,
-                    &settings.ev_chase,
-                    coords,
-                    meta.sift(),
-                    &bad_evs[..],
+                    pot, &settings.ev_chase, coords, meta.sift(), &bad_evs[..],
                 )?;
                 (structure, DidEvChasing(true))
             }
@@ -257,10 +233,7 @@ fn do_relax(
     pot: &PotentialBuilder,
     cg_settings: &cfg::Acgsd,
     coords: Coords,
-    meta: HList2<
-        Rc<[Element]>,
-        Rc<[Mass]>,
-    >,
+    meta: potential::CommonMeta,
 ) -> FailResult<Coords>
 {Ok({
     let mut flat_diff_fn = pot.threaded(true).initialize_flat_diff_fn(&coords, meta.sift())?;
@@ -276,10 +249,7 @@ fn do_eigenvector_chase(
     pot: &PotentialBuilder,
     chase_settings: &cfg::EigenvectorChase,
     mut coords: Coords,
-    meta: HList2<
-        Rc<[Element]>,
-        Rc<[Mass]>,
-    >,
+    meta: potential::CommonMeta,
     bad_evecs: &[(String, &[V3])],
 ) -> FailResult<Coords>
 {Ok({
@@ -304,10 +274,7 @@ fn do_cg_along_evecs<V, I>(
     pot: &PotentialBuilder,
     cg_settings: &cfg::Acgsd,
     coords: Coords,
-    meta: HList2<
-        Rc<[Element]>,
-        Rc<[Mass]>,
-    >,
+    meta: potential::CommonMeta,
     evecs: I,
 ) -> FailResult<Coords>
 where
@@ -323,10 +290,7 @@ fn _do_cg_along_evecs(
     pot: &PotentialBuilder,
     cg_settings: &cfg::Acgsd,
     coords: Coords,
-    meta: HList2<
-        Rc<[Element]>,
-        Rc<[Mass]>,
-    >,
+    meta: potential::CommonMeta,
     evecs: &[&[V3]],
 ) -> FailResult<Coords>
 {Ok({
@@ -347,10 +311,7 @@ fn _do_cg_along_evecs(
 fn do_minimize_along_evec(
     pot: &PotentialBuilder,
     from_coords: Coords,
-    meta: HList2<
-        Rc<[Element]>,
-        Rc<[Mass]>,
-    >,
+    meta: potential::CommonMeta,
     evec: &[V3],
 ) -> FailResult<(f64, Coords)>
 {Ok({
@@ -375,10 +336,7 @@ fn do_minimize_along_evec(
 fn warn_on_improvable_lattice_params(
     pot: &PotentialBuilder,
     coords: &Coords,
-    meta: HList2<
-        Rc<[Element]>,
-        Rc<[Mass]>,
-    >,
+    meta: potential::CommonMeta,
 ) -> FailResult<()>
 {Ok({
     const SCALE_AMT: f64 = 1e-6;

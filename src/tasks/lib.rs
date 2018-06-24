@@ -201,16 +201,17 @@ mod env {
 
 mod common {
     use ::FailResult;
-    use ::rsp2_structure::{Element, consts};
+    use ::meta::{Element, Mass};
+    use ::rsp2_structure::{consts};
 
-    pub fn default_element_mass(elem: Element) -> FailResult<f64>
-    {Ok({
+    pub fn default_element_mass(elem: Element) -> FailResult<Mass>
+    {Ok(Mass({
         match elem {
             consts::HYDROGEN => 1.00794,
             consts::CARBON => 12.0107,
             _ => bail!("No default mass for element {}.", elem.symbol()),
         }
-    })}
+    }))}
 }
 
 // Although frunk has the variadic HList![] type macro, IntelliJ Rust can't handle it,
@@ -223,6 +224,11 @@ mod hlist_aliases {
     pub type HList2<A, B> = HCons<A, HList1<B>>;
     pub type HList3<A, B, C> = HCons<A, HList2<B, C>>;
     pub type HList4<A, B, C, D> = HCons<A, HList3<B, C, D>>;
+    pub type HList5<A, B, C, D, E> = HCons<A, HList4<B, C, D, E>>;
+    pub type HList6<A, B, C, D, E, F> = HCons<A, HList5<B, C, D, E, F>>;
+    pub type HList7<A, B, C, D, E, F, G> = HCons<A, HList6<B, C, D, E, F, G>>;
+    pub type HList8<A, B, C, D, E, F, G, H> = HCons<A, HList7<B, C, D, E, F, G, H>>;
+    pub type HList9<A, B, C, D, E, F, G, H, I> = HCons<A, HList8<B, C, D, E, F, G, H, I>>;
 }
 
 pub mod exposed_for_testing {

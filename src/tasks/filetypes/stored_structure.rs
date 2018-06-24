@@ -10,17 +10,14 @@
 ** ************************************************************************ */
 
 use ::FailResult;
-use ::meta::{Element, Layer, Mass};
-use ::math::bands::ScMatrix;
+use ::meta;
 use ::traits::{Save, Load, AsPath};
 use ::hlist_aliases::*;
 use ::rsp2_structure_io::Poscar;
 use ::rsp2_structure::Coords;
 use ::traits::save::Json;
-use ::math::bonds::FracBonds;
 
 use ::path_abs::PathDir;
-use ::std::rc::Rc;
 
 const FNAME_STRUCTURE: &'static str = "POSCAR";
 const FNAME_META: &'static str = "meta.json";
@@ -33,18 +30,24 @@ const FNAME_FRAC_BONDS: &'static str = "frac-bonds.json";
 pub struct StoredStructure {
     pub title: String,
     pub coords: Coords,
-    pub elements: Rc<[Element]>,
-    pub layers: Option<Rc<[Layer]>>,
-    pub masses: Rc<[Mass]>,
-    pub layer_sc_matrices: Option<Rc<[ScMatrix]>>,
-    pub frac_bonds: Option<FracBonds>,
+    pub elements: meta::SiteElements,
+    pub layers: Option<meta::SiteLayers>,
+    pub masses: meta::SiteMasses,
+    pub layer_sc_matrices: Option<meta::LayerScMatrices>,
+    pub frac_bonds: Option<meta::FracBonds>,
 }
 
 impl StoredStructure {
-    pub fn meta(&self) -> HList3<Rc<[Element]>, Rc<[Mass]>, Option<Rc<[Layer]>>> {
-        hlist![self.elements.clone(), self.masses.clone(), self.layers.clone()]
-    }
-
+    pub fn meta(&self) -> HList5<
+        meta::SiteElements,
+        meta::SiteMasses,
+        Option<meta::SiteLayers>,
+        Option<meta::LayerScMatrices>,
+        Option<meta::FracBonds>,
+    > { hlist![
+        self.elements.clone(), self.masses.clone(), self.layers.clone(),
+        self.layer_sc_matrices.clone(), self.frac_bonds.clone(),
+    ]}
     pub fn path_is_structure(path: impl AsPath) -> bool {
         path.join(FNAME_META).exists() && path.join(FNAME_STRUCTURE).exists()
     }
@@ -52,9 +55,9 @@ impl StoredStructure {
 
 #[derive(Serialize, Deserialize)]
 struct Meta {
-    pub layers: Option<Rc<[Layer]>>,
-    pub masses: Rc<[Mass]>,
-    pub layer_sc_matrices: Option<Rc<[ScMatrix]>>,
+    pub layers: Option<meta::SiteLayers>,
+    pub masses: meta::SiteMasses,
+    pub layer_sc_matrices: Option<meta::LayerScMatrices>,
 }
 
 impl Save for StoredStructure {

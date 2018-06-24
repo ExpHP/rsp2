@@ -38,8 +38,7 @@ use ::rsp2_tasks_config::{self as cfg, Settings, NormalizationMode, SupercellSpe
 use ::traits::{AsPath, Load, Save};
 use ::phonopy::{DirWithBands, DirWithDisps, DirWithForces};
 
-use ::meta::prelude::*;
-use ::meta::{Element, Mass, Layer};
+use ::meta::{self, prelude::*};
 use ::util::ext_traits::{OptionResultExt, PathNiceExt};
 use ::math::{
     basis::{Basis3},
@@ -93,14 +92,13 @@ impl TrialDir {
     {Ok({
         let pot = PotentialBuilder::from_root_config(&self, &settings);
 
-        let (optimizable_coords, atom_elements, atom_masses, atom_layers, layer_sc_mats) = {
+        let (optimizable_coords, meta) = {
             read_optimizable_structure(
                 settings.layer_search.as_ref(),
                 settings.masses.as_ref(),
                 file_format, input,
             )?
         };
-        let meta = hlist![atom_elements, atom_masses, atom_layers];
 
         let original_coords = {
             ::cmd::param_optimization::optimize_layer_parameters(
@@ -111,9 +109,15 @@ impl TrialDir {
             )?.construct()
         };
 
+        let meta = meta.prepend({
+            settings.bond_radius.map(|bond_radius| FailOk({
+                Rc::new(FracBonds::from_brute_force_very_dumb(&original_coords, bond_radius)?)
+            })).fold_ok()?
+        });
+
         self.write_stored_structure(
             "initial.structure", "Initial structure (after lattice optimization)",
-            &original_coords, meta.sift(), layer_sc_mats.clone(),
+            &original_coords, meta.sift(),
         )?;
 
         // FIXME: Prior to the addition of the sparse solver, the code used to do something like:
@@ -136,8 +140,7 @@ impl TrialDir {
                 ($diagonalizer:expr) => {{
                     let diagonalizer = $diagonalizer;
                     self.do_main_ev_loop(
-                        settings, &*pot, layer_sc_mats.clone(),
-                        diagonalizer, original_coords, meta.sift(),
+                        settings, &*pot, diagonalizer, original_coords, meta.sift(),
                     )
                 }}
             }
@@ -170,7 +173,7 @@ impl TrialDir {
 
         self.write_stored_structure(
             "final.structure", "Final structure",
-            &coords, meta.sift(), layer_sc_mats.clone(),
+            &coords, meta.sift(),
         )?;
 
         write_eigen_info_for_machines(&ev_analysis, self.create_file("eigenvalues.final")?)?;
@@ -232,29 +235,16 @@ impl TrialDir {
         dir_name: &str,
         poscar_headline: &str,
         coords: &Coords,
-        meta: HList3<
-            Rc<[Element]>,
-            Rc<[Mass]>,
-            Option<Rc<[Layer]>>,
+        meta: HList5<
+            meta::SiteElements,
+            meta::SiteMasses,
+            Option<meta::SiteLayers>,
+            Option<meta::LayerScMatrices>,
+            Option<meta::FracBonds>,
         >,
-        layer_sc_matrices: Option<Rc<[ScMatrix]>>, // FIXME awkward
     ) -> FailResult<()>
     {Ok({
         let path = self.join(dir_name);
-
-        // TODO: should take this as an input argument, and also pass it around through
-        //       relaxation and potential
-        let frac_bonds = {
-            // HACK
-            // (no code is supposed to be reading settings.yaml outside of entry points,
-            //  but I don't want to add a Settings argument. The proper fix is to fix
-            //  the above todo)
-            let settings: Settings = self.read_settings()?;
-            settings.bond_radius.map(|bond_radius| FailOk({
-                trace!("needlessly computing frac bonds (FIXME)");
-                FracBonds::from_brute_force_very_dumb(coords, bond_radius)?
-            })).fold_ok()?
-        };
 
         trace!("Writing '{}'", path.nice());
         StoredStructure {
@@ -263,8 +253,8 @@ impl TrialDir {
             elements: meta.pick(),
             masses: meta.pick(),
             layers: meta.pick(),
-            layer_sc_matrices,
-            frac_bonds,
+            layer_sc_matrices: meta.pick(),
+            frac_bonds: meta.pick(),
         }.save(path)?
     })}
 
@@ -273,13 +263,18 @@ impl TrialDir {
         dir_name: &str,
     ) -> FailResult<(
         Coords,
-        HList3<Rc<[Element]>, Rc<[Mass]>, Option<Rc<[Layer]>>>,
-        Option<Rc<[ScMatrix]>>,
+        HList5<
+            meta::SiteElements,
+            meta::SiteMasses,
+            Option<meta::SiteLayers>,
+            Option<meta::LayerScMatrices>,
+            Option<meta::FracBonds>,
+        >,
     )>
     {Ok({
         let stored = self.read_stored_structure(dir_name)?;
         let meta = stored.meta();
-        (stored.coords, meta, stored.layer_sc_matrices)
+        (stored.coords, meta)
     })}
 
     fn read_stored_structure(&self, dir_name: impl AsRef<OsStr>) -> FailResult<StoredStructure>
@@ -333,8 +328,8 @@ impl PhonopyDiagonalizer {
         phonopy: &PhonopyBuilder,
         coords: &Coords,
         meta: HList2<
-            Rc<[Element]>,
-            Rc<[Mass]>,
+            meta::SiteElements,
+            meta::SiteMasses,
         >,
     ) -> FailResult<DirWithBands<Box<AsPath>>>
     {Ok({
@@ -371,7 +366,11 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
     ) -> FailResult<(Vec<f64>, Basis3, DynamicalMatrix)>
     {Ok({
         let prim_coords = &stored.coords;
-        let prim_meta = stored.meta();
+        let prim_meta: HList3<
+            meta::SiteElements,
+            meta::SiteMasses,
+            Option<meta::SiteLayers>,
+        > = stored.meta().sift();
 
         let compute_deperms = |coords: &_, cart_ops: &_| {
             ::rsp2_structure::find_perm::spacegroup_deperms(
@@ -417,7 +416,7 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
                 trace!("Computing symmetry");
                 let cart_ops = {
                     let atom_types: Vec<u32> = {
-                        let elements: Rc<[Element]> = prim_meta.pick();
+                        let elements: meta::SiteElements = prim_meta.pick();
                         elements.iter().map(|e| e.atomic_number()).collect()
                     };
                     SpgDataset::compute(prim_coords, &atom_types, settings.phonons.symmetry_tolerance)?
@@ -589,33 +588,35 @@ fn visualize_sparse_force_sets(
 // wrapper around the gamma_system_analysis module which handles all the newtype conversions
 fn run_gamma_system_analysis(
     coords: &Coords,
-    meta: HList3<
-        Rc<[Element]>,
-        Rc<[Mass]>,
-        Option<Rc<[Layer]>>,
+    meta: HList5<
+        meta::SiteElements,
+        meta::SiteMasses,
+        Option<meta::SiteLayers>,
+        Option<meta::LayerScMatrices>,
+        Option<meta::FracBonds>,
     >,
-    layer_sc_mats: Option<Rc<[ScMatrix]>>,
     evals: &[f64],
     evecs: &Basis3,
-    bonds: Option<&FracBonds>,
     mode_classifications: Option<Rc<[ModeKind]>>,
 ) -> FailResult<GammaSystemAnalysis> {
     use self::ev_analyses::*;
 
-    let cart_bonds = bonds.as_ref().map(|b| b.to_cart_bonds(coords));
+    // FIXME it would be nice if gamma_analysis used the same metadata types as this part
+    //       of the code does...
+    let hlist_pat![
+        site_elements, site_masses, site_layers, layer_sc_matrices, frac_bonds,
+    ] = meta;
 
-    let atom_elements: Rc<[Element]> = meta.pick();
-    let atom_masses: Rc<[Mass]> = meta.pick();
-    let atom_masses: Vec<f64> = atom_masses.iter().map(|&Mass(x)| x).collect();
-    let atom_layers: Option<Rc<[Layer]>> = meta.pick();
-    let atom_layers = atom_layers.map(|v| v.iter().map(|&Layer(n)| n).collect());
+    let site_masses: Vec<f64> = site_masses.iter().map(|&meta::Mass(x)| x).collect();
+    let site_layers = site_layers.map(|v| v.iter().map(|&meta::Layer(n)| n).collect());
+    let cart_bonds = frac_bonds.as_ref().map(|b| b.to_cart_bonds(coords));
 
     gamma_system_analysis::Input {
-        atom_layers: atom_layers.map(AtomLayers),
-        layer_sc_mats: layer_sc_mats.map(|x| LayerScMatrices(x.to_vec())),
-        atom_masses: Some(AtomMasses(atom_masses)),
+        atom_layers: site_layers.map(AtomLayers),
+        layer_sc_mats: layer_sc_matrices.map(|x| LayerScMatrices(x.to_vec())),
+        atom_masses: Some(AtomMasses(site_masses)),
         ev_classifications: mode_classifications.map(|x| EvClassifications(x.to_vec())),
-        atom_elements: Some(AtomElements(atom_elements.to_vec())),
+        atom_elements: Some(AtomElements(site_elements.to_vec())),
         atom_coords: Some(AtomCoordinates(coords.clone())),
         ev_frequencies: Some(EvFrequencies(evals.to_vec())),
         ev_eigenvectors: Some(EvEigenvectors(evecs.clone())),
@@ -666,7 +667,7 @@ impl TrialDir {
         out.push(ev_analysis.make_summary(settings));
         out.push({
             let f = |s: &str| FailOk({
-                let (coords, meta, _) = self.read_stored_structure_data(s)?;
+                let (coords, meta) = self.read_stored_structure_data(s)?;
 
                 let na = coords.num_atoms() as f64;
                 pot.one_off().compute_value(&coords, meta.sift())? / na
@@ -719,7 +720,7 @@ fn do_force_sets_at_disps_for_phonopy<P: AsPath + Send + Sync>(
     let force_sets = use_potential_maybe_with_rayon(
         pot,
         initial_coords,
-        &meta.sift(),
+        meta.sift(),
         threading == &cfg::Threading::Rayon,
         disp_dir.displaced_coord_sets().collect::<Vec<_>>(),
         move |diff_fn: &mut DiffFn<_>, meta, coords: Coords| FailOk({
@@ -740,10 +741,7 @@ fn do_force_sets_at_disps_for_sparse(
     _threading: &cfg::Threading,
     displacements: &[(usize, V3)],
     coords: &Coords,
-    meta: HList2<
-        Rc<[Element]>,
-        Rc<[Mass]>,
-    >,
+    meta: CommonMeta,
 ) -> FailResult<Vec<BTreeMap<usize, V3>>>
 {Ok({
     use ::std::io::prelude::*;
@@ -776,7 +774,7 @@ fn do_force_sets_at_disps_for_sparse(
 fn use_potential_maybe_with_rayon<Inputs, Input, F, Output>(
     pot: &PotentialBuilder,
     coords_for_initialize: &Coords,
-    meta: &CommonMeta,
+    meta: CommonMeta,
     use_rayon: bool,
     inputs: Inputs,
     compute: F,
@@ -974,7 +972,7 @@ impl TrialDir {
     {Ok({
         let pot = PotentialBuilder::from_root_config(&self, &settings);
 
-        let (coords, meta, _) = self.read_stored_structure_data("final.structure")?;
+        let (coords, meta) = self.read_stored_structure_data("final.structure")?;
 
         let phonopy = phonopy_builder_from_settings(&settings.phonons, coords.lattice());
 
@@ -1005,11 +1003,6 @@ impl TrialDir {
     ) -> FailResult<()>
     {Ok({
         let pot = PotentialBuilder::from_root_config(&self, &settings);
-
-        let bonds = settings.bond_radius.map(|bond_radius| FailOk({
-            trace!("Computing bonds");
-            FracBonds::from_brute_force_very_dumb(&stored.coords, bond_radius)?
-        })).fold_ok()?;
 
         // !!!!!!!!!!!!!!!!!
         //  FIXME FIXME BAD
@@ -1072,12 +1065,8 @@ impl TrialDir {
         trace!("Computing eigensystem info");
 
         let ev_analysis = run_gamma_system_analysis(
-            &stored.coords,
-            stored.meta().sift(),
-            stored.layer_sc_matrices.clone(),
-            &evals, &evecs,
-            bonds.as_ref(),
-            Some(classifications),
+            &stored.coords, stored.meta().sift(),
+            &evals, &evecs, Some(classifications),
         )?;
 
         write_eigen_info_for_humans(&ev_analysis, &mut |s| FailOk(info!("{}", s)))?;
@@ -1098,9 +1087,7 @@ pub(crate) fn run_sparse_analysis(
     let ev_analysis = run_gamma_system_analysis(
         &structure.coords,
         structure.meta().sift(),
-        structure.layer_sc_matrices.clone(),
         &evals, &evecs,
-        structure.frac_bonds.as_ref(),
         None, // ev_classifications
     )?;
 
@@ -1142,8 +1129,8 @@ pub(crate) fn run_plot_vdw(
         Coords::new(lattice.clone(), CoordsKind::Carts(vec![V3::zero(), pos]))
     };
 
-    let masses: Rc<[Mass]> = vec![Mass(::common::default_element_mass(CARBON).unwrap()); 2].into();
-    let elements: Rc<[Element]> = vec![CARBON; 2].into();
+    let masses: meta::SiteMasses = vec![::common::default_element_mass(CARBON).unwrap(); 2].into();
+    let elements: meta::SiteElements = vec![CARBON; 2].into();
     let meta = hlist![masses, elements];
 
     let mut diff_fn = pot.initialize_diff_fn(&get_coords(rs[0]), meta.sift())?;
@@ -1172,11 +1159,9 @@ pub(crate) fn run_converge_vdw(
     let pot = PotentialBuilder::from_config_parts(None, &threading, &lammps_update_style, pot);
 
     let lattice = Lattice::orthorhombic(40.0, 40.0, 40.0);
-    let (direction, direction_perp) = {
+    let direction = {
         // a randomly generated direction, but the same between runs
-        let dir = V3([0.2268934438759319, 0.5877271759538497, 0.0]).unit();
-        let perp = V3([dir[1], -dir[0], 0.0]); // dir rotated by 90
-        (dir, perp)
+        V3([0.2268934438759319, 0.5877271759538497, 0.0]).unit()
     };
     let get_coords = |r: f64| {
         let rho = f64::sqrt(r * r - z * z);
@@ -1186,8 +1171,8 @@ pub(crate) fn run_converge_vdw(
         Coords::new(lattice.clone(), CoordsKind::Carts(vec![V3::zero(), pos]))
     };
 
-    let masses: Rc<[Mass]> = vec![Mass(::common::default_element_mass(CARBON).unwrap()); 2].into();
-    let elements: Rc<[Element]> = vec![CARBON; 2].into();
+    let masses: meta::SiteMasses = vec![::common::default_element_mass(CARBON).unwrap(); 2].into();
+    let elements: meta::SiteElements = vec![CARBON; 2].into();
     let meta = hlist![masses, elements];
 
     let mut diff_fn = pot.initialize_diff_fn(&get_coords(r_min), meta.sift())?;
@@ -1354,18 +1339,22 @@ pub(crate) fn read_optimizable_structure(
     // FIXME train wreck output
     // TODO could contain bonds read from .structure
     ScalableCoords,
-    Rc<[Element]>,
-    Rc<[Mass]>,
-    Option<Rc<[Layer]>>,
-    Option<Rc<[ScMatrix]>>,
+    HList4<
+        meta::SiteElements,
+        meta::SiteMasses,
+        Option<meta::SiteLayers>,
+        Option<meta::LayerScMatrices>,
+    >
 )> {
+    use ::meta::Layer;
+
     let input = input.as_path();
 
     let out_coords: ScalableCoords;
-    let out_elements: Rc<[Element]>;
-    let out_masses: Rc<[Mass]>;
-    let out_layers: Option<Rc<[Layer]>>;
-    let out_sc_mats: Option<Rc<[ScMatrix]>>;
+    let out_elements: meta::SiteElements;
+    let out_masses: meta::SiteMasses;
+    let out_layers: Option<meta::SiteLayers>;
+    let out_sc_mats: Option<meta::LayerScMatrices>;
     match file_format {
         StructureFileType::Poscar => {
             use ::rsp2_structure_io::Poscar;
@@ -1436,7 +1425,7 @@ pub(crate) fn read_optimizable_structure(
             }
         },
     }
-    Ok((out_coords, out_elements, out_masses, out_layers, out_sc_mats))
+    Ok((out_coords, hlist![out_elements, out_masses, out_layers, out_sc_mats]))
 }
 
 pub(crate) fn perform_layer_search(
@@ -1471,9 +1460,11 @@ pub(crate) fn perform_layer_search(
 /// When the section is omitted, default masses are used.
 fn masses_by_config(
     cfg_masses: Option<&cfg::Masses>,
-    elements: Rc<[Element]>,
-) -> FailResult<Rc<[Mass]>>
+    elements: meta::SiteElements,
+) -> FailResult<meta::SiteMasses>
 {Ok({
+    use ::meta::Mass;
+
     elements.iter().cloned()
         .map(|element| match cfg_masses {
             Some(cfg::Masses(map)) => {
@@ -1484,7 +1475,7 @@ fn masses_by_config(
                         format_err!("No mass in config for element {}", element.symbol())
                     })
             },
-            None => ::common::default_element_mass(element).map(Mass),
+            None => ::common::default_element_mass(element),
         })
         .collect::<Result<Vec<_>, _>>()?.into()
 })}

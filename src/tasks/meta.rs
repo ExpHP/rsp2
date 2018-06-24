@@ -19,6 +19,7 @@
 //! differences in ownership would require at least half a dozen)
 
 use ::std::fmt;
+use ::std::rc::Rc;
 
 macro_rules! derive_newtype_display {
     ($Type:ident) => {
@@ -29,6 +30,9 @@ macro_rules! derive_newtype_display {
         }
     };
 }
+
+//----------------------------------------------------------------------------------
+// Types that appear inside metadata slices to serve as newtypes.
 
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
 #[derive(Serialize, Deserialize)]
@@ -41,6 +45,19 @@ newtype_index!{
     #[derive(Serialize, Deserialize)]
     Layer
 }
+
+//----------------------------------------------------------------------------------
+
+// Names intended for use in HList types.
+// The names here deliberately conflict with other names in the crate;
+// these are not intended to be imported, but rather written as `meta::Masses`, etc.
+pub type SiteMasses = Rc<[Mass]>;
+pub type SiteElements = Rc<[Element]>;
+pub type SiteLayers = Rc<[Layer]>;
+pub type LayerScMatrices = Rc<[::math::bands::ScMatrix]>;
+pub type FracBonds = Rc<::math::bonds::FracBonds>;
+
+//----------------------------------------------------------------------------------
 
 pub mod prelude {
     pub use super::MetaSift;

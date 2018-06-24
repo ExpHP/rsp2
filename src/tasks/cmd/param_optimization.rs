@@ -1,10 +1,8 @@
 
 
 use ::{FailResult};
-use ::potential::{PotentialBuilder, DiffFn};
-use ::hlist_aliases::*;
-use ::meta::prelude::*;
-use ::meta::{Mass, Element};
+use ::potential::{CommonMeta, PotentialBuilder, DiffFn};
+use ::meta::{prelude::*};
 
 use ::rsp2_minimize::exact_ls::{Value, Golden};
 use ::rsp2_structure::{Lattice, CoordsKind, Coords};
@@ -12,16 +10,12 @@ use ::rsp2_structure::layer::{LayersPerUnitCell, require_simple_axis_normal};
 use ::rsp2_structure_io::assemble::{Assemble, RawAssemble};
 use ::rsp2_array_types::{V3};
 use ::rsp2_tasks_config as cfg;
-use ::std::rc::Rc;
 
 pub(crate) fn optimize_layer_parameters(
     settings: &cfg::ScaleRanges,
     pot: &PotentialBuilder,
     mut coords_builder: ScalableCoords,
-    meta: HList2<
-        Rc<[Element]>,
-        Rc<[Mass]>,
-    >,
+    meta: CommonMeta,
 ) -> FailResult<ScalableCoords>
 {Ok({
     // Gather a bunch of setter functions and search ranges

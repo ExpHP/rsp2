@@ -12,8 +12,7 @@
 use ::FailResult;
 use ::potential::{PotentialBuilder};
 
-use ::meta::prelude::*;
-use ::meta::{Mass, Element};
+use ::meta::{self, prelude::*};
 use ::rsp2_tasks_config as cfg;
 
 use ::math::basis::Basis3;
@@ -91,8 +90,8 @@ pub(crate) fn perform_acoustic_search(
     eigenvectors: &Basis3,
     coords: &Coords,
     meta: HList2<
-        Rc<[Element]>,
-        Rc<[Mass]>,
+        meta::SiteElements,
+        meta::SiteMasses,
     >,
     settings: &cfg::AcousticSearch,
 ) -> FailResult<Rc<[ModeKind]>>
