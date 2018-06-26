@@ -196,8 +196,8 @@ mod tests {
     use super::Bound;
     use super::{linesearch, Settings, };
 
-    use ::test_functions::one_dee::prelude::*;
-    use ::test_functions::one_dee::Polynomial;
+    use ::test::one_dee::prelude::*;
+    use ::test::one_dee::Polynomial;
 
     fn init_logger() {
         let _ = ::env_logger::init();

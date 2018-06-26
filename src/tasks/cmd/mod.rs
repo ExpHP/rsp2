@@ -481,15 +481,16 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
         trace!("Computing deperms in supercell");
         let super_deperms = compute_deperms(&super_coords, &cart_ops)?;
 
-        // XXX
-        visualize_sparse_force_sets(
-            &_trial,
-            &super_coords,
-            &super_displacements,
-            &super_deperms,
-            &cart_ops,
-            &force_sets,
-        )?;
+        if log_enabled!(target: "rsp2_tasks::special::visualize_sparse_forces", ::log::Level::Trace) {
+            visualize_sparse_force_sets(
+                &_trial,
+                &super_coords,
+                &super_displacements,
+                &super_deperms,
+                &cart_ops,
+                &force_sets,
+            )?;
+        }
 
         trace!("Computing sparse force constants");
         let force_constants = ::math::dynmat::ForceConstants::compute_required_rows(

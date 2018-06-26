@@ -876,8 +876,8 @@ mod tests {
     // This is a macro pending stabilization of `impl Trait`
     macro_rules! quadratic_test_fn {
         ($target: expr) => {{
-            use ::test_functions::one_dee::prelude::*;
-            use ::test_functions::one_dee::Polynomial;
+            use ::test::one_dee::prelude::*;
+            use ::test::one_dee::Polynomial;
 
             let target = {$target}.to_vec();
             let polys = target.iter().map(|&x| Polynomial::x_n(2).recenter(-x)).collect_vec();
@@ -1012,7 +1012,7 @@ mod tests {
 
     #[test]
     fn trid() {
-        use ::test_functions::n_dee::{Trid, OnceDifferentiable};
+        use ::test::n_dee::{Trid, OnceDifferentiable};
         use ::util::random::uniform_n;
         let d = 10;
         for _ in 0..10 {
@@ -1031,7 +1031,7 @@ mod tests {
     #[test]
     fn lj() {
         use ::rsp2_slice_math::{v, V};
-        use ::test_functions::n_dee::{HyperLennardJones, OnceDifferentiable, Sum};
+        use ::test::n_dee::{HyperLennardJones, OnceDifferentiable, Sum};
         use ::util::random as urand;
         let d = 10;
 
