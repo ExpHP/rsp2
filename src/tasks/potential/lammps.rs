@@ -88,12 +88,13 @@ impl<P: Clone> Builder<P>
                 UpdateStyle::fast(sync_positions_every)
             },
         });
-        // XXX
-        inner.data_trace_dir(Some({
-            trial_dir.map(|t| t.as_path().to_owned())
-                .unwrap_or(::std::env::current_dir().unwrap())
-                .join("lammps-data-trace")
-        }));
+        if log_enabled!(target: "rsp2_tasks::special::lammps_data_trace", ::log::Level::Trace) {
+            inner.data_trace_dir(Some({
+                trial_dir.map(|t| t.as_path().to_owned())
+                    .unwrap_or(::std::env::current_dir().unwrap())
+                    .join("lammps-data-trace")
+            }));
+        }
 
         Builder { inner, potential }
     }

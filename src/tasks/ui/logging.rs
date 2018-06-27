@@ -122,6 +122,10 @@ pub fn init_global_logger() -> FailResult<SetGlobalLogfile>
             .parse("rsp2_phonopy_io=trace")
             .parse("rsp2_minimize::hager_ls=debug")
             .parse("rsp2_minimize::exact_ls=debug")
+            // not an actual module. Some debug output files are generated if you enable `trace` for
+            // specific paths under this. (don't set the whole module to `trace`; you will quickly
+            // fill your hard drive!)
+            .parse("rsp2_tasks::special=info")
             .parse(&::env::rust_log()?)
             .build()
     };
