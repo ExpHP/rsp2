@@ -13,7 +13,9 @@ use ::rsp2_structure::{CoordsKind, Lattice, Coords};
 use ::rsp2_kets::{Ket, KetRef, Rect};
 use ::rsp2_array_utils::{arr_from_fn};
 use ::rsp2_array_types::{V3, M33, dot, inv};
+use ::threading::Threading;
 
+use ::rayon::prelude::*;
 use ::std::f64::consts::PI;
 use ::itertools::Itertools;
 
@@ -154,6 +156,7 @@ impl ScMatrix {
 #[allow(unused)]
 pub fn unfold_gamma_phonon(
     config: &Config,
+    threading: Threading,
     // Takes CoordStructure because I think there might be a case for
     // supporting <M: Eq + Hash>, with the semantics that atoms with
     // non-equal metadata are "distinct" and contributions between
@@ -164,9 +167,9 @@ pub fn unfold_gamma_phonon(
     supercell_matrix: &ScMatrix,
 ) -> Vec<([u32; 3], f64)>
 {
-    let unfolder = GammaUnfolder::from_config(config, superstructure, supercell_matrix);
+    let unfolder = GammaUnfolder::from_config(config, threading, superstructure, supercell_matrix);
     let indices = unfolder.q_indices().iter().cloned();
-    let probs = unfolder.unfold_phonon(eigenvector);
+    let probs = unfolder.unfold_phonon(threading, eigenvector);
     izip!(indices, probs).collect()
 }
 
@@ -189,6 +192,7 @@ pub struct GammaUnfolder {
 impl GammaUnfolder {
     pub fn from_config(
         config: &Config,
+        threading: Threading,
         superstructure: &Coords,
         sc_matrix: &ScMatrix,
         // eigenvector_q: &V3, // reduced by sc lattice
@@ -241,14 +245,19 @@ impl GammaUnfolder {
 
                 GammaUnfolder {
                     sc_indices: quotient_indices,
-                    q_kets_by_pc_sc: pc_recip_vecs.iter().map(|sample_q| {
-                        quotient_vecs.iter().map(|quotient_q| {
-                            q_ket(
-                                &superstructure.to_carts(),
-                                &(eigenvector_q_cart + sample_q + quotient_q),
-                            )
-                        }).collect()
-                    }).collect(),
+                    q_kets_by_pc_sc: {
+                        threading.maybe_serial(|| {
+                                pc_recip_vecs.par_iter().map(|sample_q| {
+                                    quotient_vecs.par_iter().map(|quotient_q| {
+                                        q_ket(
+                                            &superstructure.to_carts(),
+                                            &(eigenvector_q_cart + sample_q + quotient_q),
+                                        )
+                                    }).collect()
+                                }).collect()
+                            },
+                        )
+                    },
                     sc_qs_frac: {
                         let pc_recip = Lattice::new(pc_recip);
                         CoordsKind::Carts(quotient_vecs.clone()).to_fracs(&pc_recip)
@@ -266,7 +275,7 @@ impl GammaUnfolder {
     pub fn q_fracs(&self) -> &[V3]
     { &self.sc_qs_frac }
 
-    pub fn unfold_phonon(&self, eigenvector: KetRef) -> Vec<f64>
+    pub fn unfold_phonon(&self, threading: Threading, eigenvector: KetRef) -> Vec<f64>
     {
         assert_eq!(eigenvector.len(), 3 * self.q_kets_by_pc_sc[0][0].len());
 
@@ -281,14 +290,18 @@ impl GammaUnfolder {
 
         // different SC reciprocal lattice vectors compete with each other.
         // different PC reciprocal lattice vectors work together.
-        let mut probs = vec![0.0; num_sc_recip_vecs];
+        let mut probs = vec![0.0f64; num_sc_recip_vecs];
         for q_kets_by_sc in &self.q_kets_by_pc_sc {
-            assert_eq!(probs.len(), q_kets_by_sc.len());
-            for (prob, q_ket) in izip!(&mut probs, q_kets_by_sc) {
-                for k in 0..3 {
-                    *prob += q_ket.as_ref().overlap(&axis_evs[k]);
-                }
-            }
+            threading.maybe_serial(|| {
+                assert_eq!(probs.len(), q_kets_by_sc.len());
+                probs.par_iter_mut()
+                    .zip_eq(q_kets_by_sc)
+                    .for_each(|(prob, q_ket)| {
+                        for k in 0..3 {
+                            *prob += q_ket.as_ref().overlap(&axis_evs[k]);
+                        }
+                    })
+            });
         }
 
         // unfortunately it seems this method of computing weights is rather
@@ -342,7 +355,13 @@ mod tests {
                 &sc_vec.map(|x| x as u32),
             );
             for config in &configs {
-                let unfolded = unfold_gamma_phonon(config, structure, eigenvector.as_ref(), &sc_mat);
+                let unfolded = unfold_gamma_phonon(
+                    config,
+                    Threading::Serial,
+                    structure,
+                    eigenvector.as_ref(),
+                    &sc_mat,
+                );
 
                 // expect that all of the nonzero probability is distributed among
                 // those entries in expect_index, and that the total is 1

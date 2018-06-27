@@ -72,6 +72,7 @@ use ::itertools::Itertools;
 use ::hlist_aliases::*;
 use ::potential::{PotentialBuilder, DiffFn, CommonMeta};
 use ::traits::save::Json;
+use ::threading::Threading;
 
 const SAVE_BANDS_DIR: &'static str = "gamma-bands";
 
@@ -722,7 +723,7 @@ fn do_force_sets_at_disps_for_phonopy<P: AsPath + Send + Sync>(
         pot,
         initial_coords,
         meta.sift(),
-        threading == &cfg::Threading::Rayon,
+        (threading == &cfg::Threading::Rayon).into(),
         disp_dir.displaced_coord_sets().collect::<Vec<_>>(),
         move |diff_fn: &mut DiffFn<_>, meta, coords: Coords| FailOk({
             let i = counter.inc();
@@ -776,7 +777,7 @@ fn use_potential_maybe_with_rayon<Inputs, Input, F, Output>(
     pot: &PotentialBuilder,
     coords_for_initialize: &Coords,
     meta: CommonMeta,
-    use_rayon: bool,
+    threading: Threading,
     inputs: Inputs,
     compute: F,
 ) -> FailResult<Vec<Output>>
@@ -786,21 +787,22 @@ where
     Inputs: IntoIterator<Item=Input>,
     Inputs: ::rayon::iter::IntoParallelIterator<Item=Input>,
     F: Fn(&mut DiffFn<CommonMeta>, CommonMeta, Input) -> FailResult<Output> + Sync + Send,
-{
-    if use_rayon {
+{ match threading {
+    Threading::Parallel => {
         use ::rayon::prelude::*;
         let get_meta = meta.sendable();
         inputs.into_par_iter()
             .map(|x| compute(&mut pot.one_off(), get_meta(), x))
             .collect()
-    } else {
+    },
+    Threading::Serial => {
         // save the cost of repeated DiffFn initialization since we don't need Send.
         let mut diff_fn = pot.initialize_diff_fn(coords_for_initialize, meta.clone())?;
         inputs.into_iter()
             .map(|x| compute(&mut diff_fn, meta.clone(), x))
             .collect()
-    }
-}
+    },
+}}
 
 //-----------------------------------
 

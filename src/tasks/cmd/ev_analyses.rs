@@ -27,6 +27,7 @@ use ::std::fmt;
 use ::serde_yaml::Value as YamlValue;
 #[allow(unused)] // compiler bug
 use ::frunk::hlist::Sculptor;
+use ::threading::Threading;
 
 use super::acoustic_search;
 
@@ -305,15 +306,16 @@ fn _unfold_probs(
                 // precompute data applicable to all kets
                 let unfolder = GammaUnfolder::from_config(
                     &from_json!({
-                            "fbz": "reciprocal-cell",
-                            "sampling": { "plain": [4, 4, 1] },
-                        }),
+                        "fbz": "reciprocal-cell",
+                        "sampling": { "plain": [4, 4, 1] },
+                    }),
+                    Threading::Parallel,
                     &partial_structure,
                     sc_mat,
                 );
 
                 let ev_q_probs = partial_evs.into_iter().map(|ket| {
-                    unfolder.unfold_phonon(ket.to_ket().as_ref())
+                    unfolder.unfold_phonon(Threading::Parallel, ket.to_ket().as_ref())
                 }).collect();
                 (unfolder, ev_q_probs)
             }).unzip()

@@ -46,7 +46,7 @@ extension-trait = "0.1.2"
 itertools = "0.7"
 lazy_static = "0.2"
 ansi_term = "0.10"
-rayon = "0.8"
+rayon = "1.0.1"
 serde = { version = "1.0.63", features = ["rc"] } 
 serde_derive = "1.0.47"
 serde_json = "1"

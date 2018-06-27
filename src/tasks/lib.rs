@@ -235,3 +235,44 @@ pub mod exposed_for_testing {
     pub use ::math::dynmat::ForceConstants;
     pub use ::meta;
 }
+
+mod threading {
+    /// Custom boolean type for enabling/disabling parallelism.
+    ///
+    /// Used in argument lists of internal APIs that want to use parallelism, to give threads
+    /// a visible presence in high-level orchestration code. (You might see
+    /// `(threading == cfg::Threading::Lammps).into()`, or even just a literal `Threading::Parallel`,
+    /// which is at least more evocative than `true`)
+    #[derive(Debug, Copy, Clone, Eq, PartialEq)]
+    pub enum Threading { Serial, Parallel }
+
+    impl From<bool> for Threading {
+        fn from(b: bool) -> Threading
+        { match b {
+            true => Threading::Parallel,
+            false => Threading::Serial,
+        }}
+    }
+
+    impl Threading {
+        /// Runs a closure in an environment where rayon has possibly been modified
+        /// to run everything in serial.
+        ///
+        /// The name is `maybe_serial` as opposed to `maybe_parallel` because the code
+        /// you write inside it should look like parallel code!
+        pub fn maybe_serial<T, F>(self, f: F) -> T
+        where
+            T: Send,
+            F: FnOnce() -> T + Send,
+        { match self {
+            Threading::Parallel => f(),
+            Threading::Serial => {
+                ::rayon::ThreadPoolBuilder::new()
+                    .num_threads(1)
+                    .build()
+                    .unwrap()
+                    .install(f)
+            },
+        }}
+    }
+}

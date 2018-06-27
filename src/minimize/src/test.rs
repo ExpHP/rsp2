@@ -505,20 +505,6 @@ pub mod n_dee {
             panic!("{}", s);
         }
 
-        fn refine_path(path: &[Vec<f64>]) -> Vec<Vec<f64>>
-        {
-            use ::itertools::Itertools;
-            use ::rsp2_slice_math::{v,V};
-            let mut new = vec![];
-            for (prev, cur) in path.iter().tuple_windows() {
-                let V(mid) = (v(cur) + v(prev)) / 2.0;
-                new.push(prev.to_vec());
-                new.push(mid);
-            }
-            new.push(path.last().unwrap().clone());
-            new
-        }
-
         #[test]
         fn trid_minimum() {
             let mut trid = super::Trid(10);
