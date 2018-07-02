@@ -708,11 +708,15 @@ class UnusedDeps:
 class UserConfig:
     def __init__(self, d):
         d = dict(d)
-        simulated_workspace = d.pop('simulated-workspace')
+        simulated_workspace = d.pop('simulated-workspace', {})
         for key in d:
             warnings.warn(f"Unrecognized user-config section: {key}")
 
         self.simulated_workspace = CfgSimulatedWorkspace(simulated_workspace)
+
+    @classmethod
+    def default(cls):
+        return cls({})
 
 class CfgSimulatedWorkspace:
     def __init__(self, d):
@@ -740,7 +744,7 @@ def read_master_user_config(fail):
             d = toml.load(f)
         return UserConfig(d)
     except FileNotFoundError:
-        return UserConfig({'config': {}})
+        return UserConfig.default()
 
 def get_internal_crates_and_root_rel_paths(fail):
     # There used to be logic in here that branched on whether each
