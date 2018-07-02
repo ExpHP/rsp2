@@ -509,8 +509,93 @@ pub(crate) mod internal_types {
     }
 }
 
+// For configuration performed by the code that uses CG, but which we don't necessarily
+// want to be available to be set in the config file.
+// (FIXME: rsp2_tasks_config probably should not be directly deserializing this crate's
+//         Settings structs in the first place!)
+#[derive(Debug, Clone, Default)]
+#[must_use]
+pub struct Builder {
+    drift_spec: Option<DriftSpec>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct DriftSpec {
+    spec: Vec<Option<usize>>,
+    num_groups: usize,
+}
+
+impl DriftSpec {
+    fn new(spec: &[Option<usize>]) -> Self {
+        use ::std::collections::{HashMap};
+        // Renumber the spec so that it uses sequential integers starting from 0.
+        let mut spec = spec.to_vec();
+        let mut map = HashMap::new();
+        let mut unused_numbers = 0..;
+        for x in &mut spec {
+            if let Some(x) = x {
+                *x = {
+                    map.entry(*x)
+                        .or_insert_with(|| unused_numbers.next().expect("overflow in drift spec"))
+                        .clone()
+                };
+            }
+        }
+        DriftSpec {
+            spec,
+            num_groups: unused_numbers.next().expect("overflow in drift spec"),
+        }
+    }
+
+    fn apply(&self, mut vector: Vec<f64>) -> Vec<f64> {
+        let mut first_values = vec![None; self.num_groups];
+        for (&group, x) in zip_eq!(&self.spec, &mut vector) {
+            if let Some(group) = group {
+                let first_value = *first_values[group].get_or_insert(*x);
+                *x -= first_value;
+            }
+        }
+        vector
+    }
+}
+
+impl Builder {
+    /// Automatically cancel drift from the direction vector so that the max step size
+    /// isn't applied unnecessarily harshly.
+    ///
+    /// For each unique integer that appears in here, the first element with that number
+    /// is subtracted from the whole group (so that the first number is always zero).
+    /// For example, to fix the first position in a set of 3-dimensional coordinates
+    /// (ordered as `x1 y1 z1 x2 y2 z2 ...`), a suitable `drift_spec` would be the vector
+    ///
+    /// ```ignore
+    /// [Some(0), Some(1), Some(2), Some(0), Some(1), Some(2), ...]
+    /// ```
+    pub fn drift_spec(mut self, spec: Option<&[Option<usize>]>) -> Self
+    { self.drift_spec = spec.map(DriftSpec::new); self }
+
+    pub fn run<E, F: DiffFn<E>>(
+        &self,
+        settings: &Settings,
+        initial_position: &[f64],
+        compute: F,
+    ) -> Result<Output, Failure<E>>
+    where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
+    { _acgsd(self, settings, initial_position, compute) }
+}
+
 #[inline(never)]
 pub fn acgsd<E, F: DiffFn<E>>(
+    settings: &Settings,
+    initial_position: &[f64],
+    compute: F,
+) -> Result<Output, Failure<E>>
+where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
+{ _acgsd(&Default::default(), settings, initial_position, compute) }
+
+#[inline(never)]
+fn _acgsd<E, F: DiffFn<E>>(
+    builder: &Builder,
     settings: &Settings,
     initial_position: &[f64],
     mut compute: F,
@@ -710,10 +795,24 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
             direction
         }}; // 'use_dir: loop { break { ... } }
 
+        // Cancel drift.
+        // NOTE: I'm not sure when the best time to do this is.
+        //       Doing it before or after normalization likely has different
+        //       effects on how the linesearch initial step size evolves,
+        //       but I haven't thought too hard about which option leads to
+        //       a better outcome.
+        let mut direction = direction;
+        if let Some(drift_spec) = &builder.drift_spec {
+            direction = drift_spec.apply(direction);
+        }
+
         // NOTE: The original source scaled alpha instead of normalizing
         //       direction, which seems to be a fruitless optimization
         //       that only serves to amplify the mental workload.
         let V(direction) = vnormalize(&direction).unwrap_or_else(|_| {
+            // FIXME: The fixed vector used here could interact poorly with drift
+            //        cancellation.
+
             // could happen for zero force; let's soldier on.
             warn!("non-normalizable direction; using arbitrary direction");
             let mut vec = vec![0.0; direction.len()];
