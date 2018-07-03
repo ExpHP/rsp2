@@ -307,6 +307,7 @@ fn _unfold_probs(
                 let unfolder = GammaUnfolder::from_config(
                     &from_json!({
                         "fbz": "reciprocal-cell",
+                        "implementation": "simd",
                         "sampling": { "plain": [4, 4, 1] },
                     }),
                     Threading::Parallel,

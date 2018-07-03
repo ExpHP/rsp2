@@ -1,0 +1,18 @@
+[package]
+!!CRATE-NAME-LINE
+version = "0.1.0"
+authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
+!!LICENSE-PERMISSIVE
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+!!rsp2-kets
+!!rsp2-soa-ops
+
+!!itertools
+!!faster
+
+[features]
+!!NIGHTLY-FEATURE-LINE

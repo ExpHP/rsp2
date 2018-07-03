@@ -33,6 +33,7 @@ extern crate rsp2_soa_ops;
 extern crate rsp2_slice_math;
 extern crate rsp2_fs_util;
 extern crate rsp2_linalg;
+extern crate rsp2_unfold_simd;
 #[macro_use] extern crate rsp2_newtype_indices;
 #[macro_use] extern crate rsp2_util_macros;
 #[macro_use] extern crate rsp2_clap;

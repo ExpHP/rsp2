@@ -49,6 +49,7 @@ rsp2-linalg         = "src/linalg"
 rsp2-integration-test = "src/util/integration-test"
 rsp2-soa-ops        = "src/util/soa-ops"
 rsp2-newtype-indices = "src/util/newtype-indices"
+rsp2-unfold-simd = "src/tasks/math/unfold-simd"
 #!!INSERTION POINT FOR NEW CRATES!!#
 
 #--------------------------------------------
@@ -85,6 +86,8 @@ slice-of-array = "0.2"
 rsp2-kets = { version = "0.3.6", git = "https://github.com/ExpHP/rsp2-kets", features = ["serde"] }
 #rsp2-kets = { path = "/home/lampam/cpp/other/rust/rsp2-kets" }
 lammps-sys = { tag = "v0.3.0", git = "https://github.com/ExpHP/lammps-sys" }
+# version with support for stable 1.27
+faster = { git = "https://github.com/AdamNiederer/faster", rev = "5cf052e326" }
 rayon = "1.0.1"
 vasp-poscar = "0.1.1"
 path_abs = "0.4.1"

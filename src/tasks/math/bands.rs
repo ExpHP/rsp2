@@ -9,10 +9,11 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::rsp2_structure::{CoordsKind, Lattice, Coords};
+use ::rsp2_structure::{Coords};
 use ::rsp2_kets::{Ket, KetRef, Rect};
 use ::rsp2_array_utils::{arr_from_fn};
 use ::rsp2_array_types::{V3, M33, dot, inv};
+use ::rsp2_unfold_simd::SimdGammaUnfolder;
 use ::threading::Threading;
 
 use ::rayon::prelude::*;
@@ -44,6 +45,7 @@ pub mod config {
     pub struct Config {
         pub fbz: FbzType,
         pub sampling: SampleType,
+        pub implementation: Implementation,
     }
 
     #[derive(Serialize, Deserialize)]
@@ -88,6 +90,25 @@ pub mod config {
         /// `(0..nx) × (0..ny) × (0..nz)`
         Plain([u32; 3]),
     }
+
+    /// Switches between the new and old implementation for benchmarking purposes.
+    #[derive(Serialize, Deserialize)]
+    #[derive(Debug, Clone)]
+    #[serde(rename_all = "kebab-case")]
+    pub enum Implementation {
+        /// Original implementation.
+        ///
+        /// Precomputed memory usage scales quadratically with supercell dimensions.
+        Old,
+
+        /// Experimental reimplementation with less memory usage and explicit SIMD.
+        ///
+        /// Precomputed memory usage scales linearly with supercell dimensions.
+        ///
+        /// The way it is written accumulates a slightly larger amount of numerical error
+        /// for larger supercells and sampling spaces.
+        Simd,
+    }
 }
 
 impl self::config::SampleType {
@@ -108,6 +129,24 @@ impl self::config::SampleType {
             .map(|a| a.map(f64::from))
             .map(|v| v * lattice)
             .collect::<Vec<_>>()
+    }
+
+    fn most_negative_point(&self) -> V3
+    {
+        use self::config::SampleType::*;
+        match *self {
+            Centered(arr) => V3(arr).map(|x| -(x as f64)),
+            Plain(_) => V3::zero(),
+        }
+    }
+
+    fn dims(&self) -> [u32; 3]
+    {
+        use self::config::SampleType::*;
+        match *self {
+            Centered(arr) => V3(arr).map(|x| x * 2 + 1).0,
+            Plain(arr) => arr,
+        }
     }
 }
 
@@ -173,20 +212,22 @@ pub fn unfold_gamma_phonon(
     izip!(indices, probs).collect()
 }
 
+pub struct GammaUnfolder(GammaUnfolderKind);
+enum GammaUnfolderKind {
+    Old(OldGammaUnfolder),
+    Simd(SimdGammaUnfolder),
+}
+
 /// Contains precomputed information derived from the
 /// q-points at which integration will be performed;
 ///
 /// This speeds up the unfolding of many eigenvectors computed
 /// at the same q point.
-pub struct GammaUnfolder {
+struct OldGammaUnfolder {
     /// `[sc_recip_index] -> index` (3D index of sc reciprocal lattice point)
     sc_indices: Vec<[u32; 3]>,
     /// `[pc_recip_index][sc_recip_index] -> q_ket`
     q_kets_by_pc_sc: Vec<Vec<Ket>>,
-
-    // HACK: these are only here to service the code that uses UnfolderAtQ
-    /// `[sc_recip_index] -> q` (reduced into primitive cell)
-    sc_qs_frac: Vec<PrimFracQ>,
 }
 
 impl GammaUnfolder {
@@ -233,48 +274,76 @@ impl GammaUnfolder {
                         }).collect();
                 assert!(quotient_indices.len() > 0, "no points to sample against");
 
-                let quotient_vecs = quotient_sample_spec.points(sc_recip);
-                let pc_recip_vecs = config.sampling.points(pc_recip);
+                let sc_sampler = quotient_sample_spec;
+                let pc_sampler = &config.sampling;
+                match config.implementation { // FIXME
+                    config::Implementation::Old => {
+                        let quotient_vecs = sc_sampler.points(sc_recip);
+                        let pc_recip_vecs = pc_sampler.points(pc_recip);
 
-                // into recip cartesian space
-                let eigenvector_q_cart = eigenvector_q * sc_recip;
-                if eigenvector_q != &V3([0.0; 3]) {
-                    // (I currently always run this code on gamma eigenvectors...)
-                    warn!("Untested code path: 9fc15058-7199-45d2-80ec-630ceb575d3d");
-                }
+                        // into recip cartesian space
+                        let eigenvector_q_cart = eigenvector_q * sc_recip;
+                        if eigenvector_q != &V3([0.0; 3]) {
+                            // (I currently always run this code on gamma eigenvectors...)
+                            warn!("Untested code path: 9fc15058-7199-45d2-80ec-630ceb575d3d");
+                        }
 
-                GammaUnfolder {
-                    sc_indices: quotient_indices,
-                    q_kets_by_pc_sc: {
-                        threading.maybe_serial(|| {
-                                pc_recip_vecs.par_iter().map(|sample_q| {
-                                    quotient_vecs.par_iter().map(|quotient_q| {
-                                        q_ket(
-                                            &superstructure.to_carts(),
-                                            &(eigenvector_q_cart + sample_q + quotient_q),
-                                        )
-                                    }).collect()
-                                }).collect()
+                        GammaUnfolder(GammaUnfolderKind::Old(OldGammaUnfolder {
+                            sc_indices: quotient_indices,
+                            q_kets_by_pc_sc: {
+                                threading.maybe_serial(|| {
+                                        pc_recip_vecs.par_iter().map(|sample_q| {
+                                            quotient_vecs.par_iter().map(|quotient_q| {
+                                                q_ket(
+                                                    &superstructure.to_carts(),
+                                                    eigenvector_q_cart + sample_q + quotient_q,
+                                                )
+                                            }).collect()
+                                        }).collect()
+                                    },
+                                )
                             },
-                        )
+                        }))
                     },
-                    sc_qs_frac: {
-                        let pc_recip = Lattice::new(pc_recip);
-                        CoordsKind::Carts(quotient_vecs.clone()).to_fracs(&pc_recip)
+                    config::Implementation::Simd => {
+                        let initial_pc_index = pc_sampler.most_negative_point();
+                        let carts = &superstructure.to_carts();
+                        GammaUnfolder(GammaUnfolderKind::Simd(SimdGammaUnfolder {
+                            sc_q_kets: [
+                                q_ket(&carts, V3([1., 0., 0.]) * sc_recip),
+                                q_ket(&carts, V3([0., 1., 0.]) * sc_recip),
+                                q_ket(&carts, V3([0., 0., 1.]) * sc_recip),
+                            ],
+                            pc_q_kets: [
+                                q_ket(&carts, V3([1., 0., 0.]) * pc_recip),
+                                q_ket(&carts, V3([0., 1., 0.]) * pc_recip),
+                                q_ket(&carts, V3([0., 0., 1.]) * pc_recip),
+                            ],
+                            initial_pc_q_ket: q_ket(&carts, initial_pc_index * pc_recip),
+                            sc_indices: quotient_indices,
+                            pc_dims: pc_sampler.dims(),
+                            sc_dims: sc_sampler.dims(),
+                        }))
                     },
                 }
             },
         }
     }
 
-    #[allow(unused)]
     pub fn q_indices(&self) -> &[[u32; 3]]
-    { &self.sc_indices }
+    { match &self.0 {
+        GammaUnfolderKind::Old(unfolder) => &unfolder.sc_indices,
+        GammaUnfolderKind::Simd(unfolder) => &unfolder.sc_indices,
+    }}
 
-    #[allow(unused)]
-    pub fn q_fracs(&self) -> &[V3]
-    { &self.sc_qs_frac }
+    pub fn unfold_phonon(&self, threading: Threading, eigenvector: KetRef) -> Vec<f64>
+    { match &self.0 {
+        GammaUnfolderKind::Old(unfolder) => unfolder.unfold_phonon(threading, eigenvector),
+        GammaUnfolderKind::Simd(unfolder) => unfolder.unfold(eigenvector),
+    }}
+}
 
+impl OldGammaUnfolder {
     pub fn unfold_phonon(&self, threading: Threading, eigenvector: KetRef) -> Vec<f64>
     {
         assert_eq!(eigenvector.len(), 3 * self.q_kets_by_pc_sc[0][0].len());
@@ -315,12 +384,8 @@ impl GammaUnfolder {
 }
 
 // NOTE: a Ket of length N_a rather than 3 * N_a
-fn q_ket(carts: &[V3], q: &V3) -> Ket
-{ carts.iter().map(|x| Rect::from_phase(-dot(x, q) * 2.0 * PI)).collect() }
-
-#[allow(unused)]
-type SuperFracQ = V3;
-type PrimFracQ = V3;
+fn q_ket(carts: &[V3], q: V3) -> Ket
+{ carts.iter().map(|x| Rect::from_phase(-dot(x, &q) * 2.0 * PI)).collect() }
 
 #[cfg(test)]
 #[deny(dead_code)]
@@ -332,223 +397,270 @@ mod tests {
 
     #[test]
     fn simple_unfold() {
-        fn do_it(
-            structure: &Coords,
-            sc_vec: V3<i32>,
-            expect_index: &[[u32; 3]],
-            eigenvector: Vec<V3>,
-        ) {
+        let mut has_had_simd_test = false;
 
-            let configs = vec![
-                from_json!({
-                    "fbz": "reciprocal-cell",
-                    "sampling": { "plain": [3, 3, 3] },
-                }),
-                from_json!({
-                    "fbz": "reciprocal-cell",
-                    "sampling": { "centered": [1, 1, 1] },
-                }),
-            ];
-            let eigenvector: Ket = eigenvector.flat().iter().map(|&r| Rect::from(r)).collect();
-            let sc_mat = ScMatrix::new(
-                &mat::from_array([[sc_vec[0], 0, 0], [0, sc_vec[1], 0], [0, 0, sc_vec[2]]]),
-                &sc_vec.map(|x| x as u32),
-            );
-            for config in &configs {
-                let unfolded = unfold_gamma_phonon(
-                    config,
-                    Threading::Serial,
-                    structure,
-                    eigenvector.as_ref(),
-                    &sc_mat,
-                );
-
-                // expect that all of the nonzero probability is distributed among
-                // those entries in expect_index, and that the total is 1
-                let (mut ayes, mut nays) = (0.0, 0.0);
-                for &(index, p) in &unfolded {
-                    match expect_index.contains(&index) {
-                        true => ayes += p,
-                        false => nays += p,
+        { // FIXME: block will be unnecessary once NLL lands
+            let mut do_it = |
+                structure: &Coords,
+                sc_vec: V3<i32>,
+                expect_index: &[[u32; 3]],
+                eigenvector: Vec<V3>,
+            | {
+                let mut configs = vec![
+                    from_json!({
+                        "fbz": "reciprocal-cell",
+                        "implementation": "old",
+                        "sampling": { "plain": [3, 3, 3] },
+                    }),
+                    from_json!({
+                        "fbz": "reciprocal-cell",
+                        "implementation": "old",
+                        "sampling": { "centered": [1, 1, 1] },
+                    }),
+                ];
+                // FIXME: remove this restriction if simd algo is ever updated to support
+                //        such cells:
+                if sc_vec[1] == 1 && sc_vec[2] == 1 {
+                    // HACK: make sure at least one nontrivial test runs for simd.
+                    //       (it probably ought to have some tests specially designed for it)
+                    // (having the above `if` block hiding in a closure otherwise makes it easy
+                    //  to accidentally remove the only applicable test)
+                    if sc_vec[0] != 1 {
+                        has_had_simd_test = true;
                     }
+
+                    // test SIMD
+                    configs.extend(vec![
+                        from_json!({
+                            "fbz": "reciprocal-cell",
+                            "implementation": "simd",
+                            "sampling": { "plain": [3, 3, 3] },
+                        }),
+                        from_json!({
+                            "fbz": "reciprocal-cell",
+                            "implementation": "simd",
+                            "sampling": { "centered": [1, 1, 1] },
+                        }),
+                    ])
                 }
-                assert!(
-                    (ayes - 1.0).abs() < 1e-6 && nays < 1e-6,
-                    "{:?} {:?}", expect_index, unfolded,
+                let eigenvector: Ket = eigenvector.flat().iter().map(|&r| Rect::from(r)).collect();
+                let sc_mat = ScMatrix::new(
+                    &mat::from_array([[sc_vec[0], 0, 0], [0, sc_vec[1], 0], [0, 0, sc_vec[2]]]),
+                    &sc_vec.map(|x| x as u32),
                 );
+                for config in &configs {
+                    let unfolded = unfold_gamma_phonon(
+                        config,
+                        Threading::Serial,
+                        structure,
+                        eigenvector.as_ref(),
+                        &sc_mat,
+                    );
+
+                    // expect that all of the nonzero probability is distributed among
+                    // those entries in expect_index, and that the total is 1
+                    let (mut ayes, mut nays) = (0.0, 0.0);
+                    for &(index, p) in &unfolded {
+                        match expect_index.contains(&index) {
+                            true => ayes += p,
+                            false => nays += p,
+                        }
+                    }
+                    assert!(
+                        (ayes - 1.0).abs() < 1e-6 && nays < 1e-6,
+                        "\
+                            config: {:?}\n\
+                            expected nonzeros: {:?}\n\
+                            output: {:?}\
+                        ", config, expect_index, unfolded,
+                    );
+                }
+            };
+
+            //--------------------------------------------
+            // easy 1D case
+            // 1 atom per primitive cell
+            let structure = Coords::new(
+                Lattice::diagonal(&[4.0, 1.0, 1.0]),
+                CoordsKind::Carts(vec![
+                    [0.0, 0.0, 0.0],
+                    [1.0, 0.0, 0.0],
+                    [2.0, 0.0, 0.0],
+                    [3.0, 0.0, 0.0],
+                ].envee()),
+            );
+            let sc_vec = V3([4, 1, 1]);
+            { // FIXME: block will be unnecessary once NLL lands
+                let mut go_do_it = |expected, eigenvector|
+                    do_it(&structure, sc_vec, expected, eigenvector);
+
+                go_do_it(&[[0, 0, 0]], vec![
+                    [-0.5, 0.0, 0.0],
+                    [-0.5, 0.0, 0.0],
+                    [-0.5, 0.0, 0.0],
+                    [-0.5, 0.0, 0.0],
+                ].envee());
+
+                // phase rotation of 2/4 tau (i.e. `-1`) per unit cell
+                go_do_it(&[[2, 0, 0]], vec![
+                    [ 0.5, 0.0, 0.0],
+                    [-0.5, 0.0, 0.0],
+                    [ 0.5, 0.0, 0.0],
+                    [-0.5, 0.0, 0.0],
+                ].envee());
+
+                // phase rotation of 1/4 tau (i.e. `i`) per unit cell.
+                // because gamma eigenvectors are always real, we end up
+                //  with contributions from two kpoints whose imaginary
+                //  parts cancel.
+                go_do_it(&[[1, 0, 0], [3, 0, 0]], vec![
+                    [ 0.5, 0.0, 0.0],
+                    [ 0.5, 0.0, 0.0],
+                    [-0.5, 0.0, 0.0],
+                    [-0.5, 0.0, 0.0],
+                ].envee());
+            } // scope go_do_it
+
+            //--------------------------------------------
+            // supercell along multiple dimensions
+            // 1 atom per primitive cell
+            let structure = Coords::new(
+                Lattice::diagonal(&[2.0, 2.0, 1.0]),
+                CoordsKind::Carts(vec![
+                    [0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0],
+                    [1.0, 0.0, 0.0],
+                    [1.0, 1.0, 0.0],
+                ].envee()),
+            );
+            let sc_vec = V3([2, 2, 1]);
+
+            { // FIXME: block will be unnecessary once NLL lands
+                let mut go_do_it = |expected, eigenvector|
+                    do_it(&structure, sc_vec, expected, eigenvector);
+
+                // gamma
+                let p = 8_f64.sqrt().recip();
+                go_do_it(&[[0, 0, 0]], vec![
+                    [ p,  p, 0.0],
+                    [ p,  p, 0.0],
+                    [ p,  p, 0.0],
+                    [ p,  p, 0.0],
+                ].envee());
+
+                // non-gamma along one axis
+                let p = 8_f64.sqrt().recip();
+                go_do_it(&[[0, 1, 0]], vec![
+                    [-p,  p, 0.0],
+                    [ p, -p, 0.0],
+                    [-p,  p, 0.0],
+                    [ p, -p, 0.0],
+                ].envee());
+
+                // non-gamma along multiple axis.
+                let p = 8_f64.sqrt().recip();
+                go_do_it(&[[1, 1, 0]], vec![
+                    [-p,  p, 0.0],
+                    [ p, -p, 0.0],
+                    [ p, -p, 0.0],
+                    [-p,  p, 0.0],
+                ].envee());
+            } // scope go_do_it
+
+            //--------------------------------------------
+            // non-diagonal lattice.
+            // hopefully, this will catch bugs involving incorrect
+            //   usage of matrices vs their transpose.
+            // 1 atom per primitive cell
+            let structure = Coords::new(
+                Lattice::from(&[
+                    [1.0, 0.0, 0.0],
+                    [-0.5, 0.5 * 3_f64.sqrt(), 0.0],
+                    [0.0, 0.0, 1.0],
+                ]),
+                CoordsKind::Fracs(vec![
+                    [0.0, 0.0, 0.0],
+                    [0.0, 0.5, 0.0],
+                    [0.5, 0.0, 0.0],
+                    [0.5, 0.5, 0.0],
+                ].envee()),
+            );
+            let sc_vec = V3([2, 2, 1]);
+
+            { // FIXME: block will be unnecessary once NLL lands
+                let mut go_do_it = |expected, eigenvector|
+                    do_it(&structure, sc_vec, expected, eigenvector);
+
+                go_do_it(&[[1, 1, 0]], vec![
+                    [0.0, 0.0, -0.5],
+                    [0.0, 0.0,  0.5],
+                    [0.0, 0.0,  0.5],
+                    [0.0, 0.0, -0.5],
+                ].envee());
             }
-        };
 
-        //--------------------------------------------
-        // easy 1D case
-        // 1 atom per primitive cell
-        let structure = Coords::new(
-            Lattice::diagonal(&[1.0, 1.0, 4.0]),
-            CoordsKind::Carts(vec![
-                [0.0, 0.0, 0.0],
-                [0.0, 0.0, 1.0],
-                [0.0, 0.0, 2.0],
-                [0.0, 0.0, 3.0],
-            ].envee()),
-        );
-        let sc_vec = V3([1, 1, 4]);
-        let go_do_it = |expected, eigenvector|
-            do_it(&structure, sc_vec, expected, eigenvector);
+            //--------------------------------------------
+            // primitive structure with more than one atom
+            let structure = Coords::new(
+                Lattice::from(&[
+                    // graphene cell (2 atoms per primitive),
+                    // doubled along b (4 atoms per supercell)
+                    [1.0, 0.0, 0.0],
+                    [-1.0, 1.0 * 3_f64.sqrt(), 0.0],
+                    [0.0, 0.0, 1.0],
+                ]),
+                CoordsKind::Fracs(vec![
+                    // honeycomb pattern
+                    [    0.0, 0.0, 0.0],
+                    [1.0/3.0, 0.0, 0.0],
+                    [    0.0, 0.5, 0.0],
+                    [1.0/3.0, 0.5, 0.0],
+                ].envee()),
+            );
+            let sc_vec = V3([1, 2, 1]);
 
-        go_do_it(&[[0, 0, 0]], vec![
-            [0.0, 0.0, -0.5],
-            [0.0, 0.0, -0.5],
-            [0.0, 0.0, -0.5],
-            [0.0, 0.0, -0.5],
-        ].envee());
+            { // FIXME: block will be unnecessary once NLL lands
+                let mut go_do_it = |expected, eigenvector|
+                    do_it(&structure, sc_vec, expected, eigenvector);
 
-        // phase rotation of 2/4 tau (i.e. `-1`) per unit cell
-        go_do_it(&[[0, 0, 2]], vec![
-            [0.0, 0.0,  0.5],
-            [0.0, 0.0, -0.5],
-            [0.0, 0.0,  0.5],
-            [0.0, 0.0, -0.5],
-        ].envee());
+                // the obvious gamma vec
+                go_do_it(&[[0, 0, 0]], vec![
+                    [0.0, 0.0,  0.5],
+                    [0.0, 0.0,  0.5],
+                    [0.0, 0.0,  0.5],
+                    [0.0, 0.0,  0.5],
+                ].envee());
 
-        // phase rotation of 1/4 tau (i.e. `i`) per unit cell.
-        // because gamma eigenvectors are always real, we end up
-        //  with contributions from two kpoints whose imaginary
-        //  parts cancel.
-        go_do_it(&[[0, 0, 1], [0, 0, 3]], vec![
-            [0.0, 0.0,  0.5],
-            [0.0, 0.0,  0.5],
-            [0.0, 0.0, -0.5],
-            [0.0, 0.0, -0.5],
-        ].envee());
+                // the less obvious gamma vec
+                // (sign only changes within the primitive cell)
+                //
+                // If we did not sample other primitive reciprocal cell vectors
+                // beyond the true gamma, this would fail.
+                go_do_it(&[[0, 0, 0]], vec![
+                    [0.0, 0.0,  0.5],
+                    [0.0, 0.0, -0.5],
+                    [0.0, 0.0,  0.5],
+                    [0.0, 0.0, -0.5],
+                ].envee());
 
-        //--------------------------------------------
-        // supercell along multiple dimensions
-        // 1 atom per primitive cell
-        let structure = Coords::new(
-            Lattice::diagonal(&[2.0, 2.0, 1.0]),
-            CoordsKind::Carts(vec![
-                [0.0, 0.0, 0.0],
-                [0.0, 1.0, 0.0],
-                [1.0, 0.0, 0.0],
-                [1.0, 1.0, 0.0],
-            ].envee()),
-        );
-        let sc_vec = V3([2, 2, 1]);
+                // a non-gamma vec
+                go_do_it(&[[0, 1, 0]], vec![
+                    [0.0, 0.0,  0.5],
+                    [0.0, 0.0,  0.5],
+                    [0.0, 0.0, -0.5],
+                    [0.0, 0.0, -0.5],
+                ].envee());
+            } // scope go_do_it
 
-        let go_do_it = |expected, eigenvector|
-            do_it(&structure, sc_vec, expected, eigenvector);
+            //--------------------------------------------
 
-        // gamma
-        let p = 8_f64.sqrt().recip();
-        go_do_it(&[[0, 0, 0]], vec![
-            [ p,  p, 0.0],
-            [ p,  p, 0.0],
-            [ p,  p, 0.0],
-            [ p,  p, 0.0],
-        ].envee());
+            // TODO: Test with non-perfect supercell
+            // TODO: Test with non-diagonal supercell
 
-        // non-gamma along one axis
-        let p = 8_f64.sqrt().recip();
-        go_do_it(&[[0, 1, 0]], vec![
-            [-p,  p, 0.0],
-            [ p, -p, 0.0],
-            [-p,  p, 0.0],
-            [ p, -p, 0.0],
-        ].envee());
+            //--------------------------------------------
 
-        // non-gamma along multiple axis.
-        let p = 8_f64.sqrt().recip();
-        go_do_it(&[[1, 1, 0]], vec![
-            [-p,  p, 0.0],
-            [ p, -p, 0.0],
-            [ p, -p, 0.0],
-            [-p,  p, 0.0],
-        ].envee());
+        } // scope has_had_simd_test mut borrow
 
-        //--------------------------------------------
-        // non-diagonal lattice.
-        // hopefully, this will catch bugs involving incorrect
-        //   usage of matrices vs their transpose.
-        // 1 atom per primitive cell
-        let structure = Coords::new(
-            Lattice::from(&[
-                [1.0, 0.0, 0.0],
-                [-0.5, 0.5 * 3_f64.sqrt(), 0.0],
-                [0.0, 0.0, 1.0],
-            ]),
-            CoordsKind::Fracs(vec![
-                [0.0, 0.0, 0.0],
-                [0.0, 0.5, 0.0],
-                [0.5, 0.0, 0.0],
-                [0.5, 0.5, 0.0],
-            ].envee()),
-        );
-        let sc_vec = V3([2, 2, 1]);
-
-        let go_do_it = |expected, eigenvector|
-            do_it(&structure, sc_vec, expected, eigenvector);
-
-        go_do_it(&[[1, 1, 0]], vec![
-            [0.0, 0.0, -0.5],
-            [0.0, 0.0,  0.5],
-            [0.0, 0.0,  0.5],
-            [0.0, 0.0, -0.5],
-        ].envee());
-
-        //--------------------------------------------
-        // primitive structure with more than one atom
-        let structure = Coords::new(
-            Lattice::from(&[
-                // graphene cell (2 atoms per primitive),
-                // doubled along b (4 atoms per supercell)
-                [1.0, 0.0, 0.0],
-                [-1.0, 1.0 * 3_f64.sqrt(), 0.0],
-                [0.0, 0.0, 1.0],
-            ]),
-            CoordsKind::Fracs(vec![
-                // honeycomb pattern
-                [    0.0, 0.0, 0.0],
-                [1.0/3.0, 0.0, 0.0],
-                [    0.0, 0.5, 0.0],
-                [1.0/3.0, 0.5, 0.0],
-            ].envee()),
-        );
-        let sc_vec = V3([1, 2, 1]);
-
-        let go_do_it = |expected, eigenvector|
-            do_it(&structure, sc_vec, expected, eigenvector);
-
-        // the obvious gamma vec
-        go_do_it(&[[0, 0, 0]], vec![
-            [0.0, 0.0,  0.5],
-            [0.0, 0.0,  0.5],
-            [0.0, 0.0,  0.5],
-            [0.0, 0.0,  0.5],
-        ].envee());
-
-        // the less obvious gamma vec
-        // (sign only changes within the primitive cell)
-        //
-        // If we did not sample other primitive reciprocal cell vectors
-        // beyond the true gamma, this would fail.
-        go_do_it(&[[0, 0, 0]], vec![
-            [0.0, 0.0,  0.5],
-            [0.0, 0.0, -0.5],
-            [0.0, 0.0,  0.5],
-            [0.0, 0.0, -0.5],
-        ].envee());
-
-        // a non-gamma vec
-        go_do_it(&[[0, 1, 0]], vec![
-            [0.0, 0.0,  0.5],
-            [0.0, 0.0,  0.5],
-            [0.0, 0.0, -0.5],
-            [0.0, 0.0, -0.5],
-        ].envee());
-
-        //--------------------------------------------
-
-        // TODO: Test with non-perfect supercell
-        // TODO: Test with non-diagonal supercell
+        assert!(has_had_simd_test, "you dufus! nothing is testing the SIMD impl!");
     }
 }

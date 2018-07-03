@@ -28,6 +28,7 @@ path = "lib.rs"
 !!rsp2-assert-close
 !!rsp2-linalg
 !!rsp2-newtype-indices
+!!rsp2-unfold-simd
 
 !!clap
 !!slice-of-array
