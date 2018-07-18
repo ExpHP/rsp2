@@ -32,11 +32,10 @@ use std::mem;
 /// `unsafe` code in other crates is allowed to trust a number of properties
 /// of index types: (these properties are provided by the macro-generated impls)
 ///
-/// * `new` and `index` are identical in behavior to `mem::transmute`, and
-///   it is safe to transmute a container of one type into another.
-/// * Methods of `Clone`, `PartialEq`, `Eq`, `PartialOrd`, and `Ord` behave
+/// * `new` and `index` are identical in behavior to `mem::transmute`.
+/// * Methods of `Clone`, `PartialEq`, `Eq`, `PartialOrd`, `Ord`, and `Hash` behave
 ///   identically to how they would for usizes.
-/// * `Hash` and `Debug` impls must not panic.
+/// * `Debug` impls do not panic.
 pub unsafe trait Idx: Copy + 'static + Eq + Debug + Display + Ord + Hash + Send + Sync {
     fn new(idx: usize) -> Self;
     fn index(self) -> usize;
@@ -54,7 +53,11 @@ macro_rules! newtype_index {
     ( $( #[ $($attr:tt)+ ] )* $type:ident) => (
 
         $( #[ $($attr)+ ] )*
-        #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+        // NOTE: unsafe code relies on these being derived in many places.
+        #[derive(Copy, Clone)]
+        // NOTE: unsafe code relies on these being derived for safely transmuting
+        //       BTreeMaps and HashMaps.
+        #[derive(PartialEq, Eq, Hash, PartialOrd, Ord)]
         pub struct $type(pub usize);
 
         unsafe impl $crate::Idx for $type {

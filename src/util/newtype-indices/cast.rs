@@ -22,6 +22,21 @@ pub struct CastIt<V: ?Sized>(PhantomData<V>, Void);
 /// # Safety
 ///
 /// This is unsafe because it has generic impls that perform transmute.
+///
+/// Special consideration must be given to types whose data layout is affected
+/// by trait impls, such as HashMap and BTreeMap.
+///
+/// The following conditions must be met for an impl to be safe:
+///
+/// * `Self` and `Result` must have identical representations.
+/// * If `Self` implements any of the traits `PartialEq`, `Eq`, `Hash`,
+///   `PartialOrd`, and `Ord`, then so must `Result` with an identical implementation
+///   (and vice versa).
+///     * This implies that generic impls of these traits on implementors of IndexCast
+///       must not be marked `default`.
+///
+/// Notice that this trait is not limited to types for which a safe conversion
+/// from `Self` to `Result` exists, as it can, for instance, convert `&A` to `&B`.
 pub unsafe trait IndexCast<Result: ?Sized, Disambig: ?Sized> {
     fn index_cast(self) -> Result
     where Self: Sized, Result: Sized,
@@ -49,7 +64,9 @@ where V: IndexCast<Result, Disambig>,
 // work, add an impl.  Otherwise, who cares?
 // !!!!!!!!!!!!!!!
 
-// base case for a successful cast
+// base case for a successful cast.
+//
+// NOTE: No other base cases may exist, for safety purposes.
 unsafe impl<Src: Idx, Dest: Idx> IndexCast<Dest, KeepIt> for Src {}
 
 // mods are just for organization
@@ -93,6 +110,14 @@ mod collections {
     use super::*;
     use ::std::collections::{HashMap, BTreeMap};
     use ::std::collections::{HashSet, BTreeSet};
+
+    // The safety of these relies on:
+    // * IndexCast being an unsafe trait that requires Self and Result to have identical
+    //   impls for these traits.
+    // * Idx being an unsafe trait which requires types to implement PartialEq, Eq,
+    //   PartialOrd, Ord, and Hash identically to usize.
+    // * The wording of that fact being such that there is no loophole like
+    //   converting `A -> B -> C` where `B: !Hash`.
 
     unsafe impl<A, B, V, Dis> IndexCast<BTreeMap<B, V>, BTreeMap<CastIt<Dis>, KeepIt>> for BTreeMap<A, V>
     where A: IndexCast<B, Dis> {}
