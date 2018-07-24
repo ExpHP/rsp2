@@ -491,6 +491,7 @@ impl LammpsOwner {
         len: usize,
     ) -> FailResult<Vec<f64>>
     {Ok({
+        assert_ne!(len, 0); // because extract_compute_any_d returns &T
         let p = self.extract_compute_any_d(name, style, ComputeType::Vector)?;
 
         ::std::slice::from_raw_parts(p, len)
