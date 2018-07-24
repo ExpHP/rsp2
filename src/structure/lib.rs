@@ -8,8 +8,7 @@
 ** Be aware that not all of rsp2 is provided under this permissive license, **
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
-
-#![cfg_attr(feature = "nightly", euclidean_division)]
+#![cfg_attr(feature = "nightly", feature(euclidean_division))]
 #![deny(unused_must_use)]
 
 extern crate rsp2_array_utils;
