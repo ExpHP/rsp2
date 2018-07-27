@@ -49,6 +49,7 @@ rsp2-linalg         = "src/linalg"
 rsp2-integration-test = "src/util/integration-test"
 rsp2-soa-ops        = "src/util/soa-ops"
 rsp2-newtype-indices = "src/util/newtype-indices"
+rsp2-numtheory      = "src/util/numtheory"
 #!!INSERTION POINT FOR NEW CRATES!!#
 
 #--------------------------------------------
@@ -72,6 +73,7 @@ lazy_static = "0.2"
 log = "0.4"
 nom = "3"
 num-traits = "0.2.3"
+num-integer = "0.1"
 ordered-float = "0.5"
 rand = "0.3"
 serde = { version = "1.0.63", features = ["rc"] }

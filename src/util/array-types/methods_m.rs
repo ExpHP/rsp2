@@ -495,6 +495,7 @@ gen_each!{
         {$Mr:ident $r:tt}
         {$Vc:ident $c:tt}
     ) => {
+        // FIXME: unnecessary Copy bound
         impl<X: Copy> Transpose for $Mr<$Vc<X>> {
             type Output = M![$c, V![$r, X]];
 

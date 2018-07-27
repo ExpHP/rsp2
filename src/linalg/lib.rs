@@ -13,12 +13,19 @@
 extern crate failure;
 extern crate rand;
 extern crate lapacke;
+extern crate lapack_src;
 extern crate slice_of_array;
 #[macro_use]
 extern crate ndarray;
+extern crate num_integer;
+extern crate num_traits;
 #[cfg_attr(test, macro_use)]
 extern crate rsp2_assert_close;
-extern crate lapack_src;
+extern crate rsp2_array_types;
+extern crate rsp2_numtheory;
+
+pub use hnf::Hnf;
+mod hnf;
 
 use ::failure::{Error};
 use ::ndarray::{Array, Array2, ArrayView2, ArrayBase, Ix2, Axis};

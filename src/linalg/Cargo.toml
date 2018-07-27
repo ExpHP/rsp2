@@ -15,7 +15,8 @@ path = "lib.rs"
 [dependencies]
 rsp2-assert-close = { path = "../util/assert-close" }
 #!!rsp2-shims
-#!!rsp2-array-types
+rsp2-array-types = { path = "../util/array-types" }
+rsp2-numtheory = { path = "../util/numtheory" }
 failure = "0.1"
 slice-of-array = "0.2"
 #!!frunk
@@ -23,7 +24,9 @@ lapacke = "0.1.4"
 lapack-src = { version = "0.1.4", features = ["netlib"] } 
 ndarray = "0.11.2"
 rand = "0.3"
+num-traits = "0.2.3"
+num-integer = "0.1"
 
 [features]
-nightly = ["beta", "rsp2-assert-close/nightly"]
-beta = ["rsp2-assert-close/beta"]
+nightly = ["beta", "rsp2-array-types/nightly", "rsp2-assert-close/nightly", "rsp2-numtheory/nightly"]
+beta = ["rsp2-array-types/beta", "rsp2-assert-close/beta", "rsp2-numtheory/beta"]

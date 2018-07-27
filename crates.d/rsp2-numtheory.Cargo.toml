@@ -8,19 +8,11 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 path = "lib.rs"
 
 [dependencies]
-!!rsp2-assert-close
-#!!rsp2-shims
-!!rsp2-array-types
-!!rsp2-numtheory
-!!failure
-!!slice-of-array
-#!!frunk
-!!lapacke
-!!lapack-src
-!!ndarray
-!!rand
-!!num-traits
 !!num-integer
+!!num-traits
+
+[dev-dependencies]
+!!rand
 
 [features]
 !!NIGHTLY-FEATURE-LINE
