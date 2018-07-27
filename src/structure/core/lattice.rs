@@ -151,7 +151,8 @@ impl Lattice {
     pub fn eye() -> Self { Self::cubic(1.0) }
 
     #[inline]
-    pub fn diagonal(&[x, y, z]: &[f64; 3]) -> Self { Self::orthorhombic(x, y, z) }
+    pub fn diagonal(&diag: &[f64; 3]) -> Self
+    { Self::new(&M33::from_diag(V3(diag))) }
 
     // NOTE: Currently there are only helpers for bravais lattices whose
     //       matrix representations are DEAD OBVIOUS.
@@ -162,19 +163,21 @@ impl Lattice {
 
     /// A cubic lattice ((a, a, a), (90, 90, 90))
     #[inline]
-    pub fn cubic(a: f64) -> Self { Self::orthorhombic(a, a, a) }
+    pub fn cubic(a: f64) -> Self
+    { Self::orthorhombic(a, a, a) }
 
     /// An orthorhombic lattice ((a, b, c), (90, 90, 90))
     #[inline]
     pub fn orthorhombic(a: f64, b: f64, c: f64) -> Self
-    { Self::from(&[[a, 0., 0.], [0., b, 0.], [0., 0., c]]) }
+    { Self::diagonal(&[a, b, c]) }
 
     // who needs quickcheck
     /// Generate a random lattice.
     ///
     /// NOTE:
     /// Elements are pulled from a uniform distribution of [-x, x]
-    /// and in all honesty I doubt this is representative of typical
+    /// and in all honesty I doubt this is representative of typical lattices.
+    /// (symmetry in particular is poorly represented)
     #[cfg(test)]
     pub fn random_uniform(max: f64) -> Self {
         use ::slice_of_array::prelude::*;

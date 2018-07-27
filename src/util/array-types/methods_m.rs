@@ -83,6 +83,12 @@ gen_each!{
             where Self: One,
             { One::one() }
 
+            /// Construct a diagonal matrix.
+            #[inline(always)]
+            pub fn from_diag(diag: DiagT<Self>) -> Self
+            where Self: FromDiag,
+            { FromDiag::from_diag(diag) }
+
             /// Matrix inverse.
             ///
             /// It is recommended to write this as `M33::inv(m)` or etc. rather than `m.inv()`.
@@ -321,48 +327,36 @@ impl<X: Semiring> One for M22<X>
 where X: PrimitiveSemiring,
 {
     #[inline(always)]
-    fn one() -> Self { M2([
-        V2([ X::one(), X::zero()]),
-        V2([X::zero(),  X::one()]),
-    ])}
+    fn one() -> Self
+    { M22::from_diag(V2([X::one(), X::one()])) }
 
     #[inline]
-    fn is_one(&self) -> bool {
-        is_one_impl(self)
-    }
+    fn is_one(&self) -> bool
+    { is_one_impl(self) }
 }
 
 impl<X: Semiring> One for M33<X>
 where X: PrimitiveSemiring,
 {
     #[inline(always)]
-    fn one() -> Self { M3([
-        V3([ X::one(), X::zero(), X::zero()]),
-        V3([X::zero(),  X::one(), X::zero()]),
-        V3([X::zero(), X::zero(),  X::one()]),
-    ])}
+    fn one() -> Self
+    { M33::from_diag(V3([X::one(), X::one(), X::one()])) }
 
     #[inline]
-    fn is_one(&self) -> bool {
-        is_one_impl(self)
-    }
+    fn is_one(&self) -> bool
+    { is_one_impl(self) }
 }
 
 impl<X: Semiring> One for M44<X>
 where X: PrimitiveSemiring,
 {
     #[inline(always)]
-    fn one() -> Self { M4([
-        V4([ X::one(), X::zero(), X::zero(), X::zero()]),
-        V4([X::zero(),  X::one(), X::zero(), X::zero()]),
-        V4([X::zero(), X::zero(),  X::one(), X::zero()]),
-        V4([X::zero(), X::zero(), X::zero(),  X::one()]),
-    ])}
+    fn one() -> Self
+    { M44::from_diag(V4([X::one(), X::one(), X::one(), X::one()])) }
 
     #[inline]
-    fn is_one(&self) -> bool {
-        is_one_impl(self)
-    }
+    fn is_one(&self) -> bool
+    { is_one_impl(self) }
 }
 
 // NOTE: I have no idea how well this optimizes.
@@ -437,7 +431,7 @@ where T: PrimitiveRing,
         - a0 * b2 * c1
         - a1 * b0 * c2
         - a2 * b1 * c0
-     }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -504,6 +498,59 @@ gen_each!{
             { from_fn(|r, c| self[c][r]) }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+
+/// Argument to `from_diag`. Probably a vector type like `V3<X>`.
+pub type DiagT<A> = <A as FromDiag>::Diag;
+
+/// Implementation detail of the inherent method `{M2,M3,M4}::from_diag`.
+///
+/// > **_Fuggedaboudit._**
+pub trait FromDiag: Sized {
+    type Diag;
+
+    fn from_diag(diag: Self::Diag) -> Self;
+}
+
+impl<X: Semiring> FromDiag for M22<X>
+where X: PrimitiveSemiring,
+{
+    type Diag = V2<X>;
+
+    #[inline(always)]
+    fn from_diag(V2([a, b]): V2<X>) -> Self { M2([
+        V2([        a, X::zero()]),
+        V2([X::zero(),         b]),
+    ])}
+}
+
+impl<X: Semiring> FromDiag for M33<X>
+where X: PrimitiveSemiring,
+{
+    type Diag = V3<X>;
+
+    #[inline(always)]
+    fn from_diag(V3([a, b, c]): V3<X>) -> Self { M3([
+        V3([        a, X::zero(), X::zero()]),
+        V3([X::zero(),         b, X::zero()]),
+        V3([X::zero(), X::zero(),         c]),
+    ])}
+}
+
+impl<X: Semiring> FromDiag for M44<X>
+where X: PrimitiveSemiring,
+{
+    type Diag = V4<X>;
+
+    #[inline(always)]
+    fn from_diag(V4([a, b, c, d]): V4<X>) -> Self { M4([
+        V4([        a, X::zero(), X::zero(), X::zero()]),
+        V4([X::zero(),         b, X::zero(), X::zero()]),
+        V4([X::zero(), X::zero(),         c, X::zero()]),
+        V4([X::zero(), X::zero(), X::zero(),         d]),
+    ])}
 }
 
 // ---------------------------------------------------------------------------
