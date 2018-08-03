@@ -39,6 +39,7 @@ use ::rsp2_lammps_wrap::{InitInfo, AtomType, PairStyle, PairCoeff};
 use ::rsp2_lammps_wrap::Builder as InnerBuilder;
 use ::rsp2_lammps_wrap::Potential as LammpsPotential;
 use ::rsp2_lammps_wrap::UpdateStyle;
+use ::rsp2_lammps_wrap::INSTANCE_LOCK;
 
 const DEFAULT_KC_Z_CUTOFF: f64 = 14.0; // (Angstrom?)
 const DEFAULT_KC_Z_MAX_LAYER_SEP: f64 = 4.5; // Angstrom
@@ -129,8 +130,11 @@ impl<M: Clone + 'static, P: LammpsPotential<Meta=M> + Clone + Send + Sync + 'sta
             }
         }
 
+        // (panic on lock already acquired; blocking could easily deadlock)
+        let lock = INSTANCE_LOCK.try_lock().unwrap();
+
         let lammps_pot = Box::new(self.potential.clone()) as Box<LammpsPotential<Meta=P::Meta>>;
-        let lmp = self.inner.build(lammps_pot, coords.clone(), meta)?;
+        let lmp = self.inner.build(lock, lammps_pot, coords.clone(), meta)?;
         Ok(Box::new(MyDiffFn::<M>(lmp)) as Box<_>)
     }
 
@@ -148,7 +152,10 @@ impl<M: Clone + 'static, P: LammpsPotential<Meta=M> + Clone + Send + Sync + 'sta
             }
         }
 
-        let lmp_disp_fn = self.inner.build_disp_fn(self.potential.clone(), coords.clone(), meta)?;
+        // (panic on lock already acquired; blocking could easily deadlock)
+        let lock = INSTANCE_LOCK.try_lock().unwrap();
+
+        let lmp_disp_fn = self.inner.build_disp_fn(lock, self.potential.clone(), coords.clone(), meta)?;
         Ok(Box::new(MyDispFn(lmp_disp_fn)) as Box<_>)
     }
 }

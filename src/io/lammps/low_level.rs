@@ -13,7 +13,6 @@
 ** ********************************************************************** */
 
 use ::FailResult;
-use ::std::sync::Mutex;
 use ::std::os::raw::{c_int, c_void, c_double, c_char};
 
 macro_rules! api_trace {
@@ -110,43 +109,59 @@ pub(crate) struct LammpsOwner {
     argv: CArgv,
 }
 
-lazy_static! {
-    /// HACK to work around the segfaults that appear to result from
-    /// lammps being instantiated from multiple threads at the same time.
-    ///
-    /// This mutex is grabbed during the creation and destruction.
-    ///
-    /// NOTE: This is a leaf in the lock hierarchy (we never attempt to
-    ///  grab other locks while holding this lock).
-    static ref INSTANTIATION_LOCK: Mutex<()> = Default::default();
-}
-
 impl Drop for LammpsOwner {
     fn drop(&mut self) {
-        let _guard = INSTANTIATION_LOCK.lock();
-
         // NOTE: not lammps_free!
         unsafe { ::lammps_sys::lammps_close(self.ptr); }
     }
 }
 
 impl LammpsOwner {
-    pub fn new(argv: &[&str]) -> FailResult<LammpsOwner>
+    /// # MPI
+    ///
+    /// This should be called on all processes.
+    ///
+    /// # Safety
+    ///
+    /// Construction of LammpsOwner is inherently unsafe because it is unsafe
+    /// to use multiple instances simultaneously on separate threads.
+    #[cfg(feature = "mpi")]
+    pub unsafe fn with_mpi<C: mpi::Communicator>(comm: C, argv: &[&str]) -> FailResult<LammpsOwner>
     {Ok({
         let mut argv = CArgv::from_strs(argv);
         let mut ptr: *mut c_void = ::std::ptr::null_mut();
 
-        {
-            // this will not deadlock because we never attempt to
-            // acquire other locks while we hold this lock.
-            let _guard = INSTANTIATION_LOCK.lock();
-            unsafe {
-                ::lammps_sys::lammps_open_no_mpi(
-                    argv.len() as c_int,
-                    argv.as_argv_ptr(),
-                    &mut ptr,
-                );
-            }
+        unsafe {
+            ::lammps_sys::lammps_open(
+                argv.len() as c_int,
+                argv.as_argv_ptr(),
+                mpi::AsRaw::as_raw(&comm),
+                &mut ptr,
+            );
+        }
+
+        let ptr = unsafe {
+            ptr.as_mut()
+        }.ok_or_else(|| format_err!("Lammps initialization failed"))?;
+
+        LammpsOwner { argv, ptr }
+    })}
+
+    /// # Safety
+    ///
+    /// Construction of LammpsOwner is inherently unsafe because it is unsafe
+    /// to use multiple instances simultaneously on separate threads.
+    pub unsafe fn new(argv: &[&str]) -> FailResult<LammpsOwner>
+    {Ok({
+        let mut argv = CArgv::from_strs(argv);
+        let mut ptr: *mut c_void = ::std::ptr::null_mut();
+
+        unsafe {
+            ::lammps_sys::lammps_open_no_mpi(
+                argv.len() as c_int,
+                argv.as_argv_ptr(),
+                &mut ptr,
+            );
         }
 
         let ptr = unsafe {
@@ -208,7 +223,7 @@ impl LammpsOwner {
     //   accepts boxes that would not otherwise be allowed by lammps.
     //   I don't know if violation of these invariants can trigger UB, but again,
     //   we might as well just assume the worst.
-    //
+
     pub unsafe fn reset_box(
         &mut self,
         mut low: [f64; 3],
@@ -250,7 +265,6 @@ pub(crate) struct Skews {
 // NOTE: Every call to an extern "C" function must be immediately
 //       followed by one of these methods.
 impl LammpsOwner {
-
     // (this is our '?')
     fn pop_error_as_result(&mut self) -> Result<(), ::LammpsError>
     {

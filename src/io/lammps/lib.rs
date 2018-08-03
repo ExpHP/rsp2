@@ -60,8 +60,18 @@ use low_level::LammpsOwner;
 mod low_level;
 
 use ::std::path::{Path, PathBuf};
+use ::std::sync::{Mutex, MutexGuard};
 use ::slice_of_array::prelude::*;
 use ::rsp2_structure::{Coords, Lattice};
+
+lazy_static! {
+    /// Guarantees that only one instance of Lammps may exist on a process,
+    /// if constructed through safe APIs.
+    pub static ref INSTANCE_LOCK: Mutex<InstanceLock> = Mutex::new(InstanceLock(()));
+}
+
+/// Proof that no instance of Lammps currently exists within the current process.
+pub struct InstanceLock(());
 
 pub struct Lammps<P: Potential> {
     /// Put Lammps behind a RefCell so we can paper over things like `get_natoms(&mut self)`
@@ -98,6 +108,8 @@ pub struct Lammps<P: Potential> {
     update_fsm: UpdateFsm,
 
     data_trace_dir: Option<PathBuf>,
+
+    _lock: InstanceLockGuard,
 }
 
 struct MaybeDirty<T> {
@@ -191,6 +203,10 @@ impl<T> MaybeDirty<T> {
 
 #[derive(Debug, Clone)]
 pub struct Builder {
+    #[cfg(feature = "mpi")]
+    comm: Option<Box<dyn mpi::Communicator + Send + Sync>>,
+    #[cfg(not(feature = "mpi"))]
+    comm: Option<()>,
     append_log: Option<PathBuf>,
     threaded: bool,
     auto_adjust_lattice: bool,
@@ -293,6 +309,7 @@ impl Default for Builder {
 impl Builder {
     pub fn new() -> Self
     { Builder {
+        comm: None,
         append_log: None,
         threaded: true,
         update_style: UpdateStyle::safe(),
@@ -313,8 +330,14 @@ impl Builder {
     pub fn append_log(&mut self, path: impl AsRef<Path>) -> &mut Self
     { self.append_log = Some(path.as_ref().to_owned()); self }
 
+    // FIXME: Rename to parallel?
+    /// Impacts both OpenMP and MPI.
     pub fn threaded(&mut self, value: bool) -> &mut Self
     { self.threaded = value; self }
+
+    #[cfg(feature = "mpi")]
+    pub fn communicator<C: mpi::Communicator>(&mut self, comm: C) -> &mut Self
+    { self.comm = Some(Box::new(comm)); self }
 
     pub fn update_style(&mut self, value: UpdateStyle) -> &mut Self
     { self.update_style = value; self }
@@ -342,26 +365,42 @@ impl Builder {
     /// The `compute_*` methods on `Lammps` will check these properties on every
     /// computed structure, and will fail if they disagree with the structure
     /// that was initially provided to `build`.
-    pub fn build<P>(&self, potential: P, initial_coords: Coords, initial_meta: P::Meta) -> FailResult<Lammps<P>>
+    pub fn build<P>(
+        &self,
+        lock: InstanceLockGuard,
+        potential: P,
+        initial_coords: Coords,
+        initial_meta: P::Meta,
+    ) -> FailResult<Lammps<P>>
     where P: Potential,
-    { Lammps::from_builder(self, potential, initial_coords, initial_meta) }
+    { Lammps::from_builder(self, lock, potential, initial_coords, initial_meta) }
 
     /// Create a `DispFn`, an alternative to `Lammps` which is optimized for computing
     /// forces at displacements.
-    pub fn build_disp_fn<P>(&self, potential: P, equilibrium_coords: Coords, equilibrium_meta: P::Meta) -> FailResult<DispFn<P>>
+    pub fn build_disp_fn<P>(
+        &self,
+        lock: InstanceLockGuard,
+        potential: P,
+        equilibrium_coords: Coords,
+        equilibrium_meta: P::Meta,
+    ) -> FailResult<DispFn<P>>
     where P: Potential,
-    { DispFn::from_builder(self, potential, equilibrium_coords, equilibrium_meta) }
+    { DispFn::from_builder(self, lock, potential, equilibrium_coords, equilibrium_meta) }
 }
+
+/// A Lammps is built directly with the MutexGuard wrapper (rather than a reference)
+/// to dodge an extra lifetime parameter.
+pub type InstanceLockGuard = MutexGuard<'static, InstanceLock>;
 
 /// Initialize LAMMPS, do nothing of particular value, and exit.
 ///
 /// For debugging linker errors.
 pub fn link_test() -> FailResult<()>
 {Ok({
-    let _ = ::LammpsOwner::new(&["lammps",
+    let _ = unsafe { ::LammpsOwner::new(&["lammps",
         "-screen", "none",
         "-log", "none",
-    ])?;
+    ])? };
 })}
 
 pub use atom_type::AtomType;
@@ -616,7 +655,7 @@ impl<'a, D: fmt::Display> fmt::Display for JoinDisplay<'a, D> {
 impl<P: Potential> Lammps<P>
 {
     // implementation of Builder::Build
-    fn from_builder(builder: &Builder, potential: P, coords: Coords, meta: P::Meta) -> FailResult<Self>
+    fn from_builder(builder: &Builder, lock: InstanceLockGuard, potential: P, coords: Coords, meta: P::Meta) -> FailResult<Self>
     {Ok({
         let original_num_atoms = coords.num_atoms();
         let original_init_info = potential.init_info(&coords, &meta);
@@ -631,6 +670,7 @@ impl<P: Potential> Lammps<P>
             auto_adjust_lattice: builder.auto_adjust_lattice,
             update_fsm: builder.update_style.initial_fsm(),
             data_trace_dir: builder.data_trace_dir.clone(),
+            _lock: lock,
         }
     })}
 
@@ -643,12 +683,29 @@ impl<P: Potential> Lammps<P>
     {Ok({
         // Lammps script based on code from Colin Daniels.
 
-        let mut lmp = ::LammpsOwner::new(&[
-            "lammps",
-            "-screen", "none",
-            "-log", "none", // logs opened from CLI are truncated, but we want to append
-        ])?;
+        let mut lmp = {
+            let argv = &[
+                "lammps",
+                "-screen", "none",
+                "-log", "none", // logs opened from CLI are truncated, but we want to append
+            ];
 
+            match builder.comm {
+                // NOTE: safe due to callsite having the instance lock
+                None => unsafe { ::LammpsOwner::new(argv)? },
+                Some(comm) => {
+                    #[cfg(not(feature = "mpi"))] {
+                        let _ = comm;
+                        unreachable!();
+                    }
+                    #[cfg(feature = "mpi")] {
+                        unsafe { ::LammpsOwner::with_mpi(comm, argv)? }
+                    }
+                },
+            }
+        };
+
+        // FIXME FIXME FIXME FIXME  this should only run on one process.  Hoo boy.
         if let Some(log_file) = &builder.append_log {
             // Append a header to the log file as a feeble attempt to help delimit individual
             // runs (even though it will still get messy for parallel runs).
@@ -1072,12 +1129,12 @@ pub struct DispFn<P: Potential> {
 }
 
 impl<P: Potential> DispFn<P> {
-    fn from_builder(builder: &Builder, potential: P, coords: Coords, meta: P::Meta) -> FailResult<Self>
+    fn from_builder(builder: &Builder, lock: InstanceLockGuard, potential: P, coords: Coords, meta: P::Meta) -> FailResult<Self>
     {Ok({
         let mut builder = builder.clone();
         builder.update_style(UpdateStyle { n: 1, pre: false, post: false, sync_positions_every: 1 });
 
-        let mut lammps = Lammps::from_builder(&builder, potential, coords, meta)?;
+        let mut lammps = Lammps::from_builder(&builder, lock, potential, coords, meta)?;
 
         // this will build neighbor lists (modifying the coordinates in the process)
         let equilibrium_force = lammps.compute_force()?;
@@ -1116,7 +1173,7 @@ mod tests {
             Lattice::eye(),
             CoordsKind::Fracs(vec![V3([0.0; 3])]),
         );
-        Builder::new().build(Default::default(), coords, ()).unwrap()
+        Builder::new().build(INSTANCE_LOCK.lock().unwrap(), Default::default(), coords, ()).unwrap()
     }
 
     macro_rules! assert_matches {

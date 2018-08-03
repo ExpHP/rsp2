@@ -19,5 +19,10 @@ path = "lib.rs"
 !!failure
 !!slice-of-array
 
+# FIXME: should be an optional dependency, but the crates script
+#        has no way to do that.
+!!mpi
+
 [features]
 !!NIGHTLY-FEATURE-LINE
+

@@ -24,6 +24,11 @@ chrono = "0.4"
 failure = "0.1"
 slice-of-array = "0.2"
 
+# FIXME: should be an optional dependency, but the crates script
+#        has no way to do that.
+mpi = "0.5.4"
+
 [features]
 nightly = ["beta", "rsp2-array-types/nightly", "rsp2-structure/nightly"]
 beta = ["rsp2-array-types/beta", "rsp2-structure/beta"]
+
