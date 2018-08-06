@@ -22,10 +22,33 @@ extern crate lammps_sys;
 #[macro_use] extern crate failure;
 #[macro_use] extern crate lazy_static;
 extern crate chrono;
+#[cfg(feature = "_mpi")]
+extern crate mpi as mpi_rs;
+
+#[cfg(feature = "_mpi")]
+mod mpi {
+    // There is little conceivable reason why rsmpi exposes a heirarchial public API
+    // other than laziness; I see nothing in it that benefits from the namespacing,
+    // and it adds a lot of mental overhead to remember the paths.
+    pub(crate) use ::mpi_rs::{
+        topology::*,
+        collective::*,
+        datatype::*,
+        raw::*,
+    };
+}
 
 use ::failure::Backtrace;
 use ::rsp2_array_types::{V3, Unvee, Envee};
 use ::log::Level;
+use ::low_level::{LowLevelApi, ComputeStyle, Skews, LammpsOwner};
+#[cfg(feature = "_mpi")]
+use ::low_level::mpi::{MpiLammpsOwner, LammpsOnDemand, LammpsDispatch};
+
+use ::std::path::{Path, PathBuf};
+use ::std::sync::{Mutex, MutexGuard};
+use ::slice_of_array::prelude::*;
+use ::rsp2_structure::{Coords, Lattice};
 
 pub type FailResult<T> = Result<T, ::failure::Error>;
 
@@ -54,15 +77,8 @@ impl fmt::Display for LammpsError {
     }
 }
 
-use ::low_level::{ComputeStyle, Skews};
 pub use ::low_level::Severity;
-use low_level::LammpsOwner;
 mod low_level;
-
-use ::std::path::{Path, PathBuf};
-use ::std::sync::{Mutex, MutexGuard};
-use ::slice_of_array::prelude::*;
-use ::rsp2_structure::{Coords, Lattice};
 
 lazy_static! {
     /// Guarantees that only one instance of Lammps may exist on a process,
@@ -87,7 +103,7 @@ pub struct Lammps<P: Potential> {
     /// - Be careful providing methods that borrow `&self` and take a callback.
     ///
     /// (NOTE: I'm not entirely sure if this is correct.)
-    ptr: ::std::cell::RefCell<LammpsOwner>,
+    ptr: ::std::cell::RefCell<Box<dyn LowLevelApi>>,
 
     /// This is stored to help convert metadata to/from AtomTypes.
     potential: P,
@@ -201,17 +217,55 @@ impl<T> MaybeDirty<T> {
     }
 }
 
+//------------------------------------------
+
 #[derive(Debug, Clone)]
 pub struct Builder {
-    #[cfg(feature = "mpi")]
-    comm: Option<Box<dyn mpi::Communicator + Send + Sync>>,
-    #[cfg(not(feature = "mpi"))]
-    comm: Option<()>,
+    make_instance: BoxDynMakeInstance,
     append_log: Option<PathBuf>,
     threaded: bool,
     auto_adjust_lattice: bool,
     update_style: UpdateStyle,
     data_trace_dir: Option<PathBuf>,
+}
+
+trait MakeInstance: fmt::Debug {
+    unsafe fn make_it(&self, argv: &[&str]) -> FailResult<Box<dyn LowLevelApi>>;
+    fn box_clone(&self) -> BoxDynMakeInstance;
+}
+
+// Cloneable wrapper
+#[derive(Debug)]
+pub struct BoxDynMakeInstance(Box<dyn MakeInstance + Send + Sync>);
+impl Clone for BoxDynMakeInstance {
+    fn clone(&self) -> Self { self.0.box_clone() }
+}
+
+#[derive(Debug, Clone)]
+struct MakePlainInstance;
+
+#[derive(Debug)]
+struct MakeMpiInstance<Root: mpi::Root>(LammpsOnDemand<Root>);
+
+impl<Root: mpi::Root> Clone for MakeMpiInstance<Root> {
+    fn clone(&self) -> Self { MakeMpiInstance(self.0.clone()) }
+}
+
+impl MakeInstance for MakePlainInstance {
+    unsafe fn make_it(&self, argv: &[&str]) -> FailResult<Box<dyn LowLevelApi>>
+    { Ok(Box::new(LammpsOwner::new(argv)?)) }
+
+    fn box_clone(&self) -> BoxDynMakeInstance
+    { BoxDynMakeInstance(Box::new(self.clone())) }
+}
+
+impl<Root: mpi::Root + fmt::Debug + Send + Sync + 'static> MakeInstance for MakeMpiInstance<Root>
+{
+    unsafe fn make_it(&self, argv: &[&str]) -> FailResult<Box<dyn LowLevelApi>>
+    { Ok(Box::new(MpiLammpsOwner::new(self.0.clone(), argv)?)) }
+
+    fn box_clone(&self) -> BoxDynMakeInstance
+    { BoxDynMakeInstance(Box::new(self.clone())) }
 }
 
 //------------------------------------------
@@ -309,7 +363,7 @@ impl Default for Builder {
 impl Builder {
     pub fn new() -> Self
     { Builder {
-        comm: None,
+        make_instance: MakePlainInstance.box_clone(),
         append_log: None,
         threaded: true,
         update_style: UpdateStyle::safe(),
@@ -335,9 +389,25 @@ impl Builder {
     pub fn threaded(&mut self, value: bool) -> &mut Self
     { self.threaded = value; self }
 
-    #[cfg(feature = "mpi")]
-    pub fn communicator<C: mpi::Communicator>(&mut self, comm: C) -> &mut Self
-    { self.comm = Some(Box::new(comm)); self }
+    /// This function can be called from multi-process MPI code in order to enter a
+    /// "single-process" mode.  The continuation is only called on the root process,
+    /// and during this time the other processes will enter an event loop dedicated to lammps.
+    #[cfg(feature = "_mpi")]
+    pub fn with_mpi_event_loop<C: mpi::Communicator, R>(
+        &self,
+        root: impl mpi::Root + Send + Sync + 'static + fmt::Debug,
+        continuation: impl FnOnce(Self) -> R,
+    ) -> Option<R> {
+        LammpsOnDemand::install(
+            LammpsDispatch::new(),
+            root,
+            |on_demand| {
+                let mut builder = self.clone();
+                builder.make_instance = MakeMpiInstance(on_demand).box_clone();
+                continuation(builder)
+            },
+        )
+    }
 
     pub fn update_style(&mut self, value: UpdateStyle) -> &mut Self
     { self.update_style = value; self }
@@ -438,7 +508,6 @@ mod atom_type {
 /// The `Meta` associated type will be the metadata type accepted by e.g. `set_structure`.
 /// Feel free to pick something convenient for your application.
 pub trait Potential {
-
     type Meta: Clone;
 
     /// Produce information needed by `rsp2_lammps_wrap` to initialize the potential.
@@ -558,8 +627,7 @@ impl From<::std::ops::RangeFull> for AtomTypeRange {
     { AtomTypeRange(None, None) }
 }
 impl From<::std::ops::Range<AtomType>> for AtomTypeRange {
-    fn from(r: ::std::ops::Range<AtomType>) -> Self
-    {
+    fn from(r: ::std::ops::Range<AtomType>) -> Self {
         // (adjust because we take half-inclusive, but store doubly-inclusive)
         AtomTypeRange(Some(r.start.value()), Some(r.end.value() - 1))
     }
@@ -625,9 +693,8 @@ impl fmt::Display for PairCoeff {
     })}
 }
 
-fn ws_join(items: &[Arg]) -> JoinDisplay<'_, Arg> {
-    JoinDisplay { items, sep: " " }
-}
+fn ws_join(items: &[Arg]) -> JoinDisplay<'_, Arg>
+{ JoinDisplay { items, sep: " " } }
 
 // Utility Display adapter for writing a separator between items.
 struct JoinDisplay<'a, D: 'a> {
@@ -679,7 +746,7 @@ impl<P: Potential> Lammps<P>
         builder: &Builder,
         num_atoms: usize,
         init_info: &InitInfo,
-    ) -> FailResult<LammpsOwner>
+    ) -> FailResult<Box<dyn LowLevelApi>>
     {Ok({
         // Lammps script based on code from Colin Daniels.
 
@@ -690,22 +757,10 @@ impl<P: Potential> Lammps<P>
                 "-log", "none", // logs opened from CLI are truncated, but we want to append
             ];
 
-            match builder.comm {
-                // NOTE: safe due to callsite having the instance lock
-                None => unsafe { ::LammpsOwner::new(argv)? },
-                Some(comm) => {
-                    #[cfg(not(feature = "mpi"))] {
-                        let _ = comm;
-                        unreachable!();
-                    }
-                    #[cfg(feature = "mpi")] {
-                        unsafe { ::LammpsOwner::with_mpi(comm, argv)? }
-                    }
-                },
-            }
+            // NOTE: safe due to how the only callers use the instance lock
+            unsafe { builder.make_instance.0.make_it(argv)? }
         };
 
-        // FIXME FIXME FIXME FIXME  this should only run on one process.  Hoo boy.
         if let Some(log_file) = &builder.append_log {
             // Append a header to the log file as a feeble attempt to help delimit individual
             // runs (even though it will still get messy for parallel runs).
@@ -730,7 +785,7 @@ impl<P: Potential> Lammps<P>
             }
 
             lmp.command(
-                &format!("log {} append", log_file.display()),
+                format!("log {} append", log_file.display()),
             )?;
         }
 
@@ -760,12 +815,12 @@ impl<P: Potential> Lammps<P>
         {
             let InitInfo { masses, pair_style, pair_coeffs } = init_info;
 
-            lmp.command(&format!("create_box {} sim", masses.len()))?;
+            lmp.command(format!("create_box {} sim", masses.len()))?;
             for (i, mass) in (1..).zip(masses) {
-                lmp.command(&format!("mass {} {}", i, mass))?;
+                lmp.command(format!("mass {} {}", i, mass))?;
             }
 
-            lmp.command(pair_style)?;
+            lmp.command(pair_style.to_string())?;
             lmp.commands(pair_coeffs)?;
         }
 
@@ -773,9 +828,10 @@ impl<P: Potential> Lammps<P>
         {
             let this_atom_type = 1;
             let seed = 0xbeef;
-            lmp.command(
-                &format!("create_atoms {} random {} {} NULL remap yes",
-                this_atom_type, num_atoms, seed))?;
+            lmp.command(format!(
+                "create_atoms {} random {} {} NULL remap yes",
+                this_atom_type, num_atoms, seed,
+            ))?;
         }
 
         // set up computes
@@ -870,7 +926,7 @@ impl<P: Potential> Lammps<P> {
             self.write_data_trace_fileset(dir, &format!("{:04}-a", iter));
         }
 
-        self.ptr.borrow_mut().command(command)?;
+        self.ptr.borrow_mut().command(command.into())?;
 
         if let Some(dir) = &self.data_trace_dir {
             self.write_data_trace_fileset(dir, &format!("{:04}-b", iter));
@@ -885,9 +941,9 @@ impl<P: Potential> Lammps<P> {
         };
         assert_eq!(types.len(), self.ptr.borrow_mut().get_natoms());
 
-        let types = types.into_iter().map(AtomType::value).collect::<Vec<_>>();
+        let types = types.into_iter().map(AtomType::value).collect();
 
-        unsafe { self.ptr.borrow_mut().scatter_atoms_i("type", &types) }?;
+        unsafe { self.ptr.borrow_mut().scatter_atoms_i("type".into(), types) }?;
     })}
 
     fn send_lmp_carts(&mut self, style: UpdatePositions) -> FailResult<()>
@@ -910,7 +966,7 @@ impl<P: Potential> Lammps<P> {
                 lmp_carts
             }
         };
-        unsafe { self.ptr.borrow_mut().scatter_atoms_f("x", new_lmp_carts.unvee_ref().flat()) }?;
+        unsafe { self.ptr.borrow_mut().scatter_atoms_f("x".into(), new_lmp_carts.unvee_ref().flat().to_vec()) }?;
     })}
 
     fn send_lmp_lattice(&mut self) -> FailResult<()>
@@ -1028,13 +1084,13 @@ fn next_after(from: f64, to: f64) -> f64 {
 impl<P: Potential> Lammps<P> {
     fn read_raw_lmp_carts(&self) -> FailResult<Vec<V3>>
     {Ok({
-        let x = unsafe { self.ptr.borrow_mut().gather_atoms_f("x", 3)? };
+        let x = unsafe { self.ptr.borrow_mut().gather_atoms_f("x".into(), 3)? };
         x.nest::<[_; 3]>().to_vec().envee()
     })}
 
     fn read_raw_lmp_force(&self) -> FailResult<Vec<V3>>
     {Ok({
-        let x = unsafe { self.ptr.borrow_mut().gather_atoms_f("f", 3)? };
+        let x = unsafe { self.ptr.borrow_mut().gather_atoms_f("f".into(), 3)? };
         x.nest::<[_; 3]>().to_vec().envee()
     })}
 }
@@ -1051,7 +1107,7 @@ impl<P: Potential> Lammps<P> {
     {Ok({
         self.update_computation()?;
 
-        unsafe { self.ptr.borrow_mut().extract_compute_0d("RSP2_PE") }?
+        unsafe { self.ptr.borrow_mut().extract_compute_0d("RSP2_PE".into()) }?
     })}
 
     /// Get the forces, possibly performing some computations if necessary.
@@ -1079,7 +1135,7 @@ impl<P: Potential> Lammps<P> {
         self.update_computation()?;
 
         unsafe {
-            self.ptr.borrow_mut().extract_compute_1d("RSP2_Pressure", ComputeStyle::Global, 6)
+            self.ptr.borrow_mut().extract_compute_1d("RSP2_Pressure".into(), ComputeStyle::Global, 6)
         }?.to_array()
     })}
 }

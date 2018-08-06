@@ -32,3 +32,11 @@ mpi = "0.5.4"
 nightly = ["beta", "rsp2-array-types/nightly", "rsp2-structure/nightly"]
 beta = ["rsp2-array-types/beta", "rsp2-structure/beta"]
 
+# FIXME: Rename feature to "mpi" once mpi is properly an optional dep.
+#
+#        This dep with the underscored name exists to make it possible to disable mpi-related
+#        features (to test conditional compilation) despite the current inadequacies
+#        of the crates script
+_mpi = ["lammps-sys/system-mpi"]
+default = ["_mpi"]
+

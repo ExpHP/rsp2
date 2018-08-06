@@ -12,89 +12,24 @@
 ** parts of it are licensed under more permissive terms.                  **
 ** ********************************************************************** */
 
+#[cfg(feature = "_mpi")]
+use ::mpi;
 use ::FailResult;
 use ::std::os::raw::{c_int, c_void, c_double, c_char};
-
-macro_rules! api_trace {
-    ($($t:tt)*) => { log!(target: ::API_TRACE_TARGET, ::API_TRACE_LEVEL, $($t)*) };
-}
+use ::low_level::{ComputeStyle, ComputeType, Skews, LowLevelApi, Severity, ScatterGatherDatatype};
 
 // Lammps exposes no API to obtain the error message length so we have to guess.
 const MAX_ERROR_BYTES: usize = 4096;
 
-macro_rules! c_enums {
-    (
-        $(
-            [$($vis:tt)*] enum $Type:ident {
-                // tt so it can double as expr and pat
-                $($Variant:ident = $value:tt,)+
-            }
-        )+
-    ) => {
-        $(
-            #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-            $($vis)* enum $Type {
-                $($Variant = $value,)+
-            }
-
-            impl $Type {
-                #[allow(unused)]
-                pub fn from_int(x: u32) -> FailResult<$Type>
-                { match x {
-                    $($value => Ok($Type::$Variant),)+
-                    _ => bail!("Invalid value {} for {}", x, stringify!($Type)),
-                }}
-            }
-        )+
-    };
-}
-
-c_enums!{
-    [pub(crate)] enum ComputeStyle {
-        Global = 0,
-        PerAtom = 1,
-        Local = 2,
-    }
-
-    [] enum ComputeType {
-        Scalar = 0,
-        Vector = 1,
-        Array = 2, // 2D
-    }
-
-    [] enum ScatterGatherDatatype {
-        Integer = 0,
-        Float = 1,
-    }
-
-    [pub] enum Severity {
-        Recoverable = 1,
-        Fatal = 2,
-    }
-}
-
-macro_rules! derive_into_from_as_cast {
-    ($($A:ty as $B:ty;)*)
-    => { $(
-        impl From<$A> for $B {
-            fn from(a: $A) -> $B { a as $B }
-        }
-    )* };
-}
-
-derive_into_from_as_cast!{
-    ComputeStyle as c_int;
-    ComputeType as c_int;
-    ScatterGatherDatatype as c_int;
-}
-
 /// A light wrapper around a LAMMPS instance which handles ownership
 /// concerns and provides an interface that uses rust primitive types.
 ///
-/// The design is fairly conservative, trying to make as few design choices
-/// as necessary.  As a result, some exposed functions are still unsafe.
-/// The expectation is that another, higher-level wrapper will be built
-/// around this.
+/// This implements the low-level API in a manner which directly wraps the C functions,
+/// making it suitable for either of the following:
+///
+/// - For methods to be called on the only process, in a non-MPI setup.
+/// - For methods to be called at the same time with the same arguments
+///   on all processes, when MPI is used.
 ///
 /// It is expressly NOT CLONE.
 #[derive(Debug)]
@@ -109,24 +44,23 @@ pub(crate) struct LammpsOwner {
     argv: CArgv,
 }
 
-impl Drop for LammpsOwner {
-    fn drop(&mut self) {
-        // NOTE: not lammps_free!
-        unsafe { ::lammps_sys::lammps_close(self.ptr); }
-    }
-}
-
 impl LammpsOwner {
     /// # MPI
     ///
-    /// This should be called on all processes.
+    /// The Lammps API generally does not specify what happens on non-root processes, so for now
+    /// we follow rather conservative rules:
+    ///
+    /// This method should be called on all processes with the same arguments.
+    /// Furthermore, after calling it, any other public method on it should be called on all
+    /// processes with the same arguments in the same order.
+    /// **This includes `Drop::drop`!**
     ///
     /// # Safety
     ///
     /// Construction of LammpsOwner is inherently unsafe because it is unsafe
     /// to use multiple instances simultaneously on separate threads.
-    #[cfg(feature = "mpi")]
-    pub unsafe fn with_mpi<C: mpi::Communicator>(comm: C, argv: &[&str]) -> FailResult<LammpsOwner>
+    #[cfg(feature = "_mpi")]
+    pub(in ::low_level) unsafe fn with_mpi<C: mpi::Communicator>(comm: &C, argv: &[&str]) -> FailResult<Self>
     {Ok({
         let mut argv = CArgv::from_strs(argv);
         let mut ptr: *mut c_void = ::std::ptr::null_mut();
@@ -135,7 +69,7 @@ impl LammpsOwner {
             ::lammps_sys::lammps_open(
                 argv.len() as c_int,
                 argv.as_argv_ptr(),
-                mpi::AsRaw::as_raw(&comm),
+                mpi::AsRaw::as_raw(comm) as _,
                 &mut ptr,
             );
         }
@@ -147,13 +81,21 @@ impl LammpsOwner {
         LammpsOwner { argv, ptr }
     })}
 
+    /// Construct without an MPI communicator.
+    ///
+    /// This is merely a wrapper around `lammps_open_no_mpi`.
+    ///
+    /// # MPI
+    ///
+    /// I don't know what happens if you use this when MPI is initialized.
+    ///
     /// # Safety
     ///
     /// Construction of LammpsOwner is inherently unsafe because it is unsafe
     /// to use multiple instances simultaneously on separate threads.
-    pub unsafe fn new(argv: &[&str]) -> FailResult<LammpsOwner>
+    pub(crate) unsafe fn new(argv: &[&str]) -> FailResult<Self>
     {Ok({
-        let mut argv = CArgv::from_strs(argv);
+        let mut argv = CArgv::from_strs(&argv);
         let mut ptr: *mut c_void = ::std::ptr::null_mut();
 
         unsafe {
@@ -172,13 +114,20 @@ impl LammpsOwner {
     })}
 }
 
+
+impl Drop for LammpsOwner {
+    fn drop(&mut self) {
+        // NOTE: not lammps_free!
+        unsafe { ::lammps_sys::lammps_close(self.ptr); }
+    }
+}
+
 //------------------------------
-// the basics
-impl LammpsOwner {
-    /// Invokes `lammps_command`.
-    pub fn command<S: ToString>(&mut self, cmd: S) -> FailResult<()>
+
+impl LowLevelApi for LammpsOwner {
+    fn command(&mut self, cmd: String) -> FailResult<()>
     {Ok({
-        let cmd = &cmd.to_string()[..];
+        let cmd = &cmd;
 
         api_trace!("lammps_command({:p}, {})", self.ptr, cmd);
 
@@ -200,31 +149,14 @@ impl LammpsOwner {
         assert!(!ret.is_null(), "lammps_command threw no exception, but returned null?!");
     })}
 
-    /// Repeatedly invokes `lammps_command`.
-    ///
-    /// That is to say, it does NOT invoke `lammps_command_list`.
-    /// (Though one should sincerely *hope* this difference does not matter...)
-    pub fn commands<S: ToString>(&mut self, cmds: impl IntoIterator<Item=S>) -> FailResult<()>
-    { cmds.into_iter().try_for_each(|s| self.command(s)) }
-
-    pub fn get_natoms(&mut self) -> usize
-    {
+    fn get_natoms(&mut self) -> usize {
         api_trace!("lammps_get_natoms({:p})", self.ptr);
         let out = unsafe { ::lammps_sys::lammps_get_natoms(self.ptr) } as usize;
         self.assert_no_error();
         out
     }
 
-    // Set the lattice.
-    //
-    // * Their documentation says "assumes `domain->set_initial_box()` has been invoked previously".
-    //   (basically, this means we must call the `create_box` command.)
-    // * Because their implementation does not trap for exceptions, it clearly
-    //   accepts boxes that would not otherwise be allowed by lammps.
-    //   I don't know if violation of these invariants can trigger UB, but again,
-    //   we might as well just assume the worst.
-
-    pub unsafe fn reset_box(
+    unsafe fn reset_box(
         &mut self,
         mut low: [f64; 3],
         mut high: [f64; 3],
@@ -248,15 +180,29 @@ impl LammpsOwner {
         //       so this will never trigger, except perhaps in future versions of lammps...
         self.pop_error_as_result()?;
     })}
-}
 
-// (struct with named fields to create fewer independent places where
-//  things could be written in the wrong order)
-#[derive(Debug, Copy, Clone)]
-pub(crate) struct Skews {
-    pub(crate) xy: f64,
-    pub(crate) yz: f64,
-    pub(crate) xz: f64,
+    // shims to inherent methods so we can write unsafe helpers closer to code that uses them
+    unsafe fn extract_compute_0d(&mut self, name: String) -> FailResult<f64>
+    { self.impl_extract_compute_0d(&name) }
+
+    unsafe fn extract_compute_1d(&mut self,
+        name: String,
+        style: ComputeStyle,
+        len: usize,
+    ) -> FailResult<Vec<f64>>
+    { self.impl_extract_compute_1d(&name, style, len) }
+
+    unsafe fn gather_atoms_i(&mut self, name: String, count: usize) -> FailResult<Vec<i64>>
+    { self.impl_gather_atoms_i(&name, count) }
+
+    unsafe fn gather_atoms_f(&mut self, name: String, count: usize) -> FailResult<Vec<f64>>
+    { self.impl_gather_atoms_f(&name, count) }
+
+    unsafe fn scatter_atoms_i(&mut self, name: String, data: Vec<i64>) -> FailResult<()>
+    { self.impl_scatter_atoms_i(&name, &data) }
+
+    unsafe fn scatter_atoms_f(&mut self, name: String, data: Vec<f64>) -> FailResult<()>
+    { self.impl_scatter_atoms_f(&name, &data) }
 }
 
 //------------------------------
@@ -266,7 +212,7 @@ pub(crate) struct Skews {
 //       followed by one of these methods.
 impl LammpsOwner {
     // (this is our '?')
-    fn pop_error_as_result(&mut self) -> Result<(), ::LammpsError>
+    pub(in ::low_level) fn pop_error_as_result(&mut self) -> Result<(), ::LammpsError>
     {
         match self.pop_error() {
             None => Ok(()),
@@ -278,7 +224,7 @@ impl LammpsOwner {
     }
 
     // (this is our 'unwrap')
-    fn assert_no_error(&mut self)
+    pub(in ::low_level) fn assert_no_error(&mut self)
     {
         self.pop_error_as_result().unwrap_or_else(|e| {
             panic!("Unexpected error from LAMMPS: {}", e);
@@ -287,7 +233,7 @@ impl LammpsOwner {
 
     // Read an error from the Lammps API if there is one.
     // (This removes the error, so that a second call will produce None.)
-    fn pop_error(&mut self) -> Option<(Severity, String)>
+    pub(in ::low_level) fn pop_error(&mut self) -> Option<(Severity, String)>
     {
         use ::lammps_sys::{lammps_get_last_error_message, lammps_has_error};
 
@@ -332,7 +278,7 @@ impl LammpsOwner {
     //
     // unsafe because an incorrect 'count' or a non-integer field may cause an out-of-bounds read.
     #[allow(unused)] // FIXME issue #4
-    pub unsafe fn gather_atoms_i(&mut self, name: &str, count: usize) -> FailResult<Vec<i64>>
+    unsafe fn impl_gather_atoms_i(&mut self, name: &str, count: usize) -> FailResult<Vec<i64>>
     {Ok({
         self.__gather_atoms_c_ty::<c_int>(name, ScatterGatherDatatype::Integer, count)?
             .into_iter().map(|x| x as i64).collect()
@@ -341,7 +287,7 @@ impl LammpsOwner {
     // Gather a floating property across all atoms.
     //
     // unsafe because an incorrect 'count' or a non-floating field may cause an out-of-bounds read.
-    pub unsafe fn gather_atoms_f(&mut self, name: &str, count: usize) -> FailResult<Vec<f64>>
+    unsafe fn impl_gather_atoms_f(&mut self, name: &str, count: usize) -> FailResult<Vec<f64>>
     {Ok({
         self.__gather_atoms_c_ty::<c_double>(name, ScatterGatherDatatype::Float, count)?
             .into_iter().map(|x| x as f64).collect()
@@ -407,7 +353,7 @@ impl LammpsOwner {
     //
     // unsafe because a non-integer field may copy data of the wrong size,
     // and data of inappropriate length could cause an out of bounds write.
-    pub unsafe fn scatter_atoms_i(&mut self, name: &str, data: &[i64]) -> FailResult<()>
+    unsafe fn impl_scatter_atoms_i(&mut self, name: &str, data: &[i64]) -> FailResult<()>
     {Ok({
         let mut cdata: Vec<_> = data.iter().map(|&x| x as c_int).collect();
         self.__scatter_atoms_checked_c_ty(name, ScatterGatherDatatype::Integer, &mut cdata)?;
@@ -417,7 +363,7 @@ impl LammpsOwner {
     //
     // unsafe because a non-floating field may copy data of the wrong size,
     // and data of inappropriate length could cause an out of bounds write.
-    pub unsafe fn scatter_atoms_f(&mut self, name: &str, data: &[f64]) -> FailResult<()>
+    unsafe fn impl_scatter_atoms_f(&mut self, name: &str, data: &[f64]) -> FailResult<()>
     {Ok({
         let mut cdata: Vec<_> = data.iter().map(|&x| x as c_double).collect();
         self.__scatter_atoms_checked_c_ty(name, ScatterGatherDatatype::Float, &mut cdata)?;
@@ -478,74 +424,6 @@ impl LammpsOwner {
     })}
 }
 
-//------------------------------
-
-/// # Computes
-impl LammpsOwner {
-    // Read a scalar compute, possibly computing it in the process.
-    //
-    // NOTE: There are warnings in extract_compute about making sure it is valid
-    //       to run the compute.  I'm not sure what it means, and it sounds to me
-    //       like this could possibly actually cause UB; I just have no idea how.
-    pub unsafe fn extract_compute_0d(&mut self, name: &str) -> FailResult<f64>
-    {Ok({
-        self.extract_compute_any_d(name, ComputeStyle::Global, ComputeType::Scalar)?
-            .clone()
-    })}
-
-    // Read a vector compute, possibly computing it in the process.
-    //
-    // NOTE: There are warnings in extract_compute about making sure it is valid
-    //       to run the compute.  I'm not sure what it means, and it sounds to me
-    //       like this could possibly actually cause UB; I just have no idea how.
-    pub unsafe fn extract_compute_1d(
-        &mut self,
-        name: &str,
-        style: ComputeStyle,
-        len: usize,
-    ) -> FailResult<Vec<f64>>
-    {Ok({
-        assert_ne!(len, 0); // because extract_compute_any_d returns &T
-        let p = self.extract_compute_any_d(name, style, ComputeType::Vector)?;
-
-        ::std::slice::from_raw_parts(p, len)
-            .iter().map(|&c| c as f64).collect()
-    })}
-
-    // CAUTION: Note the unbound lifetime!!! This is only to factor out the null check;
-    //          the output is NOT valid for arbitrary lifetimes!
-    //          (so make sure to copy the output into an owned form ASAP)
-    unsafe fn extract_compute_any_d<'unbound>(
-        &mut self,
-        name: &str,
-        style: ComputeStyle,
-        ty: ComputeType,
-    ) -> FailResult<&'unbound c_double>
-    {Ok({
-        let style: c_int = style.into();
-        let ty: c_int = ty.into();
-
-        api_trace!(
-            "lammps_extract_compute({:p}, {}, {}, {})",
-            self.ptr, name, style, ty,
-        );
-
-        let out_ptr = with_temporary_c_str(name, |name| {
-            unsafe { ::lammps_sys::lammps_extract_compute(self.ptr, name, style, ty)}
-        }) as *mut c_double;
-
-
-        // NOTE: Known cases where this produces Err:
-        // * None so far.
-        self.pop_error_as_result()?;
-
-        // NOTE: Known cases where the pointer is NULL:
-        // * (bug in lammps-wrap) Name provided does not belong to a compute.
-        out_ptr.as_ref()
-            .unwrap_or_else(|| panic!("Could not extract {:?}", name))
-    })}
-}
-
 /// Used to implement the heuristic for detecting errors in gather/scatter
 trait BitCheck {
     /// A comparison function that is reflexive even if Self is `PartialEq`.
@@ -576,6 +454,74 @@ impl BitCheck for c_int {
     { !self }
 }
 
+//------------------------------
+
+/// # Computes
+impl LammpsOwner {
+    // Read a scalar compute, possibly computing it in the process.
+    //
+    // NOTE: There are warnings in extract_compute about making sure it is valid
+    //       to run the compute.  I'm not sure what it means, and it sounds to me
+    //       like this could possibly actually cause UB; I just have no idea how.
+    unsafe fn impl_extract_compute_0d(&mut self, name: &str) -> FailResult<f64>
+    {Ok({
+        self.__extract_compute_any_d(name, ComputeStyle::Global, ComputeType::Scalar)?
+            .clone()
+    })}
+
+    // Read a vector compute, possibly computing it in the process.
+    //
+    // NOTE: There are warnings in extract_compute about making sure it is valid
+    //       to run the compute.  I'm not sure what it means, and it sounds to me
+    //       like this could possibly actually cause UB; I just have no idea how.
+    unsafe fn impl_extract_compute_1d(
+        &mut self,
+        name: &str,
+        style: ComputeStyle,
+        len: usize,
+    ) -> FailResult<Vec<f64>>
+    {Ok({
+        assert_ne!(len, 0); // because extract_compute_any_d returns &T
+        let p = self.__extract_compute_any_d(name, style, ComputeType::Vector)?;
+
+        ::std::slice::from_raw_parts(p, len)
+            .iter().map(|&c| c as f64).collect()
+    })}
+
+    // CAUTION: Note the unbound lifetime!!! This is only to factor out the null check;
+    //          the output is NOT valid for arbitrary lifetimes!
+    //          (so make sure to copy the output into an owned form ASAP)
+    unsafe fn __extract_compute_any_d<'unbound>(
+        &mut self,
+        name: &str,
+        style: ComputeStyle,
+        ty: ComputeType,
+    ) -> FailResult<&'unbound c_double>
+    {Ok({
+        let style: c_int = style.into();
+        let ty: c_int = ty.into();
+
+        api_trace!(
+            "lammps_extract_compute({:p}, {}, {}, {})",
+            self.ptr, name, style, ty,
+        );
+
+        let out_ptr = with_temporary_c_str(name, |name| {
+            unsafe { ::lammps_sys::lammps_extract_compute(self.ptr, name, style, ty)}
+        }) as *mut c_double;
+
+
+        // NOTE: Known cases where this produces Err:
+        // * None so far.
+        self.pop_error_as_result()?;
+
+        // NOTE: Known cases where the pointer is NULL:
+        // * (bug in lammps-wrap) Name provided does not belong to a compute.
+        out_ptr.as_ref()
+            .unwrap_or_else(|| panic!("Could not extract {:?}", name))
+    })}
+}
+
 //--------------------------------------
 // ffi utilz
 
@@ -599,7 +545,7 @@ fn string_from_utf8_prefix(buf: Vec<u8>) -> String
 // content (including writes of interior NUL bytes), but must not
 // write beyond the `s.len() + 1` allocated bytes for the C string.
 fn with_temporary_c_str<B, F>(s: &str, f: F) -> B
-where F: FnOnce(*mut c_char) -> B
+    where F: FnOnce(*mut c_char) -> B
 {
     // It is not safe to use CString here; LAMMPS may write NUL bytes
     // that change the length of the string.
@@ -665,3 +611,9 @@ impl CArgv {
     pub(crate) fn as_argv_ptr(&mut self) -> *mut *mut c_char
     { self.ptrs.as_mut_ptr() }
 }
+
+// FIXME disgusting and shouldn't be necessary, but I'm pretty sure it's safe.
+//
+// This is needed by MpiLammpsOwner because of the fact that the LammpsOwner instance
+// in this case is actually stored in the Builder (which is intended to be Send + Sync)
+unsafe impl Send for CArgv {}
