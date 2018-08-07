@@ -418,11 +418,15 @@ impl Builder {
     /// Call out to the LAMMPS C API to create an instance of Lammps,
     /// and configure it according to this builder.
     ///
-    /// # The "initial structure" arguments
+    /// # Modifying the structure post-build
     ///
-    /// It may seem unusual that both `build` and the `Lammps::compute_*` methods
-    /// require a structure.  The reason is because certain API calls made during
-    /// initialization depend on certain properties of the structure.
+    /// `Lammps` has a number of methods that allow you to modify the structure
+    /// after it has been built.  This can be significantly faster for running
+    /// multiple computations than it would be to build an instance per structure.
+    ///
+    /// Ideally, modifying the structure after `build` should result in the same
+    /// physical quantities as if you were to supply the modified structure from the start.
+    /// But this is difficult to guarantee, and small numerical disturbances may arise.
     ///
     /// To simplify the implementation of `Lammps`, the following properties
     /// are effectively **set in stone** after this method:
