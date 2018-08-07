@@ -23,6 +23,9 @@ path = "lib.rs"
 #        has no way to do that.
 !!mpi
 
+[dev-dependencies]
+!!rsp2-assert-close
+
 [features]
 !!NIGHTLY-FEATURE-LINE
 

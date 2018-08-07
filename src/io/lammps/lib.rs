@@ -34,6 +34,7 @@ mod mpi {
         topology::*,
         collective::*,
         datatype::*,
+        environment::*,
         raw::*,
     };
 }
@@ -471,11 +472,32 @@ pub type InstanceLockGuard = MutexGuard<'static, InstanceLock>;
 /// For debugging linker errors.
 pub fn link_test() -> FailResult<()>
 {Ok({
-    let _ = unsafe { ::LammpsOwner::new(&["lammps",
-        "-screen", "none",
-        "-log", "none",
-    ])? };
+    let _ = unsafe { LammpsOwner::new(&["lammps", "-log", "none"])? };
 })}
+
+/// Initialize LAMMPS, do nothing of particular value, and exit.
+///
+/// For debugging linker errors.
+#[cfg(feature = "_mpi")]
+pub fn mpi_link_test() -> FailResult<()>
+{Ok({
+    use ::mpi::Communicator;
+
+    let universe = ::mpi::initialize().expect("failed to intialize mpi");
+
+    println!("{}", ::mpi::library_version().unwrap());
+    LammpsOnDemand::install(
+        LammpsDispatch::new(),
+        universe.world().process_at_rank(0),
+        |on_demand| {
+            unsafe { MpiLammpsOwner::new(
+                on_demand,
+                &["lammps", "-log", "none"],
+            )}.map(drop)
+        },
+    );
+})}
+
 
 pub use atom_type::AtomType;
 // mod to encapsulate type invariant

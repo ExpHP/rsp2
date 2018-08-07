@@ -28,7 +28,7 @@ mod plain;
 #[cfg(feature = "_mpi")]
 pub(crate) mod mpi;
 #[cfg(feature = "_mpi")]
-mod mpi_helper;
+pub(crate) mod mpi_helper;
 
 c_enums!{
     [pub(crate)] enum ComputeStyle {
