@@ -32,7 +32,6 @@ fn main() -> Result<(), failure::Error> {
     let value = {
         let lock = ::rsp2_lammps_wrap::INSTANCE_LOCK.lock().unwrap();
         ::rsp2_lammps_wrap::Builder::new()
-            .threaded(false)
             .build(lock, Airebo, super_coords, super_meta).unwrap()
             .compute_value()?
     };

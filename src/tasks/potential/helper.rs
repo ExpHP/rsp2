@@ -30,8 +30,8 @@ where
     A: Clone + PotentialBuilder<M>,
     B: Clone + PotentialBuilder<M>,
 {
-    fn threaded(&self, threaded: bool) -> Box<PotentialBuilder<M>>
-    { Box::new(Sum(self.0.threaded(threaded), self.1.threaded(threaded))) }
+    fn parallel(&self, parallel: bool) -> Box<PotentialBuilder<M>>
+    { Box::new(Sum(self.0.parallel(parallel), self.1.parallel(parallel))) }
 
     fn initialize_diff_fn(&self, coords: &Coords, meta: M) -> FailResult<Box<DiffFn<M>>>
     {

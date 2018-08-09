@@ -79,7 +79,6 @@ impl<P: Clone> Builder<P>
         if let Some(trial_dir) = trial_dir {
             inner.append_log(trial_dir.join("lammps.log"));
         }
-        inner.threaded(*threading == cfg::Threading::Lammps);
         inner.update_style(match *update_style {
             cfg::LammpsUpdateStyle::Safe => UpdateStyle::safe(),
             cfg::LammpsUpdateStyle::Run{ n, pre, post, sync_positions_every } => {
@@ -103,11 +102,17 @@ impl<P: Clone> Builder<P>
         }
 
         Builder { inner, potential }
+            .parallel(*threading == cfg::Threading::Lammps)
     }
 
-    pub(crate) fn threaded(&self, threaded: bool) -> Self {
+    pub(crate) fn parallel(&self, parallel: bool) -> Self {
+        let processors = match parallel {
+            true => [None; 3],
+            false => [Some(1); 3],
+        };
+
         let mut me = self.clone();
-        me.inner.threaded(threaded);
+        me.inner.processors(processors);
         me
     }
 }
@@ -167,8 +172,8 @@ impl<M: Clone + 'static, P: LammpsPotential<Meta=M> + Clone + Send + Sync + 'sta
 
 impl<M: Clone + 'static, P: Clone + LammpsPotential<Meta=M> + Send + Sync + 'static> PotentialBuilder<M> for Builder<P>
 {
-    fn threaded(&self, threaded: bool) -> Box<PotentialBuilder<M>>
-    { Box::new(<Builder<_>>::threaded(self, threaded)) }
+    fn parallel(&self, parallel: bool) -> Box<PotentialBuilder<M>>
+    { Box::new(<Builder<_>>::parallel(self, parallel)) }
 
     fn initialize_diff_fn(&self, coords: &Coords, meta: M) -> FailResult<Box<DiffFn<M>>>
     { self.lammps_diff_fn(coords, meta) }

@@ -236,7 +236,7 @@ fn do_relax(
     meta: potential::CommonMeta,
 ) -> FailResult<Coords>
 {Ok({
-    let mut flat_diff_fn = pot.threaded(true).initialize_flat_diff_fn(&coords, meta.sift())?;
+    let mut flat_diff_fn = pot.parallel(true).initialize_flat_diff_fn(&coords, meta.sift())?;
     let relaxed_flat = ::rsp2_minimize::acgsd(
         cg_settings,
         coords.to_carts().flat(),
@@ -297,7 +297,7 @@ fn _do_cg_along_evecs(
     let flat_evecs: Vec<_> = evecs.iter().map(|ev| ev.flat()).collect();
     let init_pos = coords.to_carts();
 
-    let mut flat_diff_fn = pot.threaded(true).initialize_flat_diff_fn(&coords, meta.sift())?;
+    let mut flat_diff_fn = pot.parallel(true).initialize_flat_diff_fn(&coords, meta.sift())?;
     let relaxed_coeffs = ::rsp2_minimize::acgsd(
         cg_settings,
         &vec![0.0; evecs.len()],
@@ -315,7 +315,7 @@ fn do_minimize_along_evec(
     evec: &[V3],
 ) -> FailResult<(f64, Coords)>
 {Ok({
-    let mut diff_fn = pot.threaded(true).initialize_flat_diff_fn(&from_coords, meta.sift())?;
+    let mut diff_fn = pot.parallel(true).initialize_flat_diff_fn(&from_coords, meta.sift())?;
 
     let direction = &evec[..];
     let from_pos = from_coords.to_carts();

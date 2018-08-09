@@ -76,16 +76,21 @@ pub trait PotentialBuilder<Meta = CommonMeta>
     // ...sigh.  Use impl_dyn_clone_detail! to satisfy this.
     + DynCloneDetail<Meta>
 {
-    // NOTE: when adding methods like "threaded", make sure to override the
+    // NOTE: when adding methods like "parallel", make sure to override the
     //       default implementations in generic impls!!!
     //       (e.g. Box<PotentialBuilder<M>>, Sum<A, B>, ...)
-    /// Sometimes called as a last-minute hint to control threading
+    /// Sometimes called as a last-minute hint to control parallelism
     /// within the potential based on the current circumstances.
-    /// Use `true` to recommend the creation of threads, and `false` to discourage it.
+    ///
+    /// `.parallel(true)` is an invitation to enable maximum parallelism.
+    /// `.parallel(false)` forbids all forms of parallelism.
+    ///
+    /// This method is not reversible.  If `pot` has parallelism enabled, there is no guarantee that
+    /// `pot.parallel(false).parallel(true)` will have the same settings.
     ///
     /// The default implementation just ignores the call.
     #[must_use = "this is not an in-place mutation!"]
-    fn threaded(&self, _threaded: bool) -> Box<PotentialBuilder<Meta>>
+    fn parallel(&self, _parallel: bool) -> Box<PotentialBuilder<Meta>>
     { self.box_clone() }
 
     /// Create the DiffFn.  This does potentially expensive initialization, maybe calling out
@@ -187,8 +192,8 @@ where M: 'static, // FIXME why is this necessary? PotentialBuilder doesn't borro
 impl<Meta> PotentialBuilder<Meta> for Box<PotentialBuilder<Meta>>
 where Meta: Clone + 'static,
 {
-    fn threaded(&self, threaded: bool) -> Box<PotentialBuilder<Meta>>
-    { (**self).threaded(threaded) }
+    fn parallel(&self, parallel: bool) -> Box<PotentialBuilder<Meta>>
+    { (**self).parallel(parallel) }
 
     fn initialize_diff_fn(&self, coords: &Coords, meta: Meta) -> FailResult<Box<DiffFn<Meta>>>
     { (**self).initialize_diff_fn(coords, meta) }

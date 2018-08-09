@@ -34,14 +34,14 @@ fn main() -> Result<(), failure::Error> {
 
     let result = {
         let lock = ::rsp2_lammps_wrap::INSTANCE_LOCK.lock().unwrap();
+        ::rsp2_lammps_wrap::LammpsOnDemand::install(|on_demand| {
+            ::rsp2_lammps_wrap::Builder::new()
+                .on_demand(on_demand)
+                .stdout(true)
+                .build(lock, Airebo, super_coords, super_meta).unwrap()
+                .compute_value()
+        })
 
-        ::rsp2_lammps_wrap::Builder::new()
-            .stdout(true)
-            .with_mpi_event_loop(|builder| {
-                builder
-                    .build(lock, Airebo, super_coords, super_meta).unwrap()
-                    .compute_value()
-            })
     };
 
     if let Some(result) = result {

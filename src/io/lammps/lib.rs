@@ -224,7 +224,8 @@ impl<T> MaybeDirty<T> {
 pub struct Builder {
     make_instance: BoxDynMakeInstance,
     append_log: Option<PathBuf>,
-    threaded: bool,
+    openmp_threads: Option<u32>,
+    processors: [Option<u32>; 3],
     auto_adjust_lattice: bool,
     update_style: UpdateStyle,
     data_trace_dir: Option<PathBuf>,
@@ -362,10 +363,11 @@ impl Builder {
     { Builder {
         make_instance: MakePlainInstance.box_clone(),
         append_log: None,
-        threaded: true,
+        openmp_threads: None,
         update_style: UpdateStyle::safe(),
         auto_adjust_lattice: true,
         data_trace_dir: None,
+        processors: [None; 3],
         stdout: false,
     }}
 
@@ -385,34 +387,21 @@ impl Builder {
     pub fn stdout(&mut self, value: bool) -> &mut Self
     { self.stdout = value; self }
 
+    /// Set the number of OpenMP threads per process.
+    ///
+    /// When `None`, the lammps default is used. (which is to use `OMP_NUM_THREADS`)
+    pub fn openmp_threads(&mut self, value: Option<u32>) -> &mut Self
+    { self.openmp_threads = value; self }
+
+    /// Set the processor grid.
+    ///
+    /// This corresponds directly to LAMMPS' own `processors` command, although currently
+    /// only simple grids are supported.  None stands for `*` in the original command syntax.
+    pub fn processors(&mut self, value: [Option<u32>; 3]) -> &mut Self
+    { self.processors = value; self }
+
     pub fn append_log(&mut self, path: impl AsRef<Path>) -> &mut Self
     { self.append_log = Some(path.as_ref().to_owned()); self }
-
-    // FIXME: Rename to parallel?
-    /// Impacts both OpenMP and MPI.
-    pub fn threaded(&mut self, value: bool) -> &mut Self
-    { self.threaded = value; self }
-
-    /// Call this function from multi-process MPI code in order to enter a "single-process" mode.
-    ///
-    /// The continuation is only called on the root process, and during this time the other
-    /// processes will enter an event loop dedicated to lammps.
-    ///
-    /// This always affects all processes; you cannot use a custom communicator. (Sorry.)
-    #[cfg(feature = "_mpi")]
-    pub fn with_mpi_event_loop<R>(
-        &self,
-        continuation: impl FnOnce(Self) -> R,
-    ) -> Option<R> {
-        LammpsOnDemandImpl::install(
-            LammpsDispatch::new(),
-            |on_demand| {
-                let mut builder = self.clone();
-                builder.make_instance = MakeMpiInstance(on_demand).box_clone();
-                continuation(builder)
-            },
-        )
-    }
 
     /// Enable MPI in Lammps from single-process mode.
     ///
@@ -864,13 +853,18 @@ impl<P: Potential> Lammps<P>
             )?;
         }
 
+        lmp.command(format!("package omp {}", builder.openmp_threads.unwrap_or(0)))?;
+        lmp.command(format!("processors {}", {
+            builder.processors.iter()
+                .map(|x| match x {
+                    None => "*".to_string(),
+                    Some(x) => x.to_string(),
+                })
+                .collect::<Vec<_>>().join(" ")
+        }))?;
+
         lmp.commands(&[
-            "package omp 0",
             "units metal",                  // Angstroms, picoseconds, eV
-            match builder.threaded {
-                true => "processors * * *",
-                false => "processors 1 1 1",
-            },
             "neigh_modify delay 0",         // disable delay for a safer `run pre no`
             "atom_style atomic",            // attributes to store per-atom
             "thermo_modify lost error",     // don't let atoms disappear without telling us
