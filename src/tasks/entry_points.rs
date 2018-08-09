@@ -28,6 +28,9 @@ use ::util::ext_traits::{ArgMatchesExt};
 use ::std::process::exit;
 use ::rsp2_lammps_wrap::LammpsOnDemand;
 
+// -------------------------------------------------------------------------------------
+// Initialization common to all entry points
+
 fn wrap_main<F>(main: F) -> !
 where F: FnOnce(SetGlobalLogfile, Option<LammpsOnDemand>) -> FailResult<()>,
 {
@@ -110,6 +113,20 @@ fn show_errors(e: ::failure::Error) {
     }
 }
 
+fn check_for_deps() -> FailResult<()> {
+    ::cmd::python::check_availability()?;
+
+    if ::std::env::var_os("LAMMPS_POTENTIALS").is_none() {
+        bail!("rsp2 requires you to set the LAMMPS_POTENTIALS environment variable.");
+    }
+
+    Ok(())
+}
+
+// -------------------------------------------------------------------------------------
+// Some commonly used CLI args.
+
+// Configuration YAML obtained from CLI args.
 struct ConfigArgs(ConfigSources);
 
 impl CliDeserialize for ConfigArgs {
@@ -208,16 +225,6 @@ impl OptionalFileType {
             }
         })
     }
-}
-
-fn check_for_deps() -> FailResult<()> {
-    ::cmd::python::check_availability()?;
-
-    if ::std::env::var_os("LAMMPS_POTENTIALS").is_none() {
-        bail!("rsp2 requires you to set the LAMMPS_POTENTIALS environment variable.");
-    }
-
-    Ok(())
 }
 
 // -------------------------------------------------------------------------------------
