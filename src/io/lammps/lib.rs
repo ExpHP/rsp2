@@ -882,8 +882,6 @@ impl<P: Potential> Lammps<P>
         lmp.commands(&[
             "boundary p p p",               // (p)eriodic, (f)ixed, (s)hrinkwrap
             "box tilt small",               // triclinic
-            // NOTE: Initial skew factors must be zero to simplify
-            //       reasoning about order in send_lmp_lattice.
             "region sim prism 0 2 0 2 0 2 0 0 0", // garbage garbage garbage
         ])?;
 
