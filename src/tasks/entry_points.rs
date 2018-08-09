@@ -93,7 +93,7 @@ fn log_thread_info() -> FailResult<()> {
 }
 
 fn show_errors(e: ::failure::Error) {
-    for cause in e.causes() {
+    for cause in e.iter_chain() {
         error!("{}", cause);
     }
 
