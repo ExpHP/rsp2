@@ -25,37 +25,89 @@ use ::ui::cfg_merging::ConfigSources;
 use ::filetypes::{StoredStructure, Eigensols};
 use ::ui::cli_deserialize::CliDeserialize;
 use ::util::ext_traits::{ArgMatchesExt};
+use ::std::process::exit;
+use ::rsp2_lammps_wrap::LammpsOnDemand;
 
-fn wrap_result_main<F>(main: F)
-where F: FnOnce(SetGlobalLogfile) -> FailResult<()>,
+fn wrap_main<F>(main: F) -> !
+where F: FnOnce(SetGlobalLogfile, Option<LammpsOnDemand>) -> FailResult<()>,
 {
-    let wrapped = || {
-        let logfile = init_global_logger().expect("Could not init logger");
-        check_for_deps()?;
-        main(logfile)
-    };
+    wrap_main_with_lammps_on_demand(|on_demand| {
+        // From here onwards, everything runs on only a single process.
+        let result = (|| { // scope '?'
+            let logfile = init_global_logger().expect("Could not init logger");
+            check_for_deps()?;
+            log_thread_info()?;
+            main(logfile, on_demand)
+        })();
 
-    wrapped().unwrap_or_else(|e| {
-        for cause in e.causes() {
-            error!("{}", cause);
-        }
-
-        if ::std::env::var_os("RUST_BACKTRACE") == Some(OsStr::new("1").to_owned()) {
-            error!("{}", e.backtrace());
-        } else {
-            // When the only user is also the only dev, there isn't much point to wrapping
-            // error messages in context.  As a result of this, some error messages are
-            // *particularly* terrible.  (e.g. "cannot parse integer from empty string"
-            // without any indication of which file caused it).
-            //
-            // For now, leave a reminder about RUST_BACKTRACE.
-            error!("\
-                (If you found the above error message to be particularly lacking in \
-                detail, try again with RUST_BACKTRACE=1)\
-            ");
-        }
-        ::std::process::exit(1);
+        result.unwrap_or_else(|e| {
+            show_errors(e);
+            exit(1);
+        });
     });
+}
+
+// This initializes MPI so it must be done at the very beginning.
+//
+// The closure runs on only one process.
+fn wrap_main_with_lammps_on_demand(continuation: impl FnOnce(Option<LammpsOnDemand>)) -> ! {
+    #[cfg(feature = "_mpi")] {
+        let required = ::mpi::Threading::Serialized;
+        let (_universe, actual) = {
+            ::mpi::initialize_with_threading(required).expect("Could not initialize MPI!")
+        };
+
+        // 'actual >= required' would be nicer, but I don't think MPI specifies comparison ordering
+        assert_eq!(actual, required);
+
+        LammpsOnDemand::install(|on_demand| continuation(Some(on_demand)));
+    }
+    #[cfg(not(feature = "_mpi"))] {
+        continuation(None);
+    }
+    exit(0)
+}
+
+fn log_thread_info() -> FailResult<()> {
+    use ::mpi::traits::Communicator;
+
+    info!("Available resources for parallelism:");
+
+    #[cfg(feature = "_mpi")] {
+        let world = ::mpi::topology::SystemCommunicator::world();
+        info!("    MPI: {} process(es)", world.size());
+    }
+    #[cfg(not(feature = "_mpi"))] {
+        info!("    MPI: N/A (disabled during compilation)");
+    }
+
+    // Currently, rsp2 exposes the same value of OMP_NUM_THREADS to both Lammps (which creates
+    // them per process) and to python (which is only run on one process),
+    // so OMP info is deliberately vague and currently only here for debugging.
+    info!(" OpenMP: {} thread(s)", ::env::omp_num_threads()?);
+    info!("  rayon: {} thread(s) total", ::rayon::current_num_threads());
+    Ok(())
+}
+
+fn show_errors(e: ::failure::Error) {
+    for cause in e.causes() {
+        error!("{}", cause);
+    }
+
+    if ::std::env::var_os("RUST_BACKTRACE") == Some(OsStr::new("1").to_owned()) {
+        error!("{}", e.backtrace());
+    } else {
+        // When the only user is also the only dev, there isn't much point to wrapping
+        // error messages in context.  As a result of this, some error messages are
+        // *particularly* terrible.  (e.g. "cannot parse integer from empty string"
+        // without any indication of which file caused it).
+        //
+        // For now, leave a reminder about RUST_BACKTRACE.
+        error!("\
+            (If you found the above error message to be particularly lacking in \
+            detail, try again with RUST_BACKTRACE=1)\
+        ");
+    }
 }
 
 struct ConfigArgs(ConfigSources);
@@ -172,7 +224,7 @@ fn check_for_deps() -> FailResult<()> {
 
 // %% CRATES: binary: rsp2 %%
 pub fn rsp2(_bin_name: &str) {
-    wrap_result_main(|logfile| {
+    wrap_main(|logfile, mpi_on_demand| {
         let (app, de) = CliDeserialize::augment_clap_app({
             app_from_crate!(", ")
                 .args(&[
@@ -189,13 +241,13 @@ pub fn rsp2(_bin_name: &str) {
         logfile.start(PathFile::new(trial.new_logfile_path()?)?)?;
 
         let settings = trial.read_settings()?;
-        trial.run_relax_with_eigenvectors(&settings, filetype, &input)
+        trial.run_relax_with_eigenvectors(mpi_on_demand, &settings, filetype, &input)
     });
 }
 
 // %% CRATES: binary: rsp2-shear-plot %%
 pub fn shear_plot(bin_name: &str) {
-    wrap_result_main(|logfile| {
+    wrap_main(|logfile, mpi_on_demand| {
         let (app, de) = CliDeserialize::augment_clap_app({
             ::clap::App::new(bin_name)
                 .args(&[
@@ -211,13 +263,13 @@ pub fn shear_plot(bin_name: &str) {
         logfile.start(PathFile::new(trial.new_logfile_path()?)?)?;
 
         let settings = trial.read_settings()?;
-        trial.run_energy_surface(&settings, &input)
+        trial.run_energy_surface(mpi_on_demand, &settings, &input)
     });
 }
 
 // %% CRATES: binary: rsp2-save-bands-after-the-fact %%
 pub fn save_bands_after_the_fact(bin_name: &str) {
-    wrap_result_main(|logfile| {
+    wrap_main(|logfile, mpi_on_demand| {
         let (app, de) = CliDeserialize::augment_clap_app({
             ::clap::App::new(bin_name)
                 .args(&[
@@ -232,13 +284,13 @@ pub fn save_bands_after_the_fact(bin_name: &str) {
         logfile.start(PathFile::new(trial.new_logfile_path()?)?)?;
 
         let settings = trial.read_settings()?;
-        trial.run_save_bands_after_the_fact(&settings)
+        trial.run_save_bands_after_the_fact(mpi_on_demand, &settings)
     });
 }
 
 // %% CRATES: binary: rsp2-rerun-analysis %%
 pub fn rerun_analysis(bin_name: &str) {
-    wrap_result_main(|logfile| {
+    wrap_main(|logfile, mpi_on_demand| {
         let (app, de) = CliDeserialize::augment_clap_app({
             ::clap::App::new(bin_name)
                 .args(&[
@@ -254,7 +306,7 @@ pub fn rerun_analysis(bin_name: &str) {
         logfile.start(PathFile::new(trial.new_logfile_path()?)?)?;
 
         let settings = trial.read_settings()?;
-        trial.rerun_ev_analysis(&settings, structure)
+        trial.rerun_ev_analysis(mpi_on_demand, &settings, structure)
     });
 }
 
@@ -264,8 +316,7 @@ pub fn rerun_analysis(bin_name: &str) {
 //       while this requires the eigensolutions as input.
 // %% CRATES: binary: rsp2-sparse-analysis %%
 pub fn sparse_analysis(bin_name: &str) {
-
-    wrap_result_main(|logfile| {
+    wrap_main(|logfile, _mpi_on_demand| {
         let (app, de) = CliDeserialize::augment_clap_app({
             ::clap::App::new(bin_name)
                 .args(&[
@@ -302,7 +353,7 @@ pub fn sparse_analysis(bin_name: &str) {
 
 // %% CRATES: binary: rsp2-bond-test %%
 pub fn bond_test(bin_name: &str) {
-    wrap_result_main(|_logfile| {
+    wrap_main(|_logfile, _mpi_on_demand| {
         let (app, de) = CliDeserialize::augment_clap_app({
             ::clap::App::new(bin_name)
                 .args(&[
@@ -332,7 +383,7 @@ pub fn bond_test(bin_name: &str) {
 
 // %% CRATES: binary: rsp2-dynmat-test %%
 pub fn dynmat_test(bin_name: &str) {
-    wrap_result_main(|logfile| {
+    wrap_main(|logfile, _mpi_on_demand| {
         let (app, de) = CliDeserialize::augment_clap_app({
             ::clap::App::new(bin_name)
                 .args(&[
@@ -351,7 +402,7 @@ pub fn dynmat_test(bin_name: &str) {
 
 // %% CRATES: binary: rsp2-plot-vdw %%
 pub fn plot_vdw(bin_name: &str) {
-    wrap_result_main(|logfile| {
+    wrap_main(|logfile, mpi_on_demand| {
         let (app, de) = CliDeserialize::augment_clap_app({
             ::clap::App::new(bin_name)
                 .args(&[
@@ -376,13 +427,13 @@ pub fn plot_vdw(bin_name: &str) {
             r_min * (1.0 - alpha) + r_max * alpha
         }).collect::<Vec<_>>();
 
-        ::cmd::run_plot_vdw(&config.deserialize()?, z, &rs[..])
+        ::cmd::run_plot_vdw(mpi_on_demand, &config.deserialize()?, z, &rs[..])
     });
 }
 
 // %% CRATES: binary: rsp2-converge-vdw %%
 pub fn converge_vdw(bin_name: &str) {
-    wrap_result_main(|logfile| {
+    wrap_main(|logfile, mpi_on_demand| {
         let (app, de) = CliDeserialize::augment_clap_app({
             ::clap::App::new(bin_name)
                 .args(&[
@@ -401,6 +452,6 @@ pub fn converge_vdw(bin_name: &str) {
         let r_min: f64 = matches.value_of("r_min").map_or(Ok(z), str::parse)?;
         let r_max: f64 = matches.value_of("r_max").unwrap_or("15.0").parse()?;
 
-        ::cmd::run_converge_vdw(&config.deserialize()?, z, (r_min, r_max))
+        ::cmd::run_converge_vdw(mpi_on_demand, &config.deserialize()?, z, (r_min, r_max))
     });
 }

@@ -62,6 +62,8 @@ extern crate num_traits;
 #[macro_use] extern crate log;
 #[macro_use] extern crate itertools;
 #[macro_use] extern crate failure;
+#[cfg(feature = "_mpi")]
+extern crate mpi;
 
 extern crate lapacke;
 extern crate lapack_src;
@@ -185,6 +187,14 @@ mod env {
     {Ok({
         var("RUST_LOG")?.unwrap_or(String::new())
     })}
+
+    // (not necessarily an integer but may be a comma-separated list.
+    //  I'm sticking to a String as we only use it for display)
+    pub fn omp_num_threads() -> FailResult<String>
+    {
+        nonempty_var("OMP_NUM_THREADS")
+            .map(|s| s.unwrap_or_else(|| "1".into()))
+    }
 
     /// Show module names in log output.
     pub fn log_mod() -> FailResult<bool>

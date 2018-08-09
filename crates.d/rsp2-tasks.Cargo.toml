@@ -56,5 +56,19 @@ path = "lib.rs"
 !!lapack-src
 !!num-traits
 
+# FIXME: should be an optional dependency, but the crates script
+#        has no way to do that.
+!!mpi
+
 [features]
+default = ["_mpi"]
+
 !!NIGHTLY-FEATURE-LINE
+
+# FIXME: Rename feature to "mpi" once mpi is properly an optional dep.
+#
+#        This dep with the underscored name exists to make it possible to disable mpi-related
+#        features (to test conditional compilation) despite the current inadequacies
+#        of the crates script
+_mpi = ["rsp2-lammps-wrap/_mpi"]
+

@@ -44,7 +44,7 @@ use ::rsp2_array_types::{V3, Unvee, Envee};
 use ::log::Level;
 use ::low_level::{LowLevelApi, ComputeStyle, Skews, LammpsOwner};
 #[cfg(feature = "_mpi")]
-use ::low_level::mpi::{MpiLammpsOwner, LammpsOnDemand, LammpsDispatch};
+use ::low_level::mpi::{MpiLammpsOwner, LammpsOnDemand as LammpsOnDemandImpl, LammpsDispatch};
 
 use ::std::path::{Path, PathBuf};
 use ::std::sync::{Mutex, MutexGuard};
@@ -247,7 +247,7 @@ impl Clone for BoxDynMakeInstance {
 struct MakePlainInstance;
 
 #[derive(Debug, Clone)]
-struct MakeMpiInstance(LammpsOnDemand);
+struct MakeMpiInstance(LammpsOnDemandImpl);
 
 impl MakeInstance for MakePlainInstance {
     unsafe fn make_it(&self, argv: &[&str]) -> FailResult<Box<dyn LowLevelApi>>
@@ -404,7 +404,7 @@ impl Builder {
         &self,
         continuation: impl FnOnce(Self) -> R,
     ) -> Option<R> {
-        LammpsOnDemand::install(
+        LammpsOnDemandImpl::install(
             LammpsDispatch::new(),
             |on_demand| {
                 let mut builder = self.clone();
@@ -413,6 +413,13 @@ impl Builder {
             },
         )
     }
+
+    /// Enable MPI in Lammps from single-process mode.
+    ///
+    /// Afterwards, any Lammps potentials built through the builder will automatically
+    /// coordinate the actions of the other processes.
+    pub fn on_demand(&mut self, value: LammpsOnDemand) -> &mut Self
+    { self.make_instance = MakeMpiInstance(value.imp).box_clone(); self }
 
     pub fn update_style(&mut self, value: UpdateStyle) -> &mut Self
     { self.update_style = value; self }
@@ -486,7 +493,7 @@ pub fn link_test() -> FailResult<()>
 pub fn mpi_link_test() -> FailResult<()>
 {Ok({
     println!("{}", ::mpi::library_version().unwrap());
-    LammpsOnDemand::install(
+    LammpsOnDemandImpl::install(
         LammpsDispatch::new(),
         |on_demand| {
             unsafe { MpiLammpsOwner::new(
@@ -575,6 +582,46 @@ impl<'a, M: Clone> Potential for &'a (Potential<Meta=M> + 'a) {
     fn atom_types(&self, coords: &Coords, meta: &Self::Meta) -> Vec<AtomType>
     { (&**self).atom_types(coords, meta) }
 }
+
+//-------------------------------------------
+
+// FIXME: Doc.
+//
+// This is just an opaque type that serves as the publically visible form of MpiOnDemand.
+// Most of the docs for MpiOnDemand apply directly to this, but I'm tired of repeating myself...
+#[cfg(feature = "_mpi")]
+pub struct LammpsOnDemand { imp: LammpsOnDemandImpl }
+
+#[cfg(not(feature = "_mpi"))]
+pub enum LammpsOnDemand {}
+
+#[cfg(feature = "_mpi")]
+impl LammpsOnDemand {
+    /// Continuation-style constructor.
+    ///
+    /// # MPI
+    ///
+    /// This is to be called on all MPI processes.
+    ///
+    /// The continuation runs on a single process, while the others run in an event loop
+    /// until the continuation finishes. MPI will be unusable for anything other LAMMPS during
+    /// this time.
+    ///
+    /// # Output
+    ///
+    /// `Some` on the root process, `None` on the others.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the LammpsOnDemand is leaked outside the continuation.
+    pub fn install<R>(continuation: impl FnOnce(LammpsOnDemand) -> R) -> Option<R> {
+        LammpsOnDemandImpl::install(
+            LammpsDispatch::new(),
+            |on_demand| continuation(LammpsOnDemand { imp: on_demand }),
+        )
+    }
+}
+
 
 //-------------------------------------------
 

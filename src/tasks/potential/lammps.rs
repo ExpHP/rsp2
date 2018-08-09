@@ -39,6 +39,7 @@ use ::rsp2_lammps_wrap::{InitInfo, AtomType, PairStyle, PairCoeff};
 use ::rsp2_lammps_wrap::Builder as InnerBuilder;
 use ::rsp2_lammps_wrap::Potential as LammpsPotential;
 use ::rsp2_lammps_wrap::UpdateStyle;
+use ::rsp2_lammps_wrap::LammpsOnDemand;
 use ::rsp2_lammps_wrap::INSTANCE_LOCK;
 
 const DEFAULT_KC_Z_CUTOFF: f64 = 14.0; // (Angstrom?)
@@ -69,6 +70,7 @@ impl<P: Clone> Builder<P>
 {
     pub(crate) fn new(
         trial_dir: Option<&TrialDir>,
+        on_demand: Option<LammpsOnDemand>,
         threading: &cfg::Threading,
         update_style: &cfg::LammpsUpdateStyle,
         potential: P,
@@ -89,6 +91,9 @@ impl<P: Clone> Builder<P>
                 UpdateStyle::fast(sync_positions_every)
             },
         });
+        if let Some(on_demand) = on_demand {
+            inner.on_demand(on_demand);
+        }
         if log_enabled!(target: "rsp2_tasks::special::lammps_data_trace", ::log::Level::Trace) {
             inner.data_trace_dir(Some({
                 trial_dir.map(|t| t.as_path().to_owned())

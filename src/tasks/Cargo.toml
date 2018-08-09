@@ -61,6 +61,20 @@ lapacke = "0.1.4"
 lapack-src = { version = "0.1.4", features = ["netlib"] } 
 num-traits = "0.2.3"
 
+# FIXME: should be an optional dependency, but the crates script
+#        has no way to do that.
+mpi = "0.5.4"
+
 [features]
+default = ["_mpi"]
+
 nightly = ["beta", "rsp2-array-types/nightly", "rsp2-array-utils/nightly", "rsp2-assert-close/nightly", "rsp2-clap/nightly", "rsp2-fs-util/nightly", "rsp2-lammps-wrap/nightly", "rsp2-linalg/nightly", "rsp2-minimize/nightly", "rsp2-newtype-indices/nightly", "rsp2-phonopy-io/nightly", "rsp2-slice-math/nightly", "rsp2-soa-ops/nightly", "rsp2-structure-io/nightly", "rsp2-structure/nightly", "rsp2-tasks-config/nightly", "rsp2-util-macros/nightly"]
 beta = ["rsp2-array-types/beta", "rsp2-array-utils/beta", "rsp2-assert-close/beta", "rsp2-clap/beta", "rsp2-fs-util/beta", "rsp2-lammps-wrap/beta", "rsp2-linalg/beta", "rsp2-minimize/beta", "rsp2-newtype-indices/beta", "rsp2-phonopy-io/beta", "rsp2-slice-math/beta", "rsp2-soa-ops/beta", "rsp2-structure-io/beta", "rsp2-structure/beta", "rsp2-tasks-config/beta", "rsp2-util-macros/beta"]
+
+# FIXME: Rename feature to "mpi" once mpi is properly an optional dep.
+#
+#        This dep with the underscored name exists to make it possible to disable mpi-related
+#        features (to test conditional compilation) despite the current inadequacies
+#        of the crates script
+_mpi = ["rsp2-lammps-wrap/_mpi"]
+

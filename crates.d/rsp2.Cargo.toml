@@ -35,11 +35,24 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 !!serde-derive
 !!pretty-assertions
 
+# FIXME: should be an optional dependency, but the crates script
+#        has no way to do that.
+!!mpi
+
 [features]
+default = ["_mpi"]
+
 # Used by integration tests to make them show nice diffs using pretty_assertions.
 #
 # see doc/updating-tests.md for more details
 test-diff=["rsp2-integration-test/test-diff"]
+
+# FIXME: Rename feature to "mpi" once mpi is properly an optional dep.
+#
+#        This dep with the underscored name exists to make it possible to disable mpi-related
+#        features (to test conditional compilation) despite the current inadequacies
+#        of the crates script
+_mpi = ["rsp2-tasks/_mpi"]
 
 !!NIGHTLY-FEATURE-LINE
 

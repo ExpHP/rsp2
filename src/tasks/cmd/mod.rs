@@ -37,6 +37,7 @@ use ::{FailResult, FailOk};
 use ::rsp2_tasks_config::{self as cfg, Settings, NormalizationMode, SupercellSpec};
 use ::traits::{AsPath, Load, Save};
 use ::phonopy::{DirWithBands, DirWithDisps, DirWithForces};
+use ::rsp2_lammps_wrap::LammpsOnDemand;
 
 use ::meta::{self, prelude::*};
 use ::util::ext_traits::{OptionResultExt, PathNiceExt};
@@ -86,12 +87,13 @@ pub enum StructureFileType {
 impl TrialDir {
     pub(crate) fn run_relax_with_eigenvectors(
         self,
+        on_demand: Option<LammpsOnDemand>,
         settings: &Settings,
         file_format: StructureFileType,
         input: &PathAbs,
     ) -> FailResult<()>
     {Ok({
-        let pot = PotentialBuilder::from_root_config(&self, &settings);
+        let pot = PotentialBuilder::from_root_config(&self, on_demand, &settings);
 
         let (optimizable_coords, meta) = {
             read_optimizable_structure(
@@ -818,6 +820,7 @@ where
 impl TrialDir {
     pub(crate) fn run_energy_surface(
         self,
+        on_demand: Option<LammpsOnDemand>,
         settings: &cfg::EnergyPlotSettings,
         input: &PathDir,
     ) -> FailResult<()>
@@ -868,6 +871,14 @@ impl TrialDir {
             settings.normalization.normalize(ev)
         };
 
+        let pot = PotentialBuilder::from_config_parts(
+            Some(&self),
+            on_demand,
+            &settings.threading,
+            &settings.lammps_update_style,
+            &settings.potential,
+        );
+
         let [xmin, xmax] = settings.xlim;
         let [ymin, ymax] = settings.ylim;
         let [w, h] = settings.dim;
@@ -881,19 +892,13 @@ impl TrialDir {
                     use ::std::sync::atomic::{AtomicUsize, Ordering};
                     let counter = AtomicUsize::new(0);
                     let get_meta = meta.sendable();
-                    let me = &self;
 
                     move |pos| {FailOk({
                         let i = counter.fetch_add(1, Ordering::SeqCst);
                         // println!("{:?}", pos.flat().iter().sum::<f64>());
 
                         eprint!("\rdatapoint {:>6} of {}", i, w * h);
-                        PotentialBuilder::from_config_parts(
-                            Some(me),
-                            &settings.threading,
-                            &settings.lammps_update_style,
-                            &settings.potential,
-                        ).one_off()
+                        pot.one_off()
                             .compute_grad(
                                 &coords.clone().with_carts(pos.to_vec()),
                                 get_meta().sift(),
@@ -970,10 +975,11 @@ extension_trait! {
 impl TrialDir {
     pub(crate) fn run_save_bands_after_the_fact(
         self,
+        on_demand: Option<LammpsOnDemand>,
         settings: &Settings,
     ) -> FailResult<()>
     {Ok({
-        let pot = PotentialBuilder::from_root_config(&self, &settings);
+        let pot = PotentialBuilder::from_root_config(&self, on_demand, &settings);
 
         let (coords, meta) = self.read_stored_structure_data("final.structure")?;
 
@@ -1001,11 +1007,12 @@ impl TrialDir {
 impl TrialDir {
     pub(crate) fn rerun_ev_analysis(
         self,
+        on_demand: Option<LammpsOnDemand>,
         settings: &Settings,
         stored: StoredStructure,
     ) -> FailResult<()>
     {Ok({
-        let pot = PotentialBuilder::from_root_config(&self, &settings);
+        let pot = PotentialBuilder::from_root_config(&self, on_demand, &settings);
 
         // !!!!!!!!!!!!!!!!!
         //  FIXME FIXME BAD
@@ -1102,6 +1109,7 @@ pub(crate) fn run_sparse_analysis(
 //=================================================================
 
 pub(crate) fn run_plot_vdw(
+    on_demand: Option<LammpsOnDemand>,
     pot: &cfg::PotentialKind,
     z: f64,
     rs: &[f64],
@@ -1111,7 +1119,7 @@ pub(crate) fn run_plot_vdw(
     let threading = cfg::Threading::Lammps;
 
     let lammps_update_style = cfg::LammpsUpdateStyle::Fast { sync_positions_every: 1 };
-    let pot = PotentialBuilder::from_config_parts(None, &threading, &lammps_update_style, pot);
+    let pot = PotentialBuilder::from_config_parts(None, on_demand, &threading, &lammps_update_style, pot);
 
     let lattice = {
         let a = rs.iter().fold(0.0, |a, &b| f64::max(a, b)) + 20.0;
@@ -1150,6 +1158,7 @@ pub(crate) fn run_plot_vdw(
 })}
 
 pub(crate) fn run_converge_vdw(
+    on_demand: Option<LammpsOnDemand>,
     pot: &cfg::PotentialKind,
     z: f64,
     (r_min, r_max): (f64, f64),
@@ -1159,7 +1168,7 @@ pub(crate) fn run_converge_vdw(
     let threading = cfg::Threading::Lammps;
 
     let lammps_update_style = cfg::LammpsUpdateStyle::Fast { sync_positions_every: 1 };
-    let pot = PotentialBuilder::from_config_parts(None, &threading, &lammps_update_style, pot);
+    let pot = PotentialBuilder::from_config_parts(None, on_demand, &threading, &lammps_update_style, pot);
 
     let lattice = Lattice::orthorhombic(40.0, 40.0, 40.0);
     let direction = {
