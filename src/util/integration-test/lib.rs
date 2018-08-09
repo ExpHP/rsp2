@@ -117,7 +117,20 @@ impl CliTest {
         let _tmp = TempDir::new("rsp2")?;
         let tmp = PathDir::new(_tmp.path())?;
 
-        PathDir::current_dir()?.join("tests/resources").absolute()?.into_dir()?.symlink(tmp.join("resources"))?;
+        let cwd = PathDir::current_dir()?;
+        cwd.join("tests/resources").absolute()?.into_dir()?.symlink(tmp.join("resources"))?;
+
+        // HACK to help tame useless rebuilds:
+        //
+        // .cargo/config is not strictly considered part of a cargo project;
+        // It is merely the case that cargo checks all ancestors of the current directory.
+        // This means changing directory into a tempdir can wreak havoc if you have a .cargo/config
+        // that e.g. adds "-fopenmp".
+        //
+        // TODO: How does rsmpi manage to change linker arguments so easily?
+        if let Ok(dot_cargo) = cwd.join(".cargo").absolute()?.into_dir() {
+            dot_cargo.symlink(tmp.join(".cargo"))?;
+        };
 
         let stdout_path = tmp.join("__captured_stdout");
         let stderr_path = tmp.join("__captured_stderr");
