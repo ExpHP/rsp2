@@ -14,6 +14,8 @@ mod airebo;
 use airebo::Airebo;
 
 fn main() -> Result<(), failure::Error> {
+    let _universe = ::mpi::initialize().expect("failed to initialize MPI");
+
     let unit_coords = Coords::new(
         Lattice::orthorhombic(4.2, 4.2, 2.5579182965),
         CoordsKind::Carts(vec![
@@ -31,16 +33,11 @@ fn main() -> Result<(), failure::Error> {
     let super_meta = sc.replicate(&unit_meta);
 
     let result = {
-        use ::mpi::traits::Communicator;
-
-        let universe = ::mpi::initialize().expect("failed to initialize MPI");
-        let world = universe.world();
-        let root = world.process_at_rank(0);
-
         let lock = ::rsp2_lammps_wrap::INSTANCE_LOCK.lock().unwrap();
 
         ::rsp2_lammps_wrap::Builder::new()
-            .with_mpi_event_loop(root, |builder| {
+            .stdout(true)
+            .with_mpi_event_loop(|builder| {
                 builder
                     .build(lock, Airebo, super_coords, super_meta).unwrap()
                     .compute_value()

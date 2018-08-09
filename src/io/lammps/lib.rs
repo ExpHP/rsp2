@@ -228,6 +228,7 @@ pub struct Builder {
     auto_adjust_lattice: bool,
     update_style: UpdateStyle,
     data_trace_dir: Option<PathBuf>,
+    stdout: bool
 }
 
 trait MakeInstance: fmt::Debug {
@@ -245,12 +246,8 @@ impl Clone for BoxDynMakeInstance {
 #[derive(Debug, Clone)]
 struct MakePlainInstance;
 
-#[derive(Debug)]
-struct MakeMpiInstance<Root: mpi::Root>(LammpsOnDemand<Root>);
-
-impl<Root: mpi::Root> Clone for MakeMpiInstance<Root> {
-    fn clone(&self) -> Self { MakeMpiInstance(self.0.clone()) }
-}
+#[derive(Debug, Clone)]
+struct MakeMpiInstance(LammpsOnDemand);
 
 impl MakeInstance for MakePlainInstance {
     unsafe fn make_it(&self, argv: &[&str]) -> FailResult<Box<dyn LowLevelApi>>
@@ -260,8 +257,7 @@ impl MakeInstance for MakePlainInstance {
     { BoxDynMakeInstance(Box::new(self.clone())) }
 }
 
-impl<Root: mpi::Root + fmt::Debug + Send + Sync + 'static> MakeInstance for MakeMpiInstance<Root>
-{
+impl MakeInstance for MakeMpiInstance {
     unsafe fn make_it(&self, argv: &[&str]) -> FailResult<Box<dyn LowLevelApi>>
     { Ok(Box::new(MpiLammpsOwner::new(self.0.clone(), argv)?)) }
 
@@ -370,6 +366,7 @@ impl Builder {
         update_style: UpdateStyle::safe(),
         auto_adjust_lattice: true,
         data_trace_dir: None,
+        stdout: false,
     }}
 
     /// Toggles extremely small corrections automatically made to the lattice.
@@ -382,6 +379,12 @@ impl Builder {
     pub fn auto_adjust_lattice(&mut self, value: bool) -> &mut Self
     { self.auto_adjust_lattice = value; self }
 
+    /// Let lammps write directly to the standard output stream.
+    ///
+    /// The default value of `false` corresponds to the CLI arguments `-screen none`.
+    pub fn stdout(&mut self, value: bool) -> &mut Self
+    { self.stdout = value; self }
+
     pub fn append_log(&mut self, path: impl AsRef<Path>) -> &mut Self
     { self.append_log = Some(path.as_ref().to_owned()); self }
 
@@ -390,18 +393,19 @@ impl Builder {
     pub fn threaded(&mut self, value: bool) -> &mut Self
     { self.threaded = value; self }
 
-    /// This function can be called from multi-process MPI code in order to enter a
-    /// "single-process" mode.  The continuation is only called on the root process,
-    /// and during this time the other processes will enter an event loop dedicated to lammps.
+    /// Call this function from multi-process MPI code in order to enter a "single-process" mode.
+    ///
+    /// The continuation is only called on the root process, and during this time the other
+    /// processes will enter an event loop dedicated to lammps.
+    ///
+    /// This always affects all processes; you cannot use a custom communicator. (Sorry.)
     #[cfg(feature = "_mpi")]
-    pub fn with_mpi_event_loop<C: mpi::Communicator, R>(
+    pub fn with_mpi_event_loop<R>(
         &self,
-        root: impl mpi::Root + Send + Sync + 'static + fmt::Debug,
         continuation: impl FnOnce(Self) -> R,
     ) -> Option<R> {
         LammpsOnDemand::install(
             LammpsDispatch::new(),
-            root,
             |on_demand| {
                 let mut builder = self.clone();
                 builder.make_instance = MakeMpiInstance(on_demand).box_clone();
@@ -481,14 +485,9 @@ pub fn link_test() -> FailResult<()>
 #[cfg(feature = "_mpi")]
 pub fn mpi_link_test() -> FailResult<()>
 {Ok({
-    use ::mpi::Communicator;
-
-    let universe = ::mpi::initialize().expect("failed to intialize mpi");
-
     println!("{}", ::mpi::library_version().unwrap());
     LammpsOnDemand::install(
         LammpsDispatch::new(),
-        universe.world().process_at_rank(0),
         |on_demand| {
             unsafe { MpiLammpsOwner::new(
                 on_demand,
@@ -777,14 +776,17 @@ impl<P: Potential> Lammps<P>
         // Lammps script based on code from Colin Daniels.
 
         let mut lmp = {
-            let argv = &[
+            let mut argv = vec![
                 "lammps",
-                "-screen", "none",
                 "-log", "none", // logs opened from CLI are truncated, but we want to append
             ];
+            if !builder.stdout {
+                argv.push("-screen");
+                argv.push("none");
+            }
 
             // NOTE: safe due to how the only callers use the instance lock
-            unsafe { builder.make_instance.0.make_it(argv)? }
+            unsafe { builder.make_instance.0.make_it(&argv)? }
         };
 
         if let Some(log_file) = &builder.append_log {

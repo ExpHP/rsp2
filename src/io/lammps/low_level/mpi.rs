@@ -79,13 +79,13 @@ use ::low_level::mpi_helper::{
 /// This type is expressly NOT CLONE.
 #[cfg(feature = "_mpi")]
 #[derive(Debug)]
-pub(crate) struct MpiLammpsOwner<Root: mpi::Root> {
-    on_demand: LammpsOnDemand<Root>,
+pub(crate) struct MpiLammpsOwner {
+    on_demand: LammpsOnDemand,
 }
 
-pub(crate) type LammpsOnDemand<Root> = MpiOnDemand<Root, LammpsDispatch>;
+pub(crate) type LammpsOnDemand = MpiOnDemand<LammpsDispatch>;
 
-impl<Root: mpi::Root> MpiLammpsOwner<Root> {
+impl MpiLammpsOwner {
     /// Construct an `MpiLammpsOwner`.
     ///
     /// # MPI
@@ -98,7 +98,7 @@ impl<Root: mpi::Root> MpiLammpsOwner<Root> {
     /// unsafe to use multiple instances simultaneously on separate threads.
     #[cfg(feature = "_mpi")]
     pub(crate) unsafe fn new(
-        on_demand: LammpsOnDemand<Root>,
+        on_demand: LammpsOnDemand,
         argv: &[&str],
     ) -> FailResult<Self>
     {Ok({
@@ -117,7 +117,7 @@ impl<Root: mpi::Root> MpiLammpsOwner<Root> {
     })}
 }
 
-impl<Root: mpi::Root> Drop for MpiLammpsOwner<Root> {
+impl Drop for MpiLammpsOwner {
     fn drop(&mut self) {
         match self.on_demand.invoke(Input::Drop(InputDrop { })) {
             Output::Drop(()) => {},
@@ -198,7 +198,7 @@ macro_rules! derive_low_level_api {
             }
         )*
 
-        impl<Root: mpi::Root> LowLevelApi for MpiLammpsOwner<Root> {
+        impl LowLevelApi for MpiLammpsOwner {
             $(
                 $($unsafe_keyword)* fn $method_name(&mut self, $($field : $Field),*) -> $OutputName {
                     match self.on_demand.invoke(Input::$MethodName($InputName { $($field),* })) {
@@ -417,17 +417,17 @@ pub(crate) struct LammpsDispatch {
     // would have to maintain its own local variable for the instance, introducing yet
     // another place where New and Drop would have to be special-cased.
     //
-    // FIXME: Unsurprisingly, I am uncertain whether this was a good idea.
-    //        This design decision seems to have led to many other questionable design choices:
+    // NOTE:  Unsurprisingly, I am not a huge fan of this design decision.
+    //        It seems to have led to many other questionable design choices:
     //        - MpiLammpsOwner holding a LammpsOnDemand rather than a LammpsOwner
     //        - Arcs, Mutexes, Options, oh my!
     //        - Having to unsafe impl Send for CArgv
     //        - Making `MpiOnDemand` impl `Clone`, which is why `Dispatch` takes `&self`
     //        - Having to use interior mutability in our only implementation of `Dispatch`!
     //
-    //        Unless there were other motivations for these decisions (which I can't recall),
-    //        I imagine that we could obtain a much cleaner overall design if we did not put
-    //        the LammpsOwner here.
+    //        I tried to reverse this decision, but quickly ran into an issue
+    //        with the `Drop` impl for `MpiLammpsOwner` (which must have access to the
+    //        MpiOnDemand in order to notify the other processes).  And so it remains.
     instance: Arc<Mutex<Option<LammpsOwner>>>,
 }
 

@@ -68,27 +68,33 @@ pub trait DispatchMultiProcess {
 //        This requirement comes from the sole intended use case; I did not want to have to add a
 //        lifetime yet to PotentialBuilder (something which appears all over `rsp2_tasks`) just to
 //        support this one feature that might not even pan out.
+//
+// NOTE: This used to be parameterized over the communicator (or something
+//       that implements mpi::Root) in order to support UserCommunicators.
+//
+//       I gave up on that because it is simply too hard:
+//
+//       - The communicator (or Process) must be stored in `MpiOnDemand`
+//       - mpi::Communicator is not object-safe
+//       - mpi::Root is not object-safe, even if you constrain AsCommunicator::Out
+//       - The existing Send+Sync impls on mpi types are arbitrary, unsound, and platform-dependent.
+//         (https://github.com/bsteinb/rsmpi/issues/12)
+//       - It is impossible to obtain a `Process` that is `'static`. As a result, lifetime
+//         params are forced to appear all the way up through `rsp2_tasks::PotentialBuilder`.
+//
 #[derive(Debug)]
-pub struct MpiOnDemand<Root, D>(Arc<MpiOnDemandInner<Root, D>>);
+pub struct MpiOnDemand<D>(Arc<MpiOnDemandInner<D>>);
 
-impl<Root, D> Clone for MpiOnDemand<Root, D> {
+impl<D> Clone for MpiOnDemand<D> {
     fn clone(&self) -> Self { MpiOnDemand(self.0.clone()) }
 }
 
 #[derive(Debug, Clone)]
-pub struct MpiOnDemandInner<Root, D> {
-    // BEWARE: None of the following traits are object safe:
-    //   - mpi::Communicator
-    //   - mpi::Root, even if you constrain AsCommunicator::Out
-    root: Root,
+pub struct MpiOnDemandInner<D> {
     dispatch: D,
 }
 
-impl<Root, D> MpiOnDemand<Root, D>
-where
-    Root: mpi::Root,
-    D: DispatchMultiProcess,
-{
+impl<D: DispatchMultiProcess> MpiOnDemand<D> {
     /// Run the provided closure on a single process, with all multi-process code factored out
     /// into the provided `Dispatch`.
     ///
@@ -107,24 +113,30 @@ where
     /// has been leaked.
     pub fn install<R>(
         dispatch: D,
-        root: Root,
-        func: impl FnOnce(MpiOnDemand<Root, D>) -> R,
+        func: impl FnOnce(MpiOnDemand<D>) -> R,
     ) -> Option<R> {
-        let on_demand = MpiOnDemandInner { root, dispatch };
+        let on_demand = MpiOnDemandInner { dispatch };
 
-        if this_process_is_root(&on_demand.root) {
-            let on_demand = MpiOnDemand(Arc::new(on_demand));
-            let out = func(on_demand.clone());
+        // a note to future me (because he's an idiot):
+        //
+        // The continuation on the next line is entirely incidental and unrelated to the reason why
+        // this function takes a continuation. (and that reason is a very good one: to delimit
+        // the scope of single-process mode.)
+        with_default_root(|root| {
+            if this_process_is_root(&root) {
+                let on_demand = MpiOnDemand(Arc::new(on_demand));
+                let out = func(on_demand.clone());
 
-            Arc::try_unwrap(on_demand.0).ok()
-                .expect("Detected leak of `MpiOnDemand` value!")
-                .finish_from_root();
+                Arc::try_unwrap(on_demand.0).ok()
+                    .expect("Detected leak of `MpiOnDemand` value!")
+                    .finish_from_root(&root);
 
-            Some(out)
-        } else {
-            non_root_event_loop(on_demand);
-            None
-        }
+                Some(out)
+            } else {
+                non_root_event_loop(&root, on_demand);
+                None
+            }
+        })
     }
 
     /// Call the multi-process entry point.
@@ -136,51 +148,60 @@ where
     ///
     /// The multi-process entry point will be invoked on all processes simultaneously,
     /// but the the return value will be ignored on any non-root process.
-    pub fn invoke(&self, arg: D::Input) -> D::Output
-    { self.0.invoke_from_root(arg) }
+    pub fn invoke(&self, arg: D::Input) -> D::Output {
+        with_default_root(|root| self.0.invoke_from_root(&root, arg))
+    }
 }
 
-impl<Root, D> MpiOnDemandInner<Root, D>
-where
-    Root: mpi::Root,
-    D: DispatchMultiProcess,
-{
-    fn invoke_from_root(&self, arg: D::Input) -> D::Output {
-        assert!(this_process_is_root(&self.root), "BUG!");
-        assert!(Broadcast::broadcast(&self.root, Some(true)), "BUG!");
+// Provides the default `mpi::Root`.
+//
+// This exists because I had to give up on making the final product generic over Communicators.
+//
+// It is returned continuation-style because it is impossible to construct one that is `'static`.
+fn with_default_root<R>(continuation: impl FnOnce(mpi::Process<'_, mpi::SystemCommunicator>) -> R) -> R {
+    use ::mpi::Communicator;
 
-        let arg = Broadcast::broadcast(&self.root, Some(arg));
-        self.dispatch.dispatch(&self.root, arg)
+    let world = mpi::SystemCommunicator::world();
+    let root = world.process_at_rank(0);
+    continuation(root)
+}
+
+impl<D: DispatchMultiProcess> MpiOnDemandInner<D> {
+    fn invoke_from_root(&self, root: &impl mpi::Root, arg: D::Input) -> D::Output {
+        assert!(this_process_is_root(root), "BUG!");
+        assert!(Broadcast::broadcast(root, Some(true)), "BUG!");
+
+        let arg = Broadcast::broadcast(root, Some(arg));
+        self.dispatch.dispatch(root, arg)
     }
 
-    fn invoke_from_non_root(&self) -> KeepGoing {
-        assert!(!this_process_is_root(&self.root), "BUG!");
+    fn invoke_from_non_root(&self, root: &impl mpi::Root) -> KeepGoing {
+        assert!(!this_process_is_root(root), "BUG!");
 
-        let keep_going = Broadcast::broadcast(&self.root, None::<bool>);
+        let keep_going = Broadcast::broadcast(root, None::<bool>);
         if keep_going {
-            let arg = Broadcast::broadcast(&self.root, None);
-            let _ = self.dispatch.dispatch(&self.root, arg);
+            let arg = Broadcast::broadcast(root, None);
+            let _ = self.dispatch.dispatch(root, arg);
         }
         KeepGoing(keep_going)
     }
 
-    fn finish_from_root(self) {
-        assert!(this_process_is_root(&self.root), "BUG!");
+    fn finish_from_root(self, root: &impl mpi::Root) {
+        assert!(this_process_is_root(root), "BUG!");
 
         // Make the other processes exit the event loop.
-        assert!(!Broadcast::broadcast(&self.root, Some(false)), "BUG!");
+        assert!(!Broadcast::broadcast(root, Some(false)), "BUG!");
     }
 }
 
 struct KeepGoing(bool);
 
 // FIXME: what about error handling?
-fn non_root_event_loop<Root, D>(on_demand: MpiOnDemandInner<Root, D>)
-where
-    Root: mpi::Root,
-    D: DispatchMultiProcess,
-{
-    while let KeepGoing(true) = on_demand.invoke_from_non_root() { }
+fn non_root_event_loop<D: DispatchMultiProcess>(
+    root: &impl mpi::Root,
+    on_demand: MpiOnDemandInner<D>,
+) {
+    while let KeepGoing(true) = on_demand.invoke_from_non_root(root) { }
 }
 
 /// Helper trait to broadcast data from the root process to all processes,
