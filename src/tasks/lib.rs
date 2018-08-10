@@ -64,6 +64,7 @@ extern crate num_traits;
 #[macro_use] extern crate failure;
 #[cfg(feature = "_mpi")]
 extern crate mpi;
+extern crate num_cpus;
 
 extern crate lapacke;
 extern crate lapack_src;
@@ -92,6 +93,7 @@ mod ui;
 pub mod meta;
 mod potential;
 mod filetypes;
+mod env;
 
 pub mod entry_points;
 
@@ -163,50 +165,6 @@ mod stderr {
             }
         })})
     }
-}
-
-mod env {
-    use super::*;
-    use ::std::env;
-    use ::util::ext_traits::OptionResultExt;
-
-    fn var(key: &str) -> FailResult<Option<String>>
-    { match ::std::env::var(key) {
-        Ok(s) => Ok(Some(s)),
-        Err(env::VarError::NotPresent) => Ok(None),
-        Err(env::VarError::NotUnicode(s)) => bail!("env var not unicode: {}={:?}", key, s),
-    }}
-
-    fn nonempty_var(key: &str) -> FailResult<Option<String>>
-    { match var(key) {
-        Ok(Some(ref s)) if s == "" => Ok(None),
-        r => r,
-    }}
-
-    pub fn rust_log() -> FailResult<String>
-    {Ok({
-        var("RUST_LOG")?.unwrap_or(String::new())
-    })}
-
-    // (not necessarily an integer but may be a comma-separated list.
-    //  I'm sticking to a String as we only use it for display)
-    pub fn omp_num_threads() -> FailResult<String>
-    {
-        nonempty_var("OMP_NUM_THREADS")
-            .map(|s| s.unwrap_or_else(|| "1".into()))
-    }
-
-    /// Show module names in log output.
-    pub fn log_mod() -> FailResult<bool>
-    {Ok({
-        nonempty_var("RSP2_LOG_MOD")?
-            .map(|s| match &s[..] {
-                "1" => Ok(true),
-                "0" => Ok(false),
-                _ => bail!("Invalid setting for RSP2_LOG_MOD: {:?}", s),
-            }).fold_ok()?
-            .unwrap_or(false)
-    })}
 }
 
 mod common {

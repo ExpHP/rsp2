@@ -55,6 +55,7 @@ path = "lib.rs"
 !!lapacke
 !!lapack-src
 !!num-traits
+!!num-cpus
 
 # FIXME: should be an optional dependency, but the crates script
 #        has no way to do that.

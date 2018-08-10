@@ -86,3 +86,8 @@ macro_rules! info_once { ($($arg:tt)*) => { _log_once_impl!{info!($($arg)*)} }; 
 macro_rules! trace_once { ($($arg:tt)*) => { _log_once_impl!{trace!($($arg)*)} }; }
 #[macro_export]
 macro_rules! debug_once { ($($arg:tt)*) => { _log_once_impl!{debug!($($arg)*)} }; }
+
+#[macro_export]
+macro_rules! named_block {
+    ($lt:lifetime: $block:block) => { $lt: loop { break $block } };
+}

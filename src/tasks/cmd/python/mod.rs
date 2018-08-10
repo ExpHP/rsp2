@@ -99,6 +99,11 @@ where
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
 
+        // FIXME HACK:
+        // It'd be a PITA to propagate down threading configuration, but for now, I know
+        // that rsp2 never runs more than one python script at at time.
+        cmd.env("OMP_NUM_THREADS", ::env::max_omp_num_threads().to_string());
+
         let mut child = cmd.spawn()?;
         let child_stdin = child.stdin.take().unwrap();
         let child_stderr = child.stderr.take().unwrap();

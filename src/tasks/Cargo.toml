@@ -60,6 +60,7 @@ indoc = "0.2.3"
 lapacke = "0.1.4"
 lapack-src = { version = "0.1.4", features = ["netlib"] } 
 num-traits = "0.2.3"
+num_cpus = "1.8"
 
 # FIXME: should be an optional dependency, but the crates script
 #        has no way to do that.
