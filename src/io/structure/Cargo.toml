@@ -18,7 +18,7 @@ itertools = "0.7"
 failure = "0.1"
 vasp-poscar = "0.1.1"
 log = "0.4"
-serde = { version = "1.0.63", features = ["rc"] } 
+serde = { version = "1.0.63", features = ["rc"] }
 serde_derive = "1.0.47"
 serde_yaml = "0.7"
 

@@ -13,6 +13,7 @@ import warnings
 import string
 
 import pytoml as toml
+import typing as tp
 
 # See crates.d/crates.toml for what this script is all about.
 #
@@ -114,7 +115,7 @@ class Gen:
             make_binary_shims(binary_shim_pairs)
             # FIXME ^^^ this is waaaaaay too application-specific.
 
-            lookup_get = make_callback_lookup(args.force_workspace, fail)
+            lookup_get = make_macro_lookup(args.force_workspace, fail)
 
             if user_conf.simulated_workspace.enabled:
                 simulated_workspace_gen_symlinks(crates, user_conf.simulated_workspace, fail)
@@ -138,60 +139,55 @@ class Gen:
                     for (i, line) in enumerate(lines):
                         line = line.rstrip('\n')
 
-                        macro = line_as_macro(line)
-                        if macro is None:
+                        invocation = MacroInvocation.try_parse(line, fail=fail)
+                        if invocation is None:
                             write(line)
                             continue
 
-                        tup = lookup_get(macro)
-                        if tup is None:
-                            s = f"{src_path}:{i}: unknown macro: {format_macro(macro)}"
+                        macro = lookup_get(invocation.name)
+                        if macro is None:
+                            s = f"{src_path}:{i}: unknown macro: {format_macro(invocation.name)}"
                             fail(s)
-                        (_kind, func) = tup
 
-                        write(func(
+                        write(macro.expand(
+                            # Optional inline-TOML supplied after the macro name
+                            argument=invocation.argument,
                             # These are the keyword args available to callbacks:
                             # The directory for the Cargo.toml that we are generating.
                             cur_dir=path,
                             # The name of the crate whose Cargo.toml we are generating.
                             cur_name=name,
+                            # The name of the macro we are calling
+                            macro_name=invocation.name,
+                            fail=fail,
                         ))
 
-def make_callback_lookup(force_workspace, fail):
+def make_macro_lookup(force_workspace, fail):
     with pushd(search_for_root(fail)):
         data = read_master_config(fail)
         crates = data.pop('crates')
         preferred_versions = data.pop('preferred-versions')
         user_conf = read_master_user_config(fail)
+        root_name = get_root_package(fail)
 
-        # callbacks that generate substitutions for the line !!some-crate-name,
-        # which accept keyword arguments that are documented down by where the
-        # callback is called
-        def gen_constant(s):
-            return lambda **_ignored: s
+        class WorkspaceMembersAsPathdepsMacro(NoArgMacro):
+            def expand_noarg(self, **_ignored):
+                lines = []
+                for (name, path) in crates.items():
+                    if name != root_name:
+                        lines.append(f'{name} = {{ path = "{path}" }}')
+                return '\n'.join(lines)
 
-        def gen_relpath_to(dep_name, dep_dir):
-            def inner(*, cur_dir, **_ignored):
-                # Don't use Path for this because:
-                # - It has no normpath equivalent that doesn't follow links (wtf?)
-                # - Its relpath equivalent is too strict
-                rel = os.path.normpath(os.path.relpath(dep_dir, cur_dir))
-                return f'{dep_name} = {{ path = "{rel}" }}'
-            return inner
+            def internal_deps(self):
+                return [name for name in crates if name != root_name]
 
-        def gen_members_as_pathdeps(**_ignored):
-            root = get_root_package(fail)
-            lines = []
-            for (name, path) in crates.items():
-                if name != root:
-                    lines.append(f'{name} = {{ path = "{path}" }}')
-            return '\n'.join(lines)
-
-        def maybe_gen_workspace_line(**_ignored):
-            # This is unfortunate. The Cargo.toml files should not depend on
-            # config, but there is no other way to disable a workspace.
-            if user_conf.simulated_workspace.enabled and not force_workspace:
-                return '''
+        class MaybeItsAWorkspaceMacro(NoArgMacro):
+            def expand_noarg(self, **_ignored):
+                # This is unfortunate. The Cargo.toml files should not depend on
+                # config, but there is no other way to disable a workspace.
+                if user_conf.simulated_workspace.enabled and not force_workspace:
+                    # This message is intended to be seen from a git diff.
+                    return '''
 # !!! CAUTION !!!
 # The workspace table has been removed for the 'simulated-workspace'
 # feature of 'crates'. Please do not check this into VCS!!!
@@ -202,9 +198,13 @@ def make_callback_lookup(force_workspace, fail):
 #      ./crates gen --force-workspace
 #
 #[workspace]
-                '''.strip()
-            else:
-                return '[workspace]'
+                    '''.strip()
+                else:
+                    return '[workspace]'
+
+        class CrateNameLineMacro(NoArgMacro):
+            def expand_noarg(self, *, cur_name, **_ignored):
+                return f'name = "{cur_name}"'
 
         binary_shim_pairs = get_binary_shim_pairs()
 
@@ -215,36 +215,117 @@ def make_callback_lookup(force_workspace, fail):
         # build a dash-insensitive lookup table of callbacks
         lookup_d = {
             # name = "crate-name"
-            'CRATE-NAME-LINE': (KIND_SPECIAL, lambda *, cur_name, **_ignored: f'name = "{cur_name}"'),
+            'CRATE-NAME-LINE': CrateNameLineMacro(),
 
             # generates all lines for our own crates in the root crate's dependencies
-            'WORKSPACE-MEMBERS-AS-PATH-DEPS': (KIND_SPECIAL, gen_members_as_pathdeps),
+            'WORKSPACE-MEMBERS-AS-PATH-DEPS': WorkspaceMembersAsPathdepsMacro(),
 
             # [workspace].  Or not.
-            'MAYBE-ITS-A-WORKSPACE': (KIND_SPECIAL, maybe_gen_workspace_line),
+            'MAYBE-ITS-A-WORKSPACE': MaybeItsAWorkspaceMacro(),
 
             # licenses
-            'LICENSE-PERMISSIVE': (KIND_SPECIAL, gen_constant('license = "MIT OR Apache 2.0"')),
-            'LICENSE-GPL':        (KIND_SPECIAL, gen_constant('license = "GPL-3.0"')),
+            'LICENSE-PERMISSIVE': ConstantMacro('license = "MIT OR Apache 2.0"'),
+            'LICENSE-GPL':        ConstantMacro('license = "GPL-3.0"'),
 
             # FIXME this is waaaaaay too application-specific.
-            'BINARY-SHIM-BIN-ENTRIES': (KIND_SPECIAL, macro_subst_for_binary_shims(binary_shim_pairs)),
+            'BINARY-SHIM-BIN-ENTRIES': BinaryShimsMacro(binary_shim_pairs),
 
             # FIXME this is waaaaaay too application-specific.
-            'NIGHTLY-FEATURE-LINE': (KIND_SPECIAL, macro_subst_for_nightly_feature(lookup_get, crates, fail)),
+            'NIGHTLY-FEATURE-LINE': NightlyFeaturesMacro(lookup_get, crates),
         }
 
         for (name, path) in crates.items():
-            lookup_put(name, (KIND_INTERNAL_DEP, gen_relpath_to(name, path)))
-        for (name, version) in preferred_versions.items():
-            lookup_put(name, (KIND_EXTERNAL_DEP, gen_constant('{} = {}'.format(name, inline_toml(version)))))
+            lookup_put(name, InternalDepMacro(name, path))
+        for (name, rhs) in preferred_versions.items():
+            lookup_put(name, ExternalDepMacro(name, rhs))
     return lookup_get
+
+class Macro:
+    def expand(self,
+               argument: tp.Optional[tp.Union[int, float, str, dict, list]],
+               *,
+               cur_name: str,
+               macro_name: str,
+               cur_dir,
+               fail):
+        raise NotImplementedError
+
+    # A list of the internal dep crate names that would be added if this
+    # macro were expanded in the proper location.
+    def internal_deps(self):
+        return []
+
+class NoArgMacro(Macro):
+    def expand(self, argument, *, cur_name, cur_dir, macro_name, fail):
+        if argument is not None:
+            fail(f'macro {macro_name} takes no arguments!')
+
+        return self.expand_noarg(cur_name=cur_name, cur_dir=cur_dir, macro_name=macro_name, fail=fail)
+
+    def expand_noarg(self, *, cur_name, cur_dir, macro_name, fail):
+        raise NotImplementedError
+
+class ConstantMacro(NoArgMacro):
+    def __init__(self, value: str):
+        self.value = value
+
+    def expand_noarg(self, **_ignored):
+        return self.value
+
+class InternalDepMacro(Macro):
+    def __init__(self, dep_name: str, dep_dir):
+        self.dep_name = dep_name
+        self.dep_dir = dep_dir
+
+    def expand(self, argument, *, cur_dir, fail, **_ignored):
+        # Don't use Path for this because:
+        # - It has no normpath equivalent that doesn't follow links (wtf?)
+        # - Its relpath equivalent is too strict
+        rel = os.path.normpath(os.path.relpath(self.dep_dir, cur_dir))
+        rhs = { "path": rel }
+        if argument is not None:
+            if not isinstance(argument, dict):
+                fail("argument to dep macros must be dict, not {repr(argument)}")
+            for k,v in argument.items():
+                rhs[k] = v
+
+        return f'{self.dep_name} = {inline_toml(rhs)}'
+
+    def internal_deps(self):
+        return [self.dep_name]
+
+class ExternalDepMacro(Macro):
+    def __init__(self, dep_name: str, rhs: tp.Union[dict, str]):
+        self.dep_name = dep_name
+        self.rhs = rhs
+
+    def expand(self, argument, fail, **_ignored):
+        if argument is not None:
+            if not isinstance(argument, dict):
+                fail("argument to dep macros must be dict, not {repr(argument)}")
+            rhs = dict(argument)
+
+            if isinstance(self.rhs, str):
+                if "version" in rhs:
+                    that_version = rhs['version']
+                    fail(f"two versions specified for {self.dep_name}: {repr(self.rhs)} and {repr(that_version)}")
+                rhs["version"] = self.rhs
+
+            elif isinstance(self.rhs, dict):
+                for (k, v) in self.rhs:
+                    rhs[k]  = v
+
+            else:
+                assert False, "unreachable"
+        else:
+            rhs = self.rhs
+        return f'{self.dep_name} = {inline_toml(rhs)}'
 
 # a makeshift toml.dumps that uses inline tables
 def inline_toml(x):
     if isinstance(x, dict):
         items = ', '.join(f'{k} = {inline_toml(v)}' for (k, v) in x.items())
-        return f'{{ {items} }} '
+        return f'{{ {items} }}'
     elif isinstance(x, list):
         items = ', '.join(inline_toml(v) for v in x)
         return f'[{items}]'
@@ -261,12 +342,45 @@ def inline_toml(x):
     else:
         raise TypeError(x)
 
-# If a line is of the form "  !!macro-name  ", get "macro-name", else None
-def line_as_macro(line):
-    line = line.strip()
-    if line[:2] == "!!":
-        return line[2:]
-    return None
+# dumb hack to make pytoml parse a value written in inline syntax
+def parse_inline_toml(s):
+    if '\n' in s or '\r' in s:
+        raise ValueError(f"More than one line in inline TOML: {repr(s)}")
+    return toml.loads(f"a = {s}")['a']
+
+class MacroInvocation:
+    def __init__(self, name: str, argument=None):
+        self.name = name.replace('_', '-')
+        self.argument = argument
+
+    # If a line is a valid macro invocation, parse it.
+    # If it is clearly not a macro, return `None`.
+    # If it is dubious looking, fail.
+    #
+    # Intended grammar: (current implementation is sloppy/overly permissive)
+    #   [ WHITESPACE ]*
+    #   "!!" [ WHITESPACE ]* KEBAB_CASE_IDENTIFIER
+    #   [ WHITESPACE [ WHITESPACE ]* INLINE_TOML_VALUE ]?
+    #   [ WHITESPACE ]*
+    #
+    @classmethod
+    def try_parse(cls, line, fail) -> tp.Optional["MacroInvocation"]:
+        line = line.strip()
+        if line[:2] != "!!":
+            return None
+        line = line[2:]
+
+        parts = line.split(None, 1)
+        if len(parts) == 0:
+            fail("!! with no macro name")
+        elif len(parts) == 1:
+            name, = parts
+            return cls(name)
+        elif len(parts) == 2:
+            name, argument = parts
+            return cls(name, parse_inline_toml(argument))
+
+        assert False, "unreachable"
 
 def format_macro(name):
     return '!!' + name
@@ -695,13 +809,15 @@ class UnusedDeps:
                 with open(root_rel_src_toml_path(crate)) as f:
                     lines = list(f)
 
-                # note: this set will include a None thanks to the lines
-                #       that are not macros, but this is harmless.
-                unused_deps -= set([canonicalize_crate(line_as_macro(x)) for x in lines])
+                to_be_removed = []
+                for line in lines:
+                    invocation = MacroInvocation.try_parse(line, fail=parser.error)
+                    if invocation is not None:
+                        to_be_removed.append(canonicalize_crate(invocation.name))
+                unused_deps -= set(to_be_removed)
 
             for dep in unused_deps:
                 print(dep)
-
 
 #------------
 
@@ -869,11 +985,13 @@ fn main() {{
 }}
 """, end='', file=f)
 
+class BinaryShimsMacro(NoArgMacro):
+    def __init__(self, pairs):
+        self.pairs = pairs
 
-def macro_subst_for_binary_shims(pairs):
-    def gen(**_ignored):
+    def expand_noarg(self, **_ignored):
         entries = []
-        for (bin, _func) in pairs:
+        for (bin, _func) in self.pairs:
             lines = [
                 f"[[bin]]\n",
                 f'name = "{bin}"\n',
@@ -881,25 +999,31 @@ def macro_subst_for_binary_shims(pairs):
             ]
             entries.append(''.join(lines))
         return '\n'.join(entries)
-    return gen
 
-def macro_subst_for_nightly_feature(lookup_get, crates, fail):
-    root_name = get_root_package(fail)
-    def gen(*, cur_name, **_ignored):
+class NightlyFeaturesMacro(NoArgMacro):
+    def __init__(self, lookup_get, crates):
+        self.lookup_get = lookup_get
+        self.crates = crates
+
+    def expand_noarg(self, *, cur_name, fail, **_ignored):
+        # To figure out the list of internal crates that this crate depends on,
+        # we directly re-parse the template Cargo.toml files and look for macros
+        # that generate internal deps.
+        #
+        # It'd be much nicer to get this information from the expanded TOML,
+        # but there is a chicken-and-egg problem there as we are currently in
+        # the middle of macro expansion!
+        #
         deps = []
-        if cur_name == root_name:
-            deps = sorted([name for name in crates if name != root_name])
-        else:
-            deps = []
-            with open(root_rel_src_toml_path(cur_name)) as f:
-                for line in f:
-                    macro = line_as_macro(line)
-                    if macro is None:
-                        continue
+        with open(root_rel_src_toml_path(cur_name)) as f:
+            for line in f:
+                invocation = MacroInvocation.try_parse(line, fail=fail)
+                if invocation is None:
+                    continue
 
-                    (kind, _func) = lookup_get(macro)
-                    if kind is KIND_INTERNAL_DEP:
-                        deps.append(macro)
+                macro = self.lookup_get(invocation.name)
+                deps.extend(macro.internal_deps())
+        deps = sorted(deps)
 
         def recursive_feature_line(feature, base_list=()):
             toml_strs = [f'"{f}"' for f in base_list]
@@ -909,7 +1033,6 @@ def macro_subst_for_nightly_feature(lookup_get, crates, fail):
         nightly = recursive_feature_line("nightly", ['beta'])
         beta = recursive_feature_line("beta")
         return f'{nightly}\n{beta}'
-    return gen
 
 #------------
 

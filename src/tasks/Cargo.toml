@@ -36,18 +36,18 @@ rsp2-newtype-indices = { path = "../util/newtype-indices" }
 
 clap = "2"
 slice-of-array = "0.2"
-rsp2-kets = { version = "0.3.6", git = "https://github.com/ExpHP/rsp2-kets", features = ["serde"] } 
+rsp2-kets = { version = "0.3.6", git = "https://github.com/ExpHP/rsp2-kets", features = ["serde"] }
 rand = "0.3"
 log = "0.4"
 env_logger = "0.5.10"
 failure = "0.1"
-fern = { version = "0.5", features = ["colored"] } 
+fern = { version = "0.5", features = ["colored"] }
 extension-trait = "0.1.2"
 itertools = "0.7"
 lazy_static = "0.2"
 ansi_term = "0.10"
 rayon = "1.0.1"
-serde = { version = "1.0.63", features = ["rc"] } 
+serde = { version = "1.0.63", features = ["rc"] }
 serde_derive = "1.0.47"
 serde_json = "1"
 serde_yaml = "0.7"
@@ -58,7 +58,7 @@ frunk = "0.2.0"
 shlex = "0.1.1"
 indoc = "0.2.3"
 lapacke = "0.1.4"
-lapack-src = { version = "0.1.4", features = ["netlib"] } 
+lapack-src = { version = "0.1.4", features = ["netlib"] }
 num-traits = "0.2.3"
 num_cpus = "1.8"
 
