@@ -12,6 +12,7 @@
 use ::rsp2_array_utils::{map_arr};
 use ::std::ops::{Mul, Div};
 use ::std::sync::Arc;
+#[cfg(feature = "serde")]
 use ::serde::{Serialize, Serializer, Deserialize, Deserializer};
 
 use ::rsp2_array_types::{V3, M33, M3, mat, inv};
@@ -283,12 +284,14 @@ impl CheckClose for Lattice {
     }
 }
 
+#[cfg(feature = "serde")]
 impl Serialize for Lattice {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         self.matrix().serialize(serializer)
     }
 }
 
+#[cfg(feature = "serde")]
 impl<'de> Deserialize<'de> for Lattice {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let raw = M33::<f64>::deserialize(deserializer)?;

@@ -40,19 +40,21 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 !!mpi
 
 [features]
-default = ["_mpi"]
+default = ["mpi-support"]
 
 # Used by integration tests to make them show nice diffs using pretty_assertions.
 #
 # see doc/updating-tests.md for more details
 test-diff=["rsp2-integration-test/test-diff"]
 
-# FIXME: Rename feature to "mpi" once mpi is properly an optional dep.
+# FIXME
+# Features for optional deps, because the implicit features defined by deps do not scale well.
+# For now, THESE are what you should toggle in dependent crates.
 #
-#        This dep with the underscored name exists to make it possible to disable mpi-related
-#        features (to test conditional compilation) despite the current inadequacies
-#        of the crates script
-_mpi = ["rsp2-tasks/_mpi"]
+# Once namespaced-features are stabilized, these features will be renamed after the deps.
+# see https://github.com/rust-lang/cargo/issues/1286 (problem and proposal)
+#     https://github.com/rust-lang/cargo/issues/5565 (tracking issue, of sorts)
+mpi-support = ["rsp2-tasks/mpi-support"]
 
 !!NIGHTLY-FEATURE-LINE
 

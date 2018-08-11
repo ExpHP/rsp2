@@ -22,10 +22,10 @@ extern crate lammps_sys;
 #[macro_use] extern crate failure;
 #[macro_use] extern crate lazy_static;
 extern crate chrono;
-#[cfg(feature = "_mpi")]
+#[cfg(feature = "mpi")]
 extern crate mpi as mpi_rs;
 
-#[cfg(feature = "_mpi")]
+#[cfg(feature = "mpi")]
 mod mpi {
     // There is little conceivable reason why rsmpi exposes a heirarchial public API
     // other than laziness; I see nothing in it that benefits from the namespacing,
@@ -43,7 +43,7 @@ use ::failure::Backtrace;
 use ::rsp2_array_types::{V3, Unvee, Envee};
 use ::log::Level;
 use ::low_level::{LowLevelApi, ComputeStyle, Skews, LammpsOwner};
-#[cfg(feature = "_mpi")]
+#[cfg(feature = "mpi")]
 use ::low_level::mpi::{MpiLammpsOwner, LammpsOnDemand as LammpsOnDemandImpl, LammpsDispatch};
 
 use ::std::path::{Path, PathBuf};
@@ -247,6 +247,7 @@ impl Clone for BoxDynMakeInstance {
 #[derive(Debug, Clone)]
 struct MakePlainInstance;
 
+#[cfg(feature = "mpi")]
 #[derive(Debug, Clone)]
 struct MakeMpiInstance(LammpsOnDemandImpl);
 
@@ -258,6 +259,7 @@ impl MakeInstance for MakePlainInstance {
     { BoxDynMakeInstance(Box::new(self.clone())) }
 }
 
+#[cfg(feature = "mpi")]
 impl MakeInstance for MakeMpiInstance {
     unsafe fn make_it(&self, argv: &[&str]) -> FailResult<Box<dyn LowLevelApi>>
     { Ok(Box::new(MpiLammpsOwner::new(self.0.clone(), argv)?)) }
@@ -408,7 +410,15 @@ impl Builder {
     /// Afterwards, any Lammps potentials built through the builder will automatically
     /// coordinate the actions of the other processes.
     pub fn on_demand(&mut self, value: LammpsOnDemand) -> &mut Self
+    { self._on_demand(value) }
+
+    #[cfg(feature = "mpi")]
+    fn _on_demand(&mut self, value: LammpsOnDemand) -> &mut Self
     { self.make_instance = MakeMpiInstance(value.imp).box_clone(); self }
+
+    #[cfg(not(feature = "mpi"))]
+    fn _on_demand(&mut self, value: LammpsOnDemand) -> &mut Self
+    { match value {} }
 
     pub fn update_style(&mut self, value: UpdateStyle) -> &mut Self
     { self.update_style = value; self }
@@ -478,7 +488,7 @@ pub fn link_test() -> FailResult<()>
 /// Initialize LAMMPS, do nothing of particular value, and exit.
 ///
 /// For debugging linker errors.
-#[cfg(feature = "_mpi")]
+#[cfg(feature = "mpi")]
 pub fn mpi_link_test() -> FailResult<()>
 {Ok({
     println!("{}", ::mpi::library_version().unwrap());
@@ -578,13 +588,13 @@ impl<'a, M: Clone> Potential for &'a (Potential<Meta=M> + 'a) {
 //
 // This is just an opaque type that serves as the publically visible form of MpiOnDemand.
 // Most of the docs for MpiOnDemand apply directly to this, but I'm tired of repeating myself...
-#[cfg(feature = "_mpi")]
+#[cfg(feature = "mpi")]
 pub struct LammpsOnDemand { imp: LammpsOnDemandImpl }
 
-#[cfg(not(feature = "_mpi"))]
+#[cfg(not(feature = "mpi"))]
 pub enum LammpsOnDemand {}
 
-#[cfg(feature = "_mpi")]
+#[cfg(feature = "mpi")]
 impl LammpsOnDemand {
     /// Continuation-style constructor.
     ///

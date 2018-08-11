@@ -25,13 +25,24 @@ ordered-float = "0.5"
 itertools = "0.7"
 lazy_static = "0.2"
 log = "0.4"
-serde = { version = "1.0.63", features = ["rc"] }
-serde_derive = "1.0.47"
+serde = { version = "1.0.63", features = ["derive", "rc"], optional = true }
 
-# test deps
+[dev-dependencies]
 serde_json = "1"
 rand = "0.3"
 
 [features]
+default = []
+
 nightly = ["beta", "rsp2-array-types/nightly", "rsp2-array-utils/nightly", "rsp2-assert-close/nightly", "rsp2-soa-ops/nightly"]
 beta = ["rsp2-array-types/beta", "rsp2-array-utils/beta", "rsp2-assert-close/beta", "rsp2-soa-ops/beta"]
+
+# FIXME
+# Features for optional deps, because the implicit features defined by deps do not scale well.
+# For now, THESE are what you should toggle in dependent crates.
+#
+# Once namespaced-features are stabilized, these features will be renamed after the deps.
+# see https://github.com/rust-lang/cargo/issues/1286 (problem and proposal)
+#     https://github.com/rust-lang/cargo/issues/5565 (tracking issue, of sorts)
+serde-support = ["serde", "rsp2-array-types/serde"]
+

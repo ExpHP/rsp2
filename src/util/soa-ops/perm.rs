@@ -10,6 +10,7 @@
 ** ************************************************************************ */
 
 use ::std::fmt;
+#[cfg(feature = "frunk")]
 use ::frunk::{HCons, HNil};
 
 /// Represents a reordering operation on atoms.
@@ -102,6 +103,7 @@ impl Perm {
         self.inv.append_mut(&other.inv);
     }
 
+    #[cfg(feature = "rand")]
     pub fn random(n: usize) -> Perm
     {
         use ::rand::Rng;
@@ -460,11 +462,13 @@ impl Permute for Perm {
 }
 
 // combinators
+#[cfg(feature = "frunk")]
 impl Permute for HNil {
     fn permuted_by(self, _: &Perm) -> HNil
     { HNil }
 }
 
+#[cfg(feature = "frunk")]
 impl<A, B> Permute for HCons<A, B>
 where
     A: Permute,

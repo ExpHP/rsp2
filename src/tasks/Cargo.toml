@@ -20,12 +20,12 @@ rsp2-tasks-config = { path = "config" }
 
 rsp2-lammps-wrap = { path = "../io/lammps" }
 rsp2-minimize = { path = "../minimize" }
-rsp2-structure = { path = "../structure" }
+rsp2-structure = { path = "../structure", features = ["serde-support"] }
 rsp2-structure-io = { path = "../io/structure" }
 rsp2-phonopy-io = { path = "../io/phonopy" }
 rsp2-array-utils = { path = "../util/array" }
-rsp2-array-types = { path = "../util/array-types" }
-rsp2-soa-ops = { path = "../util/soa-ops" }
+rsp2-array-types = { path = "../util/array-types", features = ["serde-support"] }
+rsp2-soa-ops = { path = "../util/soa-ops", features = ["frunk-support"] }
 rsp2-slice-math = { path = "../util/slice-math" }
 rsp2-util-macros = { path = "../util/macros" }
 rsp2-fs-util = { path = "../util/fs" }
@@ -67,15 +67,17 @@ num_cpus = "1.8"
 mpi = "0.5.4"
 
 [features]
-default = ["_mpi"]
+default = []
 
 nightly = ["beta", "rsp2-array-types/nightly", "rsp2-array-utils/nightly", "rsp2-assert-close/nightly", "rsp2-clap/nightly", "rsp2-fs-util/nightly", "rsp2-lammps-wrap/nightly", "rsp2-linalg/nightly", "rsp2-minimize/nightly", "rsp2-newtype-indices/nightly", "rsp2-phonopy-io/nightly", "rsp2-slice-math/nightly", "rsp2-soa-ops/nightly", "rsp2-structure-io/nightly", "rsp2-structure/nightly", "rsp2-tasks-config/nightly", "rsp2-util-macros/nightly"]
 beta = ["rsp2-array-types/beta", "rsp2-array-utils/beta", "rsp2-assert-close/beta", "rsp2-clap/beta", "rsp2-fs-util/beta", "rsp2-lammps-wrap/beta", "rsp2-linalg/beta", "rsp2-minimize/beta", "rsp2-newtype-indices/beta", "rsp2-phonopy-io/beta", "rsp2-slice-math/beta", "rsp2-soa-ops/beta", "rsp2-structure-io/beta", "rsp2-structure/beta", "rsp2-tasks-config/beta", "rsp2-util-macros/beta"]
 
-# FIXME: Rename feature to "mpi" once mpi is properly an optional dep.
+# FIXME
+# Features for optional deps, because the implicit features defined by deps do not scale well.
+# For now, THESE are what you should toggle in dependent crates.
 #
-#        This dep with the underscored name exists to make it possible to disable mpi-related
-#        features (to test conditional compilation) despite the current inadequacies
-#        of the crates script
-_mpi = ["rsp2-lammps-wrap/_mpi"]
+# Once namespaced-features are stabilized, these features will be renamed after the deps.
+# see https://github.com/rust-lang/cargo/issues/1286 (problem and proposal)
+#     https://github.com/rust-lang/cargo/issues/5565 (tracking issue, of sorts)
+mpi-support = ["rsp2-lammps-wrap/mpi-support"]
 

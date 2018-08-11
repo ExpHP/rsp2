@@ -9,8 +9,8 @@ description = "A safe(r) wrapper around the lammps C bindings."
 path = "lib.rs"
 
 [dependencies]
-!!rsp2-structure
-!!rsp2-array-types
+!!rsp2-structure { features = ["serde-support"] }
+!!rsp2-array-types { features = ["serde-support"] }
 !!lammps-sys
 
 !!log
@@ -18,22 +18,22 @@ path = "lib.rs"
 !!chrono
 !!failure
 !!slice-of-array
-
-# FIXME: should be an optional dependency, but the crates script
-#        has no way to do that.
-!!mpi
+!!mpi { optional = true }
 
 [dev-dependencies]
 !!rsp2-assert-close
 
 [features]
+default = []
+
 !!NIGHTLY-FEATURE-LINE
 
-# FIXME: Rename feature to "mpi" once mpi is properly an optional dep.
+# FIXME
+# Features for optional deps, because the implicit features defined by deps do not scale well.
+# For now, THESE are what you should toggle in dependent crates.
 #
-#        This dep with the underscored name exists to make it possible to disable mpi-related
-#        features (to test conditional compilation) despite the current inadequacies
-#        of the crates script
-_mpi = ["lammps-sys/system-mpi"]
-default = ["_mpi"]
+# Once namespaced-features are stabilized, these features will be renamed after the deps.
+# see https://github.com/rust-lang/cargo/issues/1286 (problem and proposal)
+#     https://github.com/rust-lang/cargo/issues/5565 (tracking issue, of sorts)
+mpi-support = ["mpi", "lammps-sys/system-mpi"]
 

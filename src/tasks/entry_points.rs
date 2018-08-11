@@ -54,7 +54,7 @@ where F: FnOnce(SetGlobalLogfile, Option<LammpsOnDemand>) -> FailResult<()>,
 //
 // The closure runs on only one process.
 fn wrap_main_with_lammps_on_demand(continuation: impl FnOnce(Option<LammpsOnDemand>)) -> ! {
-    #[cfg(feature = "_mpi")] {
+    #[cfg(feature = "mpi")] {
         let required = ::mpi::Threading::Serialized;
         let (_universe, actual) = {
             ::mpi::initialize_with_threading(required).expect("Could not initialize MPI!")
@@ -65,22 +65,22 @@ fn wrap_main_with_lammps_on_demand(continuation: impl FnOnce(Option<LammpsOnDema
 
         LammpsOnDemand::install(|on_demand| continuation(Some(on_demand)));
     }
-    #[cfg(not(feature = "_mpi"))] {
+    #[cfg(not(feature = "mpi"))] {
         continuation(None);
     }
     exit(0)
 }
 
 fn log_thread_info() -> FailResult<()> {
-    use ::mpi::traits::Communicator;
-
     info!("Available resources for parallelism:");
 
-    #[cfg(feature = "_mpi")] {
+    #[cfg(feature = "mpi")] {
+        use ::mpi::traits::Communicator;
+
         let world = ::mpi::topology::SystemCommunicator::world();
         info!("    MPI: {} process(es)", world.size());
     }
-    #[cfg(not(feature = "_mpi"))] {
+    #[cfg(not(feature = "mpi"))] {
         info!("    MPI: N/A (disabled during compilation)");
     }
 

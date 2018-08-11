@@ -77,7 +77,7 @@ use ::low_level::mpi_helper::{
 ///
 /// A custom `Drop` impl notifies the other processes about the drop.
 /// This type is expressly NOT CLONE.
-#[cfg(feature = "_mpi")]
+#[cfg(feature = "mpi")]
 #[derive(Debug)]
 pub(crate) struct MpiLammpsOwner {
     on_demand: LammpsOnDemand,
@@ -96,7 +96,7 @@ impl MpiLammpsOwner {
     ///
     /// Like `LammpsOwner`, construction of `MpiLammpsOwner` is inherently unsafe because it is
     /// unsafe to use multiple instances simultaneously on separate threads.
-    #[cfg(feature = "_mpi")]
+    #[cfg(feature = "mpi")]
     pub(crate) unsafe fn new(
         on_demand: LammpsOnDemand,
         argv: &[&str],

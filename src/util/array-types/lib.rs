@@ -14,9 +14,9 @@ extern crate rsp2_array_utils;
 #[macro_use]
 extern crate rsp2_assert_close;
 
-extern crate serde;
+#[cfg(feature = "serde")]
 #[macro_use]
-extern crate serde_derive;
+extern crate serde;
 extern crate slice_of_array;
 #[cfg(test)]
 extern crate rand;

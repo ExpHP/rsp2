@@ -16,15 +16,14 @@ extern crate rsp2_array_types;
 extern crate rsp2_soa_ops;
 #[macro_use] extern crate rsp2_assert_close;
 
-
 extern crate ordered_float;
 extern crate slice_of_array;
 #[macro_use] extern crate log;
 #[macro_use] extern crate itertools;
 #[macro_use] extern crate failure;
 #[macro_use] extern crate lazy_static;
-extern crate serde;
-#[macro_use] extern crate serde_derive;
+#[cfg(feature = "serde")]
+#[macro_use] extern crate serde;
 #[cfg(test)] extern crate rand;
 #[cfg(test)] extern crate serde_json;
 

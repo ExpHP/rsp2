@@ -53,10 +53,10 @@ pub use ::failure::Error as Error;
 /// [`CoordsKind`]: ../struct.CoordsKind.html
 /// [`Lattice`]: ../struct.Lattice.html
 #[derive(Debug, Clone, PartialEq)]
-#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Coords {
     pub(crate) lattice: Lattice,
-    #[serde(flatten)]
+    #[cfg_attr(feature = "serde", serde(flatten))]
     pub(crate) coords: CoordsKind,
 }
 

@@ -283,11 +283,9 @@ class InternalDepMacro(Macro):
         # - Its relpath equivalent is too strict
         rel = os.path.normpath(os.path.relpath(self.dep_dir, cur_dir))
         rhs = { "path": rel }
+
         if argument is not None:
-            if not isinstance(argument, dict):
-                fail("argument to dep macros must be dict, not {repr(argument)}")
-            for k,v in argument.items():
-                rhs[k] = v
+            rhs = extend_dependency_toml(rhs, argument, fail=fail, dep_name=self.dep_name)
 
         return f'{self.dep_name} = {inline_toml(rhs)}'
 
@@ -303,23 +301,29 @@ class ExternalDepMacro(Macro):
         if argument is not None:
             if not isinstance(argument, dict):
                 fail("argument to dep macros must be dict, not {repr(argument)}")
-            rhs = dict(argument)
 
-            if isinstance(self.rhs, str):
-                if "version" in rhs:
-                    that_version = rhs['version']
-                    fail(f"two versions specified for {self.dep_name}: {repr(self.rhs)} and {repr(that_version)}")
-                rhs["version"] = self.rhs
-
-            elif isinstance(self.rhs, dict):
-                for (k, v) in self.rhs:
-                    rhs[k]  = v
-
-            else:
-                assert False, "unreachable"
+            rhs = extend_dependency_toml(self.rhs, argument, fail=fail, dep_name=self.dep_name)
         else:
             rhs = self.rhs
         return f'{self.dep_name} = {inline_toml(rhs)}'
+
+def extend_dependency_toml(dest, src, *, dep_name, fail):
+    if isinstance(dest, str):
+        if "version" in src:
+            that_version = src['version']
+            fail(f"two versions specified for {dep_name}: {repr(dest)} and {repr(that_version)}")
+        dest = { "version": dest }
+
+    if not isinstance(dest, dict):
+        fail(f"Expected a table or version string for {dep_name}, not {repr(dest)}")
+
+    dest = dict(dest)
+    for (k, v) in src.items():
+        if k == "features":
+            dest[k] = sorted(dest.get(k, []) + v)
+        else:
+            dest[k] = v
+    return dest
 
 # a makeshift toml.dumps that uses inline tables
 def inline_toml(x):

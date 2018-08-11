@@ -11,6 +11,7 @@
 
 use ::{Perm, Permute};
 use ::std::iter::FusedIterator;
+#[cfg(feature = "frunk")]
 use ::frunk::{HNil, HCons};
 
 /// Type of "a thing that has been partitioned."
@@ -273,6 +274,7 @@ where
     }
 }
 
+#[cfg(feature = "frunk")]
 impl<'iter> Partition<'iter> for HNil {
     fn into_unlabeled_partitions<L>(self, part: &'iter Part<L>) -> Unlabeled<'iter, Self>
     {Box::new({
@@ -280,6 +282,7 @@ impl<'iter> Partition<'iter> for HNil {
     })}
 }
 
+#[cfg(feature = "frunk")]
 impl<'iter, A, B> Partition<'iter> for HCons<A, B>
 where
     A: Partition<'iter> + 'iter,
@@ -291,7 +294,6 @@ where
             .map(|(head, tail)| HCons { head, tail })
     })}
 }
-
 
 #[cfg(test)]
 #[deny(dead_code)]

@@ -16,34 +16,34 @@ use ::std::fmt;
 
 /// A 2-dimensional vector with operations for linear algebra.
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct V2<X=f64>(pub [X; 2]);
 
 /// A 3-dimensional vector with operations for linear algebra.
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct V3<X=f64>(pub [X; 3]);
 
 /// A 4-dimensional vector with operations for linear algebra.
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct V4<X=f64>(pub [X; 4]);
 
 // ---------------------------------------------------------------------------
 
 /// A linear algebra dense matrix with 2 rows and fixed width.
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct M2<V>(pub [V; 2]);
 
 /// A linear algebra dense matrix with 3 rows and fixed width.
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct M3<V>(pub [V; 3]);
 
 /// A linear algebra dense matrix with 4 rows and fixed width.
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct M4<V>(pub [V; 4]);
 
 /// A square dense 2x2 matrix.

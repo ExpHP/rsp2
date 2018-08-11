@@ -62,7 +62,7 @@ extern crate num_traits;
 #[macro_use] extern crate log;
 #[macro_use] extern crate itertools;
 #[macro_use] extern crate failure;
-#[cfg(feature = "_mpi")]
+#[cfg(feature = "mpi")]
 extern crate mpi;
 extern crate num_cpus;
 

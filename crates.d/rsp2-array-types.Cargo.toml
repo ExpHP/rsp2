@@ -11,15 +11,24 @@ path = "lib.rs"
 [dependencies]
 !!rsp2-array-utils
 
-!!serde
-!!serde-derive
 !!slice-of-array
 !!num-traits
+!!serde { optional = true, features = ["derive"] }
 
-# FIXME make this dev-dependencies once rust-lang-nursery/rls#169 is fixed
+[dev-dependencies]
 !!rsp2-assert-close
-# FIXME make this dev-dependencies once rust-lang-nursery/rls#169 is fixed
 !!rand
 
 [features]
+default = []
+
 !!NIGHTLY-FEATURE-LINE
+
+# FIXME
+# Features for optional deps, because the implicit features defined by deps do not scale well.
+# For now, THESE are what you should toggle in dependent crates.
+#
+# Once namespaced-features are stabilized, these features will be renamed after the deps.
+# see https://github.com/rust-lang/cargo/issues/1286 (problem and proposal)
+#     https://github.com/rust-lang/cargo/issues/5565 (tracking issue, of sorts)
+serde-support = ["serde"]

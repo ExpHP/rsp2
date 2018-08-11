@@ -26,7 +26,7 @@ use ::rsp2_array_types::{V3, M33};
 //       lets you do `CoordsKind::Carts(&v[..]).to_fracs(lattice)` without
 //       having to allocate an intermediate vec for the carts.
 #[derive(Debug, Clone, PartialEq)]
-#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum CoordsKind<V = Vec<V3>> {
     /// Data that is expressed in a Euclidean basis.
     ///
@@ -40,7 +40,7 @@ pub enum CoordsKind<V = Vec<V3>> {
     ///
     /// ...or basically, anything represented in a form where "distance" is a
     /// meaningful concept, and where normalization can be meaningfully performed.
-    #[serde(rename = "carts")]
+    #[cfg_attr(feature = "serde", serde(rename = "carts"))]
     Carts(V),
 
     /// Data that is expressed in a fractional basis.
@@ -54,7 +54,7 @@ pub enum CoordsKind<V = Vec<V3>> {
     ///
     /// Generally speaking, these are representations where integers have a
     /// special meaning, and where distance is poorly defined.
-    #[serde(rename = "fracs")]
+    #[cfg_attr(feature = "serde", serde(rename = "fracs"))]
     Fracs(V),
 }
 

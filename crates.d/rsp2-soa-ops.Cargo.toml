@@ -10,8 +10,19 @@ path = "lib.rs"
 
 [dependencies]
 !!failure
+!!frunk { optional = true }
+# FIXME: I'd like to make this one optional, but the unit tests require it.
+#        Try again after https://github.com/rust-lang/cargo/issues/5565
 !!rand
-!!frunk
 
 [features]
 !!NIGHTLY-FEATURE-LINE
+
+# FIXME
+# Features for optional deps, because the implicit features defined by deps do not scale well.
+# For now, THESE are what you should toggle in dependent crates.
+#
+# Once namespaced-features are stabilized, these features will be renamed after the deps.
+# see https://github.com/rust-lang/cargo/issues/1286 (problem and proposal)
+#     https://github.com/rust-lang/cargo/issues/5565 (tracking issue, of sorts)
+frunk-support = ["frunk"]

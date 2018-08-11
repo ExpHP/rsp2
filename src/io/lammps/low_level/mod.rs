@@ -25,9 +25,9 @@ mod c_enum_macros;
 pub(crate) use self::plain::LammpsOwner;
 mod plain;
 
-#[cfg(feature = "_mpi")]
+#[cfg(feature = "mpi")]
 pub(crate) mod mpi;
-#[cfg(feature = "_mpi")]
+#[cfg(feature = "mpi")]
 pub(crate) mod mpi_helper;
 
 c_enums!{

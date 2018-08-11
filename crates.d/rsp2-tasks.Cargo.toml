@@ -15,12 +15,12 @@ path = "lib.rs"
 
 !!rsp2-lammps-wrap
 !!rsp2-minimize
-!!rsp2-structure
+!!rsp2-structure { features = ["serde-support"] }
 !!rsp2-structure-io
 !!rsp2-phonopy-io
 !!rsp2-array-utils
-!!rsp2-array-types
-!!rsp2-soa-ops
+!!rsp2-array-types { features = ["serde-support"] }
+!!rsp2-soa-ops { features = ["frunk-support"] }
 !!rsp2-slice-math
 !!rsp2-util-macros
 !!rsp2-fs-util
@@ -62,14 +62,16 @@ path = "lib.rs"
 !!mpi
 
 [features]
-default = ["_mpi"]
+default = []
 
 !!NIGHTLY-FEATURE-LINE
 
-# FIXME: Rename feature to "mpi" once mpi is properly an optional dep.
+# FIXME
+# Features for optional deps, because the implicit features defined by deps do not scale well.
+# For now, THESE are what you should toggle in dependent crates.
 #
-#        This dep with the underscored name exists to make it possible to disable mpi-related
-#        features (to test conditional compilation) despite the current inadequacies
-#        of the crates script
-_mpi = ["rsp2-lammps-wrap/_mpi"]
+# Once namespaced-features are stabilized, these features will be renamed after the deps.
+# see https://github.com/rust-lang/cargo/issues/1286 (problem and proposal)
+#     https://github.com/rust-lang/cargo/issues/5565 (tracking issue, of sorts)
+mpi-support = ["rsp2-lammps-wrap/mpi-support"]
 

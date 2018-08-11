@@ -27,8 +27,7 @@ rsp2-util-macros = { path = "../util/macros" }
 
 failure = "0.1"
 
-# FIXME make this dev-dependencies once rust-lang-nursery/rls#169 is fixed
-# FIXME use fern for less hax?
+[dev-dependencies]
 env_logger = "0.5.10"
 
 [features]

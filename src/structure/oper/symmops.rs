@@ -316,6 +316,7 @@ impl CartOp {
     }
 }
 
+#[cfg(feature = "serde")]
 mod serde_impls {
     use super::*;
     use ::serde::{Serialize, Serializer, Deserialize, Deserializer};

@@ -102,6 +102,7 @@ impl str::FromStr for Element {
     }
 }
 
+#[cfg(feature = "serde")]
 mod serde_impls {
     use super::*;
     use serde::{Serialize, Deserialize, ser, de};

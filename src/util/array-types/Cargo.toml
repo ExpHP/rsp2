@@ -16,16 +16,25 @@ path = "lib.rs"
 [dependencies]
 rsp2-array-utils = { path = "../array" }
 
-serde = { version = "1.0.63", features = ["rc"] }
-serde_derive = "1.0.47"
 slice-of-array = "0.2"
 num-traits = "0.2.3"
+serde = { version = "1.0.63", features = ["derive", "rc"], optional = true }
 
-# FIXME make this dev-dependencies once rust-lang-nursery/rls#169 is fixed
+[dev-dependencies]
 rsp2-assert-close = { path = "../assert-close" }
-# FIXME make this dev-dependencies once rust-lang-nursery/rls#169 is fixed
 rand = "0.3"
 
 [features]
+default = []
+
 nightly = ["beta", "rsp2-array-utils/nightly", "rsp2-assert-close/nightly"]
 beta = ["rsp2-array-utils/beta", "rsp2-assert-close/beta"]
+
+# FIXME
+# Features for optional deps, because the implicit features defined by deps do not scale well.
+# For now, THESE are what you should toggle in dependent crates.
+#
+# Once namespaced-features are stabilized, these features will be renamed after the deps.
+# see https://github.com/rust-lang/cargo/issues/1286 (problem and proposal)
+#     https://github.com/rust-lang/cargo/issues/5565 (tracking issue, of sorts)
+serde-support = ["serde"]

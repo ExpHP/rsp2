@@ -12,7 +12,7 @@
 ** parts of it are licensed under more permissive terms.                  **
 ** ********************************************************************** */
 
-#[cfg(feature = "_mpi")]
+#[cfg(feature = "mpi")]
 use ::mpi;
 use ::FailResult;
 use ::std::os::raw::{c_int, c_void, c_double, c_char};
@@ -59,7 +59,7 @@ impl LammpsOwner {
     ///
     /// Construction of LammpsOwner is inherently unsafe because it is unsafe
     /// to use multiple instances simultaneously on separate threads.
-    #[cfg(feature = "_mpi")]
+    #[cfg(feature = "mpi")]
     pub(in ::low_level) unsafe fn with_mpi<C: mpi::Communicator>(comm: &C, argv: &[&str]) -> FailResult<Self>
     {Ok({
         let mut argv = CArgv::from_strs(argv);

@@ -11,8 +11,8 @@ description = "Function minimization algorithms, even in multiple dimensions."
 !!ordered-float
 !!rand
 !!serde
-!!serde_derive
-!!serde_json
+!!serde-derive
+!!serde-json
 !!either
 
 !!rsp2-array-utils
@@ -22,8 +22,7 @@ description = "Function minimization algorithms, even in multiple dimensions."
 
 !!failure
 
-# FIXME make this dev-dependencies once rust-lang-nursery/rls#169 is fixed
-# FIXME use fern for less hax?
+[dev-dependencies]
 !!env-logger
 
 [features]
