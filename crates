@@ -33,10 +33,11 @@ def main():
     parser = ArgumentParser(description='manage Cargo.tomls in sp2')
 
     class no_command:
-        def __init__(self, *_junk):
-            pass
-        def run(self, *_junk):
-            parser.error("no subcommand specified")
+        @staticmethod
+        def __init__(*_junk): pass
+        @staticmethod
+        def run(_args, fail): fail("no subcommand specified")
+
     parser.set_defaults(klass=no_command)
 
     subs = parser.add_subparsers(title='subcommands')
@@ -47,7 +48,7 @@ def main():
         klass.configure(sub)
 
     args = parser.parse_args()
-    args.klass.run(parser, args)
+    args.klass.run(args, fail=parser.error)
 
 ALL_COMMANDS = []
 def register(klass):
@@ -79,8 +80,8 @@ class Gen:
                  'undue changes that would be checked into VCS')
 
     @staticmethod
-    def run(parser, args):
-        Gen._do_it(args, parser.error)
+    def run(args, fail):
+        Gen._do_it(args, fail)
 
     # several other commands invoke 'gen'.  This is kind of a dumb
     # hack to allow them to do so.
@@ -94,7 +95,6 @@ class Gen:
 
     @staticmethod
     def _do_it(args, fail):
-
         with pushd(search_for_root(fail)):
             data = read_master_config(fail)
             user_conf = read_master_user_config(fail)
@@ -514,27 +514,27 @@ class New:
         sub.add_argument('DIR')
 
     @staticmethod
-    def run(parser, args):
+    def run(args, fail):
         license = args.license
 
         if not is_root('.'):
             # (I'm too lazy to work out the correct relative paths
             # to be written to crates.toml)
-            parser.error("The 'new' subcommand must be run from the root.")
+            fail("The 'new' subcommand must be run from the root.")
 
         name = args.CRATENAME
         path = Path(args.DIR)
 
         if path.exists():
-            parser.error(f'"{path}": path already exists')
+            fail(f'"{path}": path already exists')
         if (path / root_rel_src_toml_path(name)).exists():
-            parser.error(f'crate "{name}" already exists')
+            fail(f'crate "{name}" already exists')
 
         # Insert a line to crates.toml without destroying formatting
         # (do this now for earlier exits on error)
         with open(MASTER_CFG_PATH) as f:
             lines = list(f)
-        lines = master_config_textual_add(lines, f'{name} = "{path}"\n', fail=parser.error)
+        lines = master_config_textual_add(lines, f'{name} = "{path}"\n', fail=fail)
 
         # make the directory
         path.mkdir()
@@ -555,7 +555,7 @@ class New:
             f.writelines(lines)
 
         # regenerate
-        Gen.run_like_function(parser.error)
+        Gen.run_like_function(fail)
 
 #------------
 
@@ -570,8 +570,8 @@ class Mv:
         sub.add_argument('DESTDIR')
 
     @staticmethod
-    def run(parser, args):
-        do_mv_or_rm(parser, curdir=args.CURDIR, destdir=args.DESTDIR)
+    def run(args, fail):
+        do_mv_or_rm(curdir=args.CURDIR, destdir=args.DESTDIR, fail=fail)
 
 
 @register
@@ -584,12 +584,12 @@ class Rm:
         sub.add_argument('DIR')
 
     @staticmethod
-    def run(parser, args):
-        do_mv_or_rm(parser, curdir=args.DIR, destdir=None)
+    def run(args, fail):
+        do_mv_or_rm(curdir=args.DIR, destdir=None, fail=fail)
 
 # Shared implementation for mv and rm.
 # When distdir is None, this deletes.
-def do_mv_or_rm(parser, curdir, destdir):
+def do_mv_or_rm(curdir, destdir, fail):
     curdir = Path(curdir)
     if destdir is not None:
         destdir = Path(destdir)
@@ -598,13 +598,13 @@ def do_mv_or_rm(parser, curdir, destdir):
         # (I'm too lazy to work out the correct relative paths
         # to be written to crates.toml)
         cmd_name = 'rm' if destdir is None else 'mv'
-        parser.error(f"The '{cmd_name}' subcommand must be run from the root.")
+        fail(f"The '{cmd_name}' subcommand must be run from the root.")
     root = Path('.')
 
     if destdir is not None and destdir.exists():
-        parser.error(f'"{destdir}": path already exists')
+        fail(f'"{destdir}": path already exists')
     if not curdir.exists():
-        parser.error(f'"{curdir}": path does not exist')
+        fail(f'"{curdir}": path does not exist')
 
     crate = crate_name_from_path(curdir)
 
@@ -612,7 +612,7 @@ def do_mv_or_rm(parser, curdir, destdir):
     # (do this now for earlier exits on error)
     with open(MASTER_CFG_PATH) as f:
         lines = list(f)
-    lines = master_config_textual_set_path(lines, crate, destdir, fail=parser.error)
+    lines = master_config_textual_set_path(lines, crate, destdir, fail=fail)
 
     if destdir is None: # rm
         rm_rf(str(curdir))
@@ -624,7 +624,7 @@ def do_mv_or_rm(parser, curdir, destdir):
         f.writelines(lines)
 
     # regenerate
-    Gen.run_like_function(parser.error)
+    Gen.run_like_function(fail)
 
 #------------
 
@@ -642,19 +642,19 @@ class Test:
         pass
 
     @staticmethod
-    def run(parser, _args):
+    def run(_args, fail):
         from subprocess import Popen
 
         # regenerate
-        Gen.run_like_function(parser.error)
+        Gen.run_like_function(fail)
 
         def do_cargo_test_all(**kw):
             code = Popen(['cargo', 'test', '--all'], **kw).wait()
             if code:
                 sys.exit(code)
 
-        user_config = read_master_user_config(parser.error)
-        with pushd(search_for_root(parser.error)):
+        user_config = read_master_user_config(fail)
+        with pushd(search_for_root(fail)):
             if user_config.simulated_workspace.enabled:
                 # do the insane thing
 
@@ -708,19 +708,19 @@ class Dot:
         sub.set_defaults(leaves=True)
 
     @staticmethod
-    def run(parser, args):
+    def run(args, fail):
         import matplotlib.pyplot as plt
         from networkx.drawing.nx_pydot import write_dot
 
         # regenerate
-        Gen.run_like_function(parser.error)
+        Gen.run_like_function(fail)
 
-        crates = get_internal_crates_and_root_rel_paths(parser.error)
+        crates = get_internal_crates_and_root_rel_paths(fail)
 
-        g = get_internal_dep_graph(crates, parser.error)
+        g = get_internal_dep_graph(crates, fail)
 
         if not args.root:
-            g.remove_node(get_root_package(parser.error))
+            g.remove_node(get_root_package(fail))
 
         if not args.leaves:
             leaves = [node for node in g if g.out_degree(node) == 0]
@@ -760,11 +760,11 @@ class Edit:
             " or 'edit config' to edit config.toml.")
 
     @staticmethod
-    def run(parser, args):
+    def run(args, fail):
         import subprocess
         import shutil
 
-        root = search_for_root(parser.error)
+        root = search_for_root(fail)
 
         if args.CRATE_OR_PATH == 'crates':
             toml_path = root / MASTER_CFG_PATH
@@ -774,7 +774,7 @@ class Edit:
                 shutil.copyfile(root / MASTER_USER_CFG_EXAMPLE_PATH, toml_path)
                 print(f"Created new config file at '{toml_path}'.", file=sys.stderr)
         else:
-            if args.CRATE_OR_PATH in get_internal_crate_names(parser.error):
+            if args.CRATE_OR_PATH in get_internal_crate_names(fail):
                 crate = args.CRATE_OR_PATH
             else:
                 crate = crate_name_from_path(args.CRATE_OR_PATH)
@@ -786,7 +786,7 @@ class Edit:
             sys.exit(1)
 
         # regenerate
-        Gen.run_like_function(parser.error)
+        Gen.run_like_function(fail)
 
 #------------
 
@@ -802,10 +802,10 @@ class UnusedDeps:
         pass
 
     @staticmethod
-    def run(parser, _args):
+    def run(_args, fail):
 
-        with pushd(search_for_root(parser.error)):
-            data = read_master_config(parser.error)
+        with pushd(search_for_root(fail)):
+            data = read_master_config(fail)
             our_crates = list(data.pop('crates'))
             unused_deps = set(map(canonicalize_crate, data.pop('preferred-versions')))
 
@@ -815,7 +815,7 @@ class UnusedDeps:
 
                 to_be_removed = []
                 for line in lines:
-                    invocation = MacroInvocation.try_parse(line, fail=parser.error)
+                    invocation = MacroInvocation.try_parse(line, fail=fail)
                     if invocation is not None:
                         to_be_removed.append(canonicalize_crate(invocation.name))
                 unused_deps -= set(to_be_removed)
