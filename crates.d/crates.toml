@@ -95,7 +95,7 @@ frunk = "0.2.0"
 shlex = "0.1.1"
 indoc = "0.2.3"
 lapacke = "0.1.4"
-lapack-src = { version = "0.1.4", features = ["netlib"] }
+lapack-src = { version = "0.1.4", features = ["intel-mkl"] }
 ndarray = "0.11.2"
 rustc-test = "0.3.0"
 pretty_assertions = "0.5.1"
