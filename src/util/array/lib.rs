@@ -8,7 +8,6 @@
 ** Be aware that not all of rsp2 is provided under this permissive license, **
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
-#![feature(rust_2018_preview)]
 
 #[macro_use] mod macros;
 mod functional;
