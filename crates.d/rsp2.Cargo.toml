@@ -39,6 +39,8 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 #        has no way to do that.
 !!mpi
 
+!!libffi-sys { features = ["system"] }
+
 [features]
 default = ["mpi-support"]
 
