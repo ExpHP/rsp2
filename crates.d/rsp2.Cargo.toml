@@ -61,3 +61,10 @@ mpi-support = ["rsp2-tasks/mpi-support"]
 !!NIGHTLY-FEATURE-LINE
 
 !!MAYBE-ITS-A-WORKSPACE
+
+[patch.crates-io.libffi-sys]
+
+# version = "0.6.2-alpha.0"
+git = "https://github.com/ExpHP/libffi-sys-rs"
+branch = "system-feature"
+#rev = "11238e18"

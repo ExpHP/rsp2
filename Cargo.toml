@@ -120,3 +120,10 @@ nightly = ["beta", "rsp2-array-types/nightly", "rsp2-array-utils/nightly", "rsp2
 beta = ["rsp2-array-types/beta", "rsp2-array-utils/beta", "rsp2-assert-close/beta", "rsp2-clap/beta", "rsp2-fs-util/beta", "rsp2-integration-test/beta", "rsp2-lammps-wrap/beta", "rsp2-linalg/beta", "rsp2-minimize/beta", "rsp2-newtype-indices/beta", "rsp2-numtheory/beta", "rsp2-phonopy-io/beta", "rsp2-slice-math/beta", "rsp2-soa-ops/beta", "rsp2-structure-io/beta", "rsp2-structure/beta", "rsp2-tasks-config/beta", "rsp2-tasks/beta", "rsp2-util-macros/beta"]
 
 [workspace]
+
+[patch.crates-io.libffi-sys]
+
+# version = "0.6.2-alpha.0"
+git = "https://github.com/ExpHP/libffi-sys-rs"
+branch = "system-feature"
+#rev = "11238e18"
