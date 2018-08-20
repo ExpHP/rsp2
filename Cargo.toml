@@ -97,7 +97,7 @@ pretty_assertions = "0.5.1"
 #        has no way to do that.
 mpi = "0.5.4"
 
-libffi-sys = { version = "0.6.2-alpha.0", git = "https://github.com/ExpHP/libffi-sys-rs", branch = "system-feature", features = ["system"] }
+libffi-sys = { version = "0.6.3", git = "https://github.com/ExpHP/libffi-sys-rs", branch = "system-feature-patchable", features = ["system"] }
 
 [features]
 default = ["mpi-support"]
@@ -125,5 +125,5 @@ beta = ["rsp2-array-types/beta", "rsp2-array-utils/beta", "rsp2-assert-close/bet
 
 # version = "0.6.2-alpha.0"
 git = "https://github.com/ExpHP/libffi-sys-rs"
-branch = "system-feature"
+branch = "system-feature-patchable"
 #rev = "11238e18"

@@ -101,4 +101,4 @@ rustc-test = "0.3.0"
 pretty_assertions = "0.5.1"
 mpi = "0.5.4"
 num_cpus = "1.8"
-libffi-sys = { version = "0.6.2-alpha.0", git = "https://github.com/ExpHP/libffi-sys-rs", branch = "system-feature" }
+libffi-sys = { version = "0.6.3", git = "https://github.com/ExpHP/libffi-sys-rs", branch = "system-feature-patchable" }
