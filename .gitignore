@@ -6,6 +6,7 @@
 **/cmake-build-debug
 **/__pycache__
 perf.data*
+log.lammps
 
 .subcrate-cfg
 .secret-test-dir
