@@ -61,10 +61,7 @@ lapacke = "0.1.4"
 lapack-src = { version = "0.1.4", features = ["openblas"] }
 num-traits = "0.2.3"
 num_cpus = "1.8"
-
-# FIXME: should be an optional dependency, but the crates script
-#        has no way to do that.
-mpi = "0.5.4"
+mpi = { version = "0.5.4", optional = true }
 
 [features]
 default = []
@@ -79,5 +76,5 @@ beta = ["rsp2-array-types/beta", "rsp2-array-utils/beta", "rsp2-assert-close/bet
 # Once namespaced-features are stabilized, these features will be renamed after the deps.
 # see https://github.com/rust-lang/cargo/issues/1286 (problem and proposal)
 #     https://github.com/rust-lang/cargo/issues/5565 (tracking issue, of sorts)
-mpi-support = ["rsp2-lammps-wrap/mpi-support"]
+mpi-support = ["mpi", "rsp2-lammps-wrap/mpi-support"]
 

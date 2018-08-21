@@ -56,10 +56,7 @@ path = "lib.rs"
 !!lapack-src
 !!num-traits
 !!num-cpus
-
-# FIXME: should be an optional dependency, but the crates script
-#        has no way to do that.
-!!mpi
+!!mpi { optional = true }
 
 [features]
 default = []
@@ -73,5 +70,5 @@ default = []
 # Once namespaced-features are stabilized, these features will be renamed after the deps.
 # see https://github.com/rust-lang/cargo/issues/1286 (problem and proposal)
 #     https://github.com/rust-lang/cargo/issues/5565 (tracking issue, of sorts)
-mpi-support = ["rsp2-lammps-wrap/mpi-support"]
+mpi-support = ["mpi", "rsp2-lammps-wrap/mpi-support"]
 
