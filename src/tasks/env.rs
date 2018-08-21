@@ -73,5 +73,5 @@ pub fn num_mpi_processes() -> u32 {
     use ::mpi::traits::Communicator;
 
     let world = ::mpi::topology::SystemCommunicator::world();
-    world.size()
+    world.size() as _
 }

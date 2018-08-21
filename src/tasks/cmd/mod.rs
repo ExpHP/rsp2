@@ -876,6 +876,7 @@ impl TrialDir {
             on_demand,
             &settings.threading,
             &settings.lammps_update_style,
+            &settings.lammps_processor_axis_mask,
             &settings.potential,
         );
 
@@ -1119,7 +1120,8 @@ pub(crate) fn run_plot_vdw(
     let threading = cfg::Threading::Lammps;
 
     let lammps_update_style = cfg::LammpsUpdateStyle::Fast { sync_positions_every: 1 };
-    let pot = PotentialBuilder::from_config_parts(None, on_demand, &threading, &lammps_update_style, pot);
+    let processor_axis_mask = [true; 3];
+    let pot = PotentialBuilder::from_config_parts(None, on_demand, &threading, &lammps_update_style, &processor_axis_mask, pot);
 
     let lattice = {
         let a = rs.iter().fold(0.0, |a, &b| f64::max(a, b)) + 20.0;
@@ -1168,7 +1170,8 @@ pub(crate) fn run_converge_vdw(
     let threading = cfg::Threading::Lammps;
 
     let lammps_update_style = cfg::LammpsUpdateStyle::Fast { sync_positions_every: 1 };
-    let pot = PotentialBuilder::from_config_parts(None, on_demand, &threading, &lammps_update_style, pot);
+    let processor_axis_mask = [true; 3];
+    let pot = PotentialBuilder::from_config_parts(None, on_demand, &threading, &lammps_update_style, &processor_axis_mask, pot);
 
     let lattice = Lattice::orthorhombic(40.0, 40.0, 40.0);
     let direction = {

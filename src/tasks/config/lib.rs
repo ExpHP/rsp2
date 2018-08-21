@@ -145,8 +145,10 @@ pub struct Settings {
     #[serde(default)]
     pub ev_loop: EvLoop,
 
+    // FIXME there should be a general lammps section
     #[serde(default)]
     pub lammps_update_style: LammpsUpdateStyle,
+    pub lammps_processor_axis_mask: [bool; 3],
 }
 derive_yaml_read!{Settings}
 
@@ -293,8 +295,11 @@ pub struct EnergyPlotSettings {
     //pub phonons: Phonons,
 
     pub potential: PotentialKind,
+
+    // FIXME there should be a general lammps section
     #[serde(default)]
     pub lammps_update_style: LammpsUpdateStyle,
+    pub lammps_processor_axis_mask: [bool; 3],
 }
 derive_yaml_read!{EnergyPlotSettings}
 

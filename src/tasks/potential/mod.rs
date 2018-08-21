@@ -348,7 +348,14 @@ impl PotentialBuilder {
         on_demand: Option<LammpsOnDemand>,
         cfg: &cfg::Settings,
     ) -> Box<PotentialBuilder> {
-        Self::from_config_parts(Some(trial_dir), on_demand, &cfg.threading, &cfg.lammps_update_style, &cfg.potential)
+        Self::from_config_parts(
+            Some(trial_dir),
+            on_demand,
+            &cfg.threading,
+            &cfg.lammps_update_style,
+            &cfg.lammps_processor_axis_mask,
+            &cfg.potential,
+        )
     }
 
     pub(crate) fn from_config_parts(
@@ -356,26 +363,27 @@ impl PotentialBuilder {
         on_demand: Option<LammpsOnDemand>,
         threading: &cfg::Threading,
         update_style: &cfg::LammpsUpdateStyle,
+        axis_mask: &[bool; 3], // HACK; lammps should have its own section
         config: &cfg::PotentialKind,
     ) -> Box<PotentialBuilder> {
         match config {
             cfg::PotentialKind::Rebo => {
                 let lammps_pot = self::lammps::Airebo::Rebo;
-                let pot = self::lammps::Builder::new(trial_dir, on_demand, threading, update_style, lammps_pot);
+                let pot = self::lammps::Builder::new(trial_dir, on_demand, threading, update_style, axis_mask, lammps_pot);
                 Box::new(pot)
             }
             cfg::PotentialKind::Airebo(cfg) => {
                 let lammps_pot = self::lammps::Airebo::from(cfg);
-                let pot = self::lammps::Builder::new(trial_dir, on_demand, threading, update_style, lammps_pot);
+                let pot = self::lammps::Builder::new(trial_dir, on_demand, threading, update_style, axis_mask, lammps_pot);
                 Box::new(pot)
             },
             cfg::PotentialKind::KolmogorovCrespiZ(cfg) => {
                 let lammps_pot = self::lammps::KolmogorovCrespiZ::from(cfg);
-                let pot = self::lammps::Builder::new(trial_dir, on_demand, threading, update_style, lammps_pot);
+                let pot = self::lammps::Builder::new(trial_dir, on_demand, threading, update_style, axis_mask, lammps_pot);
                 Box::new(pot)
             },
             cfg::PotentialKind::KolmogorovCrespiZNew(cfg) => {
-                let rebo = PotentialBuilder::from_config_parts(trial_dir, on_demand, threading, update_style, &cfg::PotentialKind::Rebo);
+                let rebo = PotentialBuilder::from_config_parts(trial_dir, on_demand, threading, update_style, axis_mask, &cfg::PotentialKind::Rebo);
                 let kc_z = self::homestyle::KolmogorovCrespiZ(cfg.clone());
                 let pot = self::helper::Sum(rebo, kc_z);
                 Box::new(pot)

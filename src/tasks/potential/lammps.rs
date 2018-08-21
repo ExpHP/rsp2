@@ -57,6 +57,7 @@ const DEFAULT_AIREBO_TORSION_ENABLED: bool = false;
 pub(crate) struct Builder<P> {
     inner: InnerBuilder,
     pub potential: P,
+    processor_axis_mask: [bool; 3],
 }
 
 fn assert_send_sync<S: Send + Sync>() {}
@@ -73,6 +74,7 @@ impl<P: Clone> Builder<P>
         on_demand: Option<LammpsOnDemand>,
         threading: &cfg::Threading,
         update_style: &cfg::LammpsUpdateStyle,
+        processor_axis_mask: &[bool; 3],
         potential: P,
     ) -> Self {
         let mut inner = InnerBuilder::new();
@@ -111,13 +113,17 @@ impl<P: Clone> Builder<P>
             }
         }
 
-        Builder { inner, potential }
+        let processor_axis_mask = *processor_axis_mask;
+
+        Builder { inner, potential, processor_axis_mask }
             .parallel(*threading == cfg::Threading::Lammps)
     }
 
     pub(crate) fn parallel(&self, parallel: bool) -> Self {
+        use ::rsp2_array_utils::map_arr;
+
         let processors = match parallel {
-            true => [None; 3],
+            true => map_arr(self.processor_axis_mask, |flag| if flag { None } else { Some(1) }),
             false => [Some(1); 3],
         };
 
