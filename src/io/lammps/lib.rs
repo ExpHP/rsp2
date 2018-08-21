@@ -507,6 +507,8 @@ pub fn mpi_link_test() -> FailResult<()>
 pub use atom_type::AtomType;
 // mod to encapsulate type invariant
 mod atom_type {
+    use super::*;
+
     /// A Lammps atom type.  These are numbered from 1.
     #[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Hash)]
     pub struct AtomType(
@@ -529,6 +531,12 @@ mod atom_type {
         pub fn from_index(x: usize) -> Self { AtomType((x + 1) as _) }
         /// Recover the 0-based index.
         pub fn to_index(self) -> usize { self.0 as usize - 1 }
+    }
+
+    impl fmt::Display for AtomType {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            fmt::Display::fmt(&self.0, f)
+        }
     }
 }
 
@@ -797,8 +805,9 @@ impl<P: Potential> Lammps<P>
     {Ok({
         let original_num_atoms = coords.num_atoms();
         let original_init_info = potential.init_info(&coords, &meta);
+        let original_atom_types = potential.atom_types(&coords, &meta);
 
-        let ptr = Self::_from_builder(builder, original_num_atoms, &original_init_info)?;
+        let ptr = Self::_from_builder(builder, original_num_atoms, &original_init_info, &coords, &original_atom_types)?;
         Lammps {
             ptr: ::std::cell::RefCell::new(ptr),
             structure: MaybeDirty::new_dirty((coords, meta)),
@@ -817,9 +826,11 @@ impl<P: Potential> Lammps<P>
         builder: &Builder,
         num_atoms: usize,
         init_info: &InitInfo,
+        coords: &Coords,
+        atom_types: &[AtomType],
     ) -> FailResult<Box<dyn LowLevelApi>>
     {Ok({
-        // Lammps script based on code from Colin Daniels.
+        use ::std::io::prelude::*;
 
         let mut lmp = {
             let mut argv = vec![
@@ -835,29 +846,20 @@ impl<P: Potential> Lammps<P>
             unsafe { builder.make_instance.0.make_it(&argv)? }
         };
 
-        if let Some(log_file) = &builder.append_log {
-            // Append a header to the log file as a feeble attempt to help delimit individual
-            // runs (even though it will still get messy for parallel runs).
-            //
-            // NOTE: This looks like a surprising hidden side-effect, but it isn't really.
-            //       Or rather, that is to say, removing it won't make things any better,
-            //       because LAMMPS itself will be writing many things to this same file
-            //       anyways over the course of this function.
-            //
-            // Errs are ignored because *it's three lines in a stinking log file*.
-            use ::std::io::prelude::*;
-            if let Ok(mut f) =
-                ::std::fs::OpenOptions::new()
-                    .write(true)
-                    .create(true)
-                    .append(true)
-                    .open(log_file)
-            {
-                let _ = writeln!(f, "---------------------------------------------");
-                let _ = writeln!(f, "---- Begin run at {}", ::chrono::Local::now());
-                let _ = writeln!(f, "---------------------------------------------");
-            }
+        // Append a header to the log file as a feeble attempt to help delimit individual
+        // runs (even though it will still get messy for parallel runs).
+        //
+        // NOTE: This looks like a surprising hidden side-effect, but it isn't really.
+        //       Or rather, that is to say, removing it won't make things any better,
+        //       because LAMMPS itself will be writing many things to this same file
+        //       anyways over the course of this function.
+        append_logfile_nonessential(builder.append_log.as_ref(), |mut f| {
+            let _ = writeln!(f, "---------------------------------------------");
+            let _ = writeln!(f, "---- Begin run at {}", ::chrono::Local::now());
+            let _ = writeln!(f, "---------------------------------------------");
+        });
 
+        if let Some(log_file) = &builder.append_log {
             lmp.command(
                 format!("log {} append", log_file.display()),
             )?;
@@ -911,6 +913,44 @@ impl<P: Potential> Lammps<P>
             ))?;
         }
 
+        // HACK:
+        //   set positions explicitly using commands to resolve "lost atoms" errors
+        //   when using certain MPI node layouts on certain structures.
+        //
+        //   I was trying to avoid this, but it seems that certain information about which atoms
+        //   belong to which nodes is only updated when certain commands are invoked; the initial
+        //   binning update from 'pre yes' on the first iteration does not suffice.
+        {
+            send_lmp_lattice(&mut *lmp, coords.lattice(), builder.auto_adjust_lattice)?;
+
+            // Setting individual positions spams the logfile.
+            // Until we find a better way, just stop writing to it momentarily.
+            lmp.command("log none".to_string())?;
+            append_logfile_nonessential(builder.append_log.as_ref(), |mut f| {
+                let _ = writeln!(f, "Setting positions explicitly using the 'set atom' command.");
+                let _ = writeln!(f, "('set' commands omitted from logfile)");
+            });
+
+            let carts = coords.to_carts();
+            for i in 0..coords.len() {
+                lmp.command(format!(
+                    "set atom {} type {} x {} y {} z {}",
+                    i + 1,
+                    atom_types[i],
+                    carts[i][0],
+                    carts[i][1],
+                    carts[i][2],
+                ))?;
+            }
+
+            // Resume logging.
+            if let Some(log_file) = &builder.append_log {
+                lmp.command(
+                    format!("log {} append", log_file.display()),
+                )?;
+            }
+        }
+
         // set up computes
         lmp.commands(&[
             &format!("compute RSP2_PE all pe"),
@@ -919,6 +959,26 @@ impl<P: Potential> Lammps<P>
 
         lmp
     })}
+}
+
+/// Tries to temporarily open the logfile to append something non-essential
+/// (like a divider or placeholder). IO errors are silently ignored.
+fn append_logfile_nonessential(
+    path: Option<impl AsRef<Path>>,
+    cont: impl FnOnce(::std::fs::File),
+) {
+    if let Some(path) = path {
+        let log = {
+            ::std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .append(true)
+                .open(path)
+        };
+        if let Ok(file) = log {
+            cont(file)
+        }
+    }
 }
 
 //-------------------------------------------
@@ -1047,35 +1107,11 @@ impl<P: Potential> Lammps<P> {
     })}
 
     fn send_lmp_lattice(&mut self) -> FailResult<()>
-    {Ok({
-        let [
-            [xx, _0, _1],
-            [xy, yy, _2],
-            [xz, yz, zz],
-        ] = self.structure.get().0.lattice().matrix().unvee();
-
-        assert_eq!(0f64, _0, "non-triangular lattices not yet supported");
-        assert_eq!(0f64, _1, "non-triangular lattices not yet supported");
-        assert_eq!(0f64, _2, "non-triangular lattices not yet supported");
-
-        let mut diag = [xx, yy, zz];
-        let mut skews = Skews { xy, yz, xz };
-        if self.auto_adjust_lattice {
-            auto_adjust_lattice(&mut diag, &mut skews);
-        }
-
-        // safe because we initialized the lattice the hard way during initialization,
-        // so surely `domain->set_initial_box()` must have been called...
-        unsafe { self.ptr.borrow_mut().reset_box([0.0, 0.0, 0.0], diag, skews)? }
-
-        // "Is this box to your liking, sire?"
-        self.ptr.borrow_mut().commands(&[
-            // These should have no effect, but they give LAMMPS a chance to look at the
-            // box and throw an exception if it doesn't like what it sees.
-            format!("change_box all x final 0 {}", diag[0]),
-            format!("change_box all xy final {}", skews.xy),
-        ])?;
-    })}
+    { send_lmp_lattice(
+        &mut **self.ptr.borrow_mut(),
+        self.structure.get().0.lattice(),
+        self.auto_adjust_lattice,
+    )}
 
     // Some of these properties probably could be allowed to change,
     // but it's not important enough for me to look into them right now,
@@ -1126,6 +1162,37 @@ impl<P: Potential> Lammps<P> {
         writeln!(file("cached.carts")?, "{:?}", self.structure.get().0.to_carts())?;
     })}
 }
+
+fn send_lmp_lattice(lmp: &mut (dyn LowLevelApi + 'static), lattice: &Lattice, auto_adjust: bool) -> FailResult<()>
+{Ok({
+    let [
+    [xx, _0, _1],
+    [xy, yy, _2],
+    [xz, yz, zz],
+    ] = lattice.matrix().unvee();
+
+    assert_eq!(0f64, _0, "non-triangular lattices not yet supported");
+    assert_eq!(0f64, _1, "non-triangular lattices not yet supported");
+    assert_eq!(0f64, _2, "non-triangular lattices not yet supported");
+
+    let mut diag = [xx, yy, zz];
+    let mut skews = Skews { xy, yz, xz };
+    if auto_adjust {
+        auto_adjust_lattice(&mut diag, &mut skews);
+    }
+
+    // safe because we initialized the lattice the hard way during initialization,
+    // so surely `domain->set_initial_box()` must have been called...
+    unsafe { lmp.reset_box([0.0, 0.0, 0.0], diag, skews)? }
+
+    // "Is this box to your liking, sire?"
+    lmp.commands(&[
+        // These should have no effect, but they give LAMMPS a chance to look at the
+        // box and throw an exception if it doesn't like what it sees.
+        format!("change_box all x final 0 {}", diag[0]),
+        format!("change_box all xy final {}", skews.xy),
+    ])?;
+})}
 
 fn auto_adjust_lattice(diag: &mut [f64; 3], skews: &mut Skews) {
     fn do_element(d: &mut f64, s: &mut f64) {
