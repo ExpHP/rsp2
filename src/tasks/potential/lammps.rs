@@ -101,6 +101,16 @@ impl<P: Clone> Builder<P>
             }));
         }
 
+        #[cfg(feature = "mpi")] {
+            if *threading != cfg::Threading::Lammps && ::env::num_mpi_processes() != 1 {
+                // We can't fool lammps into thinking it has fewer processes than it actually has.
+                // At least, not without adding support for custom communicators to lammps-wrap.
+                //
+                // (but why bother? clearly, the user intended to use MPI!)
+                panic!("Must use threading = \"lammps\" when using multiple MPI processes.");
+            }
+        }
+
         Builder { inner, potential }
             .parallel(*threading == cfg::Threading::Lammps)
     }

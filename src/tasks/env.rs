@@ -68,3 +68,10 @@ pub fn max_omp_num_threads() -> u32 {
     ::num_cpus::get() as u32
 }
 
+#[cfg(feature = "mpi")]
+pub fn num_mpi_processes() -> u32 {
+    use ::mpi::traits::Communicator;
+
+    let world = ::mpi::topology::SystemCommunicator::world();
+    world.size()
+}

@@ -75,10 +75,7 @@ fn log_thread_info() -> FailResult<()> {
     info!("Available resources for parallelism:");
 
     #[cfg(feature = "mpi")] {
-        use ::mpi::traits::Communicator;
-
-        let world = ::mpi::topology::SystemCommunicator::world();
-        info!("    MPI: {} process(es)", world.size());
+        info!("    MPI: {} process(es)", ::env::num_mpi_processes());
     }
     #[cfg(not(feature = "mpi"))] {
         info!("    MPI: N/A (disabled during compilation)");
