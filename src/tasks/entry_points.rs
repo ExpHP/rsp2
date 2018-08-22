@@ -46,7 +46,7 @@ where F: FnOnce(SetGlobalLogfile, Option<LammpsOnDemand>) -> FailResult<()>,
         result.unwrap_or_else(|e| {
             // HACK
             if let Some(::cmd::StoppedAfterDynmat) = e.downcast_ref() {
-                exit(0)
+                return;
             }
 
             show_errors(e);
@@ -69,6 +69,8 @@ fn wrap_main_with_lammps_on_demand(continuation: impl FnOnce(Option<LammpsOnDema
         assert_eq!(actual, required);
 
         LammpsOnDemand::install(|on_demand| continuation(Some(on_demand)));
+
+        // NOTE: drop of _universe here issues MPI_Finalize
     }
     #[cfg(not(feature = "mpi"))] {
         continuation(None);

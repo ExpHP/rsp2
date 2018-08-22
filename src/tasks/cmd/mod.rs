@@ -478,9 +478,9 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
             &super_coords,
             super_meta.sift(),
         )?;
-        {
-            writeln!(_trial.create_file("force-sets")?, "{:?}", force_sets).unwrap();
-        }
+//        { // FIXME add special log flag
+//            writeln!(_trial.create_file("force-sets")?, "{:?}", force_sets).unwrap();
+//        }
 
         let cart_rots: Vec<_> = {
             cart_ops.iter().map(|c| c.cart_rot()).collect()
