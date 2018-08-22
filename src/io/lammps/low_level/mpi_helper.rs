@@ -129,11 +129,11 @@ impl<D: DispatchMultiProcess> MpiOnDemand<D> {
 
                 Arc::try_unwrap(on_demand.0).ok()
                     .expect("Detected leak of `MpiOnDemand` value!")
-                    .finish_from_root(&root);
+                    .root_finish(&root);
 
                 Some(out)
             } else {
-                non_root_event_loop(&root, on_demand);
+                on_demand.non_root_event_loop(&root);
                 None
             }
         })
@@ -149,7 +149,27 @@ impl<D: DispatchMultiProcess> MpiOnDemand<D> {
     /// The multi-process entry point will be invoked on all processes simultaneously,
     /// but the the return value will be ignored on any non-root process.
     pub fn invoke(&self, arg: D::Input) -> D::Output {
-        with_default_root(|root| self.0.invoke_from_root(&root, arg))
+        with_default_root(|root| self.0.root_dispatch(&root, arg))
+    }
+
+    /// Place the non-root processes into a low activity state for the duration of a closure.
+    ///
+    /// Normally, the non-root processes for `MpiOnDemand` spend most of their time in an
+    /// `MPI_Bcast`, which is typically a busy wait with `~100%` CPU usage for performance reasons.
+    /// `eco_mode` puts them into a much less active state so that they do not heavily compete
+    /// against other threads and processes when they aren't being used for anything.
+    ///
+    /// # Potential for deadlocks
+    ///
+    /// Calling any method of `MpiOnDemand` from within the closure will result in a communication
+    /// failure between the root process and the others.
+    ///
+    /// In an ideal world, this method would take `&mut self` to make such mistakes impossible.
+    /// However, it currently does not because `MpiOnDemand` impls `Clone` (making the `&mut` easily
+    /// circumvented), and because `rsp2_tasks::PotentialBuilder` (the only place where this is
+    /// ultimately used) still exposes a thoroughly `&self`-based API.
+    pub fn eco_mode<B>(&self, cont: impl FnOnce() -> B) -> B {
+        with_default_root(|root| self.0.root_eco_mode(&root, cont))
     }
 }
 
@@ -167,42 +187,100 @@ fn with_default_root<R>(continuation: impl FnOnce(mpi::Process<'_, mpi::SystemCo
 }
 
 impl<D: DispatchMultiProcess> MpiOnDemandInner<D> {
-    fn invoke_from_root(&self, root: &impl mpi::Root, arg: D::Input) -> D::Output {
-        assert!(this_process_is_root(root), "BUG!");
-        assert!(Broadcast::broadcast(root, Some(true)), "BUG!");
+    fn root_dispatch(&self, root: &impl mpi::Root, arg: D::Input) -> D::Output {
+        assert!(this_process_is_root(root));
+        assert_eq!(Broadcast::broadcast(root, Some(EventType::Dispatch)), EventType::Dispatch);
 
         let arg = Broadcast::broadcast(root, Some(arg));
         self.dispatch.dispatch(root, arg)
     }
 
-    fn invoke_from_non_root(&self, root: &impl mpi::Root) -> KeepGoing {
-        assert!(!this_process_is_root(root), "BUG!");
+    fn non_root_dispatch(&self, root: &impl mpi::Root) {
+        assert!(!this_process_is_root(root));
 
-        let keep_going = Broadcast::broadcast(root, None::<bool>);
-        if keep_going {
-            let arg = Broadcast::broadcast(root, None);
-            let _ = self.dispatch.dispatch(root, arg);
+        let arg = Broadcast::broadcast(root, None);
+        let _ = self.dispatch.dispatch(root, arg);
+    }
+
+    // ------------
+
+    const ECO_MODE_FINISH: i32 = 1;
+
+    fn root_eco_mode<B>(&self, root: &impl mpi::Root, cont: impl FnOnce() -> B) -> B {
+        use ::mpi::{Destination, Communicator};
+
+        // Inform the others.
+        assert!(this_process_is_root(root));
+        assert_eq!(Broadcast::broadcast(root, Some(EventType::EnterEcoMode)), EventType::EnterEcoMode);
+
+        // NOTE: in the case where `cont` panics, we assume MPI will detect it and
+        //       destroy the other processes before long
+        let out = cont();
+
+        // Make the others resume busy-waiting.
+        // We use Send so that the others can use Iprobe.
+        // (there is also Ibcast but it seems overkill)
+        let world = root.as_communicator();
+        for rank in 0..world.size() {
+            if rank != world.rank() {
+                world.process_at_rank(rank).send(&Self::ECO_MODE_FINISH);
+            }
         }
-        KeepGoing(keep_going)
+        out
     }
 
-    fn finish_from_root(self, root: &impl mpi::Root) {
-        assert!(this_process_is_root(root), "BUG!");
+    fn non_root_eco_mode(&self, root: &impl mpi::Root) {
+        use ::mpi::{Source, Communicator};
 
-        // Make the other processes exit the event loop.
-        assert!(!Broadcast::broadcast(root, Some(false)), "BUG!");
+        assert!(!this_process_is_root(root));
+
+        // HACK: force into type Process because `mpi::Root` doesn't imply `mpi::Source`.
+        let root = root.as_communicator().process_at_rank(root.root_rank());
+
+        // Wait for the root process to signal that the closure has finished.
+        while root.immediate_probe().is_none() {
+            // NOTE: Because the root process communicates with the others one-by-one,
+            //       the total time taken to resume N processes may be as large as `N * interval`.
+            let interval = ::std::time::Duration::from_secs(1);
+            ::std::thread::sleep(interval);
+        }
+
+        match root.receive().0 {
+            Self::ECO_MODE_FINISH => {},
+            n => panic!("unexpected value {} on exiting eco mode", n)
+        }
+    }
+
+    // ------------
+
+    fn root_finish(self, root: &impl mpi::Root) {
+        assert!(this_process_is_root(root));
+        assert_eq!(Broadcast::broadcast(root, Some(EventType::Finish)), EventType::Finish);
+    }
+
+    // ------------
+
+    fn non_root_event_loop(self, root: &impl mpi::Root) {
+        // FIXME: what about error handling?
+        loop {
+            match Broadcast::broadcast(root, None::<EventType>) {
+                EventType::Dispatch => self.non_root_dispatch(root),
+                EventType::EnterEcoMode => self.non_root_eco_mode(root),
+                EventType::Finish => break,
+            }
+        }
     }
 }
 
-struct KeepGoing(bool);
-
-// FIXME: what about error handling?
-fn non_root_event_loop<D: DispatchMultiProcess>(
-    root: &impl mpi::Root,
-    on_demand: MpiOnDemandInner<D>,
-) {
-    while let KeepGoing(true) = on_demand.invoke_from_non_root(root) { }
+c_enums!{
+    [] enum EventType {
+        Dispatch = 0,
+        EnterEcoMode = 1,
+        Finish = 2,
+    }
 }
+
+//---------------------------------------------------------------
 
 /// Helper trait to broadcast data from the root process to all processes,
 /// including vectors of unknown length, and types with no default.
@@ -343,6 +421,20 @@ impl Broadcast for [f64; 3] {
         })
     }
 }
+
+macro_rules! impl_broadcast_for_c_enum {
+    ($($T:ident)*) => {$(
+        impl Broadcast for $T {
+            fn broadcast(root: &impl mpi::Root, buf: Option<$T>) -> $T {
+                $T::from_int(Broadcast::broadcast(root, buf.map(|x| x as _))).unwrap()
+            }
+        }
+    )*};
+}
+
+impl_broadcast_for_c_enum! { EventType }
+
+//---------------------------------------------------------------
 
 pub fn this_process_is_root(root: &impl mpi::Root) -> bool
 { mpi::Communicator::rank(root.as_communicator()) == root.root_rank() }

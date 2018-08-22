@@ -196,6 +196,9 @@ impl<M: Clone + 'static, P: Clone + LammpsPotential<Meta=M> + Send + Sync + 'sta
 
     fn initialize_disp_fn(&self, coords: &Coords, meta: M) -> FailResult<Box<DispFn>>
     { self.lammps_disp_fn(coords, meta) }
+
+    fn _eco_mode(&self, cont: &mut dyn FnMut())
+    { self.inner.eco_mode(cont) }
 }
 
 impl_dyn_clone_detail!{

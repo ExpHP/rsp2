@@ -26,7 +26,7 @@ macro_rules! c_enums {
 
             impl $Type {
                 #[allow(unused)]
-                pub fn from_int(x: u32) -> FailResult<$Type>
+                pub fn from_int(x: u32) -> ::FailResult<$Type>
                 { match x {
                     $($value => Ok($Type::$Variant),)+
                     _ => bail!("Invalid value {} for {}", x, stringify!($Type)),

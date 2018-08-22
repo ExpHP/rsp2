@@ -35,6 +35,7 @@ mod mpi {
         collective::*,
         datatype::*,
         environment::*,
+        point_to_point::*,
         raw::*,
     };
 }
@@ -235,6 +236,8 @@ pub struct Builder {
 trait MakeInstance: fmt::Debug {
     unsafe fn make_it(&self, argv: &[&str]) -> FailResult<Box<dyn LowLevelApi>>;
     fn box_clone(&self) -> BoxDynMakeInstance;
+    // FIXME awkward to see this here
+    fn eco_mode(&self, cont: &mut dyn FnMut());
 }
 
 // Cloneable wrapper
@@ -257,6 +260,9 @@ impl MakeInstance for MakePlainInstance {
 
     fn box_clone(&self) -> BoxDynMakeInstance
     { BoxDynMakeInstance(Box::new(self.clone())) }
+
+    fn eco_mode(&self, cont: &mut dyn FnMut())
+    { cont() }
 }
 
 #[cfg(feature = "mpi")]
@@ -266,6 +272,9 @@ impl MakeInstance for MakeMpiInstance {
 
     fn box_clone(&self) -> BoxDynMakeInstance
     { BoxDynMakeInstance(Box::new(self.clone())) }
+
+    fn eco_mode(&self, cont: &mut dyn FnMut())
+    { self.0.eco_mode(cont) }
 }
 
 //------------------------------------------
@@ -422,6 +431,9 @@ impl Builder {
 
     pub fn update_style(&mut self, value: UpdateStyle) -> &mut Self
     { self.update_style = value; self }
+
+    pub fn eco_mode(&self, cont: &mut dyn FnMut())
+    { self.make_instance.0.eco_mode(cont) }
 
     pub fn data_trace_dir(&mut self, value: Option<impl AsRef<Path>>) -> &mut Self
     { self.data_trace_dir = value.map(|p| p.as_ref().to_owned()); self }

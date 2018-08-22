@@ -152,6 +152,45 @@ pub trait PotentialBuilder<Meta = CommonMeta>
     fn one_off(&self) -> OneOff<'_, Meta>
     where Meta: Clone,
     { OneOff(self._as_ref_dyn()) }
+
+    /// An object-safe method used to implement `eco_mode`.
+    ///
+    /// The default implementation simply calls `cont`.
+    fn _eco_mode(&self, cont: &mut dyn FnMut())
+    { cont() }
+}
+
+// On the trait object rather than the trait to dodge Self: Sized issues.
+impl<Meta> dyn PotentialBuilder<Meta>
+where
+    Meta: Clone + 'static
+{
+    /// Some implementations of PotentialBuilder might result in loads of 100% CPU on many
+    /// processors merely by existing.
+    ///
+    /// This method tells them to hold off for the duration of a closure.
+    ///
+    /// The default implementation simply calls the closure.
+    ///
+    /// # Caution
+    ///
+    /// **You must not call other methods of `PotentialBuilder` from inside the closure!**
+    /// (or else it might deadlock, or cause MPI to abort, or somesuch).  Ideally, this method
+    /// would take `&mut self` to signify this limitation, but that would require a massive design
+    /// overhaul for `PotentialBuilder`, soooo...... *just be careful.*
+    pub fn eco_mode<B>(&self, cont: impl FnOnce() -> B) -> B {
+        let mut cont = Some(cont);
+        let mut out = None;
+        { // NLL please save us ;_;
+            let mut cont_as_fn_mut = || {
+                let cont = cont.take().expect("(BUG!) _eco_mode called continuation twice!");
+                out = Some(cont());
+            };
+            self._eco_mode(&mut cont_as_fn_mut);
+        }
+
+        out.expect("(BUG!) _eco_mode failed to call continuation!")
+    }
 }
 
 //-------------------------------------
@@ -206,6 +245,9 @@ where Meta: Clone + 'static,
 
     fn initialize_disp_fn(&self, equilibrium_coords: &Coords, meta: Meta) -> FailResult<Box<DispFn>>
     { (**self).initialize_disp_fn(equilibrium_coords, meta) }
+
+    fn _eco_mode(&self, cont: &mut dyn FnMut())
+    { (**self)._eco_mode(cont) }
 }
 
 impl_dyn_clone_detail!{

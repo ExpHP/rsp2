@@ -505,6 +505,7 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
         )?;
 
         trace!("Computing sparse dynamical matrix");
+
         let dynmat = {
             force_constants
                 .gamma_dynmat(&sc, prim_meta.pick())
@@ -520,7 +521,11 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
             trace!("nnz: {} out of {} blocks (matrix density: {:.3e})", nnz, max_size, density);
         }
         trace!("Diagonalizing dynamical matrix");
-        let (evals, evecs) = dynmat.compute_negative_eigensolutions(self.shift_invert_attempts)?;
+        let (evals, evecs) = {
+            pot.eco_mode(|| { // don't let MPI processes compete with python's threads
+                dynmat.compute_negative_eigensolutions(self.shift_invert_attempts)
+            })?
+        };
         trace!("Done diagonalizing dynamical matrix");
         (evals, evecs, dynmat)
     })}

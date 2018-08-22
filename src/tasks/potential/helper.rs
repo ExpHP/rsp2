@@ -42,6 +42,9 @@ where
 
     fn initialize_disp_fn(&self, _: &Coords, _: M) -> FailResult<Box<DispFn>>
     { unimplemented!("should use DispFns of sub potentials, rather than DefaultDispFn") }
+
+    fn _eco_mode(&self, cont: &mut dyn FnMut())
+    { (self.0)._eco_mode(&mut || (self.1)._eco_mode(cont)) }
 }
 
 impl_dyn_clone_detail!{
