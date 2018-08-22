@@ -19,7 +19,7 @@ rsp2-array-types = { path = "../util/array-types" }
 rsp2-assert-close = { path = "../util/assert-close" }
 rsp2-soa-ops = { path = "../util/soa-ops" }
 
-failure = "0.1"
+failure = "0.1.2"
 slice-of-array = "0.2"
 ordered-float = "0.5"
 itertools = "0.7"

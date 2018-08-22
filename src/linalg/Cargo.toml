@@ -17,7 +17,7 @@ rsp2-assert-close = { path = "../util/assert-close" }
 #!!rsp2-shims
 rsp2-array-types = { path = "../util/array-types" }
 rsp2-numtheory = { path = "../util/numtheory" }
-failure = "0.1"
+failure = "0.1.2"
 slice-of-array = "0.2"
 #!!frunk
 lapacke = "0.1.4"

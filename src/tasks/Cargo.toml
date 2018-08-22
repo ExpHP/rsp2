@@ -40,7 +40,7 @@ rsp2-kets = { version = "0.3.6", git = "https://github.com/ExpHP/rsp2-kets", fea
 rand = "0.3"
 log = "0.4"
 env_logger = "0.5.10"
-failure = "0.1"
+failure = "0.1.2"
 fern = { version = "0.5", features = ["colored"] }
 extension-trait = "0.1.2"
 itertools = "0.7"

@@ -25,7 +25,7 @@ rsp2-assert-close = { path = "../util/assert-close" }
 rsp2-slice-math = { path = "../util/slice-math" }
 rsp2-util-macros = { path = "../util/macros" }
 
-failure = "0.1"
+failure = "0.1.2"
 
 [dev-dependencies]
 env_logger = "0.5.10"

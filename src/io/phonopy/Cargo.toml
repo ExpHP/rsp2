@@ -14,7 +14,7 @@ license = "MIT OR Apache 2.0"
 path = "lib.rs"
 
 [dependencies]
-failure = "0.1"
+failure = "0.1.2"
 nom = "3"
 serde = { version = "1.0.63", features = ["rc"] }
 serde_derive = "1.0.47"

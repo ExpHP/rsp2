@@ -21,7 +21,7 @@ lammps-sys = { tag = "v0.3.1", git = "https://github.com/ExpHP/lammps-sys" }
 log = "0.4"
 lazy_static = "0.2"
 chrono = "0.4"
-failure = "0.1"
+failure = "0.1.2"
 slice-of-array = "0.2"
 mpi = { version = "0.5.4", optional = true }
 

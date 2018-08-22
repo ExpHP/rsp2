@@ -14,7 +14,7 @@ license = "MIT OR Apache 2.0"
 path = "lib.rs"
 
 [dependencies]
-failure = "0.1"
+failure = "0.1.2"
 tempdir = "0.3"
 log = "0.4"
 
