@@ -44,6 +44,11 @@ where F: FnOnce(SetGlobalLogfile, Option<LammpsOnDemand>) -> FailResult<()>,
         })();
 
         result.unwrap_or_else(|e| {
+            // HACK
+            if let Some(::cmd::StoppedAfterDynmat) = e.downcast_ref() {
+                exit(0)
+            }
+
             show_errors(e);
             exit(1);
         });
@@ -237,6 +242,16 @@ impl OptionalFileType {
 
 // %% CRATES: binary: rsp2 %%
 pub fn rsp2(_bin_name: &str) {
+    _rsp2_acgsd(false)
+}
+
+// HACK
+// %% CRATES: binary: rsp2-acgsd-and-dynmat %%
+pub fn rsp2_acgsd_and_dynmat(_bin_name: &str) {
+    _rsp2_acgsd(true)
+}
+
+fn _rsp2_acgsd(stop_after_dynmat: bool) {
     wrap_main(|logfile, mpi_on_demand| {
         let (app, de) = CliDeserialize::augment_clap_app({
             app_from_crate!(", ")
@@ -254,7 +269,7 @@ pub fn rsp2(_bin_name: &str) {
         logfile.start(PathFile::new(trial.new_logfile_path()?)?)?;
 
         let settings = trial.read_settings()?;
-        trial.run_relax_with_eigenvectors(mpi_on_demand, &settings, filetype, &input)
+        trial.run_relax_with_eigenvectors(mpi_on_demand, &settings, filetype, &input, stop_after_dynmat)
     });
 }
 

@@ -18,6 +18,10 @@ name = "rsp2"
 path = "src/binary-shims/rsp2.rs"
 
 [[bin]]
+name = "rsp2-acgsd-and-dynmat"
+path = "src/binary-shims/rsp2-acgsd-and-dynmat.rs"
+
+[[bin]]
 name = "rsp2-bond-test"
 path = "src/binary-shims/rsp2-bond-test.rs"
 

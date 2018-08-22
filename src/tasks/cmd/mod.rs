@@ -91,6 +91,8 @@ impl TrialDir {
         settings: &Settings,
         file_format: StructureFileType,
         input: &PathAbs,
+        // shameful HACK
+        stop_after_dynmat: bool,
     ) -> FailResult<()>
     {Ok({
         let pot = PotentialBuilder::from_root_config(&self, on_demand, &settings);
@@ -144,6 +146,7 @@ impl TrialDir {
                     let diagonalizer = $diagonalizer;
                     self.do_main_ev_loop(
                         settings, &*pot, diagonalizer, original_coords, meta.sift(),
+                        stop_after_dynmat,
                     )
                 }}
             }
@@ -300,6 +303,7 @@ impl EvLoopDiagonalizer for PhonopyDiagonalizer {
         settings: &Settings,
         pot: &PotentialBuilder,
         stored: &StoredStructure,
+        _stop_after_dynmat: bool, // HACK
     ) -> FailResult<(Vec<f64>, Basis3, DirWithBands<Box<AsPath>>)>
     {Ok({
         let meta = stored.meta();
@@ -366,6 +370,7 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
         settings: &Settings,
         pot: &PotentialBuilder,
         stored: &StoredStructure,
+        stop_after_dynmat: bool,
     ) -> FailResult<(Vec<f64>, Basis3, DynamicalMatrix)>
     {Ok({
         let prim_coords = &stored.coords;
@@ -513,6 +518,9 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
         };
         // HACK
         Json(dynmat.cereal()).save(_trial.join("gamma-dynmat.json"))?;
+        if stop_after_dynmat {
+            return Err(StoppedAfterDynmat.into());
+        }
 
         {
             let max_size = (|(a, b)| a * b)(dynmat.0.dim);
@@ -531,6 +539,15 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
     })}
 }
 
+// HACK
+// used to simulate a sort of unwind on successful exiting.
+// Take a look at the places where it's used and try not to throw up.
+//
+// In case you haven't guessed, I've given up all hope on keeping rsp2-tasks maintainable.
+// I need to rip out all of the legacy and/or experimental features I'm not using or start fresh.
+#[derive(Debug, Fail)]
+#[fail(display = "stopped after dynmat.  THIS IS NOT AN ACTUAL ERROR. THIS IS A DUMB HACK.")]
+pub(crate) struct StoppedAfterDynmat;
 
 use ::rsp2_soa_ops::{Perm, Permute};
 use ::rsp2_structure::CartOp;
@@ -1041,7 +1058,7 @@ impl TrialDir {
             macro_rules! use_diagonalizer {
                 ($diagonalizer:expr) => {{
                     $diagonalizer.do_post_relaxation_computations(
-                        &self, settings, &*pot, &stored,
+                        &self, settings, &*pot, &stored, false,
                     )
                 }}
             }

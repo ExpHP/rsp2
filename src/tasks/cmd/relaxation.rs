@@ -41,6 +41,7 @@ pub trait EvLoopDiagonalizer {
         settings: &cfg::Settings,
         pot: &PotentialBuilder,
         stored: &StoredStructure,
+        stop_after_dynmat: bool, // HACK
     ) -> FailResult<(Vec<f64>, Basis3, Self::ExtraOut)>;
 }
 
@@ -63,6 +64,7 @@ impl TrialDir {
             Option<meta::LayerScMatrices>,
             Option<meta::FracBonds>,
         >,
+        stop_after_dynmat: bool, // HACK
     ) -> FailResult<(Coords, GammaSystemAnalysis, ExtraOut)>
     {
         let mut from_coords = original_coords;
@@ -90,7 +92,7 @@ impl TrialDir {
 
                 let stored = self.read_stored_structure(&subdir)?;
 
-                diagonalizer.do_post_relaxation_computations(&self, settings, pot, &stored)?
+                diagonalizer.do_post_relaxation_computations(&self, settings, pot, &stored, stop_after_dynmat)?
             };
 
             trace!("============================");
