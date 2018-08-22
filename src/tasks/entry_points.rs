@@ -84,7 +84,16 @@ fn log_thread_info() -> FailResult<()> {
     // Currently, rsp2 exposes the same value of OMP_NUM_THREADS to both Lammps (which creates
     // them per process) and to python (which is only run on one process),
     // so OMP info is deliberately vague and currently only here for debugging.
-    info!(" OpenMP: {} thread(s) per process", ::env::omp_num_threads()?);
+    info!(
+        " OpenMP: {} thread(s) per process ({})",
+        ::env::omp_num_threads()?,
+        ::env::OMP_NUM_THREADS,
+    );
+    info!(
+        "       : {} thread(s) in single-process tasks ({})",
+        ::env::max_omp_num_threads()?,
+        ::env::MAX_OMP_NUM_THREADS,
+    );
     info!("  rayon: {} thread(s) on the root process", ::rayon::current_num_threads());
     Ok(())
 }

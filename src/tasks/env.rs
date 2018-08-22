@@ -36,9 +36,10 @@ pub fn rust_log() -> FailResult<String>
 
 // (not necessarily an integer but may be a comma-separated list.
 //  I'm sticking to a String as we only use it for display)
+pub const OMP_NUM_THREADS: &'static str = "OMP_NUM_THREADS";
 pub fn omp_num_threads() -> FailResult<String>
 {
-    nonempty_var("OMP_NUM_THREADS")
+    nonempty_var(OMP_NUM_THREADS)
         .map(|s| s.unwrap_or_else(|| "1".into()))
 }
 
@@ -54,19 +55,19 @@ pub fn log_mod() -> FailResult<bool>
         .unwrap_or(false)
 })}
 
-/// Try to figure out the maximum possible setting for OMP_NUM_THREADS
-/// for a single process (to use the full computing power of its node)
-pub fn max_omp_num_threads() -> u32 {
-    // There's lots of things we could do to try to adapt to this particular job's configuration,
-    // but very little seems reliable:
-    // - OMP_NUM_THREADS * OMPI_COMM_WORLD_LOCAL_SIZE - only available on openmpi
-    // - OMP_NUM_THREADS * SLURM_NTASKS_PER_NODE      - only available if --ntasks-per-node is used
-    // - OMP_NUM_THREADS * (SLURM_NTASKS or SLURM_NPROCS) / SLURM_JOB_NUM_NODES
-    // - bleeehhhhhhh
-
-    // The following really ought to be good enough.
-    ::num_cpus::get() as u32
-}
+pub const MAX_OMP_NUM_THREADS: &'static str = "RSP2_MAX_THREADS";
+/// Maximum possible setting for OMP_NUM_THREADS for a single process (to use the full
+/// computing power of its node).
+///
+/// Using MPI seems to somehow fool the `num_cpus` crate into seeing fewer cores.
+/// This should be manually set to the number of cores on a node.
+pub fn max_omp_num_threads() -> FailResult<u32>
+{Ok({
+    nonempty_var(MAX_OMP_NUM_THREADS)?
+        .map(|s| s.parse())
+        .fold_ok()?
+        .unwrap_or(::num_cpus::get() as u32)
+})}
 
 #[cfg(feature = "mpi")]
 pub fn num_mpi_processes() -> u32 {
