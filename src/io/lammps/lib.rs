@@ -943,17 +943,10 @@ impl<P: Potential> Lammps<P>
                 let _ = writeln!(f, "('set' commands omitted from logfile)");
             });
 
-            let carts = coords.to_carts();
-            for i in 0..coords.len() {
-                lmp.command(format!(
-                    "set atom {} type {} x {} y {} z {}",
-                    i + 1,
-                    atom_types[i],
-                    carts[i][0],
-                    carts[i][1],
-                    carts[i][2],
-                ))?;
-            }
+            lmp.init_atoms(
+                coords.to_carts().unvee(),
+                atom_types.iter().map(|ty| ty.value()).collect(),
+            )?;
 
             // Resume logging.
             if let Some(log_file) = &builder.append_log {

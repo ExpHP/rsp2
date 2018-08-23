@@ -96,6 +96,12 @@ pub(crate) trait LowLevelApi {
 
     fn get_natoms(&mut self) -> usize;
 
+    /// Initializes all positions in a manner which ensures that they are
+    /// associated with the correct processors.
+    ///
+    /// This appears on LowLevelApi as a workaround to help minimize MPI overhead.
+    fn init_atoms(&mut self, carts: Vec<[f64; 3]>, types: Vec<i64>) -> FailResult<()>;
+
     /// Set the lattice.
     ///
     /// * Their documentation says "assumes `domain->set_initial_box()` has been invoked previously".

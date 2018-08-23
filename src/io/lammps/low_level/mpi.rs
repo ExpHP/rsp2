@@ -134,6 +134,7 @@ c_enums!{
         New = 0,
         Drop = 1,
         Command = 2,
+        InitAtoms = 11,
         GetNatoms = 3,
         ResetBox = 4,
         GatherAtomsI = 5,
@@ -150,6 +151,7 @@ pub(crate) enum Input {
     New(InputNew),
     Drop(InputDrop),
     Command(InputCommand),
+    InitAtoms(InputInitAtoms),
     GetNatoms(InputGetNatoms),
     ResetBox(InputResetBox),
     GatherAtomsI(InputGatherAtomsI),
@@ -164,6 +166,7 @@ pub(crate) enum Output {
     New(OutputNew),
     Drop(OutputDrop),
     Command(OutputCommand),
+    InitAtoms(OutputInitAtoms),
     GetNatoms(OutputGetNatoms),
     ResetBox(OutputResetBox),
     GatherAtomsI(OutputGatherAtomsI),
@@ -253,6 +256,9 @@ derive_low_level_api! {
     #[fn get_natoms/GetNatoms() -> OutputGetNatoms]
     pub(crate) struct InputGetNatoms { }
 
+    #[fn init_atoms/InitAtoms() -> OutputInitAtoms]
+    pub(crate) struct InputInitAtoms { carts: Vec<[f64; 3]>, atom_types: Vec<i64> }
+
     #[(unsafe) fn reset_box/ResetBox() -> OutputResetBox]
     pub(crate) struct InputResetBox { low: [f64; 3], high: [f64; 3], skews: Skews }
 
@@ -318,6 +324,8 @@ pub(crate) type OutputDrop = ();
 /// This type exists to facilitate codegen.
 pub(crate) type OutputCommand = FailResult<()>;
 /// This type exists to facilitate codegen.
+pub(crate) type OutputInitAtoms = FailResult<()>;
+/// This type exists to facilitate codegen.
 pub(crate) type OutputGetNatoms = usize;
 /// This type exists to facilitate codegen.
 pub(crate) type OutputResetBox = FailResult<()>;
@@ -343,6 +351,7 @@ impl Broadcast for Input {
             Input::New { .. } => Method::New,
             Input::Drop { .. } => Method::Drop,
             Input::Command { .. } => Method::Command,
+            Input::InitAtoms { .. } => Method::InitAtoms,
             Input::GetNatoms { .. } => Method::GetNatoms,
             Input::ResetBox { .. } => Method::ResetBox,
             Input::GatherAtomsI { .. } => Method::GatherAtomsI,
@@ -381,7 +390,7 @@ impl Broadcast for Input {
             };
         }
         gen_match!{
-            New, Drop,
+            New, Drop, InitAtoms,
             Command, GetNatoms, ResetBox,
             GatherAtomsI, GatherAtomsF,
             ScatterAtomsI, ScatterAtomsF,
@@ -458,6 +467,7 @@ impl DispatchMultiProcess for LammpsDispatch {
                 Input::New(input) => Output::New(input.invoke_method(root, lammps)),
                 Input::Drop(input) => Output::Drop(input.invoke_method(root, lammps)),
                 Input::Command(input) => Output::Command(input.invoke_method(root, lammps)),
+                Input::InitAtoms(input) => Output::InitAtoms(input.invoke_method(root, lammps)),
                 Input::GetNatoms(input) => Output::GetNatoms(input.invoke_method(root, lammps)),
                 Input::ResetBox(input) => Output::ResetBox(input.invoke_method(root, lammps)),
                 Input::GatherAtomsI(input) => Output::GatherAtomsI(input.invoke_method(root, lammps)),

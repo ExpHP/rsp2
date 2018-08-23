@@ -31,6 +31,7 @@
 
 use ::mpi;
 use ::std::sync::Arc;
+use ::slice_of_array::prelude::*;
 
 /// A multi-process entry point for MpiOnDemand.
 ///
@@ -419,6 +420,17 @@ impl Broadcast for [f64; 3] {
         broadcast_via_mut_ref(root, value, |root, buf| {
             root.broadcast_into(&mut buf[..]);
         })
+    }
+}
+
+impl<T> Broadcast for Vec<[T; 3]>
+where
+    Vec<T>: Broadcast,
+    T: Clone,
+{
+    fn broadcast(root: &impl mpi::Root, value: Option<Vec<[T; 3]>>) -> Vec<[T; 3]> {
+        let flat = Broadcast::broadcast(root, value.map(|vec| vec.flat().to_vec()));
+        flat.nest().to_vec()
     }
 }
 

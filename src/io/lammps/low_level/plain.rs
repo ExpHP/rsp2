@@ -181,6 +181,20 @@ impl LowLevelApi for LammpsOwner {
         self.pop_error_as_result()?;
     })}
 
+    fn init_atoms(&mut self, carts: Vec<[f64; 3]>, types: Vec<i64>) -> FailResult<()>
+    {Ok({
+        for i in 0..carts.len() {
+            self.command(format!(
+                "set atom {} type {} x {} y {} z {}",
+                i + 1,
+                types[i],
+                carts[i][0],
+                carts[i][1],
+                carts[i][2],
+            ))?;
+        }
+    })}
+
     // shims to inherent methods so we can write unsafe helpers closer to code that uses them
     unsafe fn extract_compute_0d(&mut self, name: String) -> FailResult<f64>
     { self.impl_extract_compute_0d(&name) }
