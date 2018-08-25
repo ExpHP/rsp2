@@ -1,5 +1,5 @@
 pub mod layer;
-pub(crate) mod supercell;
+pub mod supercell;
 
 // these are allow(unused) because they contain
 // untested/incomplete code

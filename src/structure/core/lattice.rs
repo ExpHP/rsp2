@@ -122,7 +122,7 @@ impl Lattice {
     pub fn linear_combination(&self, coeffs: &M33<i32>) -> Lattice
     { &coeffs.map(|x| x as f64) * self }
 
-    /// Test if two Lattices represent the same Bravais lattice,
+    /// Test if two Lattices represent the same lattice,
     /// in the mathematical sense. This is to say that they each
     /// generate the same infinite set of displacement vectors.
     ///
@@ -175,8 +175,7 @@ impl Lattice {
     // who needs quickcheck
     /// Generate a random lattice.
     ///
-    /// NOTE:
-    /// Elements are pulled from a uniform distribution of [-x, x]
+    /// Elements are pulled from a uniform distribution of `[-x, x]`
     /// and in all honesty I doubt this is representative of typical lattices.
     /// (symmetry in particular is poorly represented)
     #[cfg(test)]

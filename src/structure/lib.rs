@@ -41,19 +41,8 @@ pub struct IntPrecisionError {
     value: f64,
 }
 
-pub mod supercell {
-    pub use ::algo::supercell::{
-        diagonal,
-        centered_diagonal,
-        Builder,
-        OwnedMetas,
-        SupercellToken,
-        BigDisplacement,
-    };
-}
-
+pub use ::algo::supercell;
 pub use ::algo::find_perm;
-
 pub use ::algo::layer;
 
 mod core;

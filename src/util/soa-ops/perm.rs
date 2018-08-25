@@ -365,15 +365,16 @@ impl Perm {
 
 /// Trait for applying a permutation operation.
 ///
-/// In rsp2, this has a couple of roles that might *appear* to be conflated
-/// together, but they really aren't.  It might help to envision `Perm` as
-/// being parametrized over two index types; `Perm<Src, Dest>` takes data
-/// indexed by type `Src` and transforms it into data indexed by `Dest`.
+/// `rsp2` uses permutations for a wide variety of purposes, though most
+/// frequently they represent a permutation of atoms.
 ///
-/// As such, the `Permute` impl may appear to do different things based on
-/// how the data is stored (e.g. dense data that is conceptually indexed
-/// by some index type `I`, versus sparse data that conceptually *contains*
-/// values of type `I`).
+/// Impls of `Permute` do not always necessarily apply the permutation directly to
+/// vectors contained in the type.  For instance, data in a sparse format will likely
+/// use the permutation to transform stored indices.  It helps to consider indices
+/// as having distinct types (e.g. site indices, image indices; or more specific things
+/// like "indices of sites when sorted by x"); in this model, `Perm` can be thought of
+/// as being parametrized over two index types, where `Perm<Src, Dest>` transforms
+/// data indexed by type `Src` into data indexed by type `Dest`.
 ///
 /// # Laws
 ///

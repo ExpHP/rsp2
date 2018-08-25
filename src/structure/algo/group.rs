@@ -72,8 +72,8 @@ impl<G> GroupTree<G>
     /// Compute a homomorphism of a group using the tree
     /// to elide expensive computations.
     ///
-    /// Ideally, `F` should be a function that is very expensive to
-    /// compute, while `HFn` should be comparatively cheaper.
+    /// Ideally, `compute` should be a function that is very expensive to
+    /// compute, while `compose` should be comparatively cheaper.
     ///
     /// `compose(a, b)` should compute `b of a`.
     pub fn compute_homomorphism<H>(
