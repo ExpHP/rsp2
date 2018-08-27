@@ -222,7 +222,7 @@ pub(crate) fn write_ev_analysis_output_files(
         }
 
         ::serde_json::to_writer(FileWrite::create(dir.join("unfold.json"))?, &Output {
-            layer_sc_dims: sc_mats.0.iter().map(|m| m.periods).collect(),
+            layer_sc_dims: sc_mats.iter().map(|m| m.periods).collect(),
             layer_q_indices: {
                 unfold_probs.layer_unfolders.iter()
                     .map(|u| u.q_indices().to_vec())
@@ -633,17 +633,15 @@ fn run_gamma_system_analysis(
         site_elements, site_masses, site_layers, layer_sc_matrices, frac_bonds,
     ] = meta;
 
-    let site_masses: Vec<f64> = site_masses.iter().map(|&meta::Mass(x)| x).collect();
-    let site_layers = site_layers.map(|v| v.iter().map(|&meta::Layer(n)| n).collect());
     let cart_bonds = frac_bonds.as_ref().map(|b| b.to_cart_bonds(coords));
 
     gamma_system_analysis::Input {
-        atom_layers: site_layers.map(AtomLayers),
-        layer_sc_mats: layer_sc_matrices.map(|x| LayerScMatrices(x.to_vec())),
-        atom_masses: Some(AtomMasses(site_masses)),
+        site_layers: site_layers,
+        layer_sc_mats: layer_sc_matrices,
+        site_masses: Some(site_masses.clone()),
         ev_classifications: mode_classifications.map(|x| EvClassifications(x.to_vec())),
-        atom_elements: Some(AtomElements(site_elements.to_vec())),
-        atom_coords: Some(AtomCoordinates(coords.clone())),
+        site_elements: Some(site_elements),
+        site_coords: Some(coords.clone()),
         ev_frequencies: Some(EvFrequencies(evals.to_vec())),
         ev_eigenvectors: Some(EvEigenvectors(evecs.clone())),
         bonds: cart_bonds.map(Bonds),

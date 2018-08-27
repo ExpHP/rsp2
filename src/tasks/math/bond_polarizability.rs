@@ -19,7 +19,7 @@ use ::math::basis::Basis3;
 use ::math::bonds::{CartBond, CartBonds};
 use ::enum_map::EnumMap;
 use ::rsp2_array_types::{dot, mat, V3, M33};
-use ::rsp2_structure::{Element};
+use ::meta::{Element, Mass};
 
 pub struct PolConstant {
     /// `a_par  -   a_perp`
@@ -189,7 +189,7 @@ impl RamanTensor {
 /// NOTE: Matrix is column-based.
 fn raman_tensor(
     eigenvector: &[V3],
-    masses: &[f64],
+    masses: &[Mass],
     bonds: &CartBonds,
     types: &[Element],
     pol_constants: &PolConstants,
@@ -204,7 +204,7 @@ fn raman_tensor(
         let bond_type = BondType::from_elements(types[from], types[to])?;
 
         // phonon eigenvector for this atom, need to mass normalize
-        let eig: V3 = eigenvector[from] / f64::sqrt(masses[from]);
+        let eig: V3 = eigenvector[from] / f64::sqrt(masses[from].0);
 
         // unit bond vector and length, used later
         let distance: f64 = bond_vector.norm();
@@ -266,8 +266,8 @@ pub struct Input<'a> {
     pub temperature: f64,
     pub ev_frequencies: &'a [f64],
     pub ev_eigenvectors: &'a Basis3,
-    pub atom_elements: &'a [Element],
-    pub atom_masses: &'a [f64],
+    pub site_elements: &'a [Element],
+    pub site_masses: &'a [Mass],
     pub bonds: &'a CartBonds,
 }
 
@@ -275,7 +275,7 @@ impl<'a> Input<'a> {
     pub fn compute_ev_raman_tensors(self) -> FailResult<Vec<RamanTensor>> {
         let Input {
             ev_frequencies, ev_eigenvectors,
-            temperature, atom_elements, atom_masses, bonds,
+            temperature, site_elements, site_masses, bonds,
         } = self;
 
         let pol_constants = default_CH_pol_constants();
@@ -285,9 +285,9 @@ impl<'a> Input<'a> {
                 let prefactor = raman_prefactor(frequency, temperature);
                 let tensor = raman_tensor(
                     eigs.as_real_checked(),
-                    atom_masses,
+                    site_masses,
                     bonds,
-                    atom_elements,
+                    site_elements,
                     &pol_constants,
                 )?;
                 Ok(RamanTensor { prefactor, tensor })

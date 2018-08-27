@@ -10,16 +10,14 @@
 ** ************************************************************************ */
 
 use ::FailResult;
-use ::meta::{Element};
 use ::ui::color::{ColorByRange, PaintAs, NullPainter};
 use ::ui::cfg_merging::{no_summary, merge_summaries, make_nested_mapping};
 use ::math::basis::Basis3;
-use ::math::bands::{GammaUnfolder, ScMatrix};
+use ::math::bands::{GammaUnfolder};
 #[allow(unused)] // compiler bug
 use ::itertools::Itertools;
 use ::rsp2_tasks_config::Settings;
 
-use ::rsp2_structure::{Coords};
 #[allow(unused)] // compiler bug
 use ::rsp2_soa_ops::{Part, Partition};
 
@@ -32,15 +30,17 @@ use ::threading::Threading;
 use super::acoustic_search;
 
 // NOTE: All inputs are wrapped in distinct types for the sake of type-based indexing.
+//       However, some inputs are of a sufficiently unique type that adding another newtype
+//       wrapper seems pointless, so we simply reexport those directly.
 //
 // NOTE: Since a lot of the wrapped types are just vectors, the naming convention
 //       is to prefix the name with each thing they are indexed over (in order)
 // FIXME: Y'know, we DO have `Indexed` now...
-#[derive(Debug, Clone)] pub struct AtomCoordinates(pub Coords);
-#[derive(Debug, Clone)] pub struct AtomLayers(pub Vec<usize>);
-#[derive(Debug, Clone)] pub struct AtomElements(pub Vec<Element>);
-#[derive(Debug, Clone)] pub struct AtomMasses(pub Vec<f64>);
-#[derive(Debug, Clone)] pub struct LayerScMatrices(pub Vec<ScMatrix>);
+pub use ::rsp2_structure::Coords as SiteCoordinates;
+pub use ::meta::SiteLayers;
+pub use ::meta::SiteElements;
+pub use ::meta::SiteMasses;
+pub use ::meta::LayerScMatrices;
 #[derive(Debug, Clone)] pub struct EvClassifications(pub Vec<acoustic_search::ModeKind>);
 #[derive(Debug, Clone)] pub struct EvFrequencies(pub Vec<f64>);
 #[derive(Debug, Clone)] pub struct EvEigenvectors(pub Basis3);
@@ -62,10 +62,10 @@ pub mod gamma_system_analysis {
         // The point is to allow properties specific to certain types of materials to be
         // selectively computed (and displayed, and written to output files...).
         //
-        pub atom_coords:        Option<AtomCoordinates>,
-        pub atom_layers:        Option<AtomLayers>,
-        pub atom_elements:      Option<AtomElements>,
-        pub atom_masses:        Option<AtomMasses>,
+        pub site_coords:        Option<SiteCoordinates>,
+        pub site_layers:        Option<SiteLayers>,
+        pub site_elements:      Option<SiteElements>,
+        pub site_masses:        Option<SiteMasses>,
         pub layer_sc_mats:      Option<LayerScMatrices>,
         pub ev_classifications: Option<EvClassifications>,
         pub ev_frequencies:     Option<EvFrequencies>,
@@ -88,7 +88,7 @@ pub mod gamma_system_analysis {
         pub fn compute(&self) -> FailResult<GammaSystemAnalysis>
         {Ok({
             let Input {
-                atom_coords, atom_layers, atom_elements, atom_masses,
+                site_coords, site_layers, site_elements, site_masses,
                 layer_sc_mats, ev_frequencies, ev_eigenvectors, bonds,
                 ev_classifications,
             } = self;
@@ -96,7 +96,7 @@ pub mod gamma_system_analysis {
             // since our inputs are all uniquely typed, we can let HList
             // take care of finding all the right function arguments.
             let grab_bag = hlist![
-                atom_coords, atom_layers, atom_elements, atom_masses,
+                site_coords, site_layers, site_elements, site_masses,
                 layer_sc_mats, ev_frequencies, ev_eigenvectors, bonds,
             ];
 
@@ -239,10 +239,10 @@ wrap_maybe_compute! {
 wrap_maybe_compute! {
     pub struct EvLayerAcousticness(pub Vec<f64>);
     fn ev_layer_acousticness(
-        atom_layers: &AtomLayers,
+        site_layers: &SiteLayers,
         ev_eigenvectors: &EvEigenvectors,
     ) -> FailResult<_> {
-        let part = Part::from_ord_keys(atom_layers.0.iter());
+        let part = Part::from_ord_keys(site_layers.iter());
         Ok(EvLayerAcousticness({
             (ev_eigenvectors.0).0.iter().map(|ket| {
                 ket.clone()
@@ -260,8 +260,8 @@ wrap_maybe_compute! {
         pub layer_ev_q_probs: Vec<Vec<Vec<f64>>>,
     }
     fn unfold_probs(
-        atom_layers: &AtomLayers,
-        atom_coords: &AtomCoordinates,
+        site_layers: &SiteLayers,
+        site_coords: &SiteCoordinates,
         layer_sc_mats: &LayerScMatrices,
         ev_eigenvectors: &EvEigenvectors,
     ) -> FailResult<_>
@@ -284,13 +284,13 @@ impl UnfoldProbs {
 }
 
 fn _unfold_probs(
-    atom_layers: &AtomLayers,
-    atom_coords: &AtomCoordinates,
+    site_layers: &SiteLayers,
+    site_coords: &SiteCoordinates,
     layer_sc_mats: &LayerScMatrices,
     ev_eigenvectors: &EvEigenvectors,
 ) -> FailResult<UnfoldProbs> {
-    let part = Part::from_ord_keys(atom_layers.0.iter());
-    let layer_partial_coords = atom_coords.0
+    let part = Part::from_ord_keys(site_layers.iter());
+    let layer_partial_coords = site_coords
         .clone()
         .into_unlabeled_partitions(&part)
         .collect_vec();
@@ -301,7 +301,7 @@ fn _unfold_probs(
     let layer_partial_evs = ::util::transpose_iter_to_vec(ev_layer_partial_evs);
 
     let (layer_unfolders, layer_ev_q_probs) = {
-        zip_eq!(layer_partial_coords, layer_partial_evs, &layer_sc_mats.0)
+        zip_eq!(layer_partial_coords, layer_partial_evs, &layer_sc_mats[..])
             .map(|(partial_structure, partial_evs, sc_mat)| {
                 // precompute data applicable to all kets
                 let unfolder = GammaUnfolder::from_config(
@@ -328,8 +328,8 @@ wrap_maybe_compute! {
     pub struct EvRamanTensors(pub Vec<::math::bond_polarizability::RamanTensor>);
     fn ev_raman_tensors(
         bonds: &Bonds,
-        atom_masses: &AtomMasses,
-        atom_elements: &AtomElements,
+        site_masses: &SiteMasses,
+        site_elements: &SiteElements,
         ev_frequencies: &EvFrequencies,
         ev_eigenvectors: &EvEigenvectors,
     ) -> FailResult<_>
@@ -338,8 +338,8 @@ wrap_maybe_compute! {
 
 fn _ev_raman_tensors(
     bonds: &Bonds,
-    atom_masses: &AtomMasses,
-    atom_elements: &AtomElements,
+    site_masses: &SiteMasses,
+    site_elements: &SiteElements,
     ev_frequencies: &EvFrequencies,
     ev_eigenvectors: &EvEigenvectors,
 ) -> FailResult<EvRamanTensors> {
@@ -347,8 +347,8 @@ fn _ev_raman_tensors(
 
     Input {
         temperature: 0.0,
-        atom_masses: &atom_masses.0,
-        atom_elements: &atom_elements.0,
+        site_masses: &site_masses,
+        site_elements: &site_elements,
         ev_eigenvectors: &ev_eigenvectors.0,
         ev_frequencies: &ev_frequencies.0,
         bonds: &bonds.0,

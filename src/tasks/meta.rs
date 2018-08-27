@@ -56,6 +56,7 @@ pub type SiteElements = Rc<[Element]>;
 pub type SiteLayers = Rc<[Layer]>;
 pub type LayerScMatrices = Rc<[::math::bands::ScMatrix]>;
 pub type FracBonds = Rc<::math::bonds::FracBonds>;
+pub type CartBonds = Rc<::math::bonds::CartBonds>;
 
 //----------------------------------------------------------------------------------
 
