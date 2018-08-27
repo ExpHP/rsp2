@@ -20,6 +20,7 @@ use ::std::collections::HashMap;
 use ::std::hash::Hash;
 
 #[cfg(test)] extern crate rand;
+#[cfg(test)] extern crate rustc_test as test;
 
 #[derive(Copy,Clone,Debug,Eq,PartialEq)]
 pub struct GcdData<X> {

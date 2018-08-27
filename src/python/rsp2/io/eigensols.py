@@ -9,9 +9,9 @@ def to_path(path, esols):
     ``eigenvectors`` has column vectors stored as rows.
     :return:
     """
-    dwim.to_path(path, _to_cereal(esols))
+    dwim.to_path(path, to_cereal(esols))
 
-def _to_cereal(esols):
+def to_cereal(esols):
     evals, evecs = map(np.array, esols)
     if len(evals) != len(evecs):
         raise ValueError(f'length mismatch: {len(evals)} evals, {len(evecs)} evecs')

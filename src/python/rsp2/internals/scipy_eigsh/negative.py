@@ -14,6 +14,7 @@
 import numpy as np
 import json
 import sys
+import scipy.sparse
 
 from . import eigsh_custom, get_OPinv
 from rsp2.internals import info
@@ -28,11 +29,45 @@ TOL = 1e-10
 # absolute cosines greater than this are deemed non-orthogonal
 OVERLAP_THRESH = 1e-6
 
-def main(d):
+def main_from_rust():
+    """
+    Entry point when called from rsp2's rust code.
+
+    Communicates through JSON over the standard IO streams.
+    """
+    d = json.load(sys.stdin)
     m = dynmat.from_dict(d.pop('matrix'))
     shift_invert_attempts = d.pop('shift-invert-attempts')
     assert not d
 
+    out = run(m, shift_invert_attempts=shift_invert_attempts)
+
+    json.dump(eigensols.to_cereal(out), sys.stdout)
+    print(file=sys.stdout)
+
+def main_from_cli():
+    """
+    Entry point for the standalone CLI wrapper.
+    """
+    import argparse
+    p = argparse.ArgumentParser()
+    p.add_argument('DYNMAT', help='dynmat file (.npz, .json, .json.gz, ...)')
+    p.add_argument('--output', '-o', type=str, required=True)
+    p.add_argument('--shift-invert-attempts', type=int, default=4)
+    args = p.parse_args()
+
+    out = run(
+        m=dynmat.from_path(args.DYNMAT),
+        shift_invert_attempts=args.shift_invert_attempts,
+    )
+    eigensols.to_path(args.output, out)
+
+def run(m: scipy.sparse.bsr_matrix,
+        shift_invert_attempts: int,
+        ):
+    """
+    A suitable entry point from pure python code.
+    """
     if shift_invert_attempts:
         esols = try_shift_invert(m, shift_invert_attempts)
         if not all(acousticness(v) > 1. - 1e-3 for v in esols[1]):
@@ -189,10 +224,10 @@ def mgs_step(a, b_hats):
     all dot products involve the original vector:
 
     >>> def cgs_step(a, b_hats):
-    >>>     original = a.copy()
-    >>>     for b_hat in b_hats:
-    >>>         a = a - par(original, b_hat)
-    >>>     return normalize(a)
+    ...     original = a.copy()
+    ...     for b_hat in b_hats:
+    ...         a = a - par(original, b_hat)
+    ...     return normalize(a)
 
     Contrast that with the following:
     """
@@ -245,5 +280,4 @@ def try_regular(m):
     )
 
 if __name__ == '__main__':
-    json.dump(eigensols.to_cereal(main(json.load(sys.stdin))), sys.stdout)
-    print(file=sys.stdout)
+    main_from_rust()
