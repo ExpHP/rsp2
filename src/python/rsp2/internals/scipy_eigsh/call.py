@@ -14,19 +14,18 @@
 import json
 import sys
 
-from . import common as _rsp2
+from . import eigsh_custom
+from rsp2.io import dynmat
+from rsp2.io import eigensols
 
-def main():
-    d = json.load(sys.stdin)
+def main(d):
     kw = d.pop('kw')
     kw['allow_fewer_solutions'] = d.pop('allow-fewer-solutions')
-    m = _rsp2.build_input_matrix(d.pop('matrix'))
+    m = dynmat.from_dict(d.pop('matrix'))
     assert not d
 
-    esols = _rsp2.eigsh_custom(m, **kw)
-
-    _rsp2.emit_to_stdout(esols)
-
+    return eigsh_custom(m, **kw)
 
 if __name__ == '__main__':
-    _rsp2.emit_to_stdout(main(json.load(sys.stdin)))
+    json.dump(eigensols.to_cereal(main(json.load(sys.stdin))), sys.stdout)
+    print(file=sys.stdout)

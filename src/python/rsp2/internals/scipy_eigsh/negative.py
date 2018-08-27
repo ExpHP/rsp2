@@ -15,7 +15,9 @@ import numpy as np
 import json
 import sys
 
-from . import common as _rsp2
+from . import eigsh_custom, get_OPinv
+from rsp2.internals import info
+from rsp2.io import dynmat, eigensols
 
 # The default tolerance for eigsh is machine precision, which I feel is
 # overkill. Hopefully a lighter tolerance will save some time.
@@ -27,7 +29,7 @@ TOL = 1e-10
 OVERLAP_THRESH = 1e-6
 
 def main(d):
-    m = _rsp2.build_input_matrix(d.pop('matrix'))
+    m = dynmat.from_dict(d.pop('matrix'))
     shift_invert_attempts = d.pop('shift-invert-attempts')
     assert not d
 
@@ -42,7 +44,7 @@ def main(d):
 # in **significantly** fewer iterations than regular mode.
 # noinspection PyUnreachableCode
 def try_shift_invert(m, shift_invert_attempts):
-    _rsp2.info('trace: precomputing OPinv for shift-invert')
+    info('trace: precomputing OPinv for shift-invert')
 
     # From what I have seen, shift_invert mode tends to find most of its
     # solutions fairly quickly, but some may be incorrect. Furthermore, it does
@@ -58,7 +60,7 @@ def try_shift_invert(m, shift_invert_attempts):
 
     # A heavy computational step at the beginning of shift-invert mode is
     # factorizing the matrix; do that ahead of time.
-    OPinv = _rsp2.get_OPinv(m, sigma=0, tol=TOL)
+    OPinv = get_OPinv(m, sigma=0, tol=TOL)
 
     found_evals = []
     found_evecs = []
@@ -67,8 +69,8 @@ def try_shift_invert(m, shift_invert_attempts):
     counts = []
 
     for call_i in range(shift_invert_attempts):
-        _rsp2.info('trace: shift-invert call', call_i + 1)
-        (evals, evecs) = _rsp2.eigsh_custom(
+        info('trace: shift-invert call', call_i + 1)
+        (evals, evecs) = eigsh_custom(
             m,
             k=HOW_MANY_SOLS,
             maxiter=MAX_ITER,
@@ -126,9 +128,9 @@ def try_shift_invert(m, shift_invert_attempts):
 
         counts.append(count)
 
-    _rsp2.info(" Good -- Bad (Old Wrong OrthoFail OrthoBad)")
+    info(" Good -- Bad (Old Wrong OrthoFail OrthoBad)")
     for count in counts:
-        _rsp2.info(
+        info(
             " {:^4} -- {:^3} ({:^3} {:^5} {:^9} {:^8})".format(
                 count.good,
                 count.bad.total(),
@@ -231,8 +233,8 @@ def lazy_all(it): return all(pred() for pred in it)
 # From what I've seen, this always produces legitimate solutions, but generally
 # takes long to converge onto anything.
 def try_regular(m):
-    _rsp2.info('trace: trying non-shift-invert')
-    return _rsp2.eigsh_custom(
+    info('trace: trying non-shift-invert')
+    return eigsh_custom(
         m,
         k=min(12, m.shape[0]-1),
         which='SA',
@@ -243,4 +245,5 @@ def try_regular(m):
     )
 
 if __name__ == '__main__':
-    _rsp2.emit_to_stdout(main(json.load(sys.stdin)))
+    json.dump(eigensols.to_cereal(main(json.load(sys.stdin))), sys.stdout)
+    print(file=sys.stdout)
