@@ -49,3 +49,4 @@ phonons:
   displacement-distance: 1e-4
 layer-gamma-threshold: 0.2
 bond-radius: 1.8
+lammps-processor-axis-mask: [true, true, false]
