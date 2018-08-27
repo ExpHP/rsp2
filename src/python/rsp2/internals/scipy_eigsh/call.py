@@ -13,18 +13,20 @@
 
 import json
 import sys
-import scipy.sparse
-import scipy.sparse.linalg as spla
-from scipy.sparse.linalg.eigen.arpack import ArpackNoConvergence
 
-import _rsp2
+from . import common as _rsp2
 
-d = json.load(sys.stdin)
-kw = d.pop('kw')
-kw['allow_fewer_solutions'] = d.pop('allow-fewer-solutions')
-m = _rsp2.build_input_matrix(d.pop('matrix'))
-assert not d
+def main():
+    d = json.load(sys.stdin)
+    kw = d.pop('kw')
+    kw['allow_fewer_solutions'] = d.pop('allow-fewer-solutions')
+    m = _rsp2.build_input_matrix(d.pop('matrix'))
+    assert not d
 
-esols = _rsp2.eigsh_custom(m, **kw)
+    esols = _rsp2.eigsh_custom(m, **kw)
 
-_rsp2.emit_to_stdout(esols)
+    _rsp2.emit_to_stdout(esols)
+
+
+if __name__ == '__main__':
+    _rsp2.emit_to_stdout(main(json.load(sys.stdin)))

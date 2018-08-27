@@ -40,6 +40,9 @@ where F: FnOnce(SetGlobalLogfile, Option<LammpsOnDemand>) -> FailResult<()>,
             let logfile = init_global_logger().expect("Could not init logger");
             check_for_deps()?;
             log_thread_info()?;
+
+            let _pp_guard = ::rsp2_python::add_to_python_path()?;
+
             main(logfile, on_demand)
         })();
 

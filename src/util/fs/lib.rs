@@ -49,6 +49,14 @@ pub fn create(path: impl AsRef<Path>) -> FailResult<File>
         .map_err(Into::into)
 }
 
+/// Wrapper around `std::fs::write` that adds context.
+pub fn write(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) -> FailResult<()>
+{
+    std::fs::write(path.as_ref(), contents)
+        .with_context(|e| format!("{}: could not write file: {}", path.as_ref().display(), e))
+        .map_err(Into::into)
+}
+
 /// Wrapper around `std::fs::copy` that adds context.
 pub fn copy(src: impl AsRef<Path>, dest: impl AsRef<Path>) -> FailResult<()>
 {

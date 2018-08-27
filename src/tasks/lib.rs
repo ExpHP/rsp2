@@ -31,6 +31,7 @@ extern crate rsp2_array_utils;
 extern crate rsp2_array_types;
 extern crate rsp2_soa_ops;
 extern crate rsp2_slice_math;
+extern crate rsp2_python;
 extern crate rsp2_fs_util;
 extern crate rsp2_linalg;
 #[macro_use] extern crate rsp2_newtype_indices;

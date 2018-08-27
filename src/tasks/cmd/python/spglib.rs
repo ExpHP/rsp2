@@ -16,15 +16,15 @@ use ::FailResult;
 use ::rsp2_array_types::{V3, M33};
 use ::rsp2_structure::{Coords, Lattice, IntRot, CartOp};
 
-use super::{call_script_and_communicate};
+use super::{call_script_and_communicate, Script};
 
-pub(super) const PY_CHECK_SPGLIB_AVAILABILITY: &'static str = indoc!(r#"
+pub(super) const PY_CHECK_SPGLIB_AVAILABILITY: Script = Script::String(indoc!(r#"
     #!/usr/bin/env python3
     import spglib
     spglib.get_symmetry_dataset
-"#);
+"#));
 
-const PY_CALL_SPGLIB: &'static str = include_str!("call-spglib.py");
+const PY_CALL_SPGLIB: Script = Script::String(include_str!("call-spglib.py"));
 
 #[derive(Serialize)]
 struct Input {
@@ -52,7 +52,7 @@ impl SpgDataset {
         let types = types.to_vec();
 
         let input = Input { coords, types, symprec };
-        let result: Result<Self, String> = call_script_and_communicate(PY_CALL_SPGLIB, &[], &input)?;
+        let result: Result<Self, String> = call_script_and_communicate(PY_CALL_SPGLIB, &input)?;
         result
             .map(|mut spg| { spg.lattice = Some(lattice); spg })
             .map_err(|e| SpglibError(e).into())

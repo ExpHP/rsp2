@@ -17,10 +17,13 @@ mod spglib;
 use ::{FailResult, FailOk};
 use ::std::process;
 use ::std::io::prelude::*;
+use ::std::path::{Path, PathBuf};
 
-const PY_NOOP: &'static str = indoc!(r#"
+use ::rsp2_fs_util as fsx;
+
+const PY_NOOP: Script = Script::String(indoc!(r#"
     #!/usr/bin/env python3
-"#);
+"#));
 
 #[derive(Debug, Fail)]
 #[fail(display = "an error occurred running the most trivial python script")]
@@ -41,19 +44,17 @@ pub fn check_availability() -> FailResult<()> {
 }
 
 fn call_script_and_check_success<E: ::failure::Fail>(
-    script: &'static str,
+    script: Script,
     error: E,
 ) -> FailResult<()>
 {Ok({
     use ::std::process::Stdio;
 
-    let tmp = ::rsp2_fs_util::TempDir::new("rsp2")?;
-    let path = tmp.path().join("script.py");
-
-    ::std::fs::write(&path, script)?;
+    let tmp = fsx::TempDir::new("rsp2")?;
+    let script = ReifiedScript::new(script, tmp.path().join("script.py"))?;
 
     let mut cmd = process::Command::new("python3");
-    cmd.arg(path);
+    script.add_args(&mut cmd);
 
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
@@ -72,9 +73,18 @@ fn call_script_and_check_success<E: ::failure::Fail>(
     let _ = stderr_worker.join();
 })}
 
+enum Script {
+    /// Run a script saved as a python module, using `python -m fully.qualified.name`.
+    ///
+    /// This module is resolved through all of the standard means (installed packages, `PYTHONPATH`,
+    /// etc...)
+    Module(&'static str),
+    /// Run a standalone script whose text is embedded in the binary, using `python tempfile.py`
+    String(&'static str),
+}
+
 fn call_script_and_communicate<In, Out>(
-    script: &'static str,
-    other_modules: &[(&'static str, &'static str)],
+    script: Script,
     stdin_data: In,
 ) -> FailResult<Out>
 where
@@ -83,18 +93,13 @@ where
 {Ok({
     use ::std::process::Stdio;
 
-    let tmp = ::rsp2_fs_util::TempDir::new("rsp2")?;
+    let tmp = fsx::TempDir::new("rsp2")?;
     tmp.try_with_recovery(|tmp| FailOk({
-        let main_path = tmp.path().join("main-script.py");
-        ::std::fs::write(&main_path, script)?;
-
-        for &(name, content) in other_modules {
-            let path = tmp.path().join(format!("{}.py", name));
-            ::std::fs::write(&path, content)?;
-        }
+        let script = ReifiedScript::new(script, tmp.path().join("script.py"))?;
 
         let mut cmd = process::Command::new("python3");
-        cmd.arg(main_path);
+        script.add_args(&mut cmd);
+
         cmd.stdin(Stdio::piped());
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
@@ -135,3 +140,35 @@ where
         value
     }))?.1 // tmp.try_with_recovery(...)
 })}
+
+/// The runtime component of Script.  Constructing it may produce a file on the filesystem,
+/// and it knows what arguments must be handed to the python interpreter to invoke the script.
+struct ReifiedScript {
+    script: Script,
+    file_path: Option<PathBuf>,
+}
+
+impl ReifiedScript {
+    fn new(script: Script, suggested_path: impl AsRef<Path>) -> FailResult<Self> {
+        let suggested_path = suggested_path.as_ref();
+
+        let file_path = match script {
+            Script::Module(_) => None,
+            Script::String(s) => {
+                fsx::write(suggested_path, s)?;
+                Some(suggested_path.to_owned())
+            },
+        };
+        Ok(ReifiedScript { script, file_path })
+    }
+
+    // Add the argument(s) to a `python` command specifying the script to run.
+    //
+    // Any arguments after these will be forwarded directly to the script.
+    fn add_args(&self, cmd: &mut process::Command) {
+        match self.script {
+            Script::String(_) => cmd.arg(self.file_path.as_ref().unwrap()),
+            Script::Module(s) => cmd.arg("-m").arg(s),
+        };
+    }
+}

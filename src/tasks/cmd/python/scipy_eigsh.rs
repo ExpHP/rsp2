@@ -48,20 +48,20 @@ use ::math::basis::{Basis3};
 
 #[allow(unused)] // rustc bug
 use ::slice_of_array::prelude::*;
-use super::{call_script_and_communicate};
+use super::{call_script_and_communicate, Script};
 
-pub(super) const PY_CHECK_SCIPY_AVAILABILITY: &'static str = indoc!(r#"
+pub(super) const PY_CHECK_SCIPY_AVAILABILITY: Script = Script::String(indoc!(r#"
     #!/usr/bin/env python3
     import numpy as np
     import scipy.sparse
     import scipy.sparse.linalg as spla
-"#);
+"#));
 
-const PY_CALL: &'static str = include_str!("call.py");
-const PY_NEGATIVE: &'static str = include_str!("negative.py");
-const AUX: &'static [(&'static str, &'static str)] = &[
-    ("_rsp2", include_str!("_rsp2.py")),
-];
+// NOTE: These modules require the python package in `rsp2-python` to be added to `PYTHONPATH`.
+//
+//       This is handled early on in rsp2 entry points.
+const PY_CALL:     Script = Script::Module("rsp2.internals.scipy_eigsh.call");
+const PY_NEGATIVE: Script = Script::Module("rsp2.internals.scipy_eigsh.negative");
 
 type Frequency = f64;
 
@@ -80,7 +80,7 @@ mod scripts {
 
     impl Eigsh {
         pub(super) fn invoke(self) -> FailResult<(Vec<Frequency>, Basis3)> {
-            call_script_and_communicate(PY_CALL, AUX, self)
+            call_script_and_communicate(PY_CALL, self)
                 .and_then(read_py_output)
         }
     }
@@ -94,7 +94,7 @@ mod scripts {
 
     impl Negative {
         pub(super) fn invoke(self) -> FailResult<(Vec<Frequency>, Basis3)> {
-            call_script_and_communicate(PY_NEGATIVE, AUX, self)
+            call_script_and_communicate(PY_NEGATIVE, self)
                 .and_then(read_py_output)
         }
     }

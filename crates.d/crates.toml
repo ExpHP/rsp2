@@ -50,6 +50,7 @@ rsp2-integration-test = "src/util/integration-test"
 rsp2-soa-ops        = "src/util/soa-ops"
 rsp2-newtype-indices = "src/util/newtype-indices"
 rsp2-numtheory      = "src/util/numtheory"
+rsp2-python = "src/python"
 #!!INSERTION POINT FOR NEW CRATES!!#
 
 #--------------------------------------------
@@ -102,3 +103,4 @@ pretty_assertions = "0.5.1"
 mpi = "0.5.4"
 num_cpus = "1.8"
 libffi-sys = "0.6.2"
+include_dir = "0.2.1"

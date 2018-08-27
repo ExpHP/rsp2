@@ -15,7 +15,7 @@ import numpy as np
 import json
 import sys
 
-import _rsp2
+from . import common as _rsp2
 
 # The default tolerance for eigsh is machine precision, which I feel is
 # overkill. Hopefully a lighter tolerance will save some time.
@@ -26,8 +26,7 @@ TOL = 1e-10
 # absolute cosines greater than this are deemed non-orthogonal
 OVERLAP_THRESH = 1e-6
 
-def main():
-    d = json.load(sys.stdin)
+def main(d):
     m = _rsp2.build_input_matrix(d.pop('matrix'))
     shift_invert_attempts = d.pop('shift-invert-attempts')
     assert not d
@@ -161,10 +160,10 @@ def mgs_step(a, b_hats):
     This is the function such that
 
     >>> def mgs(original_vecs):
-    >>>     out = []
-    >>>     for vec in original_vecs:
-    >>>         out.append(mgs_step(vec, out))
-    >>>     return out
+    ...     out = []
+    ...     for vec in original_vecs:
+    ...         out.append(mgs_step(vec, out))
+    ...     return out
 
     is a correct implementation of Modified Gram Schmidt method.
 
@@ -244,4 +243,4 @@ def try_regular(m):
     )
 
 if __name__ == '__main__':
-    _rsp2.emit_to_stdout(main())
+    _rsp2.emit_to_stdout(main(json.load(sys.stdin)))
