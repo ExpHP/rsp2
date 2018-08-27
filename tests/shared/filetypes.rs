@@ -1,6 +1,8 @@
 use ::std::ops::Deref;
 use ::std::path::Path;
 use ::std::io::prelude::*;
+use ::itertools::Itertools;
+use ::std::collections::{BTreeSet, BTreeMap};
 
 use ::shared::util;
 
@@ -20,7 +22,7 @@ extern crate serde;
 
 extern crate serde_json;
 
-use self::rsp2_array_types::{V3};
+use self::rsp2_array_types::{V3, M33, Unvee};
 extern crate rsp2_array_types;
 
 macro_rules! impl_json {
@@ -164,6 +166,77 @@ impl CheckFile for RamanJson {
                     zero_thresh: zero_thresh,
                     rel_tol: tol.intensity_nonzero_rel_tol,
                 });
+            }
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct Dynmat {
+    pub complex_blocks: Vec<(M33, M33)>,
+    pub col: Vec<usize>,
+    pub row_ptr: Vec<usize>,
+    pub dim: (usize, usize),
+}
+impl_json!{ (Dynmat)[save, load] }
+
+#[derive(Debug, Copy, Clone)]
+pub struct DynmatTolerances {
+    pub abs_tol: f64,
+    pub rel_tol: f64,
+}
+
+impl Dynmat {
+    fn to_map(&self) -> BTreeMap<(usize, usize), (M33, M33)> {
+        let mut out = BTreeMap::new();
+        let ends_1 = self.row_ptr.iter().cloned();
+        let ends_2 = self.row_ptr.iter().cloned().dropping(1);
+        for (row, (from, to)) in ends_1.zip(ends_2).enumerate() {
+            let blocks_in_row = self.complex_blocks[from..to].iter().cloned();
+            let cols_in_row = self.col[from..to].iter().cloned();
+            for (col, block) in cols_in_row.zip(blocks_in_row) {
+                out.insert((row, col), block);
+            }
+        }
+        out
+    }
+
+    fn zip_nonzero_blocks(&self, other: &Dynmat) -> impl Iterator<Item=((M33, M33), (M33, M33))> {
+        let mut our_map = self.to_map();
+        let our_set: BTreeSet<_> = our_map.keys().cloned().collect();
+        let mut their_map = other.to_map();
+        let their_set: BTreeSet<_> = our_map.keys().cloned().collect();
+
+        for key in &our_set - &their_set {
+            assert!(their_map.insert(key, (M33::zero(), M33::zero())).is_none(), "bug in unit test");
+        }
+        for key in &their_set - &our_set {
+            assert!(our_map.insert(key, (M33::zero(), M33::zero())).is_none(), "bug in unit test");
+        }
+        assert!(our_map.keys().eq(their_map.keys()), "bug in unit test");
+
+        our_map.values().cloned().collect_vec().into_iter()
+            .zip(their_map.values().cloned().collect_vec())
+    }
+}
+
+impl CheckFile for Dynmat {
+    type OtherArgs = DynmatTolerances;
+
+    fn read_file(path: &Path) -> Result<Self, Error> { Self::load(path) }
+
+    fn check_against(&self, expected: &Dynmat, tol: DynmatTolerances) {
+        assert_eq!(self.dim, expected.dim);
+        for (actual, expected) in self.zip_nonzero_blocks(expected) {
+            let (actual_real, actual_imag) = actual;
+            let (expected_real, expected_imag) = expected;
+            assert_close!{
+                abs=tol.abs_tol,
+                rel=tol.rel_tol,
+                [actual_real.unvee(), actual_imag.unvee()],
+                [expected_real.unvee(), expected_imag.unvee()],
             }
         }
     }

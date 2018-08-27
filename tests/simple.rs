@@ -3,6 +3,7 @@ extern crate serde;
 extern crate serde_json;
 
 extern crate failure;
+extern crate itertools;
 
 #[macro_use] extern crate rsp2_assert_close;
 extern crate rsp2_integration_test;

@@ -1,0 +1,52 @@
+potential:
+  kc-z:
+     cutoff: 14
+    #airebo:
+    #  lj-sigma: 3.0
+    #  lj-scale: 1.0
+scale-ranges:
+  repeat-count: 2
+  warn-threshold: 1e-2
+  fail: true
+  scalables: []
+    #- parameter:
+    #    axis-mask: [1, 1, 0]
+    #    guess: 1.00
+    #    range: [0.95, 1.05]
+cg:
+  stop-condition:
+    any:
+      - value-delta:
+          rel-greater-than: 0
+          steps-ago: 10
+      - iterations: 100
+  alpha-guess-max: 1e-1
+  alpha-guess-first: 1e-2
+ev-loop:
+  min-positive-iter: 1
+  max-iter: 3
+ev-chase: # one-by-one
+  cg:
+    stop-condition:
+      any:
+        - value-delta:
+            rel-greater-than: 0
+            steps-ago: 10
+        - iterations: 100
+    alpha-guess-max: 1e-1
+    alpha-guess-first: 1e-2
+threading: "lammps"
+phonons:
+  # no supercell is required for gamma dynamical matrix
+  #supercell: {target: [35, 35, 0]}
+  disp-finder:
+    rsp2:
+      directions: survey
+  eigensolver:
+    sparse: {}
+  supercell: {target: [0, 0, 0]}
+  symmetry-tolerance: 1e-2
+  displacement-distance: 1e-4
+layer-gamma-threshold: 0.2
+bond-radius: 1.8
+lammps-processor-axis-mask: [true, true, false]
