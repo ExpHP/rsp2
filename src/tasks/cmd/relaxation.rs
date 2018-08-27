@@ -23,7 +23,7 @@ use ::potential::{self, PotentialBuilder, DiffFn, DynFlatDiffFn};
 use ::meta::{self, prelude::*};
 use ::hlist_aliases::*;
 
-use ::math::basis::Basis3;
+use ::math::basis::{Basis3, EvDirection};
 
 use ::slice_of_array::prelude::*;
 use ::rsp2_slice_math::{v, V, vdot};
@@ -155,22 +155,23 @@ impl TrialDir {
     ) -> FailResult<(Coords, DidEvChasing)>
     {Ok({
         use super::acoustic_search::ModeKind;
-        let bad_evs: Vec<_> = {
+        let bad_directions: Vec<_> = {
             let classifications = ev_analysis.ev_classifications.as_ref().expect("(bug) always computed!");
             izip!(1.., evals, &evecs.0, &classifications.0)
                 .filter(|&(_, _, _, kind)| kind == &ModeKind::Imaginary)
                 .map(|(i, freq, evec, _)| {
                     let name = format!("band {} ({})", i, freq);
-                    (name, evec.as_real_checked())
+                    let direction = EvDirection::from_eigenvector(evec, meta.sift());
+                    (name, direction)
                 }).collect()
         };
 
-        match bad_evs.len() {
+        match bad_directions.len() {
             0 => (coords, DidEvChasing(false)),
             n => {
                 trace!("Chasing {} bad eigenvectors...", n);
                 let structure = do_eigenvector_chase(
-                    pot, &settings.ev_chase, coords, meta.sift(), &bad_evs[..],
+                    pot, &settings.ev_chase, coords, meta.sift(), &bad_directions[..],
                 )?;
                 (structure, DidEvChasing(true))
             }
@@ -252,13 +253,14 @@ fn do_eigenvector_chase(
     chase_settings: &cfg::EigenvectorChase,
     mut coords: Coords,
     meta: potential::CommonMeta,
-    bad_evecs: &[(String, &[V3])],
+    bad_directions: &[(String, EvDirection)],
 ) -> FailResult<Coords>
 {Ok({
     match chase_settings {
         cfg::EigenvectorChase::OneByOne => {
-            for (name, evec) in bad_evecs {
-                let (alpha, new_coords) = do_minimize_along_evec(pot, coords, meta.sift(), &evec[..])?;
+            for (name, dir) in bad_directions {
+                let dir = dir.as_real_checked();
+                let (alpha, new_coords) = do_minimize_along_evec(pot, coords, meta.sift(), dir)?;
                 info!("Optimized along {}, a = {:e}", name, alpha);
 
                 coords = new_coords;
@@ -266,26 +268,22 @@ fn do_eigenvector_chase(
             coords
         },
         cfg::EigenvectorChase::Acgsd(cg_settings) => {
-            let evecs: Vec<_> = bad_evecs.iter().map(|&(_, ev)| ev).collect();
-            do_cg_along_evecs(pot, cg_settings, coords, meta.sift(), &evecs[..])?
+            let bad_directions = bad_directions.iter().map(|(_, dir)| dir.clone());
+            do_cg_along_evecs(pot, cg_settings, coords, meta.sift(), bad_directions)?
         },
     }
 })}
 
-fn do_cg_along_evecs<V, I>(
+fn do_cg_along_evecs(
     pot: &PotentialBuilder,
     cg_settings: &cfg::Acgsd,
     coords: Coords,
     meta: potential::CommonMeta,
-    evecs: I,
+    directions: impl IntoIterator<Item=EvDirection>,
 ) -> FailResult<Coords>
-where
-    V: AsRef<[V3]>,
-    I: IntoIterator<Item=V>,
 {Ok({
-    let evecs: Vec<_> = evecs.into_iter().collect();
-    let refs: Vec<_> = evecs.iter().map(|x| x.as_ref()).collect();
-    _do_cg_along_evecs(pot, cg_settings, coords, meta, &refs)?
+    let directions = directions.into_iter().collect::<Vec<_>>();
+    _do_cg_along_evecs(pot, cg_settings, coords, meta, &directions)?
 })}
 
 fn _do_cg_along_evecs(
@@ -293,10 +291,10 @@ fn _do_cg_along_evecs(
     cg_settings: &cfg::Acgsd,
     coords: Coords,
     meta: potential::CommonMeta,
-    evecs: &[&[V3]],
+    evecs: &[EvDirection],
 ) -> FailResult<Coords>
 {Ok({
-    let flat_evecs: Vec<_> = evecs.iter().map(|ev| ev.flat()).collect();
+    let flat_evecs: Vec<_> = evecs.iter().map(|ev| ev.as_real_checked().flat()).collect();
     let init_pos = coords.to_carts();
 
     let mut flat_diff_fn = pot.parallel(true).initialize_flat_diff_fn(&coords, meta.sift())?;

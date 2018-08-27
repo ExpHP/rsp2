@@ -38,6 +38,7 @@ pub mod helper {
     //       could still be useful if some veclike data were not stored in a Vec
     //       for some reason. (like a dense matrix?)
     pub use ::part::composite_perm_for_part_lifo;
+    pub use ::part::partition_each_item;
 }
 
 pub use self::perm::{Perm, Permute};

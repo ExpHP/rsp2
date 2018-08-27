@@ -15,7 +15,7 @@ use ::potential::{PotentialBuilder};
 use ::meta::{self, prelude::*};
 use ::rsp2_tasks_config as cfg;
 
-use ::math::basis::Basis3;
+use ::math::basis::{Basis3, EvDirections};
 
 use ::rsp2_slice_math::{v, V, vdot, vnormalize, BadNorm};
 
@@ -96,6 +96,11 @@ pub(crate) fn perform_acoustic_search(
     settings: &cfg::AcousticSearch,
 ) -> FailResult<Rc<[ModeKind]>>
 {Ok({
+    let ev_directions = {
+        EvDirections::from_eigenvectors(eigenvectors, meta.sift())
+            .normalized()
+    };
+
     let &cfg::AcousticSearch {
         expected_non_translations,
         displacement_distance,
@@ -118,18 +123,21 @@ pub(crate) fn perform_acoustic_search(
         };
 
         let mut t_end = zero_index;
-        for (i, ket) in eigenvectors.0.iter().take(stop_index).enumerate() {
-            if ket.acousticness() >= 0.95 {
+        for (i, direction) in ev_directions.0.iter().take(stop_index).enumerate() {
+            if direction.acousticness() >= 0.95 {
                 t_end = i + 1;
                 kinds[i] = Some(ModeKind::Translational);
             }
         }
 
         // if there's more than three then the eigenbasis clearly isn't even orthonormal
+        //
+        // (NOTE: The above statement was originally written under the false assumption that
+        //        the eigenvectors are the directions, but I think it is still correct?
+        //        Haven't worked it out.)
         ensure!(
             kinds.iter().filter(|&x| x == &Some(ModeKind::Translational)).count() <= 3,
             "More than 3 pure translational modes! These eigenvectors are garbage!");
-
 
         // Everything after the last translational or negative mode is vibrational.
         kinds.truncate(t_end);
@@ -144,12 +152,12 @@ pub(crate) fn perform_acoustic_search(
 
     let mut rotational_count = 0;
     let mut uncertain_indices = vec![];
-    for (i, ket) in eigenvectors.0.iter().take(zero_index).enumerate() {
+    for (i, direction) in ev_directions.0.iter().take(zero_index).enumerate() {
         if kinds[i].is_some() {
             continue;
         }
 
-        let direction = ket.as_real_checked();
+        let direction = direction.as_real_checked();
         let V(pos_l) = v(pos_0.flat()) - displacement_distance * v(direction.flat());
         let V(pos_r) = v(pos_0.flat()) + displacement_distance * v(direction.flat());
         let grad_l = diff_at_pos(&pos_l[..])?.1;

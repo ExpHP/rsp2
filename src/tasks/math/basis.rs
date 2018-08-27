@@ -11,13 +11,16 @@
 
 use ::rsp2_kets::{Ket, Basis, AsKetRef};
 use ::rsp2_soa_ops::{Perm, Permute};
-use ::rsp2_soa_ops::{Part, Partition, Unlabeled};
+use ::rsp2_soa_ops::{Part, Partition, Unlabeled, helper::partition_each_item};
 
+use ::hlist_aliases::*;
+use ::meta::{self, Mass, prelude::*};
 use ::rsp2_array_types::V3;
 use ::slice_of_array::prelude::*;
 
 // alternative types to those in rsp2_kets which are defined in terms of 3-vectors
 // and for which we can implement Permute and Partition, etc.
+/// Orthonormal eigenvectors of the dynamical matrix.
 #[derive(Debug, Clone)]
 pub struct Basis3(pub(crate) Vec<Ket3>);
 
@@ -28,6 +31,17 @@ pub struct Ket3 {
     pub(crate) real: Vec<V3>,
     pub(crate) imag: Vec<V3>,
 }
+
+/// Cartesian displacement directions of eigenvectors.
+///
+/// Not necessarily normalized, and in structures with more than one distinct mass,
+/// they may not even be orthogonal.
+#[derive(Debug, Clone)]
+pub struct EvDirections(pub(crate) Vec<EvDirection>);
+
+/// Cartesian displacement direction of an eigenvector.
+#[derive(Debug, Clone)]
+pub struct EvDirection(Ket3);
 
 impl Basis3 {
     pub fn from_basis(basis: Basis) -> Self
@@ -63,6 +77,11 @@ impl Permute for Ket3 {
     }}
 }
 
+impl Permute for EvDirection {
+    fn permuted_by(self, perm: &Perm) -> Self
+    { EvDirection(self.0.permuted_by(perm)) }
+}
+
 impl<'iter> Partition<'iter> for Ket3 {
     fn into_unlabeled_partitions<L>(self, part: &'iter Part<L>) -> Unlabeled<'iter, Self>
     {Box::new({
@@ -72,24 +91,19 @@ impl<'iter> Partition<'iter> for Ket3 {
     })}
 }
 
-impl<'iter> Partition<'iter> for Basis3
-{
+impl<'iter> Partition<'iter> for Basis3 {
     fn into_unlabeled_partitions<L>(self, part: &'iter Part<L>) -> Unlabeled<'iter, Self>
-    {Box::new({
-        self.0.into_iter()
-            // (over each ket)
-            .map(|x| x.into_unlabeled_partitions(part))
-            .fold(
-                vec![Basis3(vec![]); part.region_keys().len()],
-                |mut bases, kets| {
-                    // (over each partition)
-                    for (basis, ket) in zip_eq!(&mut bases, kets) {
-                        basis.0.push(ket);
-                    }
-                    bases
-                }
-            ).into_iter()
-    })}
+    { Box::new(partition_each_item(part, self.0).map(Basis3)) }
+}
+
+impl<'iter> Partition<'iter> for EvDirection {
+    fn into_unlabeled_partitions<L>(self, part: &'iter Part<L>) -> Unlabeled<'iter, Self>
+    { Box::new(self.0.into_unlabeled_partitions(part).map(EvDirection)) }
+}
+
+impl<'iter> Partition<'iter> for EvDirections {
+    fn into_unlabeled_partitions<L>(self, part: &'iter Part<L>) -> Unlabeled<'iter, Self>
+    { Box::new(partition_each_item(part, self.0).map(EvDirections)) }
 }
 
 impl Ket3 {
@@ -98,6 +112,61 @@ impl Ket3 {
     {
         self.real.flat().iter().map(|x| x*x).sum::<f64>()
         + self.imag.flat().iter().map(|x| x*x).sum::<f64>()
+    }
+
+    pub fn norm(&self) -> f64
+    { f64::sqrt(self.sqnorm()) }
+
+    pub fn as_real_checked(&self) -> &[V3]
+    {
+        for &x in self.imag.flat() {
+            assert_eq!(x, 0.0);
+        }
+        &self.real
+    }
+
+    pub fn normalized(&self) -> Self {
+        let Ket3 { real, imag } = self;
+        let norm = self.norm();
+        let real = real.iter().map(|&v| v / norm).collect();
+        let imag = imag.iter().map(|&v| v / norm).collect();
+        Ket3 { real, imag }
+    }
+}
+
+impl EvDirections {
+    pub fn from_eigenvectors(evecs: &Basis3, meta: HList1<meta::SiteMasses>) -> Self {
+        EvDirections({
+            evecs.0.iter()
+                .map(|evec| EvDirection::from_eigenvector(evec, meta.sift()))
+                .collect()
+        })
+    }
+
+    /// Normalize each direction.
+    pub fn normalized(&self) -> Self
+    { EvDirections(self.0.iter().map(EvDirection::normalized).collect()) }
+}
+
+impl ::std::ops::Deref for EvDirection {
+    type Target = Ket3;
+
+    fn deref(&self) -> &Ket3
+    { &self.0 }
+}
+
+// methods that make sense on directions, but not eigenvectors
+impl EvDirection {
+    pub fn from_eigenvector(evec: &Ket3, meta: HList1<meta::SiteMasses>) -> Self {
+        let masses: meta::SiteMasses = meta.pick();
+        let (real, imag) = {
+            zip_eq!(&evec.real, &evec.imag, &masses[..])
+                .map(|(&real, &imag, &Mass(mass)): (&V3, &V3, _)| {
+                    (real / f64::sqrt(mass), imag / f64::sqrt(mass))
+                })
+                .unzip()
+        };
+        EvDirection(Ket3 { real, imag })
     }
 
     /// A measure from 0 to `self.sqnorm()` of how acoustic the ket is.
@@ -127,12 +196,6 @@ impl Ket3 {
         acc.0
     }
 
-    pub fn as_real_checked(&self) -> &[V3]
-    {
-        for &x in self.imag.flat() {
-            assert_eq!(x, 0.0);
-        }
-        &self.real
-    }
+    pub fn normalized(&self) -> Self
+    { EvDirection(self.0.normalized()) }
 }
-

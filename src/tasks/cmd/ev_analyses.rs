@@ -12,7 +12,7 @@
 use ::FailResult;
 use ::ui::color::{ColorByRange, PaintAs, NullPainter};
 use ::ui::cfg_merging::{no_summary, merge_summaries, make_nested_mapping};
-use ::math::basis::Basis3;
+use ::math::basis::{Basis3, EvDirections};
 use ::math::bands::{GammaUnfolder};
 #[allow(unused)] // compiler bug
 use ::itertools::Itertools;
@@ -201,7 +201,10 @@ macro_rules! wrap_maybe_compute {
     }
 }
 
-// Example of what the macro expands into.
+// ------------------------------
+//
+// This one is fully written out, as an example of what the macro expands into.
+//
 pub use self::ev_acousticness::EvAcousticness;
 pub mod ev_acousticness {
     use super::*;
@@ -209,10 +212,17 @@ pub mod ev_acousticness {
 
     pub struct EvAcousticness(pub Vec<f64>);
 
-    pub fn maybe_compute(list: HCons<&Option<EvEigenvectors>, HNil>)
+    pub fn maybe_compute(
+        list: HCons<
+            &Option<EvEigenvectors>,
+            HCons<
+                &Option<SiteMasses>,
+                HNil,
+            >,
+        >)
     -> FailResult<Option<EvAcousticness>>
     {
-        let hlist_pat![ev_eigenvectors] = list;
+        let hlist_pat![ev_eigenvectors, site_masses] = list;
         let ev_eigenvectors = match ev_eigenvectors {
             Some(x) => x,
             None => {
@@ -220,19 +230,42 @@ pub mod ev_acousticness {
                 return Ok(None);
             },
         };
+        let site_masses = match site_masses {
+            Some(x) => x,
+            None => {
+                trace!{"not computing EvAcousticness due to missing requirement SiteMasses"}
+                return Ok(None);
+            },
+        };
         trace!{"computing EvAcousticness"}
-        Ok(Some(compute(ev_eigenvectors)?))
+        Ok(Some(compute(ev_eigenvectors, site_masses)?))
     }
 
-    fn compute(ev_eigenvectors: &EvEigenvectors) -> FailResult<EvAcousticness> {
-        Ok(EvAcousticness((ev_eigenvectors.0).0.iter().map(|ket| ket.acousticness()).collect()))
+    fn compute(
+        ev_eigenvectors: &EvEigenvectors,
+        site_masses: &SiteMasses,
+    ) -> FailResult<EvAcousticness> {
+        Ok(EvAcousticness({
+            EvDirections::from_eigenvectors(&ev_eigenvectors.0, hlist![site_masses.clone()])
+                .0.iter()
+                .map(|ket| ket.acousticness() / ket.sqnorm())
+                .collect()
+        }))
     }
 }
 
 wrap_maybe_compute! {
     pub struct EvPolarization(pub Vec<[f64; 3]>);
-    fn ev_polarization(ev_eigenvectors: &EvEigenvectors) -> FailResult<_> {
-        Ok(EvPolarization((ev_eigenvectors.0).0.iter().map(|ket| ket.polarization()).collect()))
+    fn ev_polarization(
+        site_masses: &SiteMasses,
+        ev_eigenvectors: &EvEigenvectors,
+    ) -> FailResult<_> {
+        Ok(EvPolarization({
+            EvDirections::from_eigenvectors(&ev_eigenvectors.0, hlist![site_masses.clone()])
+                .normalized()
+                .0.iter().map(|direction| direction.polarization())
+                .collect()
+        }))
     }
 }
 
@@ -240,16 +273,19 @@ wrap_maybe_compute! {
     pub struct EvLayerAcousticness(pub Vec<f64>);
     fn ev_layer_acousticness(
         site_layers: &SiteLayers,
+        site_masses: &SiteMasses,
         ev_eigenvectors: &EvEigenvectors,
     ) -> FailResult<_> {
         let part = Part::from_ord_keys(site_layers.iter());
         Ok(EvLayerAcousticness({
-            (ev_eigenvectors.0).0.iter().map(|ket| {
-                ket.clone()
-                    .into_unlabeled_partitions(&part)
-                    .map(|ev| ev.acousticness())
-                    .sum()
-            }).collect()
+            EvDirections::from_eigenvectors(&ev_eigenvectors.0, hlist![site_masses.clone()])
+                .0.iter().map(|direction| {
+                    direction
+                        .normalized()
+                        .into_unlabeled_partitions(&part)
+                        .map(|layer_dir| layer_dir.acousticness())
+                        .sum()
+                }).collect()
         }))
     }
 }

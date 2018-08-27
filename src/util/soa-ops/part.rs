@@ -261,6 +261,33 @@ pub fn composite_perm_for_part_lifo<L>(part: &Part<L>) -> ::Perm
     Perm::argsort(&sort_keys)
 }
 
+/// Helper function which may be used by some impls of `Permute`.
+///
+/// Partitions each element of a Vec (producing many `Unlabeled<T>`s), then zips them
+/// up into a single `Unlabeled<Vec<T>>`.
+///
+/// This is *not* the same thing as `Vec::into_unlabeled_partitions`.
+pub fn partition_each_item<'iter, L, T>(part: &'iter Part<L>, items: Vec<T>) -> Unlabeled<'iter, Vec<T>>
+where T: Partition<'iter>,
+{Box::new({
+    items.into_iter()
+        // (over each item)
+        .map(|x| x.into_unlabeled_partitions(part))
+        .fold(
+            ::std::iter::repeat_with(|| vec![])
+                .take(part.region_keys().len())
+                .collect(),
+            |mut output: Vec<Vec<T>>, item_partitions| {
+                // (over each partition)
+                assert_eq!(output.len(), item_partitions.len());
+                for (out_partition, item_partition) in output.iter_mut().zip(item_partitions) {
+                    out_partition.push(item_partition);
+                }
+                output
+            }
+        ).into_iter()
+})}
+
 impl<'iter, A, B> Partition<'iter> for (A, B)
 where
     A: Partition<'iter> + 'iter,
