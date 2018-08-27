@@ -20,7 +20,6 @@ use ::std::collections::HashMap;
 use ::std::hash::Hash;
 
 #[cfg(test)] extern crate rand;
-#[cfg(test)] extern crate rustc_test as test;
 
 #[derive(Copy,Clone,Debug,Eq,PartialEq)]
 pub struct GcdData<X> {
@@ -323,7 +322,6 @@ mod tests {
     use ::num_integer::Integer;
     use ::num_traits::{PrimInt,Signed};
 
-    use test;
     use rand::{Rng};
 
     #[test]

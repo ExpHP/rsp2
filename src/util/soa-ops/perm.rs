@@ -103,7 +103,6 @@ impl Perm {
         self.inv.append_mut(&other.inv);
     }
 
-    #[cfg(feature = "rand")]
     pub fn random(n: usize) -> Perm
     {
         use ::rand::Rng;

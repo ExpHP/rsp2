@@ -10,6 +10,8 @@ extern crate rsp2_soa_ops;
 use rsp2_structure::{find_perm};
 extern crate rsp2_structure;
 
+extern crate itertools;
+
 //use shared::filetypes::PrimitiveNew;
 use shared::filetypes::Primitive;
 

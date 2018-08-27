@@ -230,7 +230,9 @@ pub mod n_dee {
 
     /// The function
     ///
-    ///     sum[i = 1 -> d] (1 - x_i)^2 - sum[i = 2 -> d] x_i x_{i-1}
+    /// ```ignore
+    /// sum[i = 1 -> d] (1 - x_i)^2 - sum[i = 2 -> d] x_i x_{i-1}
+    /// ```
     ///
     /// It has no local extrema aside from the global minimum.
     ///
