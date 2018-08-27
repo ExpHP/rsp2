@@ -15,5 +15,8 @@ path = "lib.rs"
 !!failure
 !!log
 
+[build-dependencies]
+!!walkdir
+
 [features]
 !!NIGHTLY-FEATURE-LINE

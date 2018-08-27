@@ -20,6 +20,9 @@ include_dir = "0.2.1"
 failure = "0.1.2"
 log = "0.4"
 
+[build-dependencies]
+walkdir = "2"
+
 [features]
 nightly = ["beta", "rsp2-fs-util/nightly"]
 beta = ["rsp2-fs-util/beta"]
