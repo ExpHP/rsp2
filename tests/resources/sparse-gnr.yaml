@@ -1,6 +1,4 @@
-potential:
-  kc-z:
-    cutoff: 14
+potential: rebo
 scale-ranges:
   scalables: []
     #- parameter:

@@ -148,21 +148,7 @@ struct ConfigArgs(ConfigSources);
 impl CliDeserialize for ConfigArgs {
     fn _augment_clap_app<'a, 'b>(app: clap::App<'a, 'b>) -> clap::App<'a, 'b> {
         app.args(&[
-            arg!(*config [-c][--config]=CONFIG... "\
-                config yaml, provided as either a filepath, or as an embedded literal \
-                (via syntax described below). \
-                When provided multiple times, the configs are merged according to some fairly \
-                dumb strategy, with preference to the values supplied in later arguments. \
-                \n\n\
-                Literals are written as '--config [NESTED_KEY]:VALID_YAML', \
-                where NESTED_KEY is an optional '.'-separated sequence of string keys, \
-                and the ':' is a literal colon. When provided, NESTED_KEY constructs a nested \
-                mapping (so `--config a.b.c:[2]` is equivalent to `--config :{a: {b: {c: [2]}}}`.\
-                \n\n\
-                Note that detection of filepaths versus literals is based solely \
-                on the presence of a colon, and no means of escaping one in a path \
-                are currently provided.\
-            "),
+            arg!(*config [-c][--config]=CONFIG... ::ui::cfg_merging::CONFIG_HELP_STR),
         ])
     }
 

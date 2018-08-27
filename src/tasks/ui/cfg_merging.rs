@@ -16,6 +16,24 @@ use ::rsp2_tasks_config::YamlRead;
 use ::serde_yaml::{Value, Mapping};
 use ::path_abs::PathFile;
 
+pub const CONFIG_HELP_STR: &'static str = "\
+    config yaml, provided as either a filepath, or as an embedded literal \
+    (via syntax described below). \
+    When provided multiple times, the configs are merged according to some fairly \
+    dumb strategy, with preference to the values supplied in later arguments. \
+    \n\n\
+    rsp2 supports some small extensions on the YAML syntax.  See `doc/config.md`.
+    \n\n\
+    Literals are written as '--config [KEY]:VALID_YAML', \
+    where KEY is an optional string key (which may be dotted, as described in config.md), \
+    and the ':' is a literal colon. When provided, KEY constructs a singleton \
+    mapping (so `--config a.b.c:[2]` is equivalent to `--config ':{a: {b: {c: [2]}}}'`.\
+    \n\n\
+    Note that detection of filepaths versus literals is based solely \
+    on the presence of a colon, and no means of escaping one in a path \
+    are currently provided.\
+";
+
 /// A list of config yamls that can be merged into a single effective config.
 ///
 /// Can be serialized to a file that shows all of the configs in detail.
@@ -29,7 +47,7 @@ pub struct ConfigSources(Vec<Config>);
 #[serde(rename_all = "kebab-case")]
 pub(crate) struct Config {
     source: ConfigSource,
-    yaml: Value,
+    yaml: ConflictFree,
 }
 
 #[derive(Serialize)]
@@ -58,18 +76,23 @@ mod resolve_from_arg {
     fn lit_from_arg(s: &str) -> FailResult<Config> {
         let mut it = s.splitn(2, ":");
 
-        let path = match it.next() {
+        let key = match it.next() {
             None => panic!("BUG! splitn always produces at least one string"),
-            Some("") => vec![],
-            Some(path) => path.split(".").collect(),
+            Some("") => None,
+            Some(key) => Some(key),
         };
         let value = {
             let s = it.next().expect("BUG! lit_from_arg called on string without ':'");
             YamlRead::from_reader(s.as_bytes())?
         };
-        let yaml = make_nested_mapping(&path, value);
-        let source = ConfigSource::Argument;
+        let yaml = match key {
+            Some(key) => make_singleton(key, value),
+            None => value,
+        };
+        let yaml = expand_dot_keys(yaml)?;
+        let yaml = validate_replacements_from_one_config(yaml)?;
 
+        let source = ConfigSource::Argument;
         Ok(Config { yaml, source })
     }
 
@@ -77,23 +100,81 @@ mod resolve_from_arg {
     fn read_file_from_arg(path: &str) -> FailResult<Config> {
         let path = PathFile::new(path)?;
         let yaml = YamlRead::from_reader(path.read()?)?;
+        let yaml = expand_dot_keys(yaml)?;
+        let yaml = validate_replacements_from_one_config(yaml)?;
+
         let source = ConfigSource::File(path);
         Ok(Config { yaml, source })
     }
 
     #[cfg(test)]
-    macro_rules! m { ($($arg:tt)*) => { Value::Mapping(vec![$($arg)*].into_iter().collect()) }; }
-    #[cfg(test)]
-    macro_rules! s { ($($arg:tt)*) => { Value::Sequence(vec![$($arg)*]) }; }
+    macro_rules! yaml {
+        ({ $($key:tt : $value:tt),*$(,)* }) => {{
+            let items = vec![$((yaml!($key), yaml!($value))),*];
+            let mapping = items.into_iter().collect();
+            Value::Mapping(mapping)
+        }};
+        ([ $($value:tt),*$(,)* ]) => {{
+            let items = vec![$(yaml!($value)),*];
+            Value::Sequence(items)
+        }};
+        ($e:tt) => { $e.into() }
+    }
 
     #[test]
     fn test_literal_args() {
-        let expected = m!{ ("hello".into(), m!{ ("how-are-you".into(), s![42.into()]) }) };
-        assert_eq!(expected, Config::resolve_from_arg(":{hello: {how-are-you: [42]}}").unwrap().yaml);
-        assert_eq!(expected, Config::resolve_from_arg(": {hello: {how-are-you: [42]}}").unwrap().yaml);
-        assert_eq!(expected, Config::resolve_from_arg("hello:{how-are-you: [42]}").unwrap().yaml);
-        assert_eq!(expected, Config::resolve_from_arg("hello: {how-are-you: [42]}").unwrap().yaml);
-        assert_eq!(expected, Config::resolve_from_arg("hello.how-are-you: [42]").unwrap().yaml);
+        macro_rules! expect {
+            ($expected:expr, $s:expr) => {{
+                let cfg = Config::resolve_from_arg($s).unwrap();
+                let ConflictFree(DotFree(yaml)) = cfg.yaml;
+                assert_eq!{$expected, yaml}
+            }};
+        }
+        macro_rules! expect_replace_error {
+            ($s:expr) => {
+                let e = Config::resolve_from_arg($s).unwrap_err();
+                match e.downcast() {
+                    Err(_) => panic!($s),
+                    Ok(InternalReplaceError) => {},
+                }
+            };
+        }
+
+        let expected = yaml!{{
+            "hello": {
+                "how-are": {
+                    "you": [42],
+                },
+            },
+        }};
+        expect!(expected, ":{hello: {how-are: {you: [42]}}}");
+        expect!(expected, ": {hello: {how-are: {you: [42]}}}");
+        expect!(expected, "hello:{how-are: {you: [42]}}");
+        expect!(expected, "hello: {how-are: {you: [42]}}");
+        expect!(expected, "hello.how-are: {you: [42]}");
+        expect!(expected, "hello.how-are.you: [42]");
+        expect!(expected, "hello: {how-are.you: [42]}");
+        expect!(expected, ":{hello.how-are.you: [42]}");
+
+        let expected = yaml!{{
+            "a": { "b1": 1, "b2": 2 },
+        }};
+        expect!(expected, ": {a: {b1: 1, b2: 2}}");
+        expect!(expected, ": {a.b1: 1, a.b2: 2}");
+        expect!(expected, "a: {b1: 1, b2: 2}");
+        expect!(expected, ": {a: {b1: 1}, a.b2: 2}");
+
+        expect!(
+            yaml!{{ "a": { "b1": {"~~REPLACE~~": 1}, "b2": 2 } }},
+            ": {a: {b1: {~~REPLACE~~: 1}}, a.b2: 2}"
+        );
+        expect!(
+            yaml!{{"~~REPLACE~~": {"a": { "b1": 1, "b2": 2 } }}},
+            "~~REPLACE~~: {a: {b1: 1}, a.b2: 2}"
+        );
+
+        expect_replace_error!("a: {b1: 1, ~~REPLACE~~: 2}");
+        expect_replace_error!(": {a.b1: 1, a.~~REPLACE~~: 2}");
     }
 }
 
@@ -116,9 +197,14 @@ impl ConfigSources {
     }
 
     pub fn into_effective_yaml(self) -> Value {
-        let empty = Value::Mapping(Default::default());
+        let FullyResolved(ConflictFree(DotFree(value))) = self._into_effective_yaml();
+        value
+    }
+
+    fn _into_effective_yaml(self) -> FullyResolved {
+        let empty = FullyResolved(ConflictFree(DotFree(Value::Mapping(Default::default()))));
         self.0.into_iter()
-            .fold(empty, |a, b| dumb_config_merge(a, b.yaml))
+            .fold(empty, |a, b| merge_nodot_and_replace(a, b.yaml))
     }
 
     pub fn deserialize<T: YamlRead>(self) -> FailResult<T> {
@@ -131,6 +217,40 @@ impl ConfigSources {
         YamlRead::from_reader(s.as_bytes())
     }
 }
+
+const REPLACE_DIRECTIVE_KEY: &'static str = "~~REPLACE~~";
+
+//----------------
+// Types to document post- and pre-conditions
+
+/// Indicates that:
+/// * all keys are strings, and no keys contain dots
+#[derive(Serialize)]
+#[derive(Debug, Clone)]
+struct DotFree(Value);
+
+/// Indicates that:
+/// * all keys are strings, and no keys contain dots
+/// * any mapping with a REPLACE directive is a singleton.
+#[derive(Serialize)]
+#[derive(Debug, Clone)]
+struct ConflictFree(DotFree);
+
+/// Indicates that:
+/// * all keys are strings, and no keys contain dots
+/// * there are no REPLACE directives
+#[derive(Serialize)]
+#[derive(Debug, Clone)]
+struct FullyResolved(ConflictFree);
+//----------------
+
+#[derive(Debug, Fail)]
+#[fail(display = "\
+    Invalid use of REPLACE directive; a REPLACE directive cannot be used \
+    to replace other values in the same config file, as the keys may be \
+    visited in a nondeterministic order.\
+")]
+pub struct InternalReplaceError;
 
 /// A simplistic config-merging function which operates directly on the yaml representation,
 /// independent of what is being deserialized. This sort of approach is inherently flawed,
@@ -157,6 +277,113 @@ fn dumb_config_merge(a: Value, b: Value) -> Value {
     }
 }
 
+fn merge_nodot(a: DotFree, b: DotFree) -> DotFree
+{ DotFree(dumb_config_merge(a.0, b.0)) }
+
+fn merge_nodot_and_replace(a: FullyResolved, b: ConflictFree) -> FullyResolved {
+    let out = merge_nodot((a.0).0, b.0);
+    resolve_replacements_from_two_configs(out)
+}
+
+fn expect_string_key(value: Value) -> FailResult<String> {
+    match value {
+        Value::String(s) => Ok(s),
+        _ => bail!{"yaml contains non-string key"},
+    }
+}
+
+fn expand_dot_keys(value: Value) -> FailResult<DotFree> {
+    match value {
+        Value::Mapping(mapping) => {
+            mapping.into_iter()
+                .try_fold(
+                    Value::Mapping(Default::default()),
+                    |acc, (key, child)| {
+                        let DotFree(child) = expand_dot_keys(child)?;
+
+                        let key = expect_string_key(key)?;
+                        let path: Vec<_> = key.split(".").collect();
+                        let new_part = make_nested_mapping(&path, child);
+                        Ok(dumb_config_merge(acc, new_part))
+                    },
+                )
+        },
+        Value::Sequence(values) => Ok(Value::Sequence({
+            values.into_iter()
+                .map(|v| expand_dot_keys(v).map(|DotFree(v)| v))
+                .collect::<Result<_, _>>()?
+        })),
+        value => Ok(value),
+    }.map(DotFree)
+}
+
+// resolve REPLACE directives, assuming that they all came from singletons in the second
+// config file of a dumb merge.
+fn resolve_replacements_from_two_configs(value: DotFree) -> FullyResolved
+{ _resolve_replacements(value, false, false).map(FullyResolved).expect("(BUG!)") }
+
+// validate but don't resolve REPLACE directives, assuming that they came from dot expansion on a
+// single config
+fn validate_replacements_from_one_config(value: DotFree) -> FailResult<ConflictFree>
+{ _resolve_replacements(value, true, true) }
+
+fn _resolve_replacements(
+    value: DotFree,
+    is_single_config: bool,
+    dry_run: bool,
+) -> FailResult<ConflictFree> {
+    fold_mappings_depth_first(
+        value.0,
+        |mapping| Ok({
+            let has_multiple_keys = mapping.len() > 1;
+            let has_replace_key = mapping.contains_key(&Value::String(REPLACE_DIRECTIVE_KEY.into()));
+            if has_multiple_keys && has_replace_key && is_single_config {
+                Err(InternalReplaceError)?;
+            }
+
+            if has_replace_key && !dry_run {
+                // If we have made it this far, all we need to do is substitute the mapping
+                // with the value under the REPLACE key (regardless of whatever else the
+                // mapping contains)
+                mapping.into_iter()
+                    .find(|(key, _)| key == REPLACE_DIRECTIVE_KEY)
+                    .unwrap().1
+            } else {
+                Value::Mapping(mapping)
+            }
+        }),
+    ).map(DotFree).map(ConflictFree)
+}
+
+fn fold_mappings_depth_first(
+    value: Value,
+    mut f: impl FnMut(Mapping) -> FailResult<Value>,
+) -> FailResult<Value>
+{ _fold_mappings_depth_first(value, &mut f) }
+
+fn _fold_mappings_depth_first(
+    value: Value,
+    f: &mut impl FnMut(Mapping) -> FailResult<Value>,
+) -> FailResult<Value>
+{Ok({
+    match value {
+        Value::Mapping(mapping) => {
+            let mapping = {
+                mapping.into_iter()
+                    .map(|(key, child)| Ok((key, _fold_mappings_depth_first(child, f)?)))
+                    .collect::<FailResult<_>>()?
+            };
+            f(mapping)?
+        },
+        Value::Sequence(values) => Value::Sequence({
+            values.into_iter()
+                .map(|value| _fold_mappings_depth_first(value, f))
+                .collect::<FailResult<_>>()?
+        }),
+        value => value,
+    }
+})}
+
 // FIXME: These functions for summary.yaml probably don't belong here,
 //        but `merge_summaries` is here to use a private function.
 /// Merges summary.yaml files for output.
@@ -171,10 +398,13 @@ pub fn merge_summaries(a: Value, b: Value) -> Value {
 pub fn no_summary() -> Value { Value::Mapping(Default::default()) }
 
 /// Constructs a Yaml like `{a: {b: {c: value}}}`
-pub fn make_nested_mapping(path: &[&str], value: Value) -> Value {
-    path.iter().rev().fold(value, |value, &key| {
-        let mut mapping = Mapping::new();
-        mapping.insert(Value::String(key.into()), value);
-        Value::Mapping(mapping)
-    })
+pub fn make_nested_mapping(path: &[impl AsRef<str>], value: Value) -> Value {
+    path.iter().rev().fold(value, |value, key| make_singleton(key, value))
+}
+
+/// Constructs a Yaml like `{a: value}`
+fn make_singleton(key: impl AsRef<str>, value: Value) -> Value {
+    let mut mapping = Mapping::new();
+    mapping.insert(Value::String(key.as_ref().to_string()), value);
+    Value::Mapping(mapping)
 }

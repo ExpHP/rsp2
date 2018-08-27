@@ -1,0 +1,52 @@
+# potential: (no default)
+
+scale-ranges:
+  repeat-count: 2
+  warn-threshold: 1e-2
+  fail: true
+  scalables: []
+
+cg:
+  stop-condition:
+    any:
+      - value-delta:
+          rel-greater-than: 0
+          steps-ago: 10
+      - iterations: 100
+  alpha-guess-max: 1e-1
+  alpha-guess-first: 1e-2
+
+ev-loop:
+  min-positive-iter: 1
+  max-iter: 3
+
+ev-chase:
+  cg:
+    stop-condition:
+      any:
+        - value-delta:
+            rel-greater-than: 0
+            steps-ago: 10
+        - iterations: 100
+    alpha-guess-max: 1e-1
+    alpha-guess-first: 1e-2
+
+# FIXME this setting needs to be exorcised
+threading: "lammps"
+
+phonons:
+  # no supercell is required for gamma dynamical matrix
+  #supercell: {target: [35, 35, 0]}
+  supercell: {target: [0, 0, 0]}
+  symmetry-tolerance: 1e-2
+  displacement-distance: 1e-4
+
+  disp-finder:
+    rsp2:
+      directions: survey
+  eigensolver:
+    sparse: {}
+
+layer-gamma-threshold: 0.2
+
+# lammps-processor-axis-mask: [true, true, true]
