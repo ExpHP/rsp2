@@ -35,7 +35,7 @@ fn gnr_test() {
                 // This seems to be because it at some point needs to relax along eigenvectors,
                 // and eigsh uses a randomly initialized starting vector.
                 rel_tol: 1e-4,
-                abs_tol: 2e-2,
+                abs_tol: 1e-1,
             },
         )
         .run().unwrap();
