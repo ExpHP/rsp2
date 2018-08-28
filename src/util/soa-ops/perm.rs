@@ -382,11 +382,11 @@ impl Perm {
 /// (whose group operator is, incidentally, also `Permute::permuted_by`!)
 ///
 /// * **Identity:**
-///   ```ignore
+///   ```text
 ///   data.permuted_by(Perm::eye(data.len())) == data
 ///   ```
 /// * **Compatibility:**
-///   ```ignore
+///   ```text
 ///   data.permuted_by(a).permuted_by(b) == data.permuted_by(a.permuted_by(b))
 ///   ```
 ///

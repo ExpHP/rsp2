@@ -568,7 +568,7 @@ impl Builder {
     /// For example, to fix the first position in a set of 3-dimensional coordinates
     /// (ordered as `x1 y1 z1 x2 y2 z2 ...`), a suitable `drift_spec` would be the vector
     ///
-    /// ```ignore
+    /// ```text
     /// [Some(0), Some(1), Some(2), Some(0), Some(1), Some(2), ...]
     /// ```
     pub fn drift_spec(mut self, spec: Option<&[Option<usize>]>) -> Self

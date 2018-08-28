@@ -230,7 +230,7 @@ pub mod n_dee {
 
     /// The function
     ///
-    /// ```ignore
+    /// ```text
     /// sum[i = 1 -> d] (1 - x_i)^2 - sum[i = 2 -> d] x_i x_{i-1}
     /// ```
     ///

@@ -321,7 +321,7 @@ impl<'d, Meta> DiffFn<Meta> for Box<DiffFn<Meta> + 'd> {
 /// change the values returned by `to_fracs()` (which matters to us in the body of
 /// `compute_force_set` because the potential might use `to_fracs()`). That is to say:
 ///
-/// ```rust,ignore
+/// ```text
 /// fn bad(mut coords: Coords) {
 ///     coords.ensure_carts();
 ///     let v1 = coords.to_fracs();
