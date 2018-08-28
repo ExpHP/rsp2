@@ -183,10 +183,11 @@ impl LowLevelApi for LammpsOwner {
 
     fn init_atoms(&mut self, carts: Vec<[f64; 3]>, types: Vec<i64>) -> FailResult<()>
     {Ok({
+        // NOTE: Creating random positions and then using `lammps_scatter_atoms` to set the initial
+        //       positions is not good enough; you get "lost atoms" errors when using MPI.
         for i in 0..carts.len() {
             self.command(format!(
-                "set atom {} type {} x {} y {} z {}",
-                i + 1,
+                "create_atoms {} single {} {} {} ",
                 types[i],
                 carts[i][0],
                 carts[i][1],

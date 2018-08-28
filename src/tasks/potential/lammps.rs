@@ -48,6 +48,8 @@ const DEFAULT_KC_Z_MAX_LAYER_SEP: f64 = 4.5; // Angstrom
 const DEFAULT_AIREBO_LJ_SIGMA:    f64 = 3.0; // (cutoff, x3.4 A)
 const DEFAULT_AIREBO_LJ_ENABLED:      bool = true;
 const DEFAULT_AIREBO_TORSION_ENABLED: bool = false;
+const DEFAULT_AIREBO_OMP: bool = true;
+const DEFAULT_REBO_OMP: bool = true;
 
 /// A bundle of everything we need to initialize a Lammps API object.
 ///
@@ -392,21 +394,34 @@ mod airebo {
             lj_sigma: f64,
             lj_enabled: bool,
             torsion_enabled: bool,
+            omp: bool,
         },
         /// Uses `pair_style rebo`.
         ///
         /// This is NOT equivalent to `pair_style airebo 0 0 0`, because it
         /// additionally sets one of the C-C interaction parameters to zero.
-        Rebo,
+        Rebo {
+            omp: bool,
+        },
     }
 
     impl<'a> From<&'a cfg::PotentialAirebo> for Airebo {
         fn from(cfg: &'a cfg::PotentialAirebo) -> Self {
-            let cfg::PotentialAirebo { lj_sigma, lj_enabled, torsion_enabled } = *cfg;
+            let cfg::PotentialAirebo { lj_sigma, lj_enabled, torsion_enabled, omp } = *cfg;
             Airebo::Airebo {
                 lj_sigma: lj_sigma.unwrap_or(DEFAULT_AIREBO_LJ_SIGMA),
                 lj_enabled: lj_enabled.unwrap_or(DEFAULT_AIREBO_LJ_ENABLED),
                 torsion_enabled: torsion_enabled.unwrap_or(DEFAULT_AIREBO_TORSION_ENABLED),
+                omp: omp.unwrap_or(DEFAULT_AIREBO_OMP),
+            }
+        }
+    }
+
+    impl<'a> From<&'a cfg::PotentialRebo> for Airebo {
+        fn from(cfg: &'a cfg::PotentialRebo) -> Self {
+            let cfg::PotentialRebo { omp } = *cfg;
+            Airebo::Rebo {
+                omp: omp.unwrap_or(DEFAULT_REBO_OMP),
             }
         }
     }
@@ -458,13 +473,23 @@ mod airebo {
                 only_unique_mass(consts::CARBON),
             ];
             let pair_style = match *self {
-                Airebo::Airebo { lj_sigma, lj_enabled, torsion_enabled } => {
-                    PairStyle::named("airebo/omp")
+                Airebo::Airebo { lj_sigma, lj_enabled, torsion_enabled, omp } => {
+                    let style = match omp {
+                        true => "airebo/omp",
+                        false => "airebo"
+                    };
+                    PairStyle::named(style)
                         .arg(lj_sigma)
                         .arg(boole(lj_enabled))
                         .arg(boole(torsion_enabled))
                 },
-                Airebo::Rebo => PairStyle::named("rebo/omp"),
+                Airebo::Rebo { omp } => {
+                    let style = match omp {
+                        true => "rebo/omp",
+                        false => "rebo"
+                    };
+                    PairStyle::named(style)
+                },
             };
             let pair_coeffs = vec![
                 PairCoeff::new(.., ..).args(&["CH.airebo", "H", "C"]),

@@ -819,7 +819,7 @@ impl<P: Potential> Lammps<P>
         let original_init_info = potential.init_info(&coords, &meta);
         let original_atom_types = potential.atom_types(&coords, &meta);
 
-        let ptr = Self::_from_builder(builder, original_num_atoms, &original_init_info, &coords, &original_atom_types)?;
+        let ptr = Self::_from_builder(builder, &original_init_info, &coords, &original_atom_types)?;
         Lammps {
             ptr: ::std::cell::RefCell::new(ptr),
             structure: MaybeDirty::new_dirty((coords, meta)),
@@ -836,7 +836,6 @@ impl<P: Potential> Lammps<P>
     // monomorphic
     fn _from_builder(
         builder: &Builder,
-        num_atoms: usize,
         init_info: &InitInfo,
         coords: &Coords,
         atom_types: &[AtomType],
@@ -915,16 +914,6 @@ impl<P: Potential> Lammps<P>
             lmp.commands(pair_coeffs)?;
         }
 
-        // garbage initial positions
-        {
-            let this_atom_type = 1;
-            let seed = 0xbeef;
-            lmp.command(format!(
-                "create_atoms {} random {} {} NULL remap yes",
-                this_atom_type, num_atoms, seed,
-            ))?;
-        }
-
         // HACK:
         //   set positions explicitly using commands to resolve "lost atoms" errors
         //   when using certain MPI node layouts on certain structures.
@@ -939,8 +928,8 @@ impl<P: Potential> Lammps<P>
             // Until we find a better way, just stop writing to it momentarily.
             lmp.command("log none".to_string())?;
             append_logfile_nonessential(builder.append_log.as_ref(), |mut f| {
-                let _ = writeln!(f, "Setting positions explicitly using the 'set atom' command.");
-                let _ = writeln!(f, "('set' commands omitted from logfile)");
+                let _ = writeln!(f, "Setting positions explicitly using the 'create_atom single' command.");
+                let _ = writeln!(f, "(commands omitted from logfile)");
             });
 
             lmp.init_atoms(

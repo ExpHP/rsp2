@@ -409,8 +409,8 @@ impl PotentialBuilder {
         config: &cfg::PotentialKind,
     ) -> Box<PotentialBuilder> {
         match config {
-            cfg::PotentialKind::Rebo => {
-                let lammps_pot = self::lammps::Airebo::Rebo;
+            cfg::PotentialKind::Rebo(cfg) => {
+                let lammps_pot = self::lammps::Airebo::from(cfg);
                 let pot = self::lammps::Builder::new(trial_dir, on_demand, threading, update_style, axis_mask, lammps_pot);
                 Box::new(pot)
             }
@@ -425,7 +425,8 @@ impl PotentialBuilder {
                 Box::new(pot)
             },
             cfg::PotentialKind::KolmogorovCrespiZNew(cfg) => {
-                let rebo = PotentialBuilder::from_config_parts(trial_dir, on_demand, threading, update_style, axis_mask, &cfg::PotentialKind::Rebo);
+                let rebo_cfg = cfg::PotentialKind::Rebo(Default::default());
+                let rebo = PotentialBuilder::from_config_parts(trial_dir, on_demand, threading, update_style, axis_mask, &rebo_cfg);
                 let kc_z = self::homestyle::KolmogorovCrespiZ(cfg.clone());
                 let pot = self::helper::Sum(rebo, kc_z);
                 Box::new(pot)

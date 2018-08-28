@@ -314,7 +314,7 @@ pub enum EnergyPlotEvIndices {
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum PotentialKind {
-    #[serde(rename = "rebo")] Rebo,
+    #[serde(rename = "rebo")] Rebo(PotentialRebo),
     #[serde(rename = "airebo")] Airebo(PotentialAirebo),
     #[serde(rename = "kc-z")] KolmogorovCrespiZ(PotentialKolmogorovCrespiZ),
     #[serde(rename = "kc-z-new")] KolmogorovCrespiZNew(PotentialKolmogorovCrespiZNew),
@@ -334,6 +334,14 @@ pub struct PotentialAirebo {
     // (I'm too lazy to make an ADT for this)
     pub lj_enabled: Option<bool>,
     pub torsion_enabled: Option<bool>,
+    pub omp: Option<bool>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub struct PotentialRebo {
+    pub omp: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize)]
