@@ -204,7 +204,7 @@ pub(crate) fn perform_acoustic_search(
 
     let fill = {
         if let Some(expected) = expected_non_translations {
-            if expected - rotational_count == uncertain_indices.len() {
+            if expected - rotational_count >= uncertain_indices.len() {
                 ModeKind::OtherAcoustic
             } else { ModeKind::Imaginary }
         } else { ModeKind::Imaginary }
