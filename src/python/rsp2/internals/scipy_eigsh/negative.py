@@ -15,6 +15,7 @@ import numpy as np
 import json
 import sys
 import scipy.sparse
+import typing as tp
 
 from . import eigsh_custom, get_OPinv
 from rsp2.internals import info
@@ -49,6 +50,7 @@ def main_from_rust():
               plain_ncv=DEFAULT_NCV, # FIXME add to input json from rust
               shift_invert_ncv=DEFAULT_NCV, # FIXME add to input json from rust
               max_solutions=DEFAULT_MAX_SOLUTIONS, # FIXME add to input json from rust
+              search_solutions=None, # FIXME add to input json from rust
               )
 
     json.dump(eigensols.to_cereal(out), sys.stdout)
@@ -77,39 +79,61 @@ def main_from_cli():
         help="suggested number of Lanczos vectors. This will automatically be "
              "clipped into the range of [min(2*max_solutions + 1, n), n]"
     )
+    p.add_argument(
+        '--search-solutions', type=int, default=None,
+        help="ask"
+    )
     args = p.parse_args()
 
-    out = run(
+    if args.search_solutions is not None and args.search_solutions < args.max_solutions:
+        p.error("--max-solutions must not exceed --search-solutions")
+
+    evals, evecs = run(
         m=dynmat.from_path(args.DYNMAT),
         shift_invert_attempts=args.shift_invert_attempts,
         shift_invert_ncv=args.shift_invert_ncv,
         plain_ncv=args.plain_ncv,
         max_solutions=args.max_solutions,
+        search_solutions=args.search_solutions,
     )
-    eigensols.to_path(args.output, out)
+    if len(evals):
+        eigensols.to_path(args.output, (evals, evecs))
+    else:
+        print("No solutions found!", file=sys.stderr)
+        sys.exit(1)
 
 def run(m: scipy.sparse.bsr_matrix,
         shift_invert_attempts: int,
         shift_invert_ncv: int,
         plain_ncv: int,
         max_solutions: int,
+        search_solutions: tp.Optional[int],
         ):
     """
     A suitable entry point from pure python code.
     """
-    if shift_invert_attempts:
-        esols = try_shift_invert(m,
-                                 max_solutions=max_solutions,
-                                 shift_invert_attempts=shift_invert_attempts,
-                                 ncv=shift_invert_ncv,
-                                 )
-        if not all(acousticness(v) > 1. - 1e-3 for v in esols[1]):
-            return esols
+    if search_solutions is None:
+        search_solutions = max_solutions
 
-    return try_regular(m,
-                       max_solutions=max_solutions,
-                       ncv=plain_ncv,
-                       )
+    # Logic for deciding when to use shift invert results
+    def inner():
+        if shift_invert_attempts:
+            esols = try_shift_invert(m,
+                                     max_solutions=search_solutions,
+                                     shift_invert_attempts=shift_invert_attempts,
+                                     ncv=shift_invert_ncv,
+                                     )
+            if not all(acousticness(v) > 1. - 1e-3 for v in esols[1]):
+                return esols
+
+        return try_regular(m,
+                           max_solutions=search_solutions,
+                           ncv=plain_ncv,
+                           )
+
+    # Cutting out other solutions
+    evals, evecs = inner()
+    return evals[:max_solutions], evecs[:max_solutions]
 
 # As an optimization, begin by using shift-invert mode, which can converge
 # in **significantly** fewer iterations than regular mode.
