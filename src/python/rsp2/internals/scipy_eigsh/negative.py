@@ -29,6 +29,10 @@ TOL = 1e-10
 # absolute cosines greater than this are deemed non-orthogonal
 OVERLAP_THRESH = 1e-6
 
+DEFAULT_MAX_SOLUTIONS = 12
+DEFAULT_SHIFT_INVERT_ATTEMPTS = 4
+DEFAULT_NCV = 0
+
 def main_from_rust():
     """
     Entry point when called from rsp2's rust code.
@@ -40,7 +44,12 @@ def main_from_rust():
     shift_invert_attempts = d.pop('shift-invert-attempts')
     assert not d
 
-    out = run(m, shift_invert_attempts=shift_invert_attempts)
+    out = run(m,
+              shift_invert_attempts=shift_invert_attempts,
+              plain_ncv=DEFAULT_NCV, # FIXME add to input json from rust
+              shift_invert_ncv=DEFAULT_NCV, # FIXME add to input json from rust
+              max_solutions=DEFAULT_MAX_SOLUTIONS, # FIXME add to input json from rust
+              )
 
     json.dump(eigensols.to_cereal(out), sys.stdout)
     print(file=sys.stdout)
@@ -53,32 +62,59 @@ def main_from_cli():
     p = argparse.ArgumentParser()
     p.add_argument('DYNMAT', help='dynmat file (.npz, .json, .json.gz, ...)')
     p.add_argument('--output', '-o', type=str, required=True)
-    p.add_argument('--shift-invert-attempts', type=int, default=4)
+    p.add_argument('--shift-invert-attempts', type=int, default=DEFAULT_SHIFT_INVERT_ATTEMPTS)
+    p.add_argument(
+        '--max-solutions', type=int, default=DEFAULT_MAX_SOLUTIONS,
+        help="max number of solutions to seek"
+    )
+    p.add_argument(
+        '--shift-invert-ncv', type=int, default=DEFAULT_NCV,
+        help="suggested number of Lanczos vectors. This will automatically be "
+             "clipped into the range of [min(2*max_solutions + 1, n), n]"
+    )
+    p.add_argument(
+        '--plain-ncv', type=int, default=DEFAULT_NCV,
+        help="suggested number of Lanczos vectors. This will automatically be "
+             "clipped into the range of [min(2*max_solutions + 1, n), n]"
+    )
     args = p.parse_args()
 
     out = run(
         m=dynmat.from_path(args.DYNMAT),
         shift_invert_attempts=args.shift_invert_attempts,
+        shift_invert_ncv=args.shift_invert_ncv,
+        plain_ncv=args.plain_ncv,
+        max_solutions=args.max_solutions,
     )
     eigensols.to_path(args.output, out)
 
 def run(m: scipy.sparse.bsr_matrix,
         shift_invert_attempts: int,
+        shift_invert_ncv: int,
+        plain_ncv: int,
+        max_solutions: int,
         ):
     """
     A suitable entry point from pure python code.
     """
     if shift_invert_attempts:
-        esols = try_shift_invert(m, shift_invert_attempts)
+        esols = try_shift_invert(m,
+                                 max_solutions=max_solutions,
+                                 shift_invert_attempts=shift_invert_attempts,
+                                 ncv=shift_invert_ncv,
+                                 )
         if not all(acousticness(v) > 1. - 1e-3 for v in esols[1]):
             return esols
 
-    return try_regular(m)
+    return try_regular(m,
+                       max_solutions=max_solutions,
+                       ncv=plain_ncv,
+                       )
 
 # As an optimization, begin by using shift-invert mode, which can converge
 # in **significantly** fewer iterations than regular mode.
 # noinspection PyUnreachableCode
-def try_shift_invert(m, shift_invert_attempts):
+def try_shift_invert(m, *, shift_invert_attempts, max_solutions, ncv):
     info('trace: precomputing OPinv for shift-invert')
 
     # From what I have seen, shift_invert mode tends to find most of its
@@ -88,10 +124,6 @@ def try_shift_invert(m, shift_invert_attempts):
     # I fear that when incorrect solutions appear, it may compromise those found
     # afterwards. So we make multiple calls with a small number of iterations.
     MAX_ITER = max(30, int(10 * m.shape[0] ** (1/3)))
-
-    # This many solutions will almost never converge in our short iteration
-    # limit. This mostly just affects the default number of lanczos vectors.
-    HOW_MANY_SOLS = min(10, m.shape[0] - 2)
 
     # A heavy computational step at the beginning of shift-invert mode is
     # factorizing the matrix; do that ahead of time.
@@ -107,15 +139,16 @@ def try_shift_invert(m, shift_invert_attempts):
         info('trace: shift-invert call', call_i + 1)
         (evals, evecs) = eigsh_custom(
             m,
-            k=HOW_MANY_SOLS,
+            k=max_solutions,
             maxiter=MAX_ITER,
             sigma=0,
             which='SA',
             tol=TOL,
             OPinv=OPinv,
+            ncv=ncv,
             allow_fewer_solutions=True,
-            # TODO: play around with ncv.
-            #       Larger ncv is slower, but what do we get in return?
+            auto_adjust_k=True,
+            auto_adjust_ncv=True,
         )
         evecs = np.array(list(map(normalize, evecs)))
 
@@ -267,16 +300,18 @@ def lazy_all(it): return all(pred() for pred in it)
 # If shift-invert hasn't produced anything satisfactory, try regular mode.
 # From what I've seen, this always produces legitimate solutions, but generally
 # takes long to converge onto anything.
-def try_regular(m):
+def try_regular(m, *, max_solutions, ncv):
     info('trace: trying non-shift-invert')
+
     return eigsh_custom(
         m,
-        k=min(12, m.shape[0]-1),
+        k=max_solutions,
         which='SA',
         tol=TOL,
+        ncv=ncv,
         allow_fewer_solutions=True,
-        # TODO: play around with ncv.
-        #       Larger ncv is slower, but what do we get in return?
+        auto_adjust_k=True,
+        auto_adjust_ncv=True,
     )
 
 if __name__ == '__main__':
