@@ -140,44 +140,58 @@ impl CartBonds {
 
 impl FracBonds {
     pub fn from_brute_force_very_dumb(
-        coords: &Coords,
+        original_coords: &Coords,
         range: impl BondRange,
     ) -> FailResult<Self> {
 
         // Construct a supercell large enough to contain all atoms that interact with an atom
-        // in the centermost unit cell.
-        let sc_builder = sufficiently_large_centered_supercell(coords.lattice(), range.maximum())?;
-        let (superstructure, sc) = sc_builder.build(coords);
-        let centermost_cell = sc.lattice_point_from_cell(sc.center_cell());
+        // in the centermost unit cell, assuming they're all reduced.
+        let sc_builder = {
+            sufficiently_large_centered_supercell(original_coords.lattice(), range.maximum())?
+        };
+
+        // ...like I said; they gotta be reduced.
+        let (reduced_coords, original_latts) = decompose_coords(original_coords);
+        let (superstructure, sc) = sc_builder.build(&reduced_coords);
 
         let mut from = vec![];
         let mut to = vec![];
         let mut image_diff = vec![];
 
-        let carts = superstructure.to_carts();
-        let cells = sc.atom_lattice_points();
-        let sites = sc.atom_primitive_atoms();
+        let sc_centermost_latt = sc.lattice_point_from_cell(sc.center_cell());
+        let sc_carts = superstructure.to_carts();
+        let sc_latts = sc.atom_lattice_points();
+        let sc_sites = sc.atom_primitive_atoms();
 
-        for (&cell_from, &site_from, &cart_from) in izip!(&cells, &sites, &carts) {
-            if cell_from != centermost_cell {
+        // The supercell is large enough that we can disregard its periodicity, and consider
+        // interactions between its centermost cell and any other atom.
+        for (&latt_from, &site_from, &cart_from) in izip!(&sc_latts, &sc_sites, &sc_carts) {
+            if latt_from != sc_centermost_latt {
                 continue;
             }
 
-            for (&cell_to, &site_to, &cart_to) in izip!(&cells, &sites, &carts) {
+            for (&latt_to, &site_to, &cart_to) in izip!(&sc_latts, &sc_sites, &sc_carts) {
                 let sqnorm = (cart_to - cart_from).sqnorm();
                 let square = |x| x*x;
                 if square(range.minimum()) <= sqnorm && sqnorm <= square(range.maximum()) {
-                    if (site_from, cell_from) == (site_to, cell_to) {
+                    // No self interactions!
+                    if (site_from, latt_from) == (site_to, latt_to) {
                         continue;
                     }
                     from.push(site_from);
                     to.push(site_to);
-                    image_diff.push(cell_to - cell_from);
+
+                    // `latt_to - latt_from` would give us the image diff between the images in our
+                    // supercell, but that's computed from the reduced positions. We actually want
+                    // the image diffs for the original positions.
+                    let adjusted_latt_to = original_latts[site_to] + latt_to;
+                    let adjusted_latt_from = original_latts[site_from] + latt_from;
+                    image_diff.push(adjusted_latt_to - adjusted_latt_from);
                 }
             }
         }
         assert_ne!(from.len(), 0, "(BUG) nothing in center cell?");
-        let num_atoms = coords.num_atoms();
+        let num_atoms = original_coords.num_atoms();
         Ok(FracBonds { num_atoms, from, to, image_diff })
     }
 
@@ -202,6 +216,23 @@ impl FracBonds {
         };
         CartBonds { num_atoms, from, to, cart_vector }
     }
+}
+
+// Split coords into reduced coordinates, and their original lattice points.
+fn decompose_coords(coords: &Coords) -> (Coords, Vec<V3<i32>>) {
+    let mut coords = coords.clone();
+    coords.ensure_fracs();
+
+    let original_fracs = coords.to_fracs();
+    coords.reduce_positions();
+    let mapped_fracs = coords.to_fracs();
+
+    let latts = {
+        izip!(original_fracs, mapped_fracs)
+            .map(|(orig, mapped)| (orig - mapped).map(|x| f64::round(x) as i32))
+            .collect()
+    };
+    (coords, latts)
 }
 
 //=================================================================
@@ -504,6 +535,35 @@ mod tests {
                 FracBond { from: 1, to: 0, image_diff: V3([0, 0,  1]) },
                 FracBond { from: 2, to: 0, image_diff: V3([0, 0,  0]) },
                 FracBond { from: 2, to: 1, image_diff: V3([0, 0,  1]) },
+            ].into_iter().collect::<BTreeSet<_>>(),
+        }
+    }
+
+    #[test]
+    fn weird_initial_images() {
+        // A very short-range interaction with only one interacting pair,
+        // but we start with really weird images; this will be reflected in the
+        // image_diff vector.
+        let coords = Coords::new(
+            Lattice::orthorhombic(1.0, 1.0, 1.0),
+            CoordsKind::Carts(vec![
+                // make sure to include negative values in case of dumb negative modulus bugs
+                V3([6.5, -3.5,  2.5]),  // the [6, -4,  2] image of [0.5, 0.5, 0.5]
+                V3([8.5, -3.5, -7.4]),  // the [8, -4, -8] image of [0.5, 0.5, 0.6]
+            ]),
+        );
+        let range = 0.1 * 1.1;
+
+        let bonds = FracBonds::from_brute_force_very_dumb(&coords, range).unwrap();
+        let actual = bonds.into_iter().collect::<BTreeSet<_>>();
+        assert_eq!{
+            actual,
+            vec![
+                // Two crucial things:
+                // * one bond should be found
+                // * `image_diff` should be `image_to` - `image_from`
+                FracBond { from: 0, to: 1, image_diff: V3([ 2, 0, -10]) },
+                FracBond { from: 1, to: 0, image_diff: V3([-2, 0,  10]) },
             ].into_iter().collect::<BTreeSet<_>>(),
         }
     }
