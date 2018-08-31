@@ -27,15 +27,18 @@ use std::{
     env,
 };
 
-pub static ROOT_DIR: Dir = include_dir!(".");
+pub static ROOT_DIR: Dir = include_dir!("rsp2");
 
 pub struct Guard(TempDir);
 
 /// Writes rsp2 python modules to a temporary directory and adds it to the `PYTHONPATH` environment
 /// variable until the returned RAII guard is dropped.
 pub fn add_to_python_path() -> Result<Guard, ::failure::Error> {
-    let temp_dir = TempDir::new("rsp2-")?;
-    write_dir_contents(&ROOT_DIR, &temp_dir.path())?;
+    let temp_dir = TempDir::new("rsp2")?;
+    let py_package_dir = temp_dir.path().join("rsp2");
+
+    ::fsx::create_dir(&py_package_dir)?;
+    write_dir_contents(&ROOT_DIR, &py_package_dir)?;
 
     modify_path_env(
         "PYTHONPATH",
