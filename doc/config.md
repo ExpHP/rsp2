@@ -1,7 +1,5 @@
 # `rsp2` configuration
 
-RSP2's config files support two small extensions on the YAML format, which are implemented as simple lexical transformations on a parsed YAML file prior to deserialization, or during the merge step.
-
 ## Config arguments
 
 RSP2 accepts multiple config arguments in a single command line. When multiple configurations are specified, they are merged together, with values from later arguments overriding earlier ones.

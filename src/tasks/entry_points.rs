@@ -16,7 +16,7 @@ use ::FailResult;
 
 use ::clap;
 use ::cmd::trial::{TrialDir, NewTrialDirArgs};
-use ::cmd::StructureFileType;
+use ::cmd::{StructureFileType, DidEvChasing};
 use ::path_abs::{PathDir, PathFile, PathAbs};
 use ::std::ffi::OsStr;
 use ::traits::Load;
@@ -261,6 +261,38 @@ fn _rsp2_acgsd(stop_after_dynmat: bool) {
 
         let settings = trial.read_settings()?;
         trial.run_relax_with_eigenvectors(mpi_on_demand, &settings, filetype, &input, stop_after_dynmat)
+    });
+}
+
+// %% CRATES: binary: rsp2-after-diagonalization %%
+pub fn after_diagonalization(bin_name: &str) {
+    wrap_main(|logfile, mpi_on_demand| {
+        let (app, de) = CliDeserialize::augment_clap_app({
+            ::clap::App::new(bin_name)
+                .about("The next step after rsp2-acgsd-and-dynmat and the negative_modes py script")
+                .args(&[
+                    arg!( dir=DIR "existing trial directory"),
+                ])
+        });
+        let matches = app.get_matches();
+        let () = de.resolve_args(&matches)?;
+
+        let dir = PathDir::new(matches.expect_value_of("dir"))?;
+        let trial = TrialDir::from_existing(&dir)?;
+
+        // Make sure the run is valid before making a logfile
+        let iteration = trial.find_iteration_for_ev_chase()?;
+
+        logfile.start(PathFile::new(trial.new_logfile_path()?)?)?;
+
+        let settings = trial.read_settings()?;
+        let DidEvChasing(chased) = trial.run_after_diagonalization(
+            mpi_on_demand, &settings, iteration,
+        )?;
+        match chased {
+            true => bail!("Ev chasing was performed; loop not done"),
+            false => Ok(())
+        }
     });
 }
 

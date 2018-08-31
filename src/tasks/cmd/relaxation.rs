@@ -15,6 +15,7 @@
 use super::trial::TrialDir;
 use super::GammaSystemAnalysis;
 use super::{write_eigen_info_for_humans, write_eigen_info_for_machines};
+use super::{EvLoopStructureKind, Iteration};
 
 use ::{FailResult, FailOk};
 use ::rsp2_tasks_config::{self as cfg, Settings};
@@ -45,7 +46,6 @@ pub trait EvLoopDiagonalizer {
     ) -> FailResult<(Vec<f64>, Basis3, Self::ExtraOut)>;
 }
 
-
 impl TrialDir {
     /// NOTE: This writes to fixed filepaths in the trial directory
     ///       and is not designed to be called multiple times.
@@ -75,57 +75,26 @@ impl TrialDir {
             let coords = from_coords;
             let iteration = loop_state.iteration;
 
-            trace!("============================");
-            trace!("Begin relaxation # {}", iteration);
-
-            let coords = do_relax(pot, &settings.cg, coords, meta.sift())?;
-
-            trace!("============================");
+            let coords = self.do_ev_loop_stuff_before_diagonalization(
+                &settings, pot, meta.sift(), iteration, coords,
+            )?;
 
             let (evals, evecs, extra_out) = {
-                let subdir = format!("ev-loop-{:02}.1.structure", iteration);
-                self.write_stored_structure(
-                    &subdir,
-                    &format!("Structure after CG round {}", iteration),
-                    &coords, meta.sift(),
-                )?;
-
+                let subdir = self.structure_filename(EvLoopStructureKind::PreEvChase(iteration));
                 let stored = self.read_stored_structure(&subdir)?;
-
-                diagonalizer.do_post_relaxation_computations(&self, settings, pot, &stored, stop_after_dynmat)?
+                diagonalizer.do_post_relaxation_computations(
+                    &self, settings, pot, &stored, stop_after_dynmat,
+                )?
             };
 
             trace!("============================");
             trace!("Finished diagonalization");
 
-            let classifications = super::acoustic_search::perform_acoustic_search(
-                pot, &evals, &evecs,
-                &coords, meta.sift(),
-                &settings.acoustic_search,
-            )?;
-            trace!("Computing eigensystem info");
-
-            let ev_analysis = super::run_gamma_system_analysis(
-                &coords, meta.sift(), &evals, &evecs, Some(classifications),
-            )?;
-
-            {
-                let file = self.create_file(format!("eigenvalues.{:02}", iteration))?;
-                write_eigen_info_for_machines(&ev_analysis, file)?;
-                write_eigen_info_for_humans(&ev_analysis, &mut |s| FailOk(info!("{}", s)))?;
-            }
-
-            let (coords, did_chasing) = self.maybe_do_ev_chasing(
-                settings, pot, coords, meta.sift(), &ev_analysis, &evals, &evecs,
-            )?;
-
-            self.write_stored_structure(
-                &format!("ev-loop-{:02}.2.structure", iteration),
-                &format!("Structure after eigenmode-chasing round {}", iteration),
-                &coords, meta.sift(),
-            )?;
-
-            warn_on_improvable_lattice_params(pot, &coords, meta.sift())?;
+            let (ev_analysis, coords, did_chasing) = {
+                self.do_ev_loop_stuff_after_diagonalization(
+                    &settings, pot, meta.sift(), iteration, coords, &evals, &evecs,
+                )?
+            };
 
             match loop_state.step(did_chasing) {
                 EvLoopStatus::KeepGoing => {
@@ -142,6 +111,80 @@ impl TrialDir {
             // unreachable
         }
     }
+
+    pub(in ::cmd) fn do_ev_loop_stuff_before_diagonalization(
+        &self,
+        settings: &Settings,
+        pot: &PotentialBuilder,
+        meta: HList5<
+            meta::SiteElements,
+            meta::SiteMasses,
+            Option<meta::SiteLayers>,
+            Option<meta::LayerScMatrices>,
+            Option<meta::FracBonds>,
+        >,
+        iteration: Iteration,
+        coords: Coords,
+    ) -> FailResult<Coords>
+    {Ok({
+        trace!("============================");
+        trace!("Begin relaxation # {}", iteration);
+
+        let coords = do_cg_relax(pot, &settings.cg, coords, meta.sift())?;
+
+        trace!("============================");
+
+        let subdir = self.structure_filename(EvLoopStructureKind::PreEvChase(iteration));
+        self.write_stored_structure(
+            &subdir,
+            &format!("Structure after CG round {}", iteration),
+            &coords, meta.sift(),
+        )?;
+        coords
+    })}
+
+    pub(in ::cmd) fn do_ev_loop_stuff_after_diagonalization(
+        &self,
+        settings: &Settings,
+        pot: &PotentialBuilder,
+        meta: HList5<
+            meta::SiteElements,
+            meta::SiteMasses,
+            Option<meta::SiteLayers>,
+            Option<meta::LayerScMatrices>,
+            Option<meta::FracBonds>,
+        >,
+        iteration: Iteration,
+        coords: Coords,
+        evals: &Vec<f64>,
+        evecs: &Basis3,
+    ) -> FailResult<(GammaSystemAnalysis, Coords, DidEvChasing)>
+    {Ok({
+        let classifications = super::acoustic_search::perform_acoustic_search(
+            pot, evals, evecs,
+            &coords, meta.sift(),
+            &settings.acoustic_search,
+        )?;
+        trace!("Computing eigensystem info");
+        let ev_analysis = super::run_gamma_system_analysis(
+            &coords, meta.sift(), evals, evecs, Some(classifications),
+        )?;
+        {
+            let file = self.create_file(format!("eigenvalues.{:02}", iteration))?;
+            write_eigen_info_for_machines(&ev_analysis, file)?;
+            write_eigen_info_for_humans(&ev_analysis, &mut |s| FailOk(info!("{}", s)))?;
+        }
+        let (coords, did_chasing) = self.maybe_do_ev_chasing(
+            settings, pot, coords, meta.sift(), &ev_analysis, evals, evecs,
+        )?;
+        self.write_stored_structure(
+            &self.structure_filename(EvLoopStructureKind::PostEvChase(iteration)),
+            &format!("Structure after eigenmode-chasing round {}", iteration),
+            &coords, meta.sift(),
+        )?;
+        warn_on_improvable_lattice_params(pot, &coords, meta.sift())?;
+        (ev_analysis, coords, did_chasing)
+    })}
 
     fn maybe_do_ev_chasing(
         &self,
@@ -181,7 +224,7 @@ impl TrialDir {
 
 struct EvLoopFsm {
     config: cfg::EvLoop,
-    iteration: u32,
+    iteration: Iteration,
     all_ok_count: u32,
 }
 
@@ -192,22 +235,22 @@ pub enum EvLoopStatus {
 }
 
 // just a named bool for documentation
-pub struct DidEvChasing(bool);
+pub struct DidEvChasing(pub bool);
 
 impl EvLoopFsm {
     pub fn new(config: &cfg::EvLoop) -> Self
     { EvLoopFsm {
         config: config.clone(),
-        iteration: 1,
+        iteration: Iteration(1),
         all_ok_count: 0,
     }}
 
     pub fn step(&mut self, did: DidEvChasing) -> EvLoopStatus {
-        self.iteration += 1;
+        self.iteration.0 += 1;
         match did {
             DidEvChasing(true) => {
                 self.all_ok_count = 0;
-                if self.iteration > self.config.max_iter {
+                if self.iteration.0 > self.config.max_iter {
                     if self.config.fail {
                         EvLoopStatus::ItsBadGuys("Too many relaxation steps!")
                     } else {
@@ -232,7 +275,7 @@ impl EvLoopFsm {
 
 //-----------------------------------------------------------------------------
 
-fn do_relax(
+fn do_cg_relax(
     pot: &PotentialBuilder,
     cg_settings: &cfg::Acgsd,
     coords: Coords,

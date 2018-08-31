@@ -27,6 +27,7 @@ pub(crate) mod trial;
 pub(crate) use ::filetypes::stored_structure::StoredStructure;
 
 use self::relaxation::EvLoopDiagonalizer;
+pub(crate) use self::relaxation::DidEvChasing;
 mod relaxation;
 mod acoustic_search;
 mod param_optimization;
@@ -67,6 +68,7 @@ use ::std::{
     ffi::{OsStr, OsString},
     collections::{BTreeMap},
     rc::{Rc},
+    fmt,
 };
 
 use ::itertools::Itertools;
@@ -82,6 +84,26 @@ pub enum StructureFileType {
     Poscar,
     LayersYaml,
     StoredStructure,
+}
+
+pub enum EvLoopStructureKind {
+    Initial,
+    PreEvChase(Iteration),
+    PostEvChase(Iteration),
+    Final,
+}
+
+// FIXME hide the member and forbid the value 0
+//
+/// Number of an iteration of the eigenvector loop.
+///
+/// Iterations are numbered starting from 1.
+#[derive(Debug, Copy, Clone)]
+pub struct Iteration(pub u32);
+
+impl fmt::Display for Iteration {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result
+    { fmt::Display::fmt(&self.0, f) }
 }
 
 impl TrialDir {
@@ -121,7 +143,8 @@ impl TrialDir {
         });
 
         self.write_stored_structure(
-            "initial.structure", "Initial structure (after lattice optimization)",
+            &self.structure_filename(EvLoopStructureKind::Initial),
+            "Initial structure (after lattice optimization)",
             &original_coords, meta.sift(),
         )?;
 
@@ -178,7 +201,8 @@ impl TrialDir {
         };
 
         self.write_stored_structure(
-            "final.structure", "Final structure",
+            &self.structure_filename(EvLoopStructureKind::Final),
+            "Final structure",
             &coords, meta.sift(),
         )?;
 
@@ -690,16 +714,17 @@ impl TrialDir {
         let mut out = vec![];
         out.push(ev_analysis.make_summary(settings));
         out.push({
-            let f = |s: &str| FailOk({
-                let (coords, meta) = self.read_stored_structure_data(s)?;
+            let f = |kind| FailOk({
+                let s = self.structure_filename(kind);
+                let (coords, meta) = self.read_stored_structure_data(&s)?;
 
                 let na = coords.num_atoms() as f64;
                 pot.one_off().compute_value(&coords, meta.sift())? / na
             });
 
-            let initial = f(&"initial.structure")?;
-            let final_ = f(&"final.structure")?;
-            let before_ev_chasing = f(&"ev-loop-01.1.structure")?;
+            let initial = f(EvLoopStructureKind::Initial)?;
+            let final_ = f(EvLoopStructureKind::Final)?;
+            let before_ev_chasing = f(EvLoopStructureKind::PreEvChase(Iteration(1)))?;
 
             let cereal = EnergyPerAtom { initial, final_, before_ev_chasing };
             let value = ::serde_yaml::to_value(&cereal)?;
@@ -1002,7 +1027,7 @@ impl TrialDir {
     {Ok({
         let pot = PotentialBuilder::from_root_config(&self, on_demand, &settings);
 
-        let (coords, meta) = self.read_stored_structure_data("final.structure")?;
+        let (coords, meta) = self.read_stored_structure_data(&self.structure_filename(EvLoopStructureKind::Final))?;
 
         let phonopy = phonopy_builder_from_settings(&settings.phonons, coords.lattice());
 
@@ -1358,6 +1383,76 @@ pub(crate) fn run_dynmat_test(phonopy_dir: &PathDir) -> FailResult<()>
 
 //=================================================================
 
+impl TrialDir {
+    /// Used to figure out which iteration we're on when starting from the
+    /// post-diagonalization part of the EV loop for sparse.
+    pub(crate) fn find_iteration_for_ev_chase(&self) -> FailResult<Iteration> {
+        use ::cmd::EvLoopStructureKind::*;
+
+        for iteration in (1..).map(Iteration) {
+            let pre_chase = self.join(self.structure_filename(PreEvChase(iteration)));
+            let post_chase = self.join(self.structure_filename(PostEvChase(iteration)));
+            let eigensols = self.join(self.eigensols_filename(iteration));
+            if !pre_chase.exists() {
+                bail!("{}: does not exist", pre_chase.nice());
+            }
+            if !post_chase.exists() {
+                if !eigensols.exists() {
+                    bail!("\
+                        {}: does not exist.  Did you perform diagonalization? \
+                        (try the python module rsp2.cli.negative_modes)
+                    ", eigensols.nice())
+                }
+                return Ok(iteration);
+            }
+        }
+        unreachable!()
+    }
+
+    pub(crate) fn run_after_diagonalization(
+        &self,
+        on_demand: Option<LammpsOnDemand>,
+        settings: &Settings,
+        iteration: Iteration,
+    ) -> FailResult<DidEvChasing> {
+        use ::cmd::EvLoopStructureKind::*;
+        use ::filetypes::Eigensols;
+
+        let pot = PotentialBuilder::from_root_config(&self, on_demand, &settings);
+
+        let (coords, meta) = self.read_stored_structure_data(&self.structure_filename(PreEvChase(iteration)))?;
+        let Eigensols {
+            frequencies: evals,
+            eigenvectors: evecs,
+        } = Load::load(self.join(self.eigensols_filename(iteration)))?;
+
+        let (_, coords, did_ev_chasing) = self.do_ev_loop_stuff_after_diagonalization(
+            settings, &pot, meta.sift(), iteration,
+            coords, &evals, &evecs,
+        )?;
+
+        if let DidEvChasing(true) = did_ev_chasing {
+            // FIXME: This is confusing and side-effectful.
+            //        File-saving should be done at the highest level possible, not in a function
+            //        called from multiple places.
+            let _coords_already_saved = self.do_ev_loop_stuff_before_diagonalization(
+                settings, &pot, meta.sift(), Iteration(iteration.0 + 1), coords,
+            )?;
+        }
+
+        {
+            let mut f = self.create_file(format!("did-ev-chasing-{:02}", iteration))?;
+            match did_ev_chasing {
+                DidEvChasing(true) => writeln!(f, "1")?,
+                DidEvChasing(false) => writeln!(f, "0")?,
+            }
+        }
+        Ok(did_ev_chasing)
+    }
+}
+
+//=================================================================
+
 // Reads a POSCAR or layers.yaml into an intermediate form which can have its
 // parameters optimized before producing a structure. (it also returns some other
 // layer-related data).
@@ -1536,3 +1631,17 @@ pub(crate) fn resolve_trial_or_structure_path(
     let structure = trial.read_stored_structure(structure_name)?;
     (trial, structure)
 })}
+
+impl TrialDir {
+    pub fn structure_filename(&self, kind: EvLoopStructureKind) -> String {
+        match kind {
+            EvLoopStructureKind::Initial => format!("initial.structure"),
+            EvLoopStructureKind::Final => format!("final.structure"),
+            EvLoopStructureKind::PreEvChase(n) => format!("ev-loop-{:02}.1.structure", n),
+            EvLoopStructureKind::PostEvChase(n) => format!("ev-loop-{:02}.2.structure", n),
+        }
+    }
+
+    pub fn eigensols_filename(&self, iteration: Iteration) -> String
+    { format!("ev-loop-modes-{:02}.json", iteration) }
+}
