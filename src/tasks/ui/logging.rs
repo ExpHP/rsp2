@@ -225,13 +225,14 @@ impl SetGlobalLogfile {
 }
 
 impl Drop for SetGlobalLogfile {
-    fn drop(&mut self) {
-        error!{"\
-            The SetGlobalLogFile was dropped. Please do not ignore it with an _ignored binding, \
-            as it causes log messages to accumulate in memory. Instead, either call 'start' or \
-            'disable' in the entry point function.\
-        "}
-    }
+    // NOTE: this should never be called in successful calls to the program, as the entry point
+    //       ought to call either 'start' or 'disable' (or else risk unbounded memory usage due
+    //       to `delayed_messages`).
+    //
+    //       ...however, we can't just make this method complain, because there are many ways that
+    //       an entry point could fail before it ever even reaches the call to 'start'/'disable'.
+    fn drop(&mut self)
+    { GLOBAL_LOGFILE.disable() }
 }
 
 fn fmt_log_message_lines(
