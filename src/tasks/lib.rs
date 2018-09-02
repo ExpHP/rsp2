@@ -245,3 +245,13 @@ mod threading {
         }}
     }
 }
+
+/// Version info, provided to rsp2-tasks by the entry points so that rsp2-tasks
+/// itself does not need to be rebuilt.
+///
+/// (the function to generate it is in the toplevel crate `rsp2`)
+#[derive(Debug, Copy, Clone)]
+pub struct VersionInfo {
+    pub short_sha: &'static str,
+    pub commit_date: &'static str,
+}

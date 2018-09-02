@@ -105,6 +105,9 @@ mpi = { version = "0.5.4", optional = true }
 
 libffi-sys = { version = "0.6.2", features = ["system"] }
 
+[build-dependencies]
+vergen = "2"
+
 [features]
 default = ["mpi-support"]
 

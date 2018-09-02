@@ -38,6 +38,9 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 
 !!libffi-sys { features = ["system"] }
 
+[build-dependencies]
+!!vergen
+
 [features]
 default = ["mpi-support"]
 
