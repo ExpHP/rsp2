@@ -240,17 +240,17 @@ impl OptionalFileType {
 // -------------------------------------------------------------------------------------
 
 // %% CRATES: binary: rsp2 %%
-pub fn rsp2(_bin_name: &str, version: VersionInfo) {
+pub fn rsp2(_bin_name: &str, version: VersionInfo) -> ! {
     _rsp2_acgsd(false, version)
 }
 
 // HACK
 // %% CRATES: binary: rsp2-acgsd-and-dynmat %%
-pub fn rsp2_acgsd_and_dynmat(_bin_name: &str, version: VersionInfo) {
+pub fn rsp2_acgsd_and_dynmat(_bin_name: &str, version: VersionInfo) -> ! {
     _rsp2_acgsd(true, version)
 }
 
-fn _rsp2_acgsd(stop_after_dynmat: bool, version: VersionInfo) {
+fn _rsp2_acgsd(stop_after_dynmat: bool, version: VersionInfo) -> ! {
     wrap_main(version, |logfile, mpi_on_demand| {
         let (app, de) = CliDeserialize::augment_clap_app({
             app_from_crate!(", ")
@@ -273,7 +273,7 @@ fn _rsp2_acgsd(stop_after_dynmat: bool, version: VersionInfo) {
 }
 
 // %% CRATES: binary: rsp2-after-diagonalization %%
-pub fn after_diagonalization(bin_name: &str, version: VersionInfo) {
+pub fn after_diagonalization(bin_name: &str, version: VersionInfo) -> ! {
     wrap_main(version, |logfile, mpi_on_demand| {
         let (app, de) = CliDeserialize::augment_clap_app({
             ::clap::App::new(bin_name)
@@ -305,7 +305,7 @@ pub fn after_diagonalization(bin_name: &str, version: VersionInfo) {
 }
 
 // %% CRATES: binary: rsp2-shear-plot %%
-pub fn shear_plot(bin_name: &str, version: VersionInfo) {
+pub fn shear_plot(bin_name: &str, version: VersionInfo) -> ! {
     wrap_main(version, |logfile, mpi_on_demand| {
         let (app, de) = CliDeserialize::augment_clap_app({
             ::clap::App::new(bin_name)
@@ -327,7 +327,7 @@ pub fn shear_plot(bin_name: &str, version: VersionInfo) {
 }
 
 // %% CRATES: binary: rsp2-save-bands-after-the-fact %%
-pub fn save_bands_after_the_fact(bin_name: &str, version: VersionInfo) {
+pub fn save_bands_after_the_fact(bin_name: &str, version: VersionInfo) -> ! {
     wrap_main(version, |logfile, mpi_on_demand| {
         let (app, de) = CliDeserialize::augment_clap_app({
             ::clap::App::new(bin_name)
@@ -348,7 +348,7 @@ pub fn save_bands_after_the_fact(bin_name: &str, version: VersionInfo) {
 }
 
 // %% CRATES: binary: rsp2-rerun-analysis %%
-pub fn rerun_analysis(bin_name: &str, version: VersionInfo) {
+pub fn rerun_analysis(bin_name: &str, version: VersionInfo) -> ! {
     wrap_main(version, |logfile, mpi_on_demand| {
         let (app, de) = CliDeserialize::augment_clap_app({
             ::clap::App::new(bin_name)
@@ -374,7 +374,7 @@ pub fn rerun_analysis(bin_name: &str, version: VersionInfo) {
 //       system using phonopy (and thus needs access to settings to know the potential),
 //       while this requires the eigensolutions as input.
 // %% CRATES: binary: rsp2-sparse-analysis %%
-pub fn sparse_analysis(bin_name: &str, version: VersionInfo) {
+pub fn sparse_analysis(bin_name: &str, version: VersionInfo) -> ! {
     wrap_main(version, |logfile, _mpi_on_demand| {
         let (app, de) = CliDeserialize::augment_clap_app({
             ::clap::App::new(bin_name)
@@ -411,7 +411,7 @@ pub fn sparse_analysis(bin_name: &str, version: VersionInfo) {
 }
 
 // %% CRATES: binary: rsp2-bond-test %%
-pub fn bond_test(bin_name: &str, version: VersionInfo) {
+pub fn bond_test(bin_name: &str, version: VersionInfo) -> ! {
     wrap_main(version, |logfile, _mpi_on_demand| {
         let (app, de) = CliDeserialize::augment_clap_app({
             ::clap::App::new(bin_name)
@@ -443,7 +443,7 @@ pub fn bond_test(bin_name: &str, version: VersionInfo) {
 }
 
 // %% CRATES: binary: rsp2-dynmat-test %%
-pub fn dynmat_test(bin_name: &str, version: VersionInfo) {
+pub fn dynmat_test(bin_name: &str, version: VersionInfo) -> ! {
     wrap_main(version, |logfile, _mpi_on_demand| {
         let (app, de) = CliDeserialize::augment_clap_app({
             ::clap::App::new(bin_name)
@@ -462,7 +462,7 @@ pub fn dynmat_test(bin_name: &str, version: VersionInfo) {
 }
 
 // %% CRATES: binary: rsp2-plot-vdw %%
-pub fn plot_vdw(bin_name: &str, version: VersionInfo) {
+pub fn plot_vdw(bin_name: &str, version: VersionInfo) -> ! {
     wrap_main(version, |logfile, mpi_on_demand| {
         let (app, de) = CliDeserialize::augment_clap_app({
             ::clap::App::new(bin_name)
@@ -493,7 +493,7 @@ pub fn plot_vdw(bin_name: &str, version: VersionInfo) {
 }
 
 // %% CRATES: binary: rsp2-converge-vdw %%
-pub fn converge_vdw(bin_name: &str, version: VersionInfo) {
+pub fn converge_vdw(bin_name: &str, version: VersionInfo) -> ! {
     wrap_main(version, |logfile, mpi_on_demand| {
         let (app, de) = CliDeserialize::augment_clap_app({
             ::clap::App::new(bin_name)
