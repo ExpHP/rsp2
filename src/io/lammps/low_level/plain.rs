@@ -187,7 +187,7 @@ impl LowLevelApi for LammpsOwner {
         //       positions is not good enough; you get "lost atoms" errors when using MPI.
         for i in 0..carts.len() {
             self.command(format!(
-                "create_atoms {} single {} {} {} ",
+                "create_atoms {} single {} {} {} remap yes",
                 types[i],
                 carts[i][0],
                 carts[i][1],
