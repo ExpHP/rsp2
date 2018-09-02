@@ -240,20 +240,25 @@ impl OptionalFileType {
 // -------------------------------------------------------------------------------------
 
 // %% CRATES: binary: rsp2 %%
-pub fn rsp2(_bin_name: &str, version: VersionInfo) -> ! {
-    _rsp2_acgsd(false, version)
+pub fn rsp2(bin_name: &str, version: VersionInfo) -> ! {
+    _rsp2_acgsd(false, bin_name, version)
 }
 
 // HACK
 // %% CRATES: binary: rsp2-acgsd-and-dynmat %%
-pub fn rsp2_acgsd_and_dynmat(_bin_name: &str, version: VersionInfo) -> ! {
-    _rsp2_acgsd(true, version)
+pub fn rsp2_acgsd_and_dynmat(bin_name: &str, version: VersionInfo) -> ! {
+    _rsp2_acgsd(true, bin_name, version)
 }
 
-fn _rsp2_acgsd(stop_after_dynmat: bool, version: VersionInfo) -> ! {
+fn _rsp2_acgsd(
+    stop_after_dynmat: bool,
+    bin_name: &str,
+    version: VersionInfo,
+) -> ! {
     wrap_main(version, |logfile, mpi_on_demand| {
         let (app, de) = CliDeserialize::augment_clap_app({
-            app_from_crate!(", ")
+            ::clap::App::new(bin_name)
+                .about("runs the full eigenvector loop of rsp2")
                 .args(&[
                     arg!( input=STRUCTURE "input file for structure"),
                 ])
