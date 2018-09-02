@@ -1,4 +1,5 @@
-potential: rebo
+potential:
+  rebo: {}
 scale-ranges:
   scalables: []
     #- parameter:
