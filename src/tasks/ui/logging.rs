@@ -35,23 +35,49 @@ mod loggers {
     }
 
     /// A log file for fern that can be created *after* logger initialization.
-    #[derive(Debug, Default)]
+    #[derive(Debug)]
     pub struct DelayedLogFile {
-        file_rw: RwLock<Option<FileWrite>>,
+        rw: RwLock<DelayedLogFileInner>,
+    }
+
+    // States:
+    //                 file     delayed_messages
+    // - initial:      None        Some(...)
+    // - started:    Some(...)       None
+    // - disabled:     None          None
+    #[derive(Debug)]
+    struct DelayedLogFileInner {
+        file: Option<FileWrite>,
+
+        // messages logged via `log` macros before the logfile was initialized,
+        // so that they can be written to it once it is open.
+        delayed_messages: Option<Vec<String>>,
     }
 
     lazy_static! {
         /// The DelayedLogFile given to fern.
-        pub static ref GLOBAL_LOGFILE: DelayedLogFile = Default::default();
+        pub static ref GLOBAL_LOGFILE: DelayedLogFile = DelayedLogFile {
+            rw: RwLock::new(DelayedLogFileInner {
+                file: None,
+                delayed_messages: Some(vec![]),
+            })
+        };
     }
 
     impl DelayedLogFile {
-        pub fn start(&self, path: PathFile) -> FailResult<()> {
-            if let Ok(mut file) = self.file_rw.write() {
-                if file.is_some() {
-                    bail!("The logfile has already been set!");
+        pub(in ::ui::logging) fn start(&self, path: PathFile) -> FailResult<()> {
+            if let Ok(mut inner) = self.rw.write() {
+                // This situation should be impossible since SetGlobalLogFile (the only API
+                // visible outside the `ui` module) has methods that take `self`.
+                assert!(inner.delayed_messages.is_some(), "(bug) The logfile was set twice!");
+                assert!(inner.file.is_none(), "(bug) impossible state!");
+
+                let mut file = path.append()?;
+                for line in inner.delayed_messages.take().unwrap() {
+                    writeln!(file, "{}", line)?;
                 }
-                *file = Some(path.append()?);
+
+                inner.file = Some(file);
             } else {
                 // PoisonError. In the highly unlikely event that this occurs, something else will
                 // probably catch it. And if we try to be a hero, we risk a double-panic,
@@ -59,26 +85,47 @@ mod loggers {
             }
             Ok(())
         }
+
+        pub(in ::ui::logging) fn disable(&self) {
+            if let Ok(mut inner) = self.rw.write() {
+                // This situation should be impossible since SetGlobalLogFile (the only API
+                // visible outside the `ui` module) has methods that take `self`.
+                assert!(inner.delayed_messages.is_some(), "(bug) The logfile was set twice!");
+                assert!(inner.file.is_none(), "(bug) impossible state!");
+
+                // stop recording messages
+                inner.delayed_messages.take();
+            } // ignore PoisonError silently for reasons documented above
+        }
     }
 
     impl Log for DelayedLogFile {
         fn enabled(&self, _: &::log::Metadata) -> bool { true }
 
         fn log(&self, record: &Record) {
-            if let Ok(mut file) = self.file_rw.write() {
-                if let Some(mut file) = (*file).as_mut() {
-                    // ignore error for same reasons as ignoring PoisonError (see above).
-                    //
-                    // (`Display::fmt` might also double-panic, but that's the Drop impl's fault
-                    //  for trying to format something that can panic!)
-                    let _ = writeln!(file, "{}", record.args());
+            if let Ok(mut inner) = self.rw.write() {
+                let inner = &mut *inner;
+                match (inner.file.as_mut(), inner.delayed_messages.as_mut()) {
+                    (Some(file), _) => {
+                        // ignore error for same reasons as ignoring PoisonError (see above).
+                        //
+                        // (`Display::fmt` might also double-panic, but that's the Drop impl's fault
+                        //  for trying to format something that can panic!)
+                        let _ = writeln!(file, "{}", record.args());
+                    },
+                    // not yet started
+                    (None, Some(delayed_messages)) => {
+                        delayed_messages.push(format!("{}", record.args()));
+                    },
+                    // disabled
+                    (None, None) => {}
                 }
             } // ignore PoisonError silently for reasons documented above
         }
 
         fn flush(&self) {
-            if let Ok(mut file) = self.file_rw.write() {
-                if let Some(mut file) = (*file).as_mut() {
+            if let Ok(mut inner) = self.rw.write() {
+                if let Some(mut file) = inner.file.as_mut() {
                     // ignore error for same reasons as ignoring PoisonError (see above)
                     let _ = file.flush();
                 }
@@ -161,13 +208,30 @@ pub fn init_test_logger() {
     let _ = init_global_logger();
 }
 
-/// Returned by `init_global_logger` to remind you to set the logfile once possible.
-/// (which can be done by calling the `start` method)
-#[must_use = "The logfile has not been set up!"]
+/// Returned by `init_global_logger` to remind you to set the logfile once possible,
+/// or to disable its logging. (which can be done by calling the `start` or `disable` method)
 pub struct SetGlobalLogfile(());
 impl SetGlobalLogfile {
-    pub fn start(self, path: PathFile) -> FailResult<()>
-    { GLOBAL_LOGFILE.start(path).map_err(Into::into) }
+    pub fn start(self, path: PathFile) -> FailResult<()> {
+        let result = GLOBAL_LOGFILE.start(path).map_err(Into::into);
+        ::std::mem::forget(self);
+        result
+    }
+
+    pub fn disable(self) {
+        GLOBAL_LOGFILE.disable();
+        ::std::mem::forget(self);
+    }
+}
+
+impl Drop for SetGlobalLogfile {
+    fn drop(&mut self) {
+        error!{"\
+            The SetGlobalLogFile was dropped. Please do not ignore it with an _ignored binding, \
+            as it causes log messages to accumulate in memory. Instead, either call 'start' or \
+            'disable' in the entry point function.\
+        "}
+    }
 }
 
 fn fmt_log_message_lines(

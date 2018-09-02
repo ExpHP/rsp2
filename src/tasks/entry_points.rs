@@ -404,7 +404,7 @@ pub fn sparse_analysis(bin_name: &str) {
 
 // %% CRATES: binary: rsp2-bond-test %%
 pub fn bond_test(bin_name: &str) {
-    wrap_main(|_logfile, _mpi_on_demand| {
+    wrap_main(|logfile, _mpi_on_demand| {
         let (app, de) = CliDeserialize::augment_clap_app({
             ::clap::App::new(bin_name)
                 .args(&[
@@ -414,6 +414,8 @@ pub fn bond_test(bin_name: &str) {
         });
         let matches = app.get_matches();
         let filetype = de.resolve_args(&matches)?;
+
+        logfile.disable();
 
         let input = PathAbs::new(matches.expect_value_of("input"))?;
         let filetype = OptionalFileType::or_guess(filetype, &input);
@@ -445,7 +447,7 @@ pub fn dynmat_test(bin_name: &str) {
         let () = de.resolve_args(&matches)?;
         let input = PathDir::new(matches.expect_value_of("input"))?;
 
-        let _ = logfile; // no trial dir
+        logfile.disable(); // no trial dir
 
         ::cmd::run_dynmat_test(&input)
     });
@@ -466,7 +468,7 @@ pub fn plot_vdw(bin_name: &str) {
         let matches = app.get_matches();
         let ConfigArgs(config) = de.resolve_args(&matches)?;
 
-        let _ = logfile; // no trial dir
+        logfile.disable(); // no trial dir
 
         let z: f64 = matches.expect_value_of("z").parse()?;
         let r_min: f64 = matches.value_of("r_min").map_or(Ok(z), str::parse)?;
@@ -497,7 +499,7 @@ pub fn converge_vdw(bin_name: &str) {
         let matches = app.get_matches();
         let ConfigArgs(config) = de.resolve_args(&matches)?;
 
-        let _ = logfile; // no trial dir
+        logfile.disable(); // no trial dir
 
         let z: f64 = matches.expect_value_of("z").parse()?;
         let r_min: f64 = matches.value_of("r_min").map_or(Ok(z), str::parse)?;
