@@ -46,4 +46,5 @@ fn simple_test() {
             },
         )
         .run().unwrap();
+    panic!();
 }

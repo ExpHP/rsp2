@@ -16,7 +16,7 @@ path = "lib.rs"
 [dependencies]
 rsp2-structure = { path = "../../structure", features = ["serde-support"] }
 rsp2-array-types = { path = "../../util/array-types", features = ["serde-support"] }
-lammps-sys = { tag = "v0.3.1", git = "https://github.com/ExpHP/lammps-sys" }
+lammps-sys = { branch = "master", git = "https://github.com/ExpHP/lammps-sys", features = ["exceptions", "package-user-omp"] }
 
 log = "0.4"
 lazy_static = "0.2"
@@ -41,5 +41,5 @@ beta = ["rsp2-array-types/beta", "rsp2-assert-close/beta", "rsp2-structure/beta"
 # Once namespaced-features are stabilized, these features will be renamed after the deps.
 # see https://github.com/rust-lang/cargo/issues/1286 (problem and proposal)
 #     https://github.com/rust-lang/cargo/issues/5565 (tracking issue, of sorts)
-mpi-support = ["mpi", "lammps-sys/system-mpi"]
+mpi-support = ["mpi", "lammps-sys/mpi"]
 
