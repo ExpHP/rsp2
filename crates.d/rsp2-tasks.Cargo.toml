@@ -14,6 +14,8 @@ path = "lib.rs"
 !!rsp2-tasks-config
 
 !!rsp2-lammps-wrap
+!!lammps-sys { features = ["package-manybody", "package-user-misc", "package-user-omp"] }
+
 !!rsp2-minimize
 !!rsp2-structure { features = ["serde-support"] }
 !!rsp2-structure-io

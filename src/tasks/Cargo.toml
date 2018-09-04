@@ -19,6 +19,8 @@ path = "lib.rs"
 rsp2-tasks-config = { path = "config" }
 
 rsp2-lammps-wrap = { path = "../io/lammps" }
+lammps-sys = { rev = "fb01339a", git = "https://github.com/ExpHP/lammps-sys", features = ["package-manybody", "package-user-misc", "package-user-omp"] }
+
 rsp2-minimize = { path = "../minimize" }
 rsp2-structure = { path = "../structure", features = ["serde-support"] }
 rsp2-structure-io = { path = "../io/structure" }

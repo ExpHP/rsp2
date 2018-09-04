@@ -8,16 +8,18 @@ Contains a small ecosystem of utility crates for working with crystal structures
 
 `rsp2` won't run out of the box; among the things you will need:
 
-* `python3` with `spglib`, `phonopy`, and `scipy` packages installed.
-* You will need to build a dynamically-linked LAMMPS. See the [`lammps-sys 0.3.0` readme](https://github.com/ExpHP/lammps-sys/tree/v0.3.0).
+* `python3` with `spglib` and `scipy` installed.
+* `phonopy` is an optional requirement.  (`rsp2` now reimplements most of what it needs from phonopy, but retains the ability to use phonopy directly for purposes of comparison).
+* You may wish to build your own copy of LAMMPS and make it available through `pkg-config`, if you require MPI to work. See the [`lammps-sys 0.5.0` readme](https://github.com/ExpHP/lammps-sys/tree/v0.5.0).
+    * If you do not need MPI support, lammps will automatically be built, but will likely be linked against the `mpi_stubs` library. This may cause incompatibilities with the rest of rsp2, which brazenly assumes that lammps was built against whatever implementation of MPI is found by `rsmpi`. In this case, for now it is recommended that you build with `--no-default-features` to disable `rsmpi` support.
 
-If you have trouble, open an issue.
+If you have trouble, please open an issue.
 
 # Running
 
 > `cargo run --bin=rsp2 -- --help` and *good luck*
 
-Because there is currently exactly one person who needs to use the code (who also happens to be the author), the CLI binaries have no stable interface.  Config files, CLI arguments, inputs and outputs undergo major revisions on a whim with the needs of the author.
+Because there is currently one or *maybe two* people who need to use the code (and this count includes the author!), the CLI binaries have no stable interface.  Config files, CLI arguments, inputs and outputs undergo major revisions on a complete whim.
 
 # License
 

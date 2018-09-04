@@ -69,7 +69,7 @@ impl LammpsOwner {
             ::lammps_sys::lammps_open(
                 argv.len() as c_int,
                 argv.as_argv_ptr(),
-                mpi::AsRaw::as_raw(comm) as _,
+                mpi::AsRaw::as_raw(comm),
                 &mut ptr,
             );
         }
