@@ -66,14 +66,26 @@ impl CliTest {
             ..Self::default()
         };
 
-        let test = test.arg("cargo").arg("run");
-        #[cfg(not(debug_assertions))]
-        let test = test.arg("--release");
-        test.arg("--manifest-path")
-            .arg(manifest_dir.join("Cargo.toml").as_path())
-            .arg("--bin")
-            .arg(name)
-            .arg("--")
+        // Yep, we peek directly into `target`, because strangely enough this
+        // is the proper thing to do.[citation needed]
+        //
+        // 'cargo run' might cause undesirable rebuilds of libraries/binaries that
+        // were already built as dependencies of this integration test, due to ephemeral
+        // changes in the environment inside cargo.
+        //
+        // Normally, running stuff directly from target/ would lead to linker issues
+        // with missing dynamic library paths; but lucky for us, since cargo is running
+        // this integration test, it has already modified `LD_LIBRARY_PATH` for us!
+        let bin = {
+            manifest_dir.join("target")
+                .join(match cfg!(debug_assertions) {
+                    true => "debug",
+                    false => "release",
+                })
+                .join(name.as_ref())
+        };
+        let bin: &Path = bin.as_ref();
+        test.arg(bin)
     }
 
     pub fn arg(mut self, arg: impl AsRef<OsStr>) -> Self {
