@@ -65,3 +65,7 @@ cache:
 notifications:
   email:
     on_success: never
+
+branches:
+  only:
+  - lammps-sys-5
