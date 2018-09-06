@@ -6,7 +6,4 @@ tar -xf openmpi-${OPENMPI_VERSION}.tar.bz2 || exit 1
 cd openmpi-$OPENMPI_VERSION || exit 1
 
 ./configure --prefix=$HOME/deps || exit 1
-make install >install.log 2>&1 || {
-    cat install.log
-    exit 1
-}
+make install >install.log 2>&1 || exit 1
