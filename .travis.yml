@@ -19,16 +19,19 @@ env:
   - OPENMPI_VERSION=3.1.2
   - OPENMPI_VERSION_SHORT=3.1
 
-  matrix:
-  - RUST_VERSION=stable RSP2_FEATURES=--features=mpi-support
-  - RUST_VERSION=stable RSP2_FEATURES=--no-default-features
-  - RUST_VERSION=nightly RSP2_FEATURES=--features=mpi-support,nightly
-
 matrix:
+  include:
+    - name: MPI
+      env: RUST_VERSION=stable RSP2_FEATURES=--features=mpi-support
+    # - name: Without MPI
+    #   env: RUST_VERSION=stable RSP2_FEATURES=--no-default-features
+    # - name: Nightly (MPI)
+    #   env: RUST_VERSION=nightly RSP2_FEATURES=--features=mpi-support,nightly
   allow_failures:
     env: RUST_VERSION=nightly RSP2_FEATURES=--features=mpi-support,nightly
 
 install:
+- pwd
 - python -c "import sysconfig; print('\n'.join(map(repr,sorted(sysconfig.get_config_vars().items()))))"
 - mkdir ~/rust-installer
 - curl -sL https://static.rust-lang.org/rustup.sh -o ~/rust-installer/rustup.sh
@@ -51,8 +54,8 @@ install:
 - $TRAVIS_BUILD_DIR/travis/install-openmpi.sh
 
 script:
-- cargo test --all
-- cargo test --all -- --ignored
+- cargo test --all $RSP2_FEATURES
+- cargo test --all $RSP2_FEATURES -- --ignored
 
 cache:
 - cargo
