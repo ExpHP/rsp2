@@ -1,0 +1,63 @@
+# We declare this a python project because it is easier to install arbitrary
+# versions of rust to the virtual machine than it is to install arbitrary
+# versions of python.  rsp2 requires python 3.6+, and non-python environments
+# only have easy access to python 3.5.
+#
+# also, rust-cpython's .travis.yml does it, so we can just copy what they do. =P
+language: python
+sudo: false
+
+python: 3.6
+
+addons:
+  apt:
+    packages:
+    - gfortran
+
+env:
+  global:
+  - OPENMPI_VERSION=3.1.2
+  - OPENMPI_VERSION_SHORT=3.1
+
+  matrix:
+  - RUST_VERSION=stable RSP2_FEATURES=--features=mpi-support
+  - RUST_VERSION=stable RSP2_FEATURES=--no-default-features
+  - RUST_VERSION=nightly RSP2_FEATURES=--features=mpi-support,nightly
+
+matrix:
+  allow_failures:
+    env: RUST_VERSION=nightly RSP2_FEATURES=--features=mpi-support,nightly
+
+install:
+- python -c "import sysconfig; print('\n'.join(map(repr,sorted(sysconfig.get_config_vars().items()))))"
+- mkdir ~/rust-installer
+- curl -sL https://static.rust-lang.org/rustup.sh -o ~/rust-installer/rustup.sh
+- sh ~/rust-installer/rustup.sh --prefix=$HOME/rust --spec=$RUST_VERSION -y --disable-sudo
+- export PYTHON_LIB=$(python -c "import sysconfig; print(sysconfig.get_config_var('LIBDIR'))")
+- find $PYTHON_LIB
+- export PATH="$HOME/deps/bin:$PATH"
+- export PATH="$HOME/rust/bin:$PATH"
+- export LIBRARY_PATH="$HOME/deps/lib:$PYTHON_LIB:$LIBRARY_PATH"
+- export LD_LIBRARY_PATH="$HOME/deps/lib:$PYTHON_LIB:$LD_LIBRARY_PATH"
+- export LD_LIBRARY_PATH="$HOME/rust/lib:$LD_LIBRARY_PATH"
+- rustc -V
+
+# additional python packages
+- pip install --upgrade pip setuptools wheel
+- pip install --only-binary=numpy,scipy numpy scipy
+- pip install spglib
+- pip install phonopy==1.13.0.64 # rsp2 does not yet support 1.13.2
+
+- travis/install-openmpi.sh
+
+script:
+- cargo test --all
+- cargo test --all -- --ignored
+
+cache:
+- cargo
+- ccache
+
+notifications:
+  email:
+    on_success: never
