@@ -37,7 +37,7 @@ install:
 - curl -sL https://static.rust-lang.org/rustup.sh -o ~/rust-installer/rustup.sh
 - sh ~/rust-installer/rustup.sh --prefix=$HOME/rust --spec=$RUST_VERSION -y --disable-sudo
 - export PYTHON_LIB=$(python -c "import sysconfig; print(sysconfig.get_config_var('LIBDIR'))")
-- find $PYTHON_LIB
+# - find $PYTHON_LIB
 - export PATH="$HOME/deps/bin:$PATH"
 - export PATH="$HOME/rust/bin:$PATH"
 - export LIBRARY_PATH="$HOME/deps/lib:$PYTHON_LIB:$LIBRARY_PATH"
@@ -46,10 +46,10 @@ install:
 - rustc -V
 
 # additional python packages
-- pip install --upgrade pip setuptools wheel
-- pip install --only-binary=numpy,scipy numpy scipy
-- pip install spglib
-- pip install phonopy==1.13.0.64 # rsp2 does not yet support 1.13.2
+- pip install --progress-bar=off --upgrade pip setuptools wheel
+- pip install --progress-bar=off --only-binary=numpy,scipy numpy scipy
+- pip install --progress-bar=off spglib
+- pip install --progress-bar=off phonopy==1.13.0.64 # rsp2 does not yet support 1.13.2
 
 - $TRAVIS_BUILD_DIR/travis/install-openmpi.sh
 
