@@ -3,8 +3,8 @@
 # openmpi version 3 is required by rsp2 (and the mpi crate in general)
 # but the apt repos only have version 1
 
-# It takes forever to build, even with ccache enabled.
-# So we explicitly cache it.
+# we can't use 'cache: ccache' with 'language: python', so we manually cache it.
+# This saves ~20 minutes of build time, and the cached data is only a few MB.
 CACHE=$HOME/cache/openmpi-${OPENMPI_VERSION}
 
 [ -e $CACHE ] || {

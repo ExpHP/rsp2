@@ -60,13 +60,17 @@ install:
 # get potentials
 - git clone https://github.com/lammps/lammps $HOME/lammps --depth=1
 
+- $TRAVIS_BUILD_DIR/travis/cargo-cache.sh load
+
 script:
 - cargo test --all $RSP2_FEATURES
 - cargo test --all $RSP2_FEATURES -- --ignored
 
+before_cache:
+- $TRAVIS_BUILD_DIR/travis/cargo-cache.sh store
+
 cache:
-  cargo: true
-  # ccache: true  # doesn't seem to help for openmpi :/
+  # 'cache: cargo' and 'cache: ccache' cannot be used with 'language: python'
   directories:
     - /home/travis/cache
 
