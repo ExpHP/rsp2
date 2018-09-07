@@ -5,15 +5,15 @@
 
 # It takes forever to build, even with ccache enabled.
 # So we explicitly cache it.
-INSTALL=$HOME/cache/openmpi-${OPENMPI_VERSION}
+CACHE=$HOME/cache/openmpi-${OPENMPI_VERSION}
 
-[ -e $INSTALL ] || {
-    cd $HOME/builds
-    wget -q https://download.open-mpi.org/release/open-mpi/v${OPENMPI_VERSION_SHORT}/openmpi-${OPENMPI_VERSION}.tar.bz2
-    tar -xf openmpi-${OPENMPI_VERSION}.tar.bz2
-    cd openmpi-$OPENMPI_VERSION
-    ./configure --prefix=$INSTALL
-    make -j2 install
+[ -e $CACHE ] || {
+    cd $HOME/builds || exit 1
+    wget -q https://download.open-mpi.org/release/open-mpi/v${OPENMPI_VERSION_SHORT}/openmpi-${OPENMPI_VERSION}.tar.bz2 || exit 1
+    tar -xf openmpi-${OPENMPI_VERSION}.tar.bz2 || exit 1
+    cd openmpi-$OPENMPI_VERSION || exit 1
+    ./configure --prefix=$CACHE  || exit 1
+    make -j2 install || exit 1
 }
 
-stow -t $HOME/deps -d $(dirname $INSTALL) $(basename $INSTALL)
+stow -t $HOME/deps -d $(dirname $CACHE) $(basename $CACHE)

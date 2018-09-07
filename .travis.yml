@@ -34,17 +34,18 @@ matrix:
 
 install:
 - pwd
-- python -c "import sysconfig; print('\n'.join(map(repr,sorted(sysconfig.get_config_vars().items()))))"
-- mkdir ~/rust-installer
-- curl -sL https://static.rust-lang.org/rustup.sh -o ~/rust-installer/rustup.sh
-- sh ~/rust-installer/rustup.sh --prefix=$HOME/rust --spec=$RUST_VERSION -y --disable-sudo
+- mkdir -p ~/cache
+- mkdir -p ~/build
+- mkdir -p ~/deps
 - export PYTHON_LIB=$(python -c "import sysconfig; print(sysconfig.get_config_var('LIBDIR'))")
-# - find $PYTHON_LIB
 - export PATH="$HOME/deps/bin:$PATH"
-- export PATH="$HOME/rust/bin:$PATH"
 - export LIBRARY_PATH="$HOME/deps/lib:$PYTHON_LIB:$LIBRARY_PATH"
 - export LD_LIBRARY_PATH="$HOME/deps/lib:$PYTHON_LIB:$LD_LIBRARY_PATH"
-- export LD_LIBRARY_PATH="$HOME/rust/lib:$LD_LIBRARY_PATH"
+
+- python -c "import sysconfig; print('\n'.join(map(repr,sorted(sysconfig.get_config_vars().items()))))"
+- curl -sL https://static.rust-lang.org/rustup.sh -o ~/build/rustup.sh
+- sh ~/build/rustup.sh --prefix=$HOME/deps --spec=$RUST_VERSION -y --disable-sudo
+# - find $PYTHON_LIB
 - rustc -V
 
 # additional python packages
@@ -62,7 +63,6 @@ install:
 script:
 - cargo test --all $RSP2_FEATURES
 - cargo test --all $RSP2_FEATURES -- --ignored
-
 
 cache:
   cargo: true
