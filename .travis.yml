@@ -52,7 +52,14 @@ install:
 - pip install --progress-bar=off spglib
 - pip install --progress-bar=off phonopy==1.13.0.64 # rsp2 does not yet support 1.13.2
 
-- $TRAVIS_BUILD_DIR/travis/install-openmpi.sh
+- pushd $HOME/builds
+- wget -q https://download.open-mpi.org/release/open-mpi/v${OPENMPI_VERSION_SHORT}/openmpi-${OPENMPI_VERSION}.tar.bz2
+- tar -xf openmpi-${OPENMPI_VERSION}.tar.bz2
+- pushd openmpi-$OPENMPI_VERSION
+- ./configure --prefix=$HOME/deps
+- make -j2 install
+- popd
+- popd
 
 script:
 - cargo test --all $RSP2_FEATURES
