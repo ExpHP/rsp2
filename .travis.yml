@@ -19,6 +19,7 @@ env:
   global:
   - OPENMPI_VERSION=3.1.2
   - OPENMPI_VERSION_SHORT=3.1
+  - LAMMPS_POTENTIALS=$HOME/lammps/potentials
 
 matrix:
   include:
@@ -55,9 +56,13 @@ install:
 
 - $TRAVIS_BUILD_DIR/travis/install-openmpi.sh
 
+# get potentials
+- git clone https://github.com/lammps/lammps $HOME/lammps --depth=1
+
 script:
 - cargo test --all $RSP2_FEATURES
 - cargo test --all $RSP2_FEATURES -- --ignored
+
 
 cache:
   cargo: true
