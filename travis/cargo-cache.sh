@@ -4,7 +4,7 @@
 
 CACHE=$HOME/cache/rsp2-cargo-stuffs
 
-if [ "$1" == store ]; then
+if [ x"$1" == xstore ]; then
     mkdir -p $CACHE
 
     # Keep build artefacts
@@ -19,12 +19,13 @@ if [ "$1" == store ]; then
     #
     # Don't worry; when .cargo is lost, the packages are re-downloaded, but not
     # rebuilt so long as the stuff in target/ is good.
-elif [ "$1" == load ]; then
+elif [ x"$1" == xload ]; then
     cp $CACHE/Cargo.lock $TRAVIS_BUILD_DIR
 
     rm -rf $TRAVIS_BUILD_DIR/target
     cp -a $CACHE/target $TRAVIS_BUILD_DIR
 
+    true
 else
     echo >&2 "Bad call to cargo-cache.sh"
     exit 1
