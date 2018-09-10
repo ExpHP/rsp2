@@ -25,10 +25,10 @@ matrix:
   include:
     - name: MPI
       env: RUST_VERSION=stable RSP2_FEATURES=--features=mpi-support
-    # - name: Without MPI
-    #   env: RUST_VERSION=stable RSP2_FEATURES=--no-default-features
-    # - name: Nightly (MPI)
-    #   env: RUST_VERSION=nightly RSP2_FEATURES=--features=mpi-support,nightly
+    - name: Without MPI
+      env: RUST_VERSION=stable RSP2_FEATURES=--no-default-features
+    - name: Nightly (MPI)
+      env: RUST_VERSION=nightly RSP2_FEATURES=--features=mpi-support,nightly
   allow_failures:
     env: RUST_VERSION=nightly RSP2_FEATURES=--features=mpi-support,nightly
 
@@ -63,6 +63,7 @@ install:
 - $TRAVIS_BUILD_DIR/travis/cargo-cache.sh load
 
 script:
+- cargo build --all $RSP2_FEATURES
 - cargo test --all $RSP2_FEATURES
 - cargo test --all $RSP2_FEATURES -- --ignored
 
@@ -80,4 +81,6 @@ notifications:
 
 branches:
   only:
+  - master
+  - develop
   - lammps-sys-5
