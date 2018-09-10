@@ -10,6 +10,13 @@ if [ "$1" = store ]; then
     # Keep build artefacts
     rm -rf $CACHE/target
     cp -a $TRAVIS_BUILD_DIR/target $CACHE
+    (
+        # archive because otherwise travis' cacher will try to compute
+        # a bajillion MD5 sums and timeout.
+        cd $CACHE
+        tar -cf target.tar target
+        rm -rf target
+    )
 
     # Maximize reuse of build artefacts by using previously built versions
     # of crates whenever possible.
@@ -23,7 +30,12 @@ elif [ "$1" = load ]; then
     cp $CACHE/Cargo.lock $TRAVIS_BUILD_DIR
 
     rm -rf $TRAVIS_BUILD_DIR/target
-    cp -a $CACHE/target $TRAVIS_BUILD_DIR
+    cp $CACHE/target.tar $TRAVIS_BUILD_DIR
+    (
+        cd $TRAVIS_BUILD_DIR
+        tar -xf target.tar
+        rm target.tar
+    )
 
     true
 else
