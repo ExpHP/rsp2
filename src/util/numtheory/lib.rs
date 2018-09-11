@@ -9,6 +9,8 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
+#![allow(non_snake_case)]
+
 // FIXME: Taken from an earlier project; not yet pruned for irrelevant stuff.
 
 extern crate num_integer;
