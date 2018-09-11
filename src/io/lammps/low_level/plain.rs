@@ -67,7 +67,7 @@ impl LammpsOwner {
 
         unsafe {
             ::lammps_sys::lammps_open(
-                argv.len() as c_int,
+                argv.len().try_to_c_int()?,
                 argv.as_argv_ptr(),
                 mpi::AsRaw::as_raw(comm),
                 &mut ptr,
@@ -100,7 +100,7 @@ impl LammpsOwner {
 
         unsafe {
             ::lammps_sys::lammps_open_no_mpi(
-                argv.len() as c_int,
+                argv.len().try_to_c_int()?,
                 argv.as_argv_ptr(),
                 &mut ptr,
             );
@@ -183,17 +183,23 @@ impl LowLevelApi for LammpsOwner {
 
     fn init_atoms(&mut self, carts: Vec<[f64; 3]>, types: Vec<i64>) -> FailResult<()>
     {Ok({
-        // NOTE: Creating random positions and then using `lammps_scatter_atoms` to set the initial
-        //       positions is not good enough; you get "lost atoms" errors when using MPI.
-        for i in 0..carts.len() {
-            self.command(format!(
-                "create_atoms {} single {} {} {} remap yes",
-                types[i],
-                carts[i][0],
-                carts[i][1],
-                carts[i][2],
-            ))?;
+        use ::slice_of_array::prelude::*;
+
+        let mut carts = carts.flat().iter().map(|&x| x as c_double).collect::<Vec<_>>();
+        let mut types = types.iter().map(|&x| x.try_to_c_int()).collect::<FailResult<Vec<_>>>()?;
+        unsafe {
+            ::lammps_sys::lammps_create_atoms(
+                self.ptr,
+                types.len().try_to_c_int()?, // int n
+                ::std::ptr::null_mut(), // tagint *id
+                types.as_mut_ptr(), // int *type
+                carts.as_mut_ptr(), // double *x
+                ::std::ptr::null_mut(), // double *v
+                ::std::ptr::null_mut(), // imageint *image
+                1, // int shrinkexceed
+            );
         }
+        self.pop_error_as_result()?;
     })}
 
     // shims to inherent methods so we can write unsafe helpers closer to code that uses them
@@ -266,7 +272,7 @@ impl LammpsOwner {
             lammps_get_last_error_message(
                 self.ptr,
                 buf.as_mut_ptr() as *mut c_char,
-                MAX_ERROR_BYTES as c_int,
+                MAX_ERROR_BYTES.try_to_c_int().unwrap(),
             )
         } as u32;
         let severity = Severity::from_int(severity_int).expect("lammps-wrap bug!");
@@ -347,14 +353,14 @@ impl LammpsOwner {
         let natoms = self.get_natoms();
 
         assert_eq!(buf.len() % natoms, 0);
-        let count = buf.len() / natoms;
+        let count = (buf.len() / natoms).try_to_c_int()?;
         let ty = ty.into();
 
         api_trace!("lammps_gather_atoms({:p}, {}, {}, {}, (out))", self.ptr, name, ty, count);
 
         with_temporary_c_str(name, |name| {
             ::lammps_sys::lammps_gather_atoms(
-                self.ptr, name, ty, count as c_int,
+                self.ptr, name, ty, count,
                 buf.as_mut_ptr() as *mut c_void,
             );
         });
@@ -370,7 +376,7 @@ impl LammpsOwner {
     // and data of inappropriate length could cause an out of bounds write.
     unsafe fn impl_scatter_atoms_i(&mut self, name: &str, data: &[i64]) -> FailResult<()>
     {Ok({
-        let mut cdata: Vec<_> = data.iter().map(|&x| x as c_int).collect();
+        let mut cdata: Vec<_> = data.iter().map(|&x| x.try_to_c_int()).collect::<FailResult<_>>()?;
         self.__scatter_atoms_checked_c_ty(name, ScatterGatherDatatype::Integer, &mut cdata)?;
     })}
 
@@ -421,14 +427,14 @@ impl LammpsOwner {
 
         let natoms = self.get_natoms();
         assert_eq!(data.len() % natoms, 0);
-        let count = data.len() / natoms;
+        let count = (data.len() / natoms).try_to_c_int()?;
         let ty = ty.into();
 
         api_trace!("lammps_scatter_atoms({:p}, {}, {}, {}, (data))", self.ptr, name, ty, count);
 
         with_temporary_c_str(name, |name| {
             ::lammps_sys::lammps_scatter_atoms(
-                self.ptr, name, ty, count as c_int,
+                self.ptr, name, ty, count,
                 data.as_mut_ptr() as *mut c_void,
             );
         });
@@ -437,6 +443,34 @@ impl LammpsOwner {
         // * None so far.
         self.pop_error_as_result()?;
     })}
+}
+
+// FIXME: remove once TryInto is stable
+trait ToCInt: Sized + ::std::fmt::Display + Ord {
+    fn max_value() -> u64;
+    fn cast_to_c_int(self) -> c_int;
+    fn cast_from_c_int(x: c_int) -> Self;
+    fn try_to_c_int(self) -> FailResult<c_int> {
+        // (first check is const, please optimize out...)
+        if (c_int::max_value() as u64) < Self::max_value() {
+            if self > Self::cast_from_c_int(c_int::max_value()) {
+                bail!("attempt to overflow c_int with value {}", self);
+            }
+        }
+        Ok(self.cast_to_c_int())
+    }
+}
+
+impl ToCInt for usize {
+    #[inline(always)] fn max_value() -> u64 { Self::max_value() as u64 }
+    #[inline(always)] fn cast_to_c_int(self) -> c_int { self as c_int }
+    #[inline(always)] fn cast_from_c_int(x: c_int) -> Self { x as Self }
+}
+
+impl ToCInt for i64 {
+    #[inline(always)] fn max_value() -> u64 { Self::max_value() as u64 }
+    #[inline(always)] fn cast_to_c_int(self) -> c_int { self as c_int }
+    #[inline(always)] fn cast_from_c_int(x: c_int) -> Self { x as Self }
 }
 
 /// Used to implement the heuristic for detecting errors in gather/scatter
