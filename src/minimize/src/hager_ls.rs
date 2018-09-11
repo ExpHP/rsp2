@@ -625,7 +625,7 @@ mod tests {
     use ::test::one_dee::Polynomial;
 
     fn init_logger() {
-        let _ = ::env_logger::init();
+        let _ = ::env_logger::try_init();
     }
 
     #[derive(Debug,Copy,Clone,Hash,PartialEq,Eq,PartialOrd,Ord)]
