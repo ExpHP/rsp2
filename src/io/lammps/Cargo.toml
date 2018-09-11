@@ -28,6 +28,22 @@ mpi = { version = "0.5.4", optional = true }
 [dev-dependencies]
 rsp2-assert-close = { path = "../../util/assert-close" }
 
+[[example]]
+name = "airebo"
+[[example]]
+name = "zero"
+[[example]]
+name = "link-test"
+[[example]]
+name = "airebo-mpi"
+required-features = ["mpi-support"]
+[[example]]
+name = "link-test-mpi"
+required-features = ["mpi-support"]
+[[example]]
+name = "zero-mpi"
+required-features = ["mpi-support"]
+
 [features]
 default = []
 

@@ -23,6 +23,22 @@ path = "lib.rs"
 [dev-dependencies]
 !!rsp2-assert-close
 
+[[example]]
+name = "airebo"
+[[example]]
+name = "zero"
+[[example]]
+name = "link-test"
+[[example]]
+name = "airebo-mpi"
+required-features = ["mpi-support"]
+[[example]]
+name = "link-test-mpi"
+required-features = ["mpi-support"]
+[[example]]
+name = "zero-mpi"
+required-features = ["mpi-support"]
+
 [features]
 default = []
 
