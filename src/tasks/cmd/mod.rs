@@ -46,7 +46,7 @@ use ::math::{
     basis::{Basis3},
     bonds::{FracBonds},
     bands::{ScMatrix},
-    dynmat::{ForceConstants, DynamicalMatrix},
+    dynmat::{ForceConstants},
 };
 use self::acoustic_search::ModeKind;
 
@@ -61,9 +61,10 @@ use ::rsp2_structure::{Coords, Lattice};
 use ::rsp2_structure::layer::LayersPerUnitCell;
 use ::phonopy::Builder as PhonopyBuilder;
 
-use ::rsp2_fs_util::{rm_rf};
+use ::rsp2_fs_util::{rm_rf, hard_link};
 
 use ::std::{
+    path::{PathBuf},
     io::{Write},
     ffi::{OsStr, OsString},
     collections::{BTreeMap},
@@ -143,7 +144,7 @@ impl TrialDir {
         });
 
         self.write_stored_structure(
-            &self.structure_filename(EvLoopStructureKind::Initial),
+            &self.structure_path(EvLoopStructureKind::Initial),
             "Initial structure (after lattice optimization)",
             &original_coords, meta.sift(),
         )?;
@@ -187,13 +188,18 @@ impl TrialDir {
                     (coords, ev_analysis)
                 },
                 Sparse { shift_invert_attempts } => {
-                    let (coords, ev_analysis, dynmat) = {
+                    let (coords, ev_analysis, final_iteration) = {
                         do_ev_loop!(SparseDiagonalizer { shift_invert_attempts })?
                     };
                     _do_not_drop_the_bands_dir = None;
 
-                    // HACK
-                    Json(dynmat.cereal()).save(self.join("gamma-dynmat.json"))?;
+                    // HACK: Put last gamma dynmat at a predictable path.
+                    let final_iteration = final_iteration.expect("ev-loop should have iterations!");
+                    rm_rf(self.join("gamma-dynmat.json"))?;
+                    hard_link(
+                        self.uncompressed_gamma_dynmat_path(final_iteration),
+                        self.join("gamma-dynmat.json"),
+                    )?;
 
                     (coords, ev_analysis)
                 },
@@ -201,7 +207,7 @@ impl TrialDir {
         };
 
         self.write_stored_structure(
-            &self.structure_filename(EvLoopStructureKind::Final),
+            &self.structure_path(EvLoopStructureKind::Final),
             "Final structure",
             &coords, meta.sift(),
         )?;
@@ -262,7 +268,7 @@ impl TrialDir {
     // (to remove any doubt about the iteration number)
     fn write_stored_structure(
         &self,
-        dir_name: &str,
+        dir: impl AsPath,
         poscar_headline: &str,
         coords: &Coords,
         meta: HList5<
@@ -274,7 +280,7 @@ impl TrialDir {
         >,
     ) -> FailResult<()>
     {Ok({
-        let path = self.join(dir_name);
+        let path = self.join(dir);
 
         trace!("Writing '{}'", path.nice());
         StoredStructure {
@@ -288,9 +294,11 @@ impl TrialDir {
         }.save(path)?
     })}
 
+    /// Read a .structure directory.
+    /// Relative paths are intepreted relative to the trial directory.
     fn read_stored_structure_data(
         &self,
-        dir_name: &str,
+        dir: impl AsPath,
     ) -> FailResult<(
         Coords,
         HList5<
@@ -302,13 +310,15 @@ impl TrialDir {
         >,
     )>
     {Ok({
-        let stored = self.read_stored_structure(dir_name)?;
+        let stored = self.read_stored_structure(dir)?;
         let meta = stored.meta();
         (stored.coords, meta)
     })}
 
-    fn read_stored_structure(&self, dir_name: impl AsRef<OsStr>) -> FailResult<StoredStructure>
-    { Load::load(self.join(dir_name.as_ref())) }
+    /// Read a .structure directory.
+    /// Relative paths are intepreted relative to the trial directory.
+    fn read_stored_structure(&self, dir: impl AsPath) -> FailResult<StoredStructure>
+    { Load::load(self.join(dir.as_path())) }
 }
 
 struct PhonopyDiagonalizer {
@@ -328,6 +338,7 @@ impl EvLoopDiagonalizer for PhonopyDiagonalizer {
         pot: &PotentialBuilder,
         stored: &StoredStructure,
         _stop_after_dynmat: bool, // HACK
+        _iteration: Option<Iteration>,
     ) -> FailResult<(Vec<f64>, Basis3, DirWithBands<Box<AsPath>>)>
     {Ok({
         let meta = stored.meta();
@@ -386,7 +397,7 @@ struct SparseDiagonalizer {
     shift_invert_attempts: u32,
 }
 impl EvLoopDiagonalizer for SparseDiagonalizer {
-    type ExtraOut = DynamicalMatrix;
+    type ExtraOut = Option<Iteration>;
 
     fn do_post_relaxation_computations(
         &self,
@@ -395,7 +406,8 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
         pot: &PotentialBuilder,
         stored: &StoredStructure,
         stop_after_dynmat: bool,
-    ) -> FailResult<(Vec<f64>, Basis3, DynamicalMatrix)>
+        iteration: Option<Iteration>,
+    ) -> FailResult<(Vec<f64>, Basis3, Option<Iteration>)>
     {Ok({
         let prim_coords = &stored.coords;
         let prim_meta: HList3<
@@ -541,7 +553,14 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
                 .hermitianize()
         };
         // HACK
-        Json(dynmat.cereal()).save(_trial.join("gamma-dynmat.json"))?;
+        // Nasty side-effect, but it's best to write this now (rather than letting the caller
+        // take care of it) so that it is there for debugging if we run into an error before
+        // this function finishes.
+        if let Some(iteration) = iteration {
+            Json(dynmat.cereal()).save(_trial.uncompressed_gamma_dynmat_path(iteration))?;
+        }
+        // EVEN NASTIER HACK
+        // ...I'd let this speak for itself, but it really can't.
         if stop_after_dynmat {
             return Err(StoppedAfterDynmat.into());
         }
@@ -559,7 +578,7 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
             })?
         };
         trace!("Done diagonalizing dynamical matrix");
-        (evals, evecs, dynmat)
+        (evals, evecs, iteration)
     })}
 }
 
@@ -715,7 +734,7 @@ impl TrialDir {
         out.push(ev_analysis.make_summary(settings));
         out.push({
             let f = |kind| FailOk({
-                let s = self.structure_filename(kind);
+                let s = self.structure_path(kind);
                 let (coords, meta) = self.read_stored_structure_data(&s)?;
 
                 let na = coords.num_atoms() as f64;
@@ -1027,7 +1046,7 @@ impl TrialDir {
     {Ok({
         let pot = PotentialBuilder::from_root_config(&self, on_demand, &settings);
 
-        let (coords, meta) = self.read_stored_structure_data(&self.structure_filename(EvLoopStructureKind::Final))?;
+        let (coords, meta) = self.read_stored_structure_data(&self.structure_path(EvLoopStructureKind::Final))?;
 
         let phonopy = phonopy_builder_from_settings(&settings.phonons, coords.lattice());
 
@@ -1081,7 +1100,7 @@ impl TrialDir {
             macro_rules! use_diagonalizer {
                 ($diagonalizer:expr) => {{
                     $diagonalizer.do_post_relaxation_computations(
-                        &self, settings, &*pot, &stored, false,
+                        &self, settings, &*pot, &stored, false, None,
                     )
                 }}
             }
@@ -1390,9 +1409,9 @@ impl TrialDir {
         use ::cmd::EvLoopStructureKind::*;
 
         for iteration in (1..).map(Iteration) {
-            let pre_chase = self.join(self.structure_filename(PreEvChase(iteration)));
-            let post_chase = self.join(self.structure_filename(PostEvChase(iteration)));
-            let eigensols = self.join(self.eigensols_filename(iteration));
+            let pre_chase = self.structure_path(PreEvChase(iteration));
+            let post_chase = self.structure_path(PostEvChase(iteration));
+            let eigensols = self.eigensols_path(iteration);
             if !pre_chase.exists() {
                 bail!("{}: does not exist", pre_chase.nice());
             }
@@ -1420,11 +1439,11 @@ impl TrialDir {
 
         let pot = PotentialBuilder::from_root_config(&self, on_demand, &settings);
 
-        let (coords, meta) = self.read_stored_structure_data(&self.structure_filename(PreEvChase(iteration)))?;
+        let (coords, meta) = self.read_stored_structure_data(&self.structure_path(PreEvChase(iteration)))?;
         let Eigensols {
             frequencies: evals,
             eigenvectors: evecs,
-        } = Load::load(self.join(self.eigensols_filename(iteration)))?;
+        } = Load::load(self.join(self.eigensols_path(iteration)))?;
 
         let (_, coords, did_ev_chasing) = self.do_ev_loop_stuff_after_diagonalization(
             settings, &pot, meta.sift(), iteration,
@@ -1633,15 +1652,18 @@ pub(crate) fn resolve_trial_or_structure_path(
 })}
 
 impl TrialDir {
-    pub fn structure_filename(&self, kind: EvLoopStructureKind) -> String {
-        match kind {
+    pub fn structure_path(&self, kind: EvLoopStructureKind) -> PathBuf {
+        self.join(match kind {
             EvLoopStructureKind::Initial => format!("initial.structure"),
             EvLoopStructureKind::Final => format!("final.structure"),
             EvLoopStructureKind::PreEvChase(n) => format!("ev-loop-{:02}.1.structure", n),
             EvLoopStructureKind::PostEvChase(n) => format!("ev-loop-{:02}.2.structure", n),
-        }
+        })
     }
 
-    pub fn eigensols_filename(&self, iteration: Iteration) -> String
-    { format!("ev-loop-modes-{:02}.json", iteration) }
+    pub fn eigensols_path(&self, iteration: Iteration) -> PathBuf
+    { self.join(format!("ev-loop-modes-{:02}.json", iteration)) }
+
+    pub fn uncompressed_gamma_dynmat_path(&self, iteration: Iteration) -> PathBuf
+    { self.join(format!("gamma-dynmat-{:02}.json", iteration)) }
 }

@@ -43,6 +43,10 @@ pub trait EvLoopDiagonalizer {
         pot: &PotentialBuilder,
         stored: &StoredStructure,
         stop_after_dynmat: bool, // HACK
+        // HACK: Used to set the filename for saving the gamma dynmat.
+        //       That shouldn't even be a responsibility of the function, but IIRC it does this
+        //       for easier debugging in case an error occurs shortly after computing the matrix
+        iteration: Option<Iteration>, // HACK
     ) -> FailResult<(Vec<f64>, Basis3, Self::ExtraOut)>;
 }
 
@@ -80,10 +84,10 @@ impl TrialDir {
             )?;
 
             let (evals, evecs, extra_out) = {
-                let subdir = self.structure_filename(EvLoopStructureKind::PreEvChase(iteration));
+                let subdir = self.structure_path(EvLoopStructureKind::PreEvChase(iteration));
                 let stored = self.read_stored_structure(&subdir)?;
                 diagonalizer.do_post_relaxation_computations(
-                    &self, settings, pot, &stored, stop_after_dynmat,
+                    &self, settings, pot, &stored, stop_after_dynmat, Some(iteration),
                 )?
             };
 
@@ -134,7 +138,7 @@ impl TrialDir {
 
         trace!("============================");
 
-        let subdir = self.structure_filename(EvLoopStructureKind::PreEvChase(iteration));
+        let subdir = self.structure_path(EvLoopStructureKind::PreEvChase(iteration));
         self.write_stored_structure(
             &subdir,
             &format!("Structure after CG round {}", iteration),
@@ -178,7 +182,7 @@ impl TrialDir {
             settings, pot, coords, meta.sift(), &ev_analysis, evals, evecs,
         )?;
         self.write_stored_structure(
-            &self.structure_filename(EvLoopStructureKind::PostEvChase(iteration)),
+            &self.structure_path(EvLoopStructureKind::PostEvChase(iteration)),
             &format!("Structure after eigenmode-chasing round {}", iteration),
             &coords, meta.sift(),
         )?;
