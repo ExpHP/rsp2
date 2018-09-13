@@ -7,6 +7,7 @@
 name = "rsp2-integration-test"
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
+description = "utilities shared by rsp2's integration tests"
 license = "MIT OR Apache 2.0"
 
 [lib]
@@ -14,7 +15,15 @@ path = "lib.rs"
 
 [dependencies]
 rsp2-fs-util = { path = "../fs" }
+rsp2-structure = { path = "../../structure" }
+rsp2-array-types = { path = "../array-types" }
+rsp2-assert-close = { path = "../assert-close" }
+rsp2-python = { path = "../../python" }
 
+serde = { version = "1.0.63", features = ["rc"] }
+serde_json = "1"
+serde_derive = "1.0.47"
+itertools = "0.7"
 failure = "0.1.2"
 path_abs = "0.4.1"
 pretty_assertions = "0.5.1"
@@ -22,6 +31,6 @@ pretty_assertions = "0.5.1"
 [features]
 test-diff = []
 
-nightly = ["beta", "rsp2-fs-util/nightly"]
-beta = ["rsp2-fs-util/beta"]
+nightly = ["beta", "rsp2-array-types/nightly", "rsp2-assert-close/nightly", "rsp2-fs-util/nightly", "rsp2-python/nightly", "rsp2-structure/nightly"]
+beta = ["rsp2-array-types/beta", "rsp2-assert-close/beta", "rsp2-fs-util/beta", "rsp2-python/beta", "rsp2-structure/beta"]
 

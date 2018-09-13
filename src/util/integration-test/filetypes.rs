@@ -1,30 +1,31 @@
+/* ************************************************************************ **
+** This file is part of rsp2, and is licensed under EITHER the MIT license  **
+** or the Apache 2.0 license, at your option.                               **
+**                                                                          **
+**     http://www.apache.org/licenses/LICENSE-2.0                           **
+**     http://opensource.org/licenses/MIT                                   **
+**                                                                          **
+** Be aware that not all of rsp2 is provided under this permissive license, **
+** and that the project as a whole is licensed under the GPL 3.0.           **
+** ************************************************************************ */
+
 use ::std::ops::Deref;
 use ::std::path::Path;
 use ::std::io::prelude::*;
 use ::itertools::Itertools;
 use ::std::collections::{BTreeSet, BTreeMap};
 
-use ::shared::util;
+use ::util;
 
-use self::rsp2_integration_test::CheckFile;
-extern crate rsp2_integration_test;
+use ::CheckFile;
 
-pub use self::failure::Error;
-extern crate failure;
+pub use ::failure::Error;
 
-use self::path_abs::{FileRead, FileWrite};
-extern crate path_abs;
+use ::path_abs::{FileRead, FileWrite};
+use ::rsp2_structure::{Coords, CartOp};
+use ::rsp2_array_types::{V3, M33, Unvee};
 
-use self::rsp2_structure::{Coords, CartOp};
-extern crate rsp2_structure;
-
-extern crate serde;
-
-extern crate serde_json;
-
-use self::rsp2_array_types::{V3, M33, Unvee};
-extern crate rsp2_array_types;
-
+#[macro_export]
 macro_rules! impl_json {
     (($Type:ty) [$($methods:ident),*]) => {
         $( impl_json!{@one ($Type) [$methods]} )*
@@ -32,16 +33,16 @@ macro_rules! impl_json {
     (@one ($Type:ty) [load]) => {
         #[allow(unused)]
         impl $Type {
-            pub fn load(path: impl AsRef<::std::path::Path>) -> Result<Self, $crate::shared::filetypes::Error> {
-                $crate::shared::filetypes::load_json(path)
+            pub fn load(path: impl AsRef<::std::path::Path>) -> Result<Self, $crate::filetypes::Error> {
+                $crate::filetypes::load_json(path)
             }
         }
     };
     (@one ($Type:ty) [save]) => {
         #[allow(unused)]
         impl $Type {
-            pub fn save(&self, path: impl AsRef<::std::path::Path>) -> Result<(), $crate::shared::filetypes::Error> {
-                $crate::shared::filetypes::save_json(path, self)
+            pub fn save(&self, path: impl AsRef<::std::path::Path>) -> Result<(), $crate::filetypes::Error> {
+                $crate::filetypes::save_json(path, self)
             }
         }
     }
@@ -186,7 +187,7 @@ impl Dynmat {
     pub fn load(path: impl AsRef<::std::path::Path>) -> Result<Self, Error> {
         // we can't read NPZ in rust
         let _guard = ::rsp2_python::add_to_python_path();
-        let _tmp = ::rsp2_fs_util::TempDir::new("rsp2")?;
+        let _tmp = ::fsx::TempDir::new("rsp2")?;
         let json_path = _tmp.path().join("tmp.json");
         // FIXME awkward as heck to be using process::Command for this, should the rust wrapper
         //       maybe be public in rsp2_python rather than private in rsp2_tasks?
@@ -209,7 +210,7 @@ impl Dynmat {
         // we can't write NPZ in rust
         let _guard = ::rsp2_python::add_to_python_path();
 
-        let _tmp = ::rsp2_fs_util::TempDir::new("rsp2")?;
+        let _tmp = ::fsx::TempDir::new("rsp2")?;
         let json_path = _tmp.path().join("tmp.json");
         save_json(&json_path, self)?;
 
@@ -288,17 +289,17 @@ impl CheckFile for Dynmat {
 // ----------------------------------------------------------------------------------------------
 
 pub fn load_json<T>(path: impl AsRef<Path>) -> Result<T, Error>
-where T: serde::de::DeserializeOwned,
+where T: ::serde::de::DeserializeOwned,
 {
     let file = FileRead::read(path)?;
-    Ok(serde_json::from_reader(file)?)
+    Ok(::serde_json::from_reader(file)?)
 }
 
 pub fn save_json<T>(path: impl AsRef<Path>, obj: &T) -> Result<(), Error>
 where T: ::serde::Serialize,
 {
     let mut file = FileWrite::create(path)?;
-    serde_json::to_writer(&mut file, obj)?;
+    ::serde_json::to_writer(&mut file, obj)?;
     writeln!(file)?;
     Ok(())
 }

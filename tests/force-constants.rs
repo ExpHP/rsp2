@@ -11,12 +11,10 @@ extern crate serde_json;
 extern crate failure;
 extern crate itertools;
 
-extern crate rsp2_python;
-extern crate rsp2_fs_util;
-
 #[macro_use]
-mod shared;
-use shared::filetypes::{Primitive};
+extern crate rsp2_integration_test;
+
+use ::rsp2_integration_test::filetypes::Primitive;
 
 type FailResult<T> = Result<T, ::failure::Error>;
 use ::std::path::Path;

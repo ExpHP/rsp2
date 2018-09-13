@@ -2,6 +2,7 @@
 !!CRATE-NAME-LINE
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
+description = "utilities shared by rsp2's integration tests"
 !!LICENSE-PERMISSIVE
 
 [lib]
@@ -9,7 +10,15 @@ path = "lib.rs"
 
 [dependencies]
 !!rsp2-fs-util
+!!rsp2-structure
+!!rsp2-array-types
+!!rsp2-assert-close
+!!rsp2-python
 
+!!serde
+!!serde-json
+!!serde-derive
+!!itertools
 !!failure
 !!path-abs
 !!pretty-assertions

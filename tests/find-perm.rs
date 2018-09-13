@@ -1,8 +1,5 @@
-// HACK: serde derives needed by `shared`
-extern crate serde;
-#[macro_use] extern crate serde_derive;
-#[macro_use] extern crate rsp2_assert_close;
-#[macro_use] extern crate rsp2_util_macros;
+#[macro_use]
+extern crate rsp2_util_macros;
 
 use rsp2_soa_ops::Permute;
 extern crate rsp2_soa_ops;
@@ -10,28 +7,8 @@ extern crate rsp2_soa_ops;
 use rsp2_structure::{find_perm};
 extern crate rsp2_structure;
 
-extern crate itertools;
-
-extern crate rsp2_python;
-extern crate rsp2_fs_util;
-
-//use shared::filetypes::PrimitiveNew;
-use shared::filetypes::Primitive;
-
-mod shared;
-//
-//#[test]
-//fn test_fix() {
-//    let Primitive {
-//        cart_rots: _, frac_ops, coords,  masses, displacements,
-//    } = Primitive::load("tests/resources/primitive/graphene.json").unwrap();
-//
-//    let cart_ops = frac_ops.iter().map(|f| f.to_rot().to_cart_op_with_frac_trans(f.to_trans().frac(), coords.lattice())).collect();
-//
-//    PrimitiveNew {
-//        cart_ops, coords, masses, displacements,
-//    }.save("tests/resources/primitive/graphene-new.json").unwrap();
-//}
+use rsp2_integration_test::filetypes::Primitive;
+extern crate rsp2_integration_test;
 
 #[test]
 fn test_graphene() {
