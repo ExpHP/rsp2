@@ -12,6 +12,8 @@ use ::rsp2_integration_test::CliTest;
 
 extern crate path_abs;
 extern crate rsp2_structure;
+extern crate rsp2_python;
+extern crate rsp2_fs_util;
 
 use ::path_abs::{PathAbs};
 
@@ -28,8 +30,8 @@ fn simple_test() {
         .arg(abs("tests/resources/simple.vasp").as_path())
         .arg("-o").arg("out")
         .check_file::<filetypes::Dynmat>(
-            "out/gamma-dynmat.json".as_ref(),
-            "tests/resources/sparse-out/gamma-dynmat.json".as_ref(),
+            "out/gamma-dynmat.npz".as_ref(),
+            "tests/resources/sparse-out/gamma-dynmat.npz".as_ref(),
             filetypes::DynmatTolerances {
                 rel_tol: 1e-9,
                 abs_tol: 1e-9,

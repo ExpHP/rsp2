@@ -12,6 +12,8 @@ use ::rsp2_integration_test::CliTest;
 
 extern crate path_abs;
 extern crate rsp2_structure;
+extern crate rsp2_python;
+extern crate rsp2_fs_util;
 
 use ::path_abs::{PathAbs};
 

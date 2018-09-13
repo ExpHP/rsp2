@@ -41,9 +41,6 @@ def from_path(path):
 def to_path(path, obj):
     dwim.to_path(path, obj, to_dict=to_dict)
 
-def _from_npy(m): return m
-def _to_npy(m): return m
-
 def to_dict(m):
     assert isinstance(m, scipy.sparse.bsr_matrix)
     assert m.data.shape[1:] == (3,3)
@@ -79,3 +76,7 @@ def from_dict(m):
         (data, m['col'], m['row-ptr']),
         shape=tuple(3*x for x in m['dim']),
     )
+
+def equal(a, b):
+    # Semantics of np.array_equal, except suitable for sparse matrices
+    return a.shape == b.shape and not (a != b).data.any()

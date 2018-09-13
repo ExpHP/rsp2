@@ -66,7 +66,7 @@ def to_path(path, obj, file=None, fullpath=None, to_dict=None):
         fullpath = path
     if file is None:
         with open(path, 'wb+') as file:
-            return to_path(path, obj, file, fullpath)
+            return to_path(path, obj, file, fullpath, to_dict)
 
     if _endswith_nocase(path, '.json'):
         import json
@@ -94,7 +94,7 @@ def to_path(path, obj, file=None, fullpath=None, to_dict=None):
 
     elif _endswith_nocase(path, '.gz'):
         import gzip
-        to_path(path[:-len('.gz')], obj, gzip.GzipFile(path, mode='xb', fileobj=file))
+        to_path(path[:-len('.gz')], obj, gzip.GzipFile(path, mode='xb', fileobj=file), to_dict)
 
     else:
         raise ValueError(f'unknown extension in {repr(fullpath)}')

@@ -12,6 +12,9 @@ extern crate rsp2_structure;
 
 extern crate itertools;
 
+extern crate rsp2_python;
+extern crate rsp2_fs_util;
+
 //use shared::filetypes::PrimitiveNew;
 use shared::filetypes::Primitive;
 

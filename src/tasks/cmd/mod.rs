@@ -197,8 +197,8 @@ impl TrialDir {
                     let final_iteration = final_iteration.expect("ev-loop should have iterations!");
                     rm_rf(self.join("gamma-dynmat.json"))?;
                     hard_link(
-                        self.uncompressed_gamma_dynmat_path(final_iteration),
-                        self.join("gamma-dynmat.json"),
+                        self.gamma_dynmat_path(final_iteration),
+                        self.final_gamma_dynmat_path(),
                     )?;
 
                     (coords, ev_analysis)
@@ -557,7 +557,14 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
         // take care of it) so that it is there for debugging if we run into an error before
         // this function finishes.
         if let Some(iteration) = iteration {
+            // we can't write NPZ easily from rust, so write JSON and convert via python
             Json(dynmat.cereal()).save(_trial.uncompressed_gamma_dynmat_path(iteration))?;
+
+            ::cmd::python::convert::dynmat(
+                _trial.uncompressed_gamma_dynmat_path(iteration),
+                _trial.gamma_dynmat_path(iteration),
+                ::cmd::python::convert::Mode::Delete,
+            )?;
         }
         // EVEN NASTIER HACK
         // ...I'd let this speak for itself, but it really can't.
@@ -1666,4 +1673,10 @@ impl TrialDir {
 
     pub fn uncompressed_gamma_dynmat_path(&self, iteration: Iteration) -> PathBuf
     { self.join(format!("gamma-dynmat-{:02}.json", iteration)) }
+
+    pub fn gamma_dynmat_path(&self, iteration: Iteration) -> PathBuf
+    { self.join(format!("gamma-dynmat-{:02}.npz", iteration)) }
+
+    pub fn final_gamma_dynmat_path(&self) -> PathBuf
+    { self.join("gamma-dynmat.npz") }
 }

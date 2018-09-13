@@ -34,6 +34,7 @@ pub struct CliTest {
     cmd: Vec<OsString>,
     expect_success: Option<bool>,
     checkers: Vec<DirChecker>,
+    checker_index: usize, // where 'after_run's end and 'checkers' begin
 }
 
 impl Default for CliTest {
@@ -51,11 +52,13 @@ impl Default for CliTest {
                 .collect(),
             expect_success: Some(true),
             checkers: vec![],
+            checker_index: 0,
         }
     }
 }
 
 pub type DirChecker = Box<Fn(&PathDir) -> Result<()>>;
+pub type AfterRun = Box<Fn(&PathDir) -> Result<()>>;
 
 impl CliTest {
     pub fn cargo_binary(name: impl AsRef<OsStr>) -> Self {
@@ -123,8 +126,16 @@ impl CliTest {
         self.check(checker)
     }
 
+    pub fn after_run<F>(mut self, callback: F) -> Self
+    where F: Fn(&PathDir) -> Result<()> + 'static,
+    {
+        self.checkers.insert(self.checker_index, Box::new(callback));
+        self.checker_index += 1;
+        self
+    }
+
     pub fn run(self) -> Result<()> {
-        let CliTest { cmd, checkers, expect_success } = self;
+        let CliTest { cmd, checkers, expect_success, checker_index: _ } = self;
 
         let _tmp = TempDir::new("rsp2")?;
         let tmp = PathDir::new(_tmp.path())?;

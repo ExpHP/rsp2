@@ -11,6 +11,9 @@ extern crate serde_json;
 extern crate failure;
 extern crate itertools;
 
+extern crate rsp2_python;
+extern crate rsp2_fs_util;
+
 #[macro_use]
 mod shared;
 use shared::filetypes::{Primitive};

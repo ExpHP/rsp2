@@ -180,7 +180,50 @@ pub struct Dynmat {
     pub row_ptr: Vec<usize>,
     pub dim: (usize, usize),
 }
-impl_json!{ (Dynmat)[save, load] }
+
+impl Dynmat {
+    #[allow(unused)]
+    pub fn load(path: impl AsRef<::std::path::Path>) -> Result<Self, Error> {
+        // we can't read NPZ in rust
+        let _guard = ::rsp2_python::add_to_python_path();
+        let _tmp = ::rsp2_fs_util::TempDir::new("rsp2")?;
+        let json_path = _tmp.path().join("tmp.json");
+        // FIXME awkward as heck to be using process::Command for this, should the rust wrapper
+        //       maybe be public in rsp2_python rather than private in rsp2_tasks?
+        assert!({ // FIXME: Error instead of panic?
+            ::std::process::Command::new("python3")
+                .arg("-m").arg("rsp2.cli.convert_dynmat")
+                .arg("--keep")
+                .arg(path.as_ref())
+                .arg("--output").arg(&json_path)
+                .status()?
+                .success()
+        });
+        load_json(json_path)
+    }
+}
+
+impl Dynmat {
+    #[allow(unused)]
+    pub fn save(&self, path: impl AsRef<::std::path::Path>) -> Result<(), Error> {
+        // we can't write NPZ in rust
+        let _guard = ::rsp2_python::add_to_python_path();
+
+        let _tmp = ::rsp2_fs_util::TempDir::new("rsp2")?;
+        let json_path = _tmp.path().join("tmp.json");
+        save_json(&json_path, self)?;
+
+        assert!({ // FIXME: Error instead of panic?
+            ::std::process::Command::new("python3")
+                .arg("-m").arg("rsp2.cli.convert_dynmat")
+                .arg(json_path)
+                .arg("--output").arg(path.as_ref())
+                .status()?
+                .success()
+        });
+        Ok(())
+    }
+}
 
 #[derive(Debug, Copy, Clone)]
 pub struct DynmatTolerances {

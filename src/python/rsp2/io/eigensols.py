@@ -20,3 +20,11 @@ def to_cereal(esols):
 
     return evals, (real, imag)
 
+def equal(a, b):
+    evals_a, (real_a, imag_a) = a
+    evals_b, (real_b, imag_b) = b
+    return (True
+            and np.array_equal(evals_a, evals_b)
+            and np.array_equal(real_a, real_b)
+            and np.array_equal(imag_a, imag_b)
+            )
