@@ -521,3 +521,18 @@ pub fn converge_vdw(bin_name: &str, version: VersionInfo) -> ! {
         ::cmd::run_converge_vdw(mpi_on_demand, &config.deserialize()?, z, (r_min, r_max))
     });
 }
+
+// %% CRATES: binary: rsp2-library-paths %%
+pub fn print_library_paths(bin_name: &str, _version: VersionInfo) -> ! {
+    let app = {
+        ::clap::App::new(bin_name)
+            .about("\
+                prints the value of LD_LIBRARY_PATH supplied by cargo at compilation time, \
+                to assist in running binaries directly from target/.
+            ")
+    };
+    let _ = app.get_matches();
+
+    println!("{}", ::std::env::var("LD_LIBRARY_PATH").unwrap());
+    exit(0);
+}

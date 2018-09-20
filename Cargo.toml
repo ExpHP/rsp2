@@ -38,6 +38,10 @@ name = "rsp2-dynmat-test"
 path = "src/binary-shims/rsp2-dynmat-test.rs"
 
 [[bin]]
+name = "rsp2-library-paths"
+path = "src/binary-shims/rsp2-library-paths.rs"
+
+[[bin]]
 name = "rsp2-plot-vdw"
 path = "src/binary-shims/rsp2-plot-vdw.rs"
 
