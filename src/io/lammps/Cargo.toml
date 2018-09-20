@@ -16,7 +16,7 @@ path = "lib.rs"
 [dependencies]
 rsp2-structure = { path = "../../structure", features = ["serde-support"] }
 rsp2-array-types = { path = "../../util/array-types", features = ["serde-support"] }
-lammps-sys = { rev = "2ebd553", git = "https://github.com/ExpHP/lammps-sys", features = ["exceptions", "package-user-omp"] }
+lammps-sys = { rev = "6bba3ad", git = "https://github.com/ExpHP/lammps-sys", features = ["exceptions", "package-user-omp"] }
 
 log = "0.4"
 lazy_static = "0.2"
