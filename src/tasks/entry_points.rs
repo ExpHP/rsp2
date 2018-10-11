@@ -28,13 +28,16 @@ use ::rsp2_lammps_wrap::LammpsOnDemand;
 use ::clap;
 use ::path_abs::{PathDir, PathFile, PathAbs};
 use ::std::ffi::OsStr;
+use ::std::panic::UnwindSafe;
 use ::std::process::exit;
 
 // -------------------------------------------------------------------------------------
 // Initialization common to all entry points
 
 fn wrap_main<F>(version: VersionInfo, main: F) -> !
-where F: FnOnce(SetGlobalLogfile, Option<LammpsOnDemand>) -> FailResult<()>,
+where
+    F: FnOnce(SetGlobalLogfile, Option<LammpsOnDemand>) -> FailResult<()>,
+    F: UnwindSafe,
 {
     wrap_main_with_lammps_on_demand(|on_demand| {
         // From here onwards, everything runs on only a single process.
@@ -64,7 +67,7 @@ where F: FnOnce(SetGlobalLogfile, Option<LammpsOnDemand>) -> FailResult<()>,
 // This initializes MPI so it must be done at the very beginning.
 //
 // The closure runs on only one process.
-fn wrap_main_with_lammps_on_demand(continuation: impl FnOnce(Option<LammpsOnDemand>)) -> ! {
+fn wrap_main_with_lammps_on_demand(continuation: impl UnwindSafe + FnOnce(Option<LammpsOnDemand>)) -> ! {
     #[cfg(feature = "mpi")] {
         let required = ::mpi::Threading::Serialized;
         let (_universe, actual) = {
@@ -74,7 +77,9 @@ fn wrap_main_with_lammps_on_demand(continuation: impl FnOnce(Option<LammpsOnDema
         // 'actual >= required' would be nicer, but I don't think MPI specifies comparison ordering
         assert_eq!(actual, required);
 
-        LammpsOnDemand::install(|on_demand| continuation(Some(on_demand)));
+        LammpsOnDemand::with_mpi_abort_on_unwind(|| {
+            LammpsOnDemand::install(|on_demand| continuation(Some(on_demand)));
+        });
 
         // NOTE: drop of _universe here issues MPI_Finalize
     }

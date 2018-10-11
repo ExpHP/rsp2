@@ -626,6 +626,10 @@ impl LammpsOnDemand {
     /// until the continuation finishes. MPI will be unusable for anything other LAMMPS during
     /// this time.
     ///
+    /// **Important:** Currently, if a process panics at a bad time, the other processes may
+    /// get deadlocked on a blocking operation. Nothing is done about this by default.
+    /// See the helper method `with_mpi_abort_on_unwind` for a possible solution.
+    ///
     /// # Output
     ///
     /// `Some` on the root process, `None` on the others.
@@ -638,6 +642,14 @@ impl LammpsOnDemand {
             LammpsDispatch::new(),
             |on_demand| continuation(LammpsOnDemand { imp: on_demand }),
         )
+    }
+
+    /// Helper to call `MPI_ABORT` if a panic occurs inside the continuation,
+    /// *after* allowing the panic implementation to unwind back out.
+    ///
+    /// This will be completely ineffective if the panic implementation does not unwind.
+    pub fn with_mpi_abort_on_unwind<R>(func: impl ::std::panic::UnwindSafe + FnOnce() -> R) -> R {
+        ::low_level::mpi_helper::with_mpi_abort_on_unwind(func)
     }
 }
 

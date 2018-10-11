@@ -108,6 +108,10 @@ impl<D: DispatchMultiProcess> MpiOnDemand<D> {
     /// while the others enter an event loop (mostly blocking, waiting for `invoke` to be called).
     /// When the closure exits, execution resumes on all processes.
     ///
+    /// **Important:** Currently, if a process panics at a bad time, the other processes may
+    /// get deadlocked on a blocking operation. Nothing is done about this by default.
+    /// See the helper method `with_mpi_abort_on_unwind` for a possible solution.
+    ///
     /// # Panics
     ///
     /// Panics after the function returns if it is detected that the `MpiOnDemand`
@@ -172,6 +176,26 @@ impl<D: DispatchMultiProcess> MpiOnDemand<D> {
     pub fn eco_mode<B>(&self, cont: impl FnOnce() -> B) -> B {
         with_default_root(|root| self.0.root_eco_mode(&root, cont))
     }
+}
+
+/// Helper to call `MPI_ABORT` if a panic occurs inside the continuation,
+/// *after* allowing the panic implementation to unwind back out.
+///
+/// This will be completely ineffective if the panic implementation does not unwind.
+pub fn with_mpi_abort_on_unwind<R>(func: impl ::std::panic::UnwindSafe + FnOnce() -> R) -> R {
+    use ::mpi::{AsCommunicator, Communicator};
+
+    with_default_root(|root| {
+        let res = ::std::panic::catch_unwind(func);
+        match res {
+            Ok(r) => return r,
+            Err(_payload) => {
+                // we won't need to worry about printing a message, under the assumption
+                // that the panic hook already did so before beginning to unwind.
+                root.as_communicator().abort(1);
+            },
+        }
+    })
 }
 
 // Provides the default `mpi::Root`.
