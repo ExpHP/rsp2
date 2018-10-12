@@ -422,6 +422,7 @@ mod unsafe_impls {
         );
 
         out.clear();
+        out.reserve_exact(vec.len());
 
         //------------------------------------------------
         // You are now entering a PANIC FREE ZONE
