@@ -9,7 +9,7 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::{Lattice, Coords};
+use ::{Lattice, Coords, CoordsKind};
 use ::{CartOp};
 use super::group::GroupTree;
 
@@ -86,6 +86,10 @@ pub fn spacegroup_deperms(
 pub fn spacegroup_coperms_with_meta<M: Ord>(
     // Arbitrary superstructure (the thing we want to permute)
     coords: &Coords,
+    // Metadata, which is assumed to obey the symmetry of the spacegroup.
+    // (i.e. sites in a symmetry star should have the same metadata)
+    //
+    // (FIXME: This is not checked)
     metadata: &[M],
 
     // Spacegroup operators.
@@ -116,7 +120,12 @@ pub fn spacegroup_coperms_with_meta<M: Ord>(
         // Generators: Do a (very expensive!) brute force search.
         |op_ind, _int_op| {
             let to_fracs = cart_ops[op_ind].transform_fracs(lattice, &from_fracs);
-            brute_force_with_sort_trick(lattice, metadata, &from_fracs, &to_fracs[..], tol)
+            brute_force_with_sort_trick(
+                lattice,
+                metadata, CoordsKind::Fracs(&from_fracs),
+                metadata, CoordsKind::Fracs(&to_fracs[..]),
+                tol,
+            )
         },
         // Other operators: Quickly compose the results from other operators.
         |a, b| Ok({
@@ -134,6 +143,10 @@ pub fn spacegroup_coperms_with_meta<M: Ord>(
 pub fn spacegroup_deperms_with_meta<M: Ord>(
     // Arbitrary superstructure (the thing we want to permute)
     coords: &Coords,
+    // Metadata, which is assumed to obey the symmetry of the spacegroup.
+    // (i.e. sites in a symmetry star should have the same metadata)
+    //
+    // (FIXME: This is not checked)
     metadata: &[M],
 
     // Spacegroup operators.
@@ -148,60 +161,18 @@ fn invert_each(perms: impl IntoIterator<Item=Perm>) -> Vec<Perm>
 
 pub(crate) fn brute_force_with_sort_trick<M: Ord>(
     lattice: &Lattice,
-    meta: &[M],
-    from_fracs: &[V3],
-    to_fracs: &[V3],
+    from_meta: &[M],
+    from: CoordsKind<impl AsRef<[V3]>>,
+    to_meta: &[M],
+    to: CoordsKind<impl AsRef<[V3]>>,
     tol: f64,
 ) -> Result<Perm, PositionMatchError>
 {Ok({
-    use ::ordered_float::NotNaN;
-    use ::CoordsKind::Fracs;
-
-    // Sort both sides by some measure which is likely to produce a small
-    // maximum value of (sorted_rotated_index - sorted_original_index).
-    // This reduces an O(n^2) search down to ~O(n).
-    // (for O(n log n) work overall, including the sort)
-    //
-    // We choose to sort first by atom type, then by distance to the nearest
-    // bravais lattice point.
-    let sort_by_lattice_distance = |fracs: &[V3]| {
-        let mut fracs = fracs.to_vec();
-        for v in &mut fracs {
-            *v -= v.map(f64::round);
-        }
-
-        let data_to_sort = {
-            Fracs(fracs.clone())
-                // NOTE: It's possible that computing distances in fractional space can be
-                //       even more effective than in cartesian space.  See this comment
-                //       and the conversation leading up to it:
-                //
-                //       https://github.com/atztogo/spglib/pull/44#issuecomment-356516736
-                //
-                //       But for now, I'll leave it as is.
-                .to_carts(lattice)
-                .into_iter()
-                .zip(meta)
-                .map(|(x, m)| {
-                    (
-                        m, // first by atom type
-                        NotNaN::new(x.norm()).unwrap(),
-                    )
-                })
-                .collect::<Vec<_>>()
-        };
-        let perm = Perm::argsort(&data_to_sort);
-        (perm.clone(), fracs.permuted_by(&perm))
-    };
-
-    let (perm_from, sorted_from) = sort_by_lattice_distance(&from_fracs);
-    let (perm_to, sorted_to) = sort_by_lattice_distance(&to_fracs);
+    let (perm_from, sorted_from) = fracs_sorted_by_lattice_distance(lattice, from, from_meta);
+    let (perm_to, sorted_to) = fracs_sorted_by_lattice_distance(lattice, to, to_meta);
 
     let perm_between = brute_force_near_identity(
-        lattice,
-        &sorted_from[..],
-        &sorted_to[..],
-        tol,
+        lattice, &sorted_from[..], &sorted_to[..], tol,
     )?;
 
     // Compose all of the permutations for the full permutation.
@@ -213,12 +184,97 @@ pub(crate) fn brute_force_with_sort_trick<M: Ord>(
         .permuted_by(&perm_to.inverted())
 })}
 
+// FIXME allows mismatched meta
+pub(crate) fn set_difference_with_sort_trick<M: Ord>(
+    lattice: &Lattice,
+    a_meta: &[M],
+    a: CoordsKind<impl AsRef<[V3]>>,
+    b_meta: &[M],
+    b: CoordsKind<impl AsRef<[V3]>>,
+    tol: f64,
+) -> Missing
+{
+    let (perm_a, sorted_a) = fracs_sorted_by_lattice_distance(lattice, a, a_meta);
+    let (perm_b, sorted_b) = fracs_sorted_by_lattice_distance(lattice, b, b_meta);
+
+    let missing = brute_force_set_difference(
+        lattice, &sorted_a[..], &sorted_b[..], tol,
+    );
+
+    missing
+        .permuting_a_by(perm_a.inverted())
+        .permuting_b_by(perm_b.inverted())
+}
+
+// Both structures are sorted by some measure which is likely to produce a small
+// maximum value of (sorted_rotated_index - sorted_original_index).
+// This reduces an O(n^2) search down to ~O(n).
+// (for O(n log n) work overall, including the sort)
+//
+// We choose to sort first by atom type, then by distance to the nearest
+// bravais lattice point.
+#[inline(always)]
+fn fracs_sorted_by_lattice_distance<M: Ord>(
+    lattice: &Lattice,
+    coords: CoordsKind<impl AsRef<[V3]>>,
+    meta: &[M],
+) -> (Perm, Vec<V3>) {
+    use ::ordered_float::NotNaN;
+
+    let mut fracs = coords.to_fracs(lattice);
+    for v in &mut fracs {
+        *v -= v.map(f64::round);
+    }
+
+    let data_to_sort = {
+        ::CoordsKind::Fracs(fracs.clone())
+            // NOTE: It's possible that computing distances in fractional space can be
+            //       even more effective than in cartesian space.  See this comment
+            //       and the conversation leading up to it:
+            //
+            //       https://github.com/atztogo/spglib/pull/44#issuecomment-356516736
+            //
+            //       But for now, I'll leave it as is.
+            .to_carts(lattice)
+            .into_iter()
+            .zip(meta)
+            .map(|(x, m)| {
+                (
+                    m, // first by atom type
+                    NotNaN::new(x.norm()).unwrap(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let perm = Perm::argsort(&data_to_sort);
+    (perm.clone(), fracs.permuted_by(&perm))
+}
+
 #[derive(Debug, Fail)]
 pub enum PositionMatchError {
     #[fail(display = "positions are too dissimilar")]
     NoMatch(Backtrace),
     #[fail(display = "multiple positions mapped to the same index")]
     DuplicateMatch(Backtrace),
+}
+
+/// The type returned by set difference operations on coords, providing the
+/// atoms missing from each structure via unambiguously-named fields.
+#[derive(Debug, Clone)]
+pub struct Missing {
+    pub only_in_a: Vec<usize>,
+    pub only_in_b: Vec<usize>,
+}
+
+impl Missing {
+    fn permuting_a_by(mut self, perm: Perm) -> Self {
+        self.only_in_a = self.only_in_a.into_iter().map(|i| perm.permute_index(i)).collect();
+        self
+    }
+    fn permuting_b_by(mut self, perm: Perm) -> Self {
+        self.only_in_b = self.only_in_b.into_iter().map(|i| perm.permute_index(i)).collect();
+        self
+    }
 }
 
 // Optimized for permutations near the identity.
@@ -231,7 +287,6 @@ fn brute_force_near_identity(
     tol: f64,
 ) -> Result<Perm, PositionMatchError>
 {Ok({
-
     assert_eq!(from_fracs.len(), to_fracs.len());
     let n = from_fracs.len();
 
@@ -265,12 +320,7 @@ fn brute_force_near_identity(
                 continue;
             }
 
-            let distance2 = {
-                let diff = (from_fracs[from] - to_fracs[to]).map(|x| x - x.round());
-                let cart = diff * lattice;
-                cart.sqnorm()
-            };
-            if distance2 < tol * tol {
+            if fracs_within(lattice, from_fracs[from], to_fracs[to], tol) {
                 perm[to] = from;
                 continue 'from;
             }
@@ -285,15 +335,74 @@ fn brute_force_near_identity(
     Perm::from_vec(perm).expect("(BUG) invalid perm without match error!?")
 })}
 
+// Optimized for permutations near the identity.
+// NOTE: Lattice must be reduced so that the voronoi cell fits
+//       within the eight unit cells around the origin
+fn brute_force_set_difference(
+    lattice: &Lattice,
+    a_fracs: &[V3],
+    b_fracs: &[V3],
+    tol: f64,
+) -> Missing
+{
+    let mut found_b = vec![false; b_fracs.len()];
+
+    // Same optimization described in from_perm.
+    //
+    // FIXME: If even a single thing is missing from `to`, then we end up with
+    //        quadratic complexity. I think this can be fixed by implementing some
+    //        sort of jump list?  Meh.
+    let mut search_start = 0;
+    let mut only_in_a = vec![];
+
+    'a: for a in 0..a_fracs.len() {
+        // Skip through things filled out of order.
+        while search_start < b_fracs.len() && found_b[search_start] {
+            search_start += 1;
+        }
+
+        for b in search_start..b_fracs.len() {
+            if found_b[b] {
+                continue;
+            }
+
+            if fracs_within(lattice, a_fracs[a], b_fracs[b], tol) {
+                found_b[b] = true;
+                continue 'a;
+            }
+        }
+        only_in_a.push(a);
+    }
+
+    let only_in_b = {
+        found_b.iter().enumerate()
+            .filter(|(_, &x)| !x)
+            .map(|(b, _)| b)
+            .collect()
+    };
+    Missing { only_in_a, only_in_b }
+}
+
+// Determine whether two fractional points have images that lie within a cartesian
+// distance tol of each other, assuming that the voronoi cell fits within the eight
+// unit cells around the origin.
+#[inline(always)] // hopefully lift the `tol * tol` out of a loop
+fn fracs_within(lattice: &Lattice, a: V3, b: V3, tol: f64) -> bool {
+    let shortest_diff = (a - b).map(|x| x - x.round());
+    let shortest_cart = shortest_diff * lattice;
+    shortest_cart.sqnorm() < tol * tol
+}
+
 #[cfg(test)]
 #[deny(unused)]
 mod tests {
     use ::Lattice;
     use super::*;
 
-    use ::rand::Rand;
+    use ::rand::{Rand, Rng};
 
     use ::rsp2_array_types::Envee;
+    use ::slice_of_array::prelude::*;
 
     fn random_vec<T: Rand>(n: usize) -> Vec<T>
     { (0..n).map(|_| ::rand::random()).collect() }
@@ -308,25 +417,150 @@ mod tests {
 
     #[test]
     fn brute_force_works() {
-        let (original, perm, permuted) = random_problem(20);
-        let lattice = Lattice::random_uniform(1.0);
+        for _ in 0..10 {
+            let (original, perm, permuted) = random_problem(20);
+            let lattice = Lattice::random_uniform(1.0);
 
-        let output = super::brute_force_near_identity(
-            &lattice, &original, &permuted, 1e-5,
-        ).unwrap();
+            let output = super::brute_force_near_identity(
+                &lattice, &original, &permuted, 1e-5,
+            ).unwrap();
 
-        assert_eq!(output, perm);
+            assert_eq!(output, perm);
+        }
     }
 
     #[test]
-    fn of_rotation_impl_works() {
-        let (original, perm, permuted) = random_problem(20);
-        let lattice = Lattice::random_uniform(1.0);
+    fn sort_trick_works() {
+        for _ in 0..10 {
+            let (original, perm, permuted) = random_problem(20);
+            let lattice = Lattice::random_uniform(1.0);
 
-        let output = super::brute_force_with_sort_trick(
-            &lattice, &[(); 20], &original, &permuted, 1e-5,
-        ).unwrap();
+            let output = super::brute_force_with_sort_trick(
+                &lattice,
+                &[(); 20], CoordsKind::Fracs(&original),
+                &[(); 20], CoordsKind::Fracs(&permuted),
+                1e-5,
+            ).unwrap();
 
-        assert_eq!(output, perm);
+            assert_eq!(output, perm);
+        }
+    }
+
+    #[test]
+    fn sort_trick_images() {
+        for _ in 0..10 {
+            let (mut original, perm, mut permuted) = random_problem(20);
+            // FIXME: Figure out how to detect if a lattice is "well-behaved".
+            //
+            // HACK: Use a fixed lattice so that we can be sure it supports our limitations on
+            //       the voronoi cell.
+            let half_r3 = 0.5 * f64::sqrt(3.0);
+            let lattice = Lattice::from(&[
+                [ 1.0,     0.0, 0.0],
+                [-0.5, half_r3, 0.0],
+                [ 0.0,     0.0, 1.0],
+            ]);
+
+            for x in ::std::iter::empty().chain(original.flat_mut()).chain(permuted.flat_mut()) {
+                *x += ::rand::thread_rng().gen_range::<i32>(-5, 5+1) as f64;
+            }
+
+            let output = super::brute_force_with_sort_trick(
+                &lattice,
+                &[(); 20], CoordsKind::Fracs(&original),
+                &[(); 20], CoordsKind::Fracs(&permuted),
+                1e-5,
+            ).unwrap();
+
+            assert_eq!(output, perm);
+        }
+    }
+
+    // FIXME known failure
+//    #[test]
+//    fn meta_mismatch() {
+//        let meta = &['A', 'B'];
+//        let lattice = Lattice::random_uniform(1.0);
+//        let original = &[V3([0.0; 3]), V3([0.5; 3])];
+//        let permuted = &[V3([0.5; 3]), V3([0.0; 3])];
+//        assert!(
+//            super::brute_force_with_sort_trick(&lattice, meta, original, meta, permuted, 1e-5)
+//                .is_err()
+//        );
+//    }
+
+    // a nonempty set of max size r containing indices into a vec of length n, in sorted order
+    fn random_index_subset(n: usize, r: usize) -> Vec<usize> {
+        let mut mask = vec![false; n];
+        for _ in 0..r {
+            let u = ::rand::random::<usize>() % mask.len();
+            mask[u] = true;
+        }
+        mask.iter().enumerate().filter(|(_, &x)| x).map(|(i, _)| i).collect()
+    }
+
+    fn remove_item<T: PartialEq>(vec: &mut Vec<T>, item: &T) -> Option<T> {
+        let index = vec.iter().position(|x| x == item)?;
+        Some(vec.remove(index))
+    }
+
+    #[test]
+    fn missing() {
+        for _ in 0..10 {
+            let (full, _, permuted) = random_problem(20);
+            let lattice = Lattice::random_uniform(1.0);
+
+            let empty: Vec<usize> = vec![];
+
+            let full_meta = vec![(); 20];
+
+            // test with nothing missing
+            let Missing {
+                only_in_a, only_in_b,
+            } = super::set_difference_with_sort_trick(
+                &lattice,
+                &full_meta, CoordsKind::Fracs(&full),
+                &full_meta, CoordsKind::Fracs(&permuted),
+                1e-5,
+            );
+            assert_eq!(&only_in_a, &empty);
+            assert_eq!(&only_in_b, &empty);
+
+            // now remove some things....
+            let removed = random_index_subset(20, 3);
+            assert!(removed.len() > 0);
+
+            let mut partial = permuted.clone();
+            for &i in &removed {
+                remove_item(&mut partial, &full[i]);
+            }
+            let partial_meta = vec![(); partial.len()];
+
+            // test things missing from b
+            let Missing {
+                mut only_in_a, only_in_b,
+            } = super::set_difference_with_sort_trick(
+                &lattice,
+                &full_meta, CoordsKind::Fracs(&full),
+                &partial_meta, CoordsKind::Fracs(&partial),
+                1e-5,
+            );
+            only_in_a.sort();
+            assert_eq!(&only_in_a, &removed);
+            assert_eq!(&only_in_b, &empty);
+
+            // test things missing from a
+            let Missing {
+                only_in_a, mut only_in_b,
+            } = super::set_difference_with_sort_trick(
+                &lattice,
+                &partial_meta, CoordsKind::Fracs(&partial),
+                &full_meta, CoordsKind::Fracs(&full),
+                1e-5,
+            );
+            only_in_b.sort();
+            assert_eq!(&only_in_a, &empty);
+            assert_eq!(&only_in_b, &removed);
+        }
     }
 }

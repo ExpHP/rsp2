@@ -19,6 +19,11 @@ use ::rsp2_array_types::{V3, M33};
 ///
 /// This allows a function to support either cartesian coordinates,
 /// or fractional coordinates with respect to some lattice.
+///
+/// Direct usage of this type is uncommon, as `Coords` (which includes the
+/// lattice) is usually the preferable choice.  An example use case for
+/// `CoordsKind` might be in a function signature that takes two sets of
+/// coordinates sharing a single lattice.
 //
 // NOTE: The type parameter here was originally introduced as a step towards
 //       an HList-based Structure type. While those plans have been scrapped,
@@ -73,6 +78,16 @@ where V: AsRef<[V3]>,
     { match self {
         CoordsKind::Carts(c) => (Tag::Cart, c.as_ref()),
         CoordsKind::Fracs(c) => (Tag::Frac, c.as_ref()),
+    }}
+}
+
+impl<V> CoordsKind<V>
+where V: AsRef<[V3]>,
+{
+    pub fn as_ref(&self) -> CoordsKind<&[V3]>
+    { match self {
+        &CoordsKind::Carts(ref c) => CoordsKind::Carts(c.as_ref()),
+        &CoordsKind::Fracs(ref c) => CoordsKind::Fracs(c.as_ref()),
     }}
 }
 

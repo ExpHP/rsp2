@@ -9,7 +9,7 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::{Lattice, CoordsKind};
+use ::{Lattice, CoordsKind, Missing};
 use ::rsp2_soa_ops::{Perm, Permute};
 use ::rsp2_soa_ops::{Part, Partition, Unlabeled};
 use ::rsp2_array_types::{M33, V3, Unvee};
@@ -321,12 +321,41 @@ impl Coords {
             self.lattice().matrix().unvee(),
             target.lattice().matrix().unvee(),
         );
-        let meta = vec![(); self.coords.len()];
+        let fake_meta = vec![(); self.coords.len()];
         ::algo::find_perm::brute_force_with_sort_trick(
             self.lattice(),
-            &meta,
-            &self.to_fracs(),
-            &target.to_fracs(),
+            &fake_meta, self.coords.as_ref(),
+            &fake_meta, target.coords.as_ref(),
+            tol,
+        )
+    }
+
+    /// Get indices of sites that are only in one structure, but not another.
+    ///
+    /// The structures must have matching lattices.
+    ///
+    /// **FIXME:** The current implementation has a known flaw that it will become significantly
+    /// slower (jumping up from from `O(n log n)` to `O(n^2)` complexity) if the second structure
+    /// is missing anything.  I have an inkling how to fix it but I'm too lazy to benchmark it.
+    pub fn set_difference_indices(
+        &self,
+        other: &Coords,
+        tol: f64,
+    ) -> Missing
+    {
+        // FIXME: incompatible lattices should return Error and not panic
+        // NOTE: maybe this test on the lattice should use a larger or smaller
+        //        tolerance than the perm search. Haven't thought it through
+        // (include abs; arbitrary lattices may have near-zero cancellations)
+        assert_close!(rel=tol, abs=tol,
+            self.lattice().matrix().unvee(),
+            other.lattice().matrix().unvee(),
+        );
+        let fake_meta = vec![(); self.coords.len()];
+        ::algo::find_perm::set_difference_with_sort_trick(
+            self.lattice(),
+            &fake_meta, self.coords.as_ref(),
+            &fake_meta, other.coords.as_ref(),
             tol,
         )
     }

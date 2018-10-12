@@ -58,6 +58,7 @@ pub use ::core::lattice::Lattice;
 pub use ::core::coords::CoordsKind;
 pub use ::core::structure::Coords;
 pub use ::core::structure::NonEquivalentLattice;
+pub use ::algo::find_perm::Missing;
 
 pub use ::element::Element;
 
