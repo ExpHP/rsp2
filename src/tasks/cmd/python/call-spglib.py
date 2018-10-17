@@ -18,14 +18,42 @@ import spglib
 
 def main():
     d = json.load(sys.stdin)
-    types = np.array(d.pop('types'), dtype=int)
-    coords = d.pop('coords')
-    symprec = d.pop('symprec')
-    assert not d
+    result = _result_main(**d)
+    json.dump(result, sys.stdout)
+    print()
+
+def _result_main(**kw):
+    try:
+        return _except_main(**kw)
+    except SpgError as e:
+        return {"Err": "spglib: " + e.message() }
+
+def _except_main(types, coords, symprec):
+    types = np.array(types, dtype=int)
     fracs = np.array(coords.pop('fracs'))
     lattice = np.array(coords.pop('lattice'))
 
-    ds = spglib.get_symmetry_dataset((lattice, fracs, types), symprec)
+    cell = (lattice, fracs, types)
+
+    # check primitiveness
+    # alas, SPGLIB's symmetry dataset does not give any reliable way to
+    # check this.
+    #
+    # FIXME this should be checked sooner in RSP2, not after expensive relaxation
+    prim = spglib.find_primitive(cell, symprec=symprec)
+    if not prim:
+        SpgError.throw()
+
+    prim_lattice = prim[0]
+    vol_ratio = abs(np.linalg.det(lattice) / np.linalg.det(prim_lattice))
+    if abs(abs(vol_ratio) - 1) > 1e-4:
+        return {"Err": "rsp2 requires the input to be a primitive cell"}
+
+    ds = spglib.get_symmetry_dataset(cell, symprec=symprec)
+    if not ds:
+        SpgError.throw()
+
+    print(ds)
 
     # you can't JSON-serialize numpy types
     def un_numpy_ify(d):
@@ -35,16 +63,18 @@ def main():
         if isinstance(d, (float, int, str)): return d
         raise TypeError
 
-    if ds:
-        result = {"Ok": un_numpy_ify(ds)}
-    else:
+    return {"Ok": un_numpy_ify(ds)}
+
+class SpgError(RuntimeError):
+    @classmethod
+    def throw(cls):
         error = spglib.get_error_message()
         if error == "no error": # right...
             error = "an unspecified Bad Thing happened while calling spglib"
-        result = {"Err": error}
+        raise cls(error)
 
-    json.dump(result, sys.stdout)
-    print()
+    def message(self):
+        return self.args[0]
 
 if __name__ == '__main__':
     main()
