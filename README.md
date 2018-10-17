@@ -17,9 +17,19 @@ If you have trouble, please open an issue.
 
 # Running
 
-> `cargo run --bin=rsp2 -- --help` and *good luck*
+> `cargo run --release --bin=rsp2 -- --help` and *good luck*
 
 Because there is currently one or *maybe two* people who need to use the code (and this count includes the author!), the CLI binaries have no stable interface.  Config files, CLI arguments, inputs and outputs undergo major revisions on a complete whim.
+
+## MPI
+
+You can't use `mpirun` through cargo, so you need to run the built binary directly from 
+
+```
+cargo build --release --bin=rsp2
+cargo run --release --bin=rsp2-library-paths >release.path
+LD_LIBRARY_PATH=$(cat release.path):${LD_LIBRARY_PATH} mpirun target/release/rsp2 ARGS GO HERE
+```
 
 # License
 
