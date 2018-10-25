@@ -48,6 +48,8 @@ pub trait EvLoopDiagonalizer {
         //       for easier debugging in case an error occurs shortly after computing the matrix
         iteration: Option<Iteration>, // HACK
     ) -> FailResult<(Vec<f64>, Basis3, Self::ExtraOut)>;
+
+    fn allow_unfold_bands(&self) -> bool;
 }
 
 impl TrialDir {
@@ -97,6 +99,7 @@ impl TrialDir {
             let (ev_analysis, coords, did_chasing) = {
                 self.do_ev_loop_stuff_after_diagonalization(
                     &settings, pot, meta.sift(), iteration, coords, &evals, &evecs,
+                    diagonalizer.allow_unfold_bands(),
                 )?
             };
 
@@ -162,6 +165,7 @@ impl TrialDir {
         coords: Coords,
         evals: &Vec<f64>,
         evecs: &Basis3,
+        allow_unfold_bands: bool,
     ) -> FailResult<(GammaSystemAnalysis, Coords, DidEvChasing)>
     {Ok({
         let classifications = super::acoustic_search::perform_acoustic_search(
@@ -172,6 +176,7 @@ impl TrialDir {
         trace!("Computing eigensystem info");
         let ev_analysis = super::run_gamma_system_analysis(
             &coords, meta.sift(), evals, evecs, Some(classifications),
+            allow_unfold_bands,
         )?;
         {
             let file = self.create_file(format!("eigenvalues.{:02}", iteration))?;

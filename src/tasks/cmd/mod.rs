@@ -359,6 +359,11 @@ impl EvLoopDiagonalizer for PhonopyDiagonalizer {
 
         (evals, evecs, bands_dir)
     })}
+
+    fn allow_unfold_bands(&self) -> bool {
+        // phonopy diagonalizer is only ever used on small systems
+        true
+    }
 }
 
 impl PhonopyDiagonalizer {
@@ -587,6 +592,13 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
         trace!("Done diagonalizing dynamical matrix");
         (evals, evecs, iteration)
     })}
+
+    fn allow_unfold_bands(&self) -> bool {
+        // sparse diagonalizer is used on large systems where UnfoldProbs is prohibitively
+        // expensive to compute, and it's not even very useful when we're only looking at
+        // imaginary/acoustic modes.
+        false
+    }
 }
 
 // HACK
@@ -674,6 +686,9 @@ fn run_gamma_system_analysis(
     evals: &[f64],
     evecs: &Basis3,
     mode_classifications: Option<Rc<[ModeKind]>>,
+    // can set to false to forcibly disable this expensive operation even
+    // if all necessary data is available
+    unfold_bands: bool,
 ) -> FailResult<GammaSystemAnalysis> {
     use self::ev_analyses::*;
 
@@ -695,6 +710,7 @@ fn run_gamma_system_analysis(
         ev_frequencies: Some(EvFrequencies(evals.to_vec())),
         ev_eigenvectors: Some(EvEigenvectors(evecs.clone())),
         bonds: cart_bonds.map(Bonds),
+        permission_to_unfold_bands: if unfold_bands { Some(PermissionToUnfoldBands) } else { None },
     }.compute()
 }
 
@@ -1149,6 +1165,7 @@ impl TrialDir {
         let ev_analysis = run_gamma_system_analysis(
             &stored.coords, stored.meta().sift(),
             &evals, &evecs, Some(classifications),
+            true, // unfold bands
         )?;
 
         write_eigen_info_for_humans(&ev_analysis, &mut |s| FailOk(info!("{}", s)))?;
@@ -1171,6 +1188,7 @@ pub(crate) fn run_sparse_analysis(
         structure.meta().sift(),
         &evals, &evecs,
         None, // ev_classifications
+        true, // unfold_bands
     )?;
 
     write_eigen_info_for_humans(&ev_analysis, &mut |s| FailOk(info!("{}", s)))?;
@@ -1452,9 +1470,13 @@ impl TrialDir {
             eigenvectors: evecs,
         } = Load::load(self.join(self.eigensols_path(iteration)))?;
 
+        // this binary is only ever used with the sparse diagonalizer
+        let allow_unfold_bands = false;
+
         let (_, coords, did_ev_chasing) = self.do_ev_loop_stuff_after_diagonalization(
             settings, &pot, meta.sift(), iteration,
             coords, &evals, &evecs,
+            allow_unfold_bands,
         )?;
 
         if let DidEvChasing(true) = did_ev_chasing {

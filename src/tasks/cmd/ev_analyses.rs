@@ -46,6 +46,10 @@ pub use ::meta::LayerScMatrices;
 #[derive(Debug, Clone)] pub struct EvEigenvectors(pub Basis3);
 #[derive(Debug, Clone)] pub struct Bonds(pub ::math::bonds::CartBonds);
 
+// Band unfolding is seriously expensive, and not at all useful for the sparse diagonalizer
+// during relaxation.
+#[derive(Debug, Clone)] pub struct PermissionToUnfoldBands;
+
 pub use self::gamma_system_analysis::GammaSystemAnalysis;
 pub mod gamma_system_analysis {
     use super::*;
@@ -71,6 +75,7 @@ pub mod gamma_system_analysis {
         pub ev_frequencies:     Option<EvFrequencies>,
         pub ev_eigenvectors:    Option<EvEigenvectors>,
         pub bonds:              Option<Bonds>,
+        pub permission_to_unfold_bands: Option<PermissionToUnfoldBands>,
     }
 
     pub struct GammaSystemAnalysis {
@@ -90,7 +95,7 @@ pub mod gamma_system_analysis {
             let Input {
                 site_coords, site_layers, site_elements, site_masses,
                 layer_sc_mats, ev_frequencies, ev_eigenvectors, bonds,
-                ev_classifications,
+                ev_classifications, permission_to_unfold_bands,
             } = self;
 
             // since our inputs are all uniquely typed, we can let HList
@@ -98,6 +103,7 @@ pub mod gamma_system_analysis {
             let grab_bag = hlist![
                 site_coords, site_layers, site_elements, site_masses,
                 layer_sc_mats, ev_frequencies, ev_eigenvectors, bonds,
+                permission_to_unfold_bands,
             ];
 
             let (args, _) = grab_bag.sculpt();
@@ -300,6 +306,7 @@ wrap_maybe_compute! {
         site_coords: &SiteCoordinates,
         layer_sc_mats: &LayerScMatrices,
         ev_eigenvectors: &EvEigenvectors,
+        permission_to_unfold_bands: &PermissionToUnfoldBands,
     ) -> FailResult<_>
     = _unfold_probs;
 }
@@ -324,6 +331,7 @@ fn _unfold_probs(
     site_coords: &SiteCoordinates,
     layer_sc_mats: &LayerScMatrices,
     ev_eigenvectors: &EvEigenvectors,
+    _: &PermissionToUnfoldBands,
 ) -> FailResult<UnfoldProbs> {
     let part = Part::from_ord_keys(site_layers.iter());
     let layer_partial_coords = site_coords
