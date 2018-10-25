@@ -54,7 +54,9 @@ use ::rsp2_structure::{Coords, Lattice};
 
 pub type FailResult<T> = Result<T, ::failure::Error>;
 
-use std::fmt;
+use ::std::fmt;
+use ::std::fs;
+use ::std::io::Write;
 
 pub const API_TRACE_TARGET: &'static str = concat!(module_path!(), "::c_api");
 pub const API_TRACE_LEVEL: Level = Level::Trace;
@@ -126,6 +128,8 @@ pub struct Lammps<P: Potential> {
     update_fsm: UpdateFsm,
 
     data_trace_dir: Option<PathBuf>,
+
+    debug_dir: Option<PathBuf>,
 
     _lock: InstanceLockGuard,
 }
@@ -230,6 +234,7 @@ pub struct Builder {
     auto_adjust_lattice: bool,
     update_style: UpdateStyle,
     data_trace_dir: Option<PathBuf>,
+    debug_dir: Option<PathBuf>,
     stdout: bool
 }
 
@@ -378,6 +383,7 @@ impl Builder {
         update_style: UpdateStyle::safe(),
         auto_adjust_lattice: true,
         data_trace_dir: None,
+        debug_dir: None,
         processors: [None; 3],
         stdout: false,
     }}
@@ -435,8 +441,16 @@ impl Builder {
     pub fn eco_mode(&self, cont: &mut dyn FnMut())
     { self.make_instance.0.eco_mode(cont) }
 
+    /// If set, an immensely large number of files will be written to this directory
+    /// tracing the state of coordinate data both in rsp2 and LAMMPS.
     pub fn data_trace_dir(&mut self, value: Option<impl AsRef<Path>>) -> &mut Self
     { self.data_trace_dir = value.map(|p| p.as_ref().to_owned()); self }
+
+    /// If set, some files may be written to this directory on error.
+    ///
+    /// The names use a fixed prefix.
+    pub fn debug_dir(&mut self, value: Option<impl AsRef<Path>>) -> &mut Self
+    { self.debug_dir = value.map(|p| p.as_ref().to_owned()); self }
 
     /// Call out to the LAMMPS C API to create an instance of Lammps,
     /// and configure it according to this builder.
@@ -841,6 +855,7 @@ impl<P: Potential> Lammps<P>
             auto_adjust_lattice: builder.auto_adjust_lattice,
             update_fsm: builder.update_style.initial_fsm(),
             data_trace_dir: builder.data_trace_dir.clone(),
+            debug_dir: builder.debug_dir.clone(),
             _lock: lock,
         }
     })}
@@ -1124,14 +1139,26 @@ impl<P: Potential> Lammps<P> {
     // so we simply check that they don't change.
     fn check_data_set_in_stone(&self, coords: &Coords, meta: &P::Meta) -> FailResult<()>
     {Ok({
-        fn check<D>(msg: &'static str, was: D, now: D) -> FailResult<()>
-        where D: fmt::Debug + PartialEq,
-        {
-            ensure!(
-                was == now,
-                format!("{} changed since build()\n was: {:?}\n now: {:?}", msg, was, now));
-            Ok(())
+        // struct acting as a generic closure
+        struct Closure<'a, P: Potential + 'a> {
+            lmp: &'a Lammps<P>,
+            coords: &'a Coords,
         }
+        impl<'a, P: Potential + 'a> Closure<'a, P> {
+            fn check<D>(&self, msg: &'static str, was: D, now: D) -> FailResult<()>
+            where D: fmt::Debug + PartialEq,
+            {
+                let Closure { lmp, coords } = *self;
+                if was != now {
+                    if let Some(mut file) = lmp.create_debug_dir_file("lammps-wrap-debug-carts") {
+                        let _ = writeln!(file, "{:?}", coords.to_carts());
+                    }
+                    bail!("{} changed since build()\n was: {:?}\n now: {:?}", msg, was, now);
+                }
+                Ok(())
+            }
+        }
+
         let InitInfo { masses, pair_style, pair_coeffs } = self.potential.init_info(coords, meta);
         let Lammps {
             original_num_atoms,
@@ -1143,11 +1170,12 @@ impl<P: Potential> Lammps<P> {
             ..
         } = *self;
 
-        check("number of atom types has", original_masses.len(), masses.len())?;
-        check("number of atoms has", original_num_atoms, coords.num_atoms())?;
-        check("masses have", original_masses, &masses)?;
-        check("pair_style command has", original_pair_style, &pair_style)?;
-        check("pair_coeff commands have", original_pair_coeffs, &pair_coeffs)?;
+        let c = Closure { lmp: self, coords };
+        c.check("number of atom types has", original_masses.len(), masses.len())?;
+        c.check("number of atoms has", original_num_atoms, coords.num_atoms())?;
+        c.check("masses have", original_masses, &masses)?;
+        c.check("pair_style command has", original_pair_style, &pair_style)?;
+        c.check("pair_coeff commands have", original_pair_coeffs, &pair_coeffs)?;
     })}
 
     fn write_data_trace_fileset(&self, dir: &Path, filename_prefix: &str) {
@@ -1156,9 +1184,6 @@ impl<P: Potential> Lammps<P> {
 
     fn _write_data_trace_fileset(&self, dir: &Path, filename_prefix: &str) -> FailResult<()>
     {Ok({
-        use ::std::fs;
-        use ::std::io::Write;
-
         fs::create_dir_all(dir)?;
         let file = |ext: &str| {
             fs::File::create(dir.join(format!("{}.{}", filename_prefix, ext)))
@@ -1167,6 +1192,24 @@ impl<P: Potential> Lammps<P> {
         writeln!(file("lmp.force")?, "{:?}", self.read_raw_lmp_force()?)?;
         writeln!(file("cached.carts")?, "{:?}", self.structure.get().0.to_carts())?;
     })}
+
+    fn create_debug_dir_file(&self, name: &str) -> Option<fs::File> {
+        if let Some(ref debug_dir) = self.debug_dir {
+            let path = debug_dir.join(name);
+            match fs::File::create(&path) {
+                Ok(file) => {
+                    info!("wrote {}", path.display());
+                    Some(file)
+                },
+                Err(e) => {
+                    warn!("could not create lammps-wrap debug file {}: {}", path.display(), e);
+                    None
+                },
+            }
+        } else {
+            None
+        }
+    }
 }
 
 fn send_lmp_lattice(lmp: &mut (dyn LowLevelApi + 'static), lattice: &Lattice, auto_adjust: bool) -> FailResult<()>
