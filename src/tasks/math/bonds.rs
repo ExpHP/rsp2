@@ -10,6 +10,7 @@
 ** ************************************************************************ */
 
 use ::FailResult;
+use ::rsp2_soa_ops::{Perm, Permute};
 use ::rsp2_structure::supercell;
 use ::rsp2_structure::{Coords, Lattice};
 use ::rsp2_array_utils::{arr_from_fn, try_map_arr};
@@ -63,8 +64,22 @@ pub struct CartBonds {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FracBond {
+    /// Source atom of this edge.
     pub from: usize,
+
+    /// Target atom of this edge.
     pub to: usize,
+
+    /// Determines which ghost of `to` is interacting with which ghost of `from`.
+    ///
+    /// Chosen to be measured relative to the actual positions that were given to the bond
+    /// search (as opposed to the reduced positions).  Specifically, it is chosen such that
+    ///
+    /// ```text
+    /// (original_coords[to] - original_coords[from]) + image_diff * lattice
+    /// ```
+    ///
+    /// was the cartesian vector representing the bond at the time of construction.
     pub image_diff: V3<i32>,
 }
 
@@ -73,6 +88,27 @@ pub struct CartBond {
     pub from: usize,
     pub to: usize,
     pub cart_vector: V3,
+}
+
+//=================================================================
+
+impl FracBonds {
+    pub fn from_iter(num_atoms: usize, iter: impl IntoIterator<Item=FracBond>) -> Self {
+        let iter = iter.into_iter();
+        let size = iter.size_hint().0;
+        let mut from = Vec::with_capacity(size);
+        let mut to = Vec::with_capacity(size);
+        let mut image_diff = Vec::with_capacity(size);
+
+        for FracBond { from: f, to: t, image_diff: i } in iter {
+            assert!(f < num_atoms);
+            assert!(t < num_atoms);
+            from.push(f);
+            to.push(t);
+            image_diff.push(i);
+        }
+        FracBonds { from, to, image_diff, num_atoms }
+    }
 }
 
 //=================================================================
@@ -154,6 +190,9 @@ impl FracBonds {
         let (reduced_coords, original_latts) = decompose_coords(original_coords);
         let (superstructure, sc) = sc_builder.build(&reduced_coords);
 
+        let num_atoms = original_coords.num_atoms();
+        assert_eq!(num_atoms, sc.num_primitive_atoms());
+
         let mut from = vec![];
         let mut to = vec![];
         let mut image_diff = vec![];
@@ -216,6 +255,9 @@ impl FracBonds {
         };
         CartBonds { num_atoms, from, to, cart_vector }
     }
+
+    pub fn num_atoms_per_cell(&self) -> usize
+    { self.num_atoms }
 }
 
 // Split coords into reduced coordinates, and their original lattice points.
@@ -412,6 +454,20 @@ mod geometry {
             let numer = dot(&plane.normal, &(&plane.point - &self.start));
             let denom = dot(&plane.normal, &self.vector);
             numer / denom
+        }
+    }
+}
+
+//=================================================================
+
+impl Permute for FracBonds {
+    fn permuted_by(self, perm: &Perm) -> Self {
+        assert_eq!(self.num_atoms, perm.len());
+        FracBonds {
+            num_atoms: self.num_atoms,
+            from: self.from.into_iter().map(|x| perm.permute_index(x)).collect(),
+            to: self.to.into_iter().map(|x| perm.permute_index(x)).collect(),
+            image_diff: self.image_diff,
         }
     }
 }

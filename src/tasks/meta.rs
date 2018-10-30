@@ -122,6 +122,13 @@ impl<T: Clone + Sync> MetaSendable for ::std::rc::Rc<[T]> {
     }
 }
 
+impl MetaSendable for FracBonds {
+    fn sendable<'a>(&'a self) -> Box<Fn() -> Self + Send + Sync + 'a> {
+        let send = &**self;
+        Box::new(move || Rc::new(send.clone()))
+    }
+}
+
 impl<V: MetaSendable> MetaSendable for Option<V> {
     fn sendable<'a>(&'a self) -> Box<Fn() -> Self + Send + Sync + 'a> {
         let get = self.as_ref().map(|x| x.sendable());

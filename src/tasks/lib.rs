@@ -51,6 +51,7 @@ extern crate ansi_term;
 extern crate fern;
 extern crate shlex;
 extern crate clap;
+extern crate petgraph;
 #[macro_use] extern crate lazy_static;
 extern crate rsp2_kets;
 extern crate path_abs;

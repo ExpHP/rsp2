@@ -44,6 +44,7 @@ path = "lib.rs"
 !!itertools
 !!lazy-static
 !!ansi-term
+!!petgraph
 !!rayon
 !!serde
 !!serde-derive

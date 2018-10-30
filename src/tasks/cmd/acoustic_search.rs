@@ -89,9 +89,10 @@ pub(crate) fn perform_acoustic_search(
     eigenvalues: &[f64],
     eigenvectors: &Basis3,
     coords: &Coords,
-    meta: HList2<
+    meta: HList3<
         meta::SiteElements,
         meta::SiteMasses,
+        Option<meta::FracBonds>,
     >,
     settings: &cfg::AcousticSearch,
 ) -> FailResult<Rc<[ModeKind]>>

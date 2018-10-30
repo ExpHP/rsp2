@@ -27,9 +27,10 @@ use ::rsp2_lammps_wrap::LammpsOnDemand;
 ///
 /// (all potentials usable in the main code must use a single metadata
 ///  type by necessity, due to the use of dynamic polymorphism)
-pub type CommonMeta = HList2<
+pub type CommonMeta = HList3<
     meta::SiteElements,
     meta::SiteMasses,
+    Option<meta::FracBonds>,
 >;
 
 /// Trait alias for a function producing flat potential and gradient,

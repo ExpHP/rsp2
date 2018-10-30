@@ -129,6 +129,8 @@ impl TrialDir {
         };
 
         let original_coords = {
+            // (can't reliably get bonds until the lattice parameter is correct)
+            let meta = meta.clone().prepend(None::<meta::FracBonds>);
             ::cmd::param_optimization::optimize_layer_parameters(
                 &settings.scale_ranges,
                 &pot,
@@ -374,9 +376,10 @@ impl PhonopyDiagonalizer {
         pot: &PotentialBuilder,
         phonopy: &PhonopyBuilder,
         coords: &Coords,
-        meta: HList2<
+        meta: HList3<
             meta::SiteElements,
             meta::SiteMasses,
+            Option<meta::FracBonds>,
         >,
     ) -> FailResult<DirWithBands<Box<AsPath>>>
     {Ok({
@@ -415,10 +418,11 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
     ) -> FailResult<(Vec<f64>, Basis3, Option<Iteration>)>
     {Ok({
         let prim_coords = &stored.coords;
-        let prim_meta: HList3<
+        let prim_meta: HList4<
             meta::SiteElements,
             meta::SiteMasses,
             Option<meta::SiteLayers>,
+            Option<meta::FracBonds>
         > = stored.meta().sift();
 
         let compute_deperms = |coords: &_, cart_ops: &_| {
@@ -496,12 +500,18 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
                     sc.replicate(&x[..]).into()
                 }};
             }
+            // replicating the primitive cell bonds is not worth the trouble
+            let super_bonds = settings.bond_radius.map(|bond_radius| FailOk({
+                Rc::new(FracBonds::from_brute_force_very_dumb(&super_coords, bond_radius)?)
+            })).fold_ok()?;
             prim_meta.clone().map(hlist![
                 f!(),
                 f!(),
                 |opt: Option<_>| opt.map(f!()),
+                |_: Option<meta::FracBonds>| { super_bonds },
             ])
         };
+
         let super_displacements: Vec<_> = {
             prim_displacements.iter()
                 .map(|&(prim, disp)| {
@@ -1233,7 +1243,8 @@ pub(crate) fn run_plot_vdw(
 
     let masses: meta::SiteMasses = vec![::common::default_element_mass(CARBON).unwrap(); 2].into();
     let elements: meta::SiteElements = vec![CARBON; 2].into();
-    let meta = hlist![masses, elements];
+    let bonds = None::<meta::FracBonds>;
+    let meta = hlist![masses, elements, bonds];
 
     let mut diff_fn = pot.initialize_diff_fn(&get_coords(rs[0]), meta.sift())?;
 
@@ -1277,7 +1288,8 @@ pub(crate) fn run_converge_vdw(
 
     let masses: meta::SiteMasses = vec![::common::default_element_mass(CARBON).unwrap(); 2].into();
     let elements: meta::SiteElements = vec![CARBON; 2].into();
-    let meta = hlist![masses, elements];
+    let bonds = None::<meta::FracBonds>;
+    let meta = hlist![masses, elements, bonds];
 
     let mut diff_fn = pot.initialize_diff_fn(&get_coords(r_min), meta.sift())?;
 

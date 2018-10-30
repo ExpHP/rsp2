@@ -508,7 +508,7 @@ mod kc_z {
     #[derive(Debug, Clone, Default)]
     pub struct KolmogorovCrespiZ {
         rebo: bool,
-        cutoff: f64,
+        cutoff_end: f64,
         cutoff_interval: Option<f64>,
         // max distance between interacting layers.
         // used to identify vacuum separation.
@@ -525,7 +525,7 @@ mod kc_z {
             } = *cfg;
             KolmogorovCrespiZ {
                 rebo,
-                cutoff: cutoff.unwrap_or(DEFAULT_KC_Z_CUTOFF),
+                cutoff_end: cutoff.unwrap_or(DEFAULT_KC_Z_CUTOFF),
                 cutoff_interval,
                 max_layer_sep: max_layer_sep.unwrap_or(DEFAULT_KC_Z_MAX_LAYER_SEP),
             }
@@ -535,12 +535,27 @@ mod kc_z {
     impl KolmogorovCrespiZ {
         // NOTE: This ends up getting called stupidly often, but I don't think
         //       it is expensive enough to be a real cause for concern.
-        fn find_layers(&self, structure: &Coords) -> Layers
+        fn find_layers(&self, coords: &Coords, meta: &CommonMeta) -> Layers
         {
-            ::rsp2_structure::layer::find_layers(&structure, V3([0, 0, 1]), 0.25)
-                .unwrap_or_else(|e| {
-                    panic!("Failure to determine layers when using kolmogorov/crespi/z: {}", e);
-                })
+            use ::rsp2_structure::layer;
+
+            let bonds: Option<meta::FracBonds> = meta.pick();
+            let result = match bonds {
+                Some(bonds) => {
+                    // enhance layer assignments using connected components to support layers that
+                    // overlap after buckling
+                    let ccs = bonds.to_periodic_graph().connected_components_by_site();
+                    layer::find_layers_with_labels(&ccs, &coords, V3([0, 0, 1]), 0.25)
+                },
+
+                // FIXME: this is supported just so that we can wait until after parameter
+                //        optimization before generating the bond graph.
+                //        There ought to be a better way...
+                None => layer::find_layers(&coords, V3([0, 0, 1]), 0.25),
+            };
+            result.unwrap_or_else(|e| {
+                panic!("Failure to determine layers when using kolmogorov/crespi/z: {}", e);
+            })
         }
 
         fn classify_gap(&self, gap: f64) -> GapKind
@@ -560,9 +575,9 @@ mod kc_z {
         //          specifically along the Z axis.
         //        * We need a way to identify the vacuum separation gap.
         //
-        fn atom_types(&self, coords: &Coords, _: &CommonMeta) -> Vec<AtomType>
+        fn atom_types(&self, coords: &Coords, meta: &CommonMeta) -> Vec<AtomType>
         {
-            self.find_layers(coords)
+            self.find_layers(coords, meta)
                 .by_atom().into_iter()
                 .map(|x| AtomType::from_index(x))
                 .collect()
@@ -573,7 +588,7 @@ mod kc_z {
             let elements: meta::SiteElements = meta.pick();
             let masses: meta::SiteMasses = meta.pick();
 
-            let layers = match self.find_layers(coords).per_unit_cell() {
+            let layers = match self.find_layers(coords, meta).per_unit_cell() {
                 None => panic!("kolmogorov/crespi/z is only supported for layered materials"),
                 Some(layers) => layers,
             };
@@ -623,7 +638,7 @@ mod kc_z {
             for &(i, j) in &interacting_pairs {
                 overlay.push(overlay::Item {
                     pair_style: {
-                        let mut cmd = PairStyle::named("kolmogorov/crespi/z").arg(self.cutoff);
+                        let mut cmd = PairStyle::named("kolmogorov/crespi/z").arg(self.cutoff_end);
                         if let Some(cutoff_interval) = self.cutoff_interval {
                             cmd = cmd.arg(cutoff_interval);
                         }

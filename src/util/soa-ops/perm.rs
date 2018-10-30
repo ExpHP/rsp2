@@ -482,6 +482,14 @@ where
     }}
 }
 
+impl<A> Permute for Option<A>
+where
+    A: Permute
+{
+    fn permuted_by(self, perm: &Perm) -> Option<A>
+    { self.map(|x| x.permuted_by(perm)) }
+}
+
 // rsp2-tasks needs this
 impl<T: Clone> Permute for ::std::rc::Rc<[T]> {
     fn permuted_by(self, perm: &Perm) -> Self
@@ -492,6 +500,12 @@ impl<T: Clone> Permute for ::std::rc::Rc<[T]> {
         let vec = vec.permuted_by(perm);
         let slice = vec.into_boxed_slice();
         slice.into()
+    }
+}
+
+impl<T: Permute + Clone> Permute for ::std::rc::Rc<T> {
+    fn permuted_by(self, perm: &Perm) -> Self {
+        Box::new((*self).clone().permuted_by(perm)).into()
     }
 }
 
