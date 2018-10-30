@@ -10,12 +10,11 @@
 ** ************************************************************************ */
 
 use ::FailResult;
-use ::meta::Mass;
+use ::meta;
 use ::rsp2_array_types::{V3, M33, M3};
 use ::rsp2_soa_ops::{Perm, Permute};
 use ::rsp2_structure::supercell::SupercellToken;
 use ::rsp2_newtype_indices::{Idx, Indexed, index_cast};
-use ::std::rc::Rc;
 use ::std::collections::BTreeMap;
 use ::slice_of_array::prelude::*;
 use ::math::sparse::{self, RawCoo, RawCsr};
@@ -578,7 +577,7 @@ impl ForceConstants {
     pub fn gamma_dynmat(
         &self,
         sc: &SupercellToken,
-        masses: Rc<[Mass]>,
+        masses: meta::SiteMasses,
     ) -> DynamicalMatrix {
         assert_eq!(masses.len(), sc.num_primitive_atoms());
         let masses: &Indexed<PrimI, _> = Indexed::from_raw_ref(&masses[..]);

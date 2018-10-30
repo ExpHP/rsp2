@@ -13,8 +13,8 @@ extern crate rsp2_kets;
 extern crate rsp2_structure;
 extern crate rsp2_array_types;
 
+extern crate nom;
 #[macro_use] extern crate failure;
-#[macro_use] extern crate nom;
 #[macro_use] extern crate serde_derive;
 extern crate byte_tools;
 extern crate serde_json;

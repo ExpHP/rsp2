@@ -14,12 +14,11 @@
 
 use ::FailResult;
 use ::hlist_aliases::*;
-use ::meta::{Mass, Element};
+use ::meta;
 use ::rsp2_structure::{Coords};
 use ::rsp2_tasks_config as cfg;
 use ::rsp2_array_types::{V3, Unvee};
 use ::slice_of_array::prelude::*;
-use ::std::rc::Rc;
 use ::std::collections::BTreeMap;
 use ::cmd::trial::TrialDir;
 use ::rsp2_lammps_wrap::LammpsOnDemand;
@@ -29,8 +28,8 @@ use ::rsp2_lammps_wrap::LammpsOnDemand;
 /// (all potentials usable in the main code must use a single metadata
 ///  type by necessity, due to the use of dynamic polymorphism)
 pub type CommonMeta = HList2<
-    Rc<[Element]>,
-    Rc<[Mass]>,
+    meta::SiteElements,
+    meta::SiteMasses,
 >;
 
 /// Trait alias for a function producing flat potential and gradient,

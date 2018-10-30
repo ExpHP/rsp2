@@ -20,7 +20,6 @@ use ::nom::*;
 use ::std::io::Read;
 use ::std::mem::size_of;
 
-
 pub fn read_eigenvector_npy(mut r: impl Read) -> FailResult<Vec<Basis>> {
     let bytes = {
         let mut bytes = vec![];

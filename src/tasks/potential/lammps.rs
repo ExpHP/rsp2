@@ -22,16 +22,14 @@
 
 use super::{DynCloneDetail, PotentialBuilder, DiffFn, DispFn, CommonMeta, helper};
 use ::FailResult;
-use ::meta::{Mass, Element};
 #[allow(unused)] // rustc bug
-use ::meta::prelude::*;
+use ::meta::{self, prelude::*};
 #[allow(unused)] // rustc bug
 use ::rsp2_soa_ops::{Part, Partition};
 use ::rsp2_structure::{Coords, consts};
 use ::rsp2_structure::layer::Layers;
 use ::rsp2_tasks_config as cfg;
 use ::rsp2_array_types::{V3};
-use ::std::rc::Rc;
 use ::std::collections::BTreeMap;
 use ::cmd::trial::TrialDir;
 
@@ -432,7 +430,7 @@ mod airebo {
 
         fn atom_types(&self, _: &Coords, meta: &CommonMeta) -> Vec<AtomType>
         {
-            let elements: Rc<[Element]> = meta.pick();
+            let elements: meta::SiteElements = meta.pick();
             elements.iter().map(|elem| match elem.symbol() {
                 "H" => AtomType::new(1),
                 "C" => AtomType::new(2),
@@ -441,8 +439,8 @@ mod airebo {
         }
 
         fn init_info(&self, _: &Coords, meta: &CommonMeta) -> InitInfo {
-            let elements: Rc<[Element]> = meta.pick();
-            let masses: Rc<[Mass]> = meta.pick();
+            let elements: meta::SiteElements = meta.pick();
+            let masses: meta::SiteMasses = meta.pick();
 
             let only_unique_mass = |target_elem| {
                 let iter = {
@@ -452,7 +450,7 @@ mod airebo {
                 };
 
                 match only_unique_value(iter) {
-                    OnlyUniqueResult::Ok(Mass(mass)) => mass,
+                    OnlyUniqueResult::Ok(meta::Mass(mass)) => mass,
                     OnlyUniqueResult::NoValues => {
                         // It is unlikely that this value will ever come into play (atoms of
                         // this element would need to be introduced afterwards), and if their
@@ -572,8 +570,8 @@ mod kc_z {
 
         fn init_info(&self, coords: &Coords, meta: &CommonMeta) -> InitInfo
         {
-            let elements: Rc<[Element]> = meta.pick();
-            let masses: Rc<[Mass]> = meta.pick();
+            let elements: meta::SiteElements = meta.pick();
+            let masses: meta::SiteMasses = meta.pick();
 
             let layers = match self.find_layers(coords).per_unit_cell() {
                 None => panic!("kolmogorov/crespi/z is only supported for layered materials"),
@@ -592,7 +590,7 @@ mod kc_z {
                 let m = masses.to_vec()
                     .into_unlabeled_partitions(&layer_part)
                     .map(|layer_masses| match only_unique_value(layer_masses) {
-                        OnlyUniqueResult::Ok(Mass(x)) => x,
+                        OnlyUniqueResult::Ok(meta::Mass(x)) => x,
                         OnlyUniqueResult::Conflict(_, _) => {
                             panic!("KCZ does not support multiple masses within a layer");
                         }
