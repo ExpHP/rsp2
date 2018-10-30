@@ -12,7 +12,7 @@
 // FIXME kill these once there's utilities that support these
 //       operations on variable length slices/vecs
 #[cfg(test)]
-use ::ordered_float::NotNaN;
+use ::ordered_float::NotNan;
 
 use ::IntPrecisionError;
 
@@ -32,10 +32,10 @@ pub(crate) fn translate_mut_n3_n3(coords: &mut [V3], by: &[V3])
 }
 
 #[cfg(test)]
-pub(crate) fn not_nan_n3(coords: Vec<V3>) -> Vec<V3<NotNaN<f64>>> {
+pub(crate) fn not_nan_n3(coords: Vec<V3>) -> Vec<V3<NotNan<f64>>> {
     // still a newtype?
-    assert_eq!(::std::mem::size_of::<f64>(), ::std::mem::size_of::<NotNaN<f64>>());
-    // (NotNaN has undefined behavior for NaN so we must check)
+    assert_eq!(::std::mem::size_of::<f64>(), ::std::mem::size_of::<NotNan<f64>>());
+    // (NotNan has undefined behavior for NaN so we must check)
     assert!(coords.iter().flat_map(|v| v).all(|x| !x.is_nan()));
     unsafe { ::std::mem::transmute(coords) }
 }

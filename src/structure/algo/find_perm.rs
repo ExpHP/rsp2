@@ -219,7 +219,7 @@ fn fracs_sorted_by_lattice_distance<M: Ord>(
     coords: CoordsKind<impl AsRef<[V3]>>,
     meta: &[M],
 ) -> (Perm, Vec<V3>) {
-    use ::ordered_float::NotNaN;
+    use ::ordered_float::NotNan;
 
     let mut fracs = coords.to_fracs(lattice);
     for v in &mut fracs {
@@ -241,7 +241,7 @@ fn fracs_sorted_by_lattice_distance<M: Ord>(
             .map(|(x, m)| {
                 (
                     m, // first by atom type
-                    NotNaN::new(x.norm()).unwrap(),
+                    NotNan::new(x.norm()).unwrap(),
                 )
             })
             .collect::<Vec<_>>()

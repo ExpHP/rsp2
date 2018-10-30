@@ -15,7 +15,7 @@ use ::rsp2_soa_ops::{Permute, Perm, Part, Partition};
 
 use ::std::mem;
 use ::itertools::Itertools;
-use ::ordered_float::NotNaN;
+use ::ordered_float::NotNan;
 
 use ::rsp2_array_types::{V3, dot};
 
@@ -185,7 +185,7 @@ fn assign_layers_impl_frac_1d(
             positions.iter().cloned().map(reduce).enumerate().collect()
         };
 
-        vec.sort_by_key(|&(_, x)| NotNaN::new(x).unwrap());
+        vec.sort_by_key(|&(_, x)| NotNan::new(x).unwrap());
         vec
     };
 

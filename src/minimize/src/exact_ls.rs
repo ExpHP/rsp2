@@ -356,7 +356,7 @@ impl Golden {
                 iterations += 1;
             }; // let stop_reason = { ... }
 
-            //history.sort_on_key(|bound| NotNaN::new(bound.alpha).unwrap());
+            //history.sort_on_key(|bound| NotNan::new(bound.alpha).unwrap());
             let (_a, b, _d) = state;
             trace!("GS-stop:  a: {:<23e}  ({})", b.alpha, stop_reason);
             Ok(b.alpha)

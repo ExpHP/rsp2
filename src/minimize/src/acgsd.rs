@@ -14,7 +14,7 @@
 use ::stop_condition::prelude::*;
 
 use ::itertools::Itertools;
-use ::ordered_float::NotNaN;
+use ::ordered_float::NotNan;
 use ::std::fmt::Write;
 use ::std::collections::VecDeque;
 use ::std::fmt;
@@ -702,13 +702,13 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
                 },
                 distrib = {
                     use ::reporting::Bins;
-                    let grad_data = saved.gradient.iter().map(|&x| NotNaN::new(x.abs()).unwrap()).collect_vec();
+                    let grad_data = saved.gradient.iter().map(|&x| NotNan::new(x.abs()).unwrap()).collect_vec();
                     let &grad_max = grad_data.iter().max().unwrap();
                     let grad_fracs = {
-                        if grad_max == NotNaN::new(0.0).unwrap() { grad_data }
+                        if grad_max == NotNan::new(0.0).unwrap() { grad_data }
                         else { grad_data.iter().map(|&x| x / grad_max).collect() }
                     };
-                    let divs = vec![0.0, 0.05, 0.50, 1.0].into_iter().map(|x| NotNaN::new(x).unwrap()).collect_vec();
+                    let divs = vec![0.0, 0.05, 0.50, 1.0].into_iter().map(|x| NotNan::new(x).unwrap()).collect_vec();
                     let bins = Bins::from_iter(divs, grad_fracs);
                     format!(" {:20} {}", bins.display(), *bins.as_counts().last().unwrap())
                 }
@@ -840,7 +840,7 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
             //         and ought not to be the caller's concern)
             let mut memoized: Box<FnMut(f64) -> Result<(f64, f64), ComputeError<E>>>
                 = ::util::cache::hash_memoize_result_by_key(
-                    |&alpha| ::ordered_float::NotNaN::new(alpha).unwrap(),
+                    |&alpha| ::ordered_float::NotNan::new(alpha).unwrap(),
                     |alpha| {
                         let point = compute_in_dir(alpha, &direction)?;
                         let slope = vdot(&point.gradient, &direction);
