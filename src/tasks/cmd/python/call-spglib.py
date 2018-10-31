@@ -53,8 +53,6 @@ def _except_main(types, coords, symprec):
     if not ds:
         SpgError.throw()
 
-    print(ds)
-
     # you can't JSON-serialize numpy types
     def un_numpy_ify(d):
         if isinstance(d, dict): return {k: un_numpy_ify(v) for (k, v) in d.items()}
