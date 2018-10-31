@@ -37,6 +37,7 @@ install:
 - mkdir -p ~/cache
 - mkdir -p ~/build
 - mkdir -p ~/deps
+- du -hs ~/cache/* || true
 - export PYTHON_LIB=$(python -c "import sysconfig; print(sysconfig.get_config_var('LIBDIR'))")
 - export PATH="$HOME/deps/bin:$PATH"
 - export LIBRARY_PATH="$HOME/deps/lib:$PYTHON_LIB:$LIBRARY_PATH"
@@ -69,6 +70,7 @@ script:
 
 before_cache:
 - $TRAVIS_BUILD_DIR/travis/cargo-cache.sh store
+- du -hs ~/cache/* || true
 
 cache:
   # 'cache: cargo' and 'cache: ccache' cannot be used with 'language: python'
