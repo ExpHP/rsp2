@@ -19,6 +19,7 @@ path = "lib.rs"
 !!ordered-float
 !!itertools
 !!lazy-static
+!!num-integer
 !!log
 !!serde { optional = true, features = ["derive"] }
 

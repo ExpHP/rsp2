@@ -83,6 +83,14 @@ impl Layers {
         Layers::NoDistinctLayers { sorted_indices } => vec![0; sorted_indices.len()],
         Layers::NoAtoms => vec![],
     }}
+
+    #[must_use = "not an in-place operation"]
+    pub fn scale_gaps(self, factor: f64) -> Self
+    { match self {
+        Layers::PerUnitCell(layers) => Layers::PerUnitCell(layers.scale_gaps(factor)),
+        Layers::NoDistinctLayers { .. } => self,
+        Layers::NoAtoms => self,
+    }}
 }
 
 impl LayersPerUnitCell {
@@ -101,41 +109,39 @@ impl LayersPerUnitCell {
         }
         out
     }
+
+    #[must_use = "not an in-place operation"]
+    pub fn scale_gaps(self, factor: f64) -> Self
+    { LayersPerUnitCell {
+        groups: self.groups,
+        gaps: self.gaps.into_iter().map(|x| x * factor).collect(),
+    }}
 }
 
 // -------------------------------------------------------------
 
-// FIXME this is wrong wrong wrong.
-//       Only correct when the other two lattice vectors are
-//         perpendicular to the chosen lattice vector.
-//       May need to rethink the API.
-//
-// NOTE probably can fix this by treating 'normal' as a miller index.
-//      (i.e. fractional in units of the *reciprocal* vectors)
-//
 /// Determine layers in a structure, numbered from zero.
-/// Also returns the count.
 ///
 /// This finds "layers" defined as groups of atoms isolated from
 /// other groups by at least some minimum distance projected along
 /// a normal vector.
 ///
-/// Normal is in fractional coords, and is currently limited such
-/// that it must be one of the lattice vectors.
+/// The normal vector must always point along a valid periodic plane normal;
+/// this ensures that no discontinuities arise in the coordinate at the
+/// periodic boundaries. `miller` determines the direction of this normal.
+/// There are two equivalent ways to perceive this:
+///
+/// * `miller` is the Miller index of planes parallel to the layers
+///   (assuming they are flat).
+/// * `miller` is the smallest integer index of a reciprocal lattice vector
+///   that is parallel to (and positively oriented with) the normal.
+///
+/// Miller indices of `gcd > 1` are forbidden.
 ///
 /// `Layers` produced by this method will satisfy the property that
 /// all gaps are `> 0` and `<=` the periodic length of the normal axis.
-pub fn find_layers(structure: &Coords, normal: V3<i32>, cart_threshold: f64)
--> Result<Layers, Error>
-{
-    find_layers_impl::<()>(
-        &structure.to_fracs(),
-        structure.lattice(),
-        normal,
-        cart_threshold,
-        None,
-    )
-}
+pub fn find_layers(coords: &Coords, miller: V3<i32>, cart_threshold: f64) -> Result<Layers, Error>
+{ find_layers_impl::<()>(coords, miller, cart_threshold, None) }
 
 /// Construct Layers from predetermined site layers (represented by any Ord type).
 ///
@@ -177,69 +183,40 @@ pub fn find_layers_with_labels<L: Ord>(
     normal: V3<i32>,
     threshold: f64,
 ) -> Result<Layers, Error>
-{
-    find_layers_impl(
-        &structure.to_fracs(),
-        structure.lattice(),
-        normal,
-        threshold,
-        Some(labels)
-    )
-}
+{ find_layers_impl(structure, normal, threshold, Some(labels)) }
 
+// Unified wrapper around the two algorithms which handles all the stuff
+// related to plane normals and fractional <-> cartesian conversions
+// (reformulating everything as a problem in 1D)
 fn find_layers_impl<L: Ord>(
-    fracs: &[V3<f64>],
-    lattice: &Lattice,
-    normal: V3<i32>,
+    coords: &Coords,
+    miller: V3<i32>,
     cart_threshold: f64,
     labels: Option<&[L]>,
 ) -> Result<Layers, Error>
 {Ok({
-    if fracs.len() == 0 {
+    let carts = coords.to_carts();
+    if carts.len() == 0 {
         return Ok(Layers::NoAtoms);
     }
 
-    // NOTE: the validity of the following algorithm is
-    //       predicated on two things:
-    //
-    //  * The normal points precisely along a lattice vector.
-    //    (This requirement can perhaps be eased through the use of
-    //    unimodular transforms.)
-    //
-    //  * The normal must be orthogonal to the other lattice vectors.
-    //
-    // This ensures that there's no funny business where the projected
-    // distance along the axis could suddenly change as a particle crosses
-    // a periodic surface while traveling within a layer.
-    //
-    // Fail if these conditions are not met.
-    let axis = require_simple_axis_normal(normal, lattice)?;
+    let gcd = ::miller::gcd(miller);
+    ensure!(gcd == 1, "Layers can only be found along a primitive miller index");
+    let normal = coords.lattice().plane_normal(miller);
+    let periodic_length = coords.lattice().plane_spacing(miller);
 
     // Transform into units used by the bulk of the algorithm:
-    let periodic_length = lattice.norms()[axis];
-    let frac_values = fracs.iter().map(|f| f[axis]).collect::<Vec<_>>();
+    let cart_values = carts.into_iter().map(|c| V3::dot(&c, &normal));
+    let frac_values = cart_values.map(|x| x / periodic_length).collect::<Vec<_>>();
     let frac_threshold = cart_threshold / periodic_length;
 
     // Perform the bulk of the algorithm
     let layers = assign_layers_impl_frac_1d(&frac_values, frac_threshold, labels)?;
 
     // Convert units back
-    match layers {
-        Layers::NoAtoms => unreachable!(),
-        Layers::NoDistinctLayers { sorted_indices } => {
-            Layers::NoDistinctLayers { sorted_indices }
-        },
-        Layers::PerUnitCell(layers) => {
-            let LayersPerUnitCell { groups, gaps } = layers;
-            let gaps = gaps.into_iter().map(|x| x * periodic_length).collect();
-            Layers::PerUnitCell(LayersPerUnitCell { groups, gaps })
-        },
-    }
+    layers.scale_gaps(periodic_length)
 })}
 
-// NOTE: All the warnings and fixmes about being "wrong wrong wrong"
-//       do not apply to this algorithm, which solves a simpler problem.
-//
 // Given a sequence of positions `x`, each of which has periodic images
 // with a period of 1, identify the layers that exist per unit cell.
 fn assign_layers_impl_frac_1d<L: Ord>(
@@ -338,7 +315,6 @@ fn assign_layers_impl_frac_1d_no_labels(
     // Notice that separations CAN be equal to 1, but not 0, which is interestingly
     //  reversed from most half-open domains.
     assert!(layer_seps.iter().all(|&x| 0.0 < x && x <= 1.0));
-    println!("A: {:?}", groups.iter().map(|xs| xs.iter().map(|&i| positions[i]).collect_vec()).collect_vec());
 
     Layers::PerUnitCell(LayersPerUnitCell { groups, gaps: layer_seps })
 })}
@@ -362,14 +338,12 @@ fn assign_layers_impl_frac_1d_with_labels<L: Ord>(
     let part = Part::from_ord_keys(labels);
     let indices = (0..positions.len()).collect_vec();
     let mut parted_indices = indices.into_unlabeled_partitions(&part).collect_vec();
-    println!("{:?}", parted_indices);
 
     // Sort within each layer.
     // Track which ones cross the PBC boundary.
     let mut found_layer_without_gap = false;
     let mut parted_crosses_boundary = vec![];
     for part_indices in &mut parted_indices {
-        println!("{:?}", part_indices.iter().map(|&i| positions[i]).collect::<Vec<_>>());
         let perm = argsort_floats(part_indices.iter().map(|&i| positions[i]));
         let new_indices = replace(part_indices, vec![]).permuted_by(&perm);
         *part_indices = new_indices;
@@ -446,12 +420,10 @@ fn assign_layers_impl_frac_1d_with_labels<L: Ord>(
                 let first = positions[parted_indices[0][0]];
                 let last_image = positions[*parted_indices.last().unwrap().last().unwrap()] - 1.0;
                 let first_image = first + if parted_crosses_boundary[0] { -1.0 } else { 0.0 };
-                println!("B: {}, {}, {}", first, last_image, first - last_image);
                 first_image - last_image
             }))
             .collect()
     };
-    println!("B: {:?}", parted_indices.iter().map(|xs| xs.iter().map(|&i| positions[i]).collect_vec()).collect_vec());
     let groups = parted_indices;
 
     Layers::PerUnitCell(LayersPerUnitCell { groups, gaps })
@@ -600,6 +572,7 @@ impl LayersPerUnitCell {
 #[deny(unused)]
 mod tests {
     use super::*;
+    use ::CoordsKind;
     use ::rsp2_soa_ops::{Permute, Perm};
     use ::rsp2_array_types::Envee;
 
@@ -618,16 +591,25 @@ mod tests {
         // actually in the range `0.0 < sep <= 1.0`. And a value equal
         // to 1.0 is not unlikely for a single layer structure recently
         // read from an input file, so let's make sure it works.
-        let fracs = vec![
-            [0.00, 0.25, 0.5],
-            [0.25, 0.00, 0.5],
-        ].envee();
-        let lattice = Lattice::eye();
+        let coords = Coords::new(
+            Lattice::eye(),
+            CoordsKind::Fracs(vec![
+                [0.00, 0.25, 0.5],
+                [0.25, 0.00, 0.5],
+            ].envee()),
+        );
 
         // deliberately test using exact equality; the periodic length
         // is 1.0 so there should be no rounding difficulties.
         assert_eq!(
-            super::find_layers_impl::<()>(&fracs, &lattice, V3([0, 0, 1]), 0.15, None).unwrap(),
+            super::find_layers(&coords, V3([0, 0, 1]), 0.15).unwrap(),
+            Layers::PerUnitCell(LayersPerUnitCell {
+                groups: vec![vec![0, 1]],
+                gaps: vec![1.0], // <-- field of greatest interest
+            }),
+        );
+        assert_eq!(
+            super::find_layers_with_labels(&['A', 'A'], &coords, V3([0, 0, 1]), 0.15).unwrap(),
             Layers::PerUnitCell(LayersPerUnitCell {
                 groups: vec![vec![0, 1]],
                 gaps: vec![1.0], // <-- field of greatest interest
@@ -669,8 +651,9 @@ mod tests {
             expected_by_atom: Vec<usize>,
         ) {
             // exercise the wildly different codepaths between labeled and unlabeled
-            let layers_1 = super::find_layers_impl(fracs, lattice, normal, cart_tol, None::<&[()]>).unwrap();
-            let layers_2 = super::find_layers_impl(fracs, lattice, normal, cart_tol, Some(&expected_by_atom)).unwrap();
+            let coords = Coords::new(lattice.clone(), CoordsKind::Fracs(fracs.to_vec()));
+            let layers_1 = super::find_layers(&coords, normal, cart_tol).unwrap();
+            let layers_2 = super::find_layers_with_labels(&expected_by_atom, &coords, normal, cart_tol).unwrap();
 
             // assert_eq, but be careful with floats
             for (layers, message) in vec![(layers_1, "no_labels"), (layers_2, "with_labels")] {
@@ -790,33 +773,37 @@ mod tests {
         );
     }
 
+    // FIXME: This also tests arbitrary directions
     #[test]
     fn overlapping_layers() {
-        const FRAC_TOL: f64 = 0.21;
-        const LATTICE_MATRIX: [[f64; 3]; 3] = [
-            // gobbledygook; anything invertible
-            [ 4.0, 1.0, 2.0],
-            [ 2.0, 3.0, 7.0],
-            [ 0.0, 6.0, 8.0],
-        ];
+        let check = |frac_tol: f64, points: &[(char, f64)], expected_frac_layers: Layers| {
+            let lattice = Lattice::random_uniform(10.0);
+            let miller = ::miller::make_primitive(::miller::random_nonzero(10)).unwrap();
+            let cart_normal = lattice.plane_normal(miller);
 
-        let zlen = Lattice::from(&LATTICE_MATRIX).norms()[2];
+            let axis_len = lattice.plane_spacing(miller);
+            let cart_tol = axis_len * frac_tol;
+            let expected_layers = expected_frac_layers.scale_gaps(axis_len);
 
-        fn check(points: &[(char, f64)], expected_layers: Layers) {
-            let normal = V3([0, 0, 1]);
-            let lattice = Lattice::from(&LATTICE_MATRIX);
-            let cart_tol = lattice.norms()[2] * FRAC_TOL;
-            let (labels, frac_zs): (Vec<_>, Vec<_>) = points.into_iter().cloned().unzip();
-            let fracs = frac_zs.into_iter().map(|z| V3([0.0, 0.0, z])).collect_vec();
+            let (labels, axis_fracs): (Vec<_>, Vec<_>) = points.iter().cloned().unzip();
+            let coords = Coords::new(
+                lattice,
+                CoordsKind::Carts({
+                    axis_fracs.iter()
+                        .map(|&f| cart_normal * (f * axis_len))
+                        .collect()
+                }),
+            );
 
             // try multiple permutations to reduce false negatives
             for _ in 0..8 {
                 let perm = Perm::random(points.len());
-                let fracs = fracs.to_vec().permuted_by(&perm);
+                let coords = coords.clone().permuted_by(&perm);
+                let labels = labels.clone().permuted_by(&perm);
                 let expected_layers = expected_layers.clone().permuted_by(&perm);
 
                 // Only check the algorithm that supports labels
-                let layers = super::find_layers_impl(&fracs, &lattice, normal, cart_tol, Some(&labels)).unwrap();
+                let layers = find_layers_with_labels(&labels, &coords, miller, cart_tol).unwrap();
 
                 // assert_eq, but be careful with floats
                 match (&layers, &expected_layers) {
@@ -830,26 +817,26 @@ mod tests {
                     (actual, expected) => assert_eq!(actual, expected),
                 }
             }
-        }
+        };
 
         // --------------------------------------
         // test cases
 
         // Make sure they're supported, for one...
         check(
-            &[('A', 0.4), ('A', 0.6), ('B', 0.5), ('B', 0.7)],
+            0.21, &[('A', 0.4), ('A', 0.6), ('B', 0.5), ('B', 0.7)],
             Layers::PerUnitCell(LayersPerUnitCell {
                 groups: vec![vec![0, 1], vec![2, 3]],
-                gaps: scale(&[-0.1, 0.7], zlen),
+                gaps: vec![-0.1, 0.7],
             }),
         );
 
         // Make sure Ord impl of labels doesn't matter
         check(
-            &[('B', 0.4), ('B', 0.6), ('A', 0.5), ('A', 0.7)],
+            0.21, &[('B', 0.4), ('B', 0.6), ('A', 0.5), ('A', 0.7)],
             Layers::PerUnitCell(LayersPerUnitCell {
                 groups: vec![vec![0, 1], vec![2, 3]],
-                gaps: scale(&[-0.1, 0.7], zlen),
+                gaps: vec![-0.1, 0.7],
             }),
         );
 
@@ -857,40 +844,40 @@ mod tests {
         // miserable for the gap-computing code
         check(
             // A straddles
-            &[('A', 0.9), ('A', 0.1), ('B', 0.01), ('B', 0.20)],
+            0.21, &[('A', 0.9), ('A', 0.1), ('B', 0.01), ('B', 0.20)],
             Layers::PerUnitCell(LayersPerUnitCell {
                 groups: vec![vec![0, 1], vec![2, 3]],
-                gaps: scale(&[-0.09, 0.70], zlen),
+                gaps: vec![-0.09, 0.70],
             }),
         );
 
         check(
             // B straddles
-            &[('A', 0.8), ('A', 0.99), ('B', 0.90), ('B', 0.10)],
+            0.21, &[('A', 0.8), ('A', 0.99), ('B', 0.90), ('B', 0.10)],
             Layers::PerUnitCell(LayersPerUnitCell {
                 groups: vec![vec![2, 3], vec![0, 1]],
-                gaps: scale(&[0.70, -0.09], zlen),
+                gaps: vec![0.70, -0.09],
             }),
         );
 
         check(
             // Both straddle
-            &[('A', 0.85), ('A', 0.05), ('B', 0.95), ('B', 0.15)],
+            0.21, &[('A', 0.85), ('A', 0.05), ('B', 0.95), ('B', 0.15)],
             Layers::PerUnitCell(LayersPerUnitCell {
                 groups: vec![vec![0, 1], vec![2, 3]],
-                gaps: scale(&[-0.1, 0.7], zlen),
+                gaps: vec![-0.1, 0.7],
             }),
         );
 
         // evidence that all gaps can be negative
         check(
-            &[
+            0.21, &[
                 ('A', 0.5), ('A', 0.7), ('A', 0.9), ('A', 0.1),
                 ('B', 0.0), ('B', 0.2), ('B', 0.4), ('B', 0.6),
             ],
             Layers::PerUnitCell(LayersPerUnitCell {
                 groups: vec![vec![0, 1, 2, 3], vec![4, 5, 6, 7]],
-                gaps: scale(&[-0.1, -0.1], zlen),
+                gaps: vec![-0.1, -0.1],
             }),
         );
     }

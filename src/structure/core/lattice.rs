@@ -122,6 +122,42 @@ impl Lattice {
     pub fn linear_combination(&self, coeffs: &M33<i32>) -> Lattice
     { &coeffs.map(|x| x as f64) * self }
 
+    /// Get the normal to the family of planes with a given Miller index.
+    ///
+    /// Miller indices with `gcd > 1` are permitted and are interpreted according to
+    /// the documentation in the [`miller`] module.  They should produce the same value
+    /// as a primitive vector, numerical errors not withstanding.
+    ///
+    /// # Panics
+    ///
+    /// Panics on a Miller index of `[0, 0, 0]`.
+    ///
+    /// [`miller`]: TODO-LINK-FN
+    pub fn plane_normal(&self, miller: V3<i32>) -> V3
+    { self.miller_to_recip_cart(miller).unit() }
+
+    /// Get the interplanar spacing of the family of planes specified by a Miller index.
+    ///
+    /// Miller indices with `gcd > 1` are permitted and are interpreted according to
+    /// the documentation in the [`miller`] module.  They should produce a spacing that
+    /// is `1 / gcd` times the typical spacing.
+    ///
+    /// # Panics
+    ///
+    /// Panics on a Miller index of `[0, 0, 0]`.
+    ///
+    /// [`miller`]: TODO-LINK-FN
+    pub fn plane_spacing(&self, miller: V3<i32>) -> f64
+    { self.miller_to_recip_cart(miller).norm().recip() }
+
+    #[inline(always)]
+    fn miller_to_recip_cart(&self, miller: V3<i32>) -> V3 {
+        assert_ne!(miller, V3::zero());
+        // rowvec-mat multiplication by A.T^-1,
+        // or equivalently mat-colvec multiplication by A^-1
+        &*self.inverse * miller.map(|x| x as f64)
+    }
+
     /// Test if two Lattices represent the same lattice,
     /// in the mathematical sense. This is to say that they each
     /// generate the same infinite set of displacement vectors.
@@ -356,5 +392,43 @@ mod tests {
             [2.0, 2.0, 0.0],
             [0.0, 0.0, 2.0],
         ]));
+    }
+
+    #[test]
+    fn planes() {
+        use ::rand::Rng;
+        use ::rsp2_numtheory::gcd;
+
+        // check the normals of some arbitrary planes
+        for _ in 0..20 {
+            let mut rng = ::rand::thread_rng();
+            let lattice = Lattice::random_uniform(20);
+            let miller = ::miller::random_nonzero(10);
+            let gcd = ::miller::gcd(miller);
+
+            let int_distance = |x| x - x.round();
+            let recip = miller * lattice.reciprocal();
+            let normal = lattice.plane_normal(miller);
+            let plane_translation_vector = normal * lattice.plane_spacing(miller);
+            let actual_phase = normal.dot(recip);
+            assert_close!(lattice.plane_normal(miller), lattice.plane_normal(miller / gcd));
+            assert_close!(gcd as f64, plane_translation_vector.dot(recip));
+        }
+
+        // Test specifically along the (001) planes for more properties we can easily verify.
+        for _ in 0..20 {
+            let lattice = Lattice::random_uniform(20);
+
+            let n = ::rand::thread_rng().gen_range(1, 10+1);
+            let miller = V3([0, 0, n]);
+
+            let [a, b, c] = lattice.vectors();
+            let expected_normal = a.cross(b).unit(); // up to sign...
+            let expected_spacing = expected_normal.dot(c) / n as f64;
+
+            assert!(lattice.plane_normal(miller).dot(c) > 0.0);
+            assert_close!(lattice.plane_normal(miller).dot(expected_normal).abs(), 1.0);
+            assert_close!(lattice.plane_spacing(miller), true_spacing);
+        }
     }
 }

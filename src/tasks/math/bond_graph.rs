@@ -4,8 +4,7 @@ use ::math::bonds::{FracBonds, FracBond};
 use ::rsp2_array_types::V3;
 
 use ::rsp2_newtype_indices::index_cast;
-use ::std::ops::{Deref, DerefMut};
-use ::std::collections::{BTreeMap, BTreeSet, VecDeque};
+use ::std::ops::{Deref};
 use ::petgraph::prelude::*;
 
 pub use self::periodic::PeriodicGraph;
@@ -36,14 +35,6 @@ pub mod periodic {
         type Target = DiGraph<Node, Edge>;
 
         fn deref(&self) -> &Self::Target { &self.0 }
-    }
-
-    impl PeriodicGraph {
-        /// Construct from a DiGraph.
-        ///
-        /// This does not validate any properties typically expected of PeriodicGraph.
-        fn from_digraph_unchecked(g: DiGraph<Node, Edge>) -> Self { PeriodicGraph(g) }
-        fn into_digraph(self) -> DiGraph<Node, Edge> { self.0 }
     }
 
     impl FracBonds {
