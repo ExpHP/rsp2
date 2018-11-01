@@ -179,6 +179,41 @@ impl Lattice {
             Err(_) => false,
         }
     }
+
+    /// Rotate into a form where the first vector points entirely along x, and the
+    /// second vector is in the xy-plane.
+    ///
+    /// This is the form required by LAMMPS.  This form makes the lattice matrix lower
+    /// triangular in RSP2's convention.
+    ///
+    /// If the input cell is left-handed, the output will also be left-handed; however
+    /// it is not specified which of the 3 diagonal elements will be negative.
+    pub fn rotate_to_lower_triangular(&self) -> Lattice {
+        // https://lammps.sandia.gov/doc/Howto_triclinic.html
+        let &[a, b, c] = self.vectors();
+
+        // The formulas are tuned for a right-handed matrix.
+        //
+        // For a left-handed matrix, we simply negate the first vector, solve the problem for the
+        // resulting right-handed basis, then negate the first vector again to get the answer for
+        // our matrix.
+        let sign = self.matrix().det().signum();
+        let a = a * sign;
+
+        let a_unit = a.unit();
+        let m00 = a.norm();
+        let m10 = b.dot(&a_unit);
+        let m20 = c.dot(&a_unit);
+        let m11 = f64::sqrt(b.sqnorm() - m10*m10);
+        let m21 = (b.dot(&c) - m10*m20) / m11;
+        let m22 = f64::sqrt(c.sqnorm() - m20*m20 - m21*m21);
+
+        Lattice::from([
+            [sign * m00, 0.0, 0.0],
+            [m10, m11, 0.0],
+            [m20, m21, m22],
+        ])
+    }
 }
 
 /// Helper constructors
@@ -334,10 +369,11 @@ impl<'de> Deserialize<'de> for Lattice {
     }
 }
 
-#[cfg(tests)]
+#[cfg(test)]
 #[deny(unused)]
 mod tests {
     use super::*;
+    use ::rsp2_array_types::Unvee;
 
     #[test]
     fn get_inverse() {
@@ -355,15 +391,12 @@ mod tests {
         ]);
 
         let lattice = Lattice::new(&matrix);
-        assert_eq!(matrix, lattice.matrix());
-        assert_eq!(exact_inverse, lattice.inverse_matrix());
+        assert_eq!(&matrix, lattice.matrix());
+        assert_eq!(&exact_inverse, lattice.inverse_matrix());
 
-        let inverted = lattice.inverted();
-        assert_eq!(exact_inverse, inverted.matrix());
-        assert_eq!(matrix, inverted.inverse_matrix());
-
-        assert_eq!(Lattice::eye(), &lattice * &inverted);
-        assert_eq!(Lattice::eye(), &inverted * &lattice);
+        let recip = lattice.reciprocal();
+        assert_eq!(&exact_inverse.t(), recip.matrix());
+        assert_eq!(&matrix.t(), recip.inverse_matrix());
 
         assert_ne!(&Lattice::eye(), &lattice);
     }
@@ -397,38 +430,58 @@ mod tests {
     #[test]
     fn planes() {
         use ::rand::Rng;
-        use ::rsp2_numtheory::gcd;
 
         // check the normals of some arbitrary planes
         for _ in 0..20 {
-            let mut rng = ::rand::thread_rng();
-            let lattice = Lattice::random_uniform(20);
+            let lattice = Lattice::random_uniform(20.0);
             let miller = ::miller::random_nonzero(10);
             let gcd = ::miller::gcd(miller);
 
-            let int_distance = |x| x - x.round();
-            let recip = miller * lattice.reciprocal();
+            let recip = miller.map(|x| x as f64) * &lattice.reciprocal();
             let normal = lattice.plane_normal(miller);
             let plane_translation_vector = normal * lattice.plane_spacing(miller);
-            let actual_phase = normal.dot(recip);
-            assert_close!(lattice.plane_normal(miller), lattice.plane_normal(miller / gcd));
-            assert_close!(gcd as f64, plane_translation_vector.dot(recip));
+            assert_close!(
+                lattice.plane_normal(miller).0,
+                lattice.plane_normal(miller.map(|x| x / gcd)).0,
+            );
+            assert_close!(1.0, plane_translation_vector.dot(&recip));
         }
 
         // Test specifically along the (001) planes for more properties we can easily verify.
         for _ in 0..20 {
-            let lattice = Lattice::random_uniform(20);
+            let lattice = Lattice::random_uniform(20.0);
 
             let n = ::rand::thread_rng().gen_range(1, 10+1);
             let miller = V3([0, 0, n]);
 
             let [a, b, c] = lattice.vectors();
             let expected_normal = a.cross(b).unit(); // up to sign...
-            let expected_spacing = expected_normal.dot(c) / n as f64;
+            let expected_spacing = expected_normal.dot(c).abs() / n as f64;
 
             assert!(lattice.plane_normal(miller).dot(c) > 0.0);
-            assert_close!(lattice.plane_normal(miller).dot(expected_normal).abs(), 1.0);
-            assert_close!(lattice.plane_spacing(miller), true_spacing);
+            assert_close!(lattice.plane_normal(miller).dot(&expected_normal).abs(), 1.0);
+            assert_close!(lattice.plane_spacing(miller), expected_spacing);
+        }
+    }
+
+    #[test]
+    fn rotation_to_lower_triangular()  {
+        for _ in 0..3 {
+            let lattice = Lattice::random_uniform(10.0);
+            let rotated = lattice.rotate_to_lower_triangular();
+
+            // Rotated must be lower triangular
+            assert_close!(abs=1e-11, 0.0, rotated.matrix()[0][1]);
+            assert_close!(abs=1e-11, 0.0, rotated.matrix()[0][2]);
+            assert_close!(abs=1e-11, 0.0, rotated.matrix()[1][2]);
+
+            // The lattices must be equal up to rotation.
+            //
+            // A sufficient condition for a 3x3 matrix R to be a rotation matrix
+            // is that it is orthogonal with determinant 1.
+            let rotation = lattice.inverse_matrix() * rotated.matrix();
+            assert_close!(rel=1e-11, abs=1e-11, M33::eye().unvee(), (rotation * rotation.t()).unvee());
+            assert_close!(rel=1e-11, 1.0, rotation.det());
         }
     }
 }
