@@ -13,10 +13,34 @@
 ** ********************************************************************** */
 
 use ::FailResult;
+
 use ::std::os::raw::{c_int};
+use ::std::fmt;
+use ::failure::Backtrace;
 
 macro_rules! api_trace {
     ($($t:tt)*) => { log!(target: ::API_TRACE_TARGET, ::API_TRACE_LEVEL, $($t)*) };
+}
+
+/// An error thrown by the LAMMPS C API.
+#[derive(Debug, Fail)]
+pub struct LammpsError {
+    pub(crate) backtrace: Backtrace,
+    pub(crate) severity: Severity,
+    pub(crate) message: String,
+}
+
+impl fmt::Display for LammpsError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f, "LAMMPS threw {}: {}",
+            match self.severity {
+                Severity::Recoverable => "an exception",
+                Severity::Fatal => "a fatal exception",
+            },
+            self.message,
+        )
+    }
 }
 
 #[macro_use]

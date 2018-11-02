@@ -40,49 +40,34 @@ mod mpi {
     };
 }
 
-use ::failure::Backtrace;
-use ::rsp2_array_types::{V3, Unvee, Envee};
-use ::log::Level;
+use ::maybe_dirty::MaybeDirty;
 use ::low_level::{LowLevelApi, ComputeStyle, Skews, LammpsOwner};
 #[cfg(feature = "mpi")]
 use ::low_level::mpi::{MpiLammpsOwner, LammpsOnDemand as LammpsOnDemandImpl, LammpsDispatch};
 
 use ::std::path::{Path, PathBuf};
 use ::std::sync::{Mutex, MutexGuard};
-use ::slice_of_array::prelude::*;
-use ::rsp2_structure::{Coords, Lattice};
-
-pub type FailResult<T> = Result<T, ::failure::Error>;
-
 use ::std::fmt;
 use ::std::fs;
 use ::std::io::Write;
 
+use ::log::Level;
+use ::slice_of_array::prelude::*;
+use ::rsp2_structure::{Coords, Lattice};
+use ::rsp2_array_types::{V3, Unvee, Envee};
+
+pub type FailResult<T> = Result<T, ::failure::Error>;
+
+pub use pub_types::*;
+mod pub_types;
+
 pub const API_TRACE_TARGET: &'static str = concat!(module_path!(), "::c_api");
 pub const API_TRACE_LEVEL: Level = Level::Trace;
 
-/// An error thrown by the LAMMPS C API.
-#[derive(Debug, Fail)]
-pub struct LammpsError {
-    backtrace: Backtrace,
-    severity: Severity,
-    message: String,
-}
-impl fmt::Display for LammpsError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f, "LAMMPS threw {}: {}",
-            match self.severity {
-                Severity::Recoverable => "an exception",
-                Severity::Fatal => "a fatal exception",
-            },
-            self.message,
-        )
-    }
-}
-
-pub use ::low_level::Severity;
+pub use ::low_level::{LammpsError, Severity};
 mod low_level;
+
+mod maybe_dirty;
 
 lazy_static! {
     /// Guarantees that only one instance of Lammps may exist on a process,
@@ -132,95 +117,6 @@ pub struct Lammps<P: Potential> {
     debug_dir: Option<PathBuf>,
 
     _lock: InstanceLockGuard,
-}
-
-struct MaybeDirty<T> {
-    // NOTE: Possible states for the members:
-    //
-    //        dirty:       clean:       when
-    //        Some(s)       None       is dirty, and has never been clean.
-    //        Some(s)      Some(s)     is dirty, but has been clean in the past.
-    //         None        Some(s)     is currently clean.
-
-    /// new data that has not been marked clean.
-    dirty: Option<T>,
-    /// the last data marked clean.
-    clean: Option<T>,
-}
-
-impl<T> MaybeDirty<T> {
-    pub fn new_dirty(x: T) -> MaybeDirty<T> {
-        MaybeDirty {
-            dirty: Some(x),
-            clean: None,
-        }
-    }
-
-    pub fn is_dirty(&self) -> bool
-    { self.dirty.is_some() }
-
-    pub fn last_clean(&self) -> Option<&T>
-    { self.clean.as_ref() }
-
-    pub fn get(&self) -> &T
-    { self.dirty.as_ref().or(self.last_clean()).unwrap() }
-
-    /// Get a mutable reference. This automatically marks the value as dirty.
-    pub fn get_mut(&mut self) -> &mut T
-    where T: Clone,
-    {
-        if self.dirty.is_none() {
-            self.dirty = self.clean.clone();
-        }
-        self.dirty.as_mut().unwrap()
-    }
-
-    pub fn mark_clean(&mut self)
-    {
-        assert!(self.dirty.is_some() || self.clean.is_some());
-
-        if self.dirty.is_some() {
-            self.clean = self.dirty.take();
-        }
-
-        assert!(self.dirty.is_none());
-        assert!(self.clean.is_some());
-    }
-
-    // test if f(x) is dirty by equality
-    // HACK
-    // this is only provided to help work around borrow checker issues
-    //
-    // To clarify: If there is no last clean value, then ALL projections
-    // are considered dirty by definition.
-    pub fn is_projection_dirty<K: ?Sized + PartialEq>(
-        &self,
-        mut f: impl FnMut(&T) -> &K,
-    ) -> bool {
-        match (&self.clean, &self.dirty) {
-            (Some(clean), Some(dirty)) => f(clean) != f(dirty),
-            (None, Some(_)) => true,
-            (Some(_), None) => false,
-            (None, None) => unreachable!(),
-        }
-    }
-
-    // HACK
-    // This differs from `is_projection_dirty` only in that the callback
-    // returns owned data instead of borrowed. One might think that this
-    // method could therefore be used to implement the other; but it can't,
-    // because the lifetime in F's return type would be overconstrained.
-    pub fn is_function_dirty<K: PartialEq>(
-        &self,
-        mut f: impl FnMut(&T) -> K,
-    ) -> bool {
-        match (&self.clean, &self.dirty) {
-            (Some(clean), Some(dirty)) => f(clean) != f(dirty),
-            (None, Some(_)) => true,
-            (Some(_), None) => false,
-            (None, None) => unreachable!(),
-        }
-    }
 }
 
 //------------------------------------------
@@ -315,7 +211,8 @@ impl UpdateStyle {
 // Determines the next `run` command for updating Lammps.
 //
 // Now that we always use the same command, the implementation is trivial.
-// It only exists as a holdover from an earlier, less trivial design.
+// It only exists as a holdover from an earlier, less trivial design,
+// and may eventually be removed.
 #[derive(Debug, Clone)]
 struct UpdateFsm {
     iter: u32,
@@ -529,43 +426,6 @@ pub fn mpi_link_test() -> FailResult<()>
     );
 })}
 
-
-pub use atom_type::AtomType;
-// mod to encapsulate type invariant
-mod atom_type {
-    use super::*;
-
-    /// A Lammps atom type.  These are numbered from 1.
-    #[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Hash)]
-    pub struct AtomType(
-        // INVARIANT: value is >= 1.
-        i64,
-    );
-
-    impl AtomType {
-        /// # Panics
-        ///
-        /// Panics on values less than 1.
-        pub fn new(x: i64) -> Self {
-            assert!(x > 0);
-            AtomType(x as _)
-        }
-        pub fn value(self) -> i64 { self.0 }
-
-        // because this is a PITA to do manually all the time...
-        /// Construct from a 0-based index.
-        pub fn from_index(x: usize) -> Self { AtomType((x + 1) as _) }
-        /// Recover the 0-based index.
-        pub fn to_index(self) -> usize { self.0 as usize - 1 }
-    }
-
-    impl fmt::Display for AtomType {
-        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            fmt::Display::fmt(&self.0, f)
-        }
-    }
-}
-
 /// Trait through which a consumer of this crate sets up the potential to be used.
 ///
 /// It is used to initialize the atom types and pair potentials when Lammps is initialized.
@@ -665,172 +525,6 @@ impl LammpsOnDemand {
     pub fn with_mpi_abort_on_unwind<R>(func: impl ::std::panic::UnwindSafe + FnOnce() -> R) -> R {
         ::low_level::mpi_helper::with_mpi_abort_on_unwind(func)
     }
-}
-
-
-//-------------------------------------------
-
-/// Data describing the commands which need to be sent to lammps to initialize
-/// atom types and the potential.
-#[derive(Debug, Clone)]
-pub struct InitInfo {
-    /// Mass of each atom type.
-    pub masses: Vec<f64>,
-
-    /// Lammps commands to initialize the pair potentials.
-    pub pair_style: PairStyle,
-
-    /// Lammps commands to initialize the pair potentials.
-    pub pair_coeffs: Vec<PairCoeff>,
-}
-
-/// Represents a `pair_style` command.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PairStyle(pub Arg, pub Vec<Arg>);
-/// Represents a `pair_coeff` command.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PairCoeff(pub AtomTypeRange, pub AtomTypeRange, pub Vec<Arg>);
-
-impl PairStyle {
-    pub fn named(name: impl ToString) -> Self
-    { PairStyle(Arg::from(name), vec![]) }
-
-    pub fn name(&self) -> &str
-    { &(self.0).0 }
-
-    /// Append an argument
-    pub fn arg(mut self, arg: impl ToString) -> Self
-    { self.1.push(Arg::from(arg)); self }
-
-    /// Append several uniformly-typed arguments
-    pub fn args<As>(self, args: As) -> Self
-    where As: IntoIterator, As::Item: ToString,
-    { args.into_iter().fold(self, Self::arg) }
-}
-
-impl PairCoeff {
-    pub fn new<I, J>(i: I, j: J) -> Self
-    where AtomTypeRange: From<I> + From<J>,
-    { PairCoeff(i.into(), j.into(), vec![]) }
-
-    /// Append an argument
-    pub fn arg(mut self, arg: impl ToString) -> Self
-    { self.2.push(Arg::from(arg)); self }
-
-    /// Append several uniformly-typed arguments
-    pub fn args<As>(self, args: As) -> Self
-    where As: IntoIterator, As::Item: ToString,
-    { args.into_iter().fold(self, Self::arg) }
-}
-
-/// A range of AtomTypes representing the star-wildcard ranges
-/// accepted by the `pair_coeff` command.
-///
-/// Construct like `typ.into()` or `(..).into()`.
-//
-// (NOTE: This is stored as the doubly-inclusive range sent
-//        to Lammps. We store ints instead of AtomTypes so that
-//        it can represent the empty range "1*0", but I haven't
-//        tested whether LAMMPS actually even allows that)
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AtomTypeRange(Option<i64>, Option<i64>);
-
-impl From<AtomType> for AtomTypeRange {
-    fn from(i: AtomType) -> Self
-    { AtomTypeRange(Some(i.value()), Some(i.value())) }
-}
-impl From<::std::ops::RangeFull> for AtomTypeRange {
-    fn from(_: ::std::ops::RangeFull) -> Self
-    { AtomTypeRange(None, None) }
-}
-impl From<::std::ops::Range<AtomType>> for AtomTypeRange {
-    fn from(r: ::std::ops::Range<AtomType>) -> Self {
-        // (adjust because we take half-inclusive, but store doubly-inclusive)
-        AtomTypeRange(Some(r.start.value()), Some(r.end.value() - 1))
-    }
-}
-
-impl fmt::Display for AtomTypeRange {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fn write_endpoint(f: &mut fmt::Formatter, i: Option<i64>) -> fmt::Result {
-            match i {
-                Some(i) => write!(f, "{}", i),
-                None => Ok(()),
-            }
-        }
-        let AtomTypeRange(min, max) = *self;
-        write_endpoint(f, min)?;
-        write!(f, "*")?;
-        write_endpoint(f, max)?;
-        Ok(())
-    }
-}
-
-//-------------------------------------------
-
-/// Type used for stringy arguments to a Lammps command,
-/// which takes care of quoting for interior whitespace.
-///
-/// (**NOTE:** actually it does not do this yet; this type is
-///  simply used wherever we know quoting *should* happen
-///  once implemented)
-///
-/// Construct using `s.into()`/`Arg::from(s)`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Arg(pub String);
-
-impl Arg {
-    // NOTE: This isn't a From impl because the Display impl
-    //       implies that Arg: ToString, and thus From<S: ToString>
-    //       would conflict with the blanket From<Self> impl.
-    //
-    //       Save us, specialization!
-    fn from<S: ToString>(s: S) -> Arg { Arg(s.to_string()) }
-}
-
-impl fmt::Display for Arg {
-    // TODO: Actually handle quoting. (low priority)
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result
-    { write!(f, "{}", self.0) }
-}
-
-impl fmt::Display for PairStyle {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result
-    {Ok({
-        let PairStyle(name, args) = self;
-        write!(f, "pair_style {} {}", name, ws_join(args))?;
-    })}
-}
-
-impl fmt::Display for PairCoeff {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result
-    {Ok({
-        let PairCoeff(i, j, args) = self;
-        write!(f, "pair_coeff {} {} {}", i, j, ws_join(args))?;
-    })}
-}
-
-fn ws_join(items: &[Arg]) -> JoinDisplay<'_, Arg>
-{ JoinDisplay { items, sep: " " } }
-
-// Utility Display adapter for writing a separator between items.
-struct JoinDisplay<'a, D: 'a> {
-    items: &'a [D],
-    sep: &'a str,
-}
-
-impl<'a, D: fmt::Display> fmt::Display for JoinDisplay<'a, D> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result
-    {Ok({
-        let mut items = self.items.iter();
-
-        if let Some(item) = items.next() {
-            write!(f, "{}", item)?;
-        }
-        for item in items {
-            write!(f, "{}{}", self.sep, item)?;
-        }
-    })}
 }
 
 //-------------------------------------------

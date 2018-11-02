@@ -19,6 +19,7 @@
 //! ...there are, however, massive downsides. Even though only the root is running most of
 //! the code, the other processes still need to know which MPI functions are going to be used.
 //! To make this work, the handler function must be written largely as a state machine.
+//!
 //! # Limitations and suspected footguns
 //!
 //! This abstraction **does not compose with itself very well.**  The intended use-case is to
