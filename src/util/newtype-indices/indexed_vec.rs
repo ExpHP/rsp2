@@ -18,7 +18,7 @@ use std::slice;
 use std::marker::PhantomData;
 use std::hash::Hash;
 use std::borrow::{Borrow, BorrowMut};
-use std::ops::{Deref, DerefMut, Index, IndexMut, Range, RangeFull};
+use std::ops::{Deref, DerefMut, Index, IndexMut, Range, RangeFull, RangeFrom};
 use std::fmt;
 use std::vec;
 use std::mem;
@@ -39,6 +39,8 @@ use std::mem;
 pub unsafe trait Idx: Copy + 'static + Eq + Debug + Display + Ord + Hash + Send + Sync {
     fn new(idx: usize) -> Self;
     fn index(self) -> usize;
+    #[inline(always)]
+    fn next(self) -> Self { Self::new(self.index() + 1) }
 }
 
 unsafe impl Idx for usize {
@@ -61,12 +63,12 @@ macro_rules! newtype_index {
         pub struct $type(pub usize);
 
         unsafe impl $crate::Idx for $type {
-            #[inline]
+            #[inline(always)]
             fn new(value: usize) -> Self {
                 $type(value)
             }
 
-            #[inline]
+            #[inline(always)]
             fn index(self) -> usize {
                 self.0
             }
@@ -105,6 +107,18 @@ impl<I: Idx, V: ?Sized + fmt::Debug> fmt::Debug for Indexed<I, V> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         fmt::Debug::fmt(&self.raw, fmt)
     }
+}
+
+#[inline]
+pub fn iota<I: Idx>(start: I) -> std::iter::Map<RangeFrom<usize>, impl Fn(usize) -> I> {
+    (start.index()..).map(I::new)
+}
+
+// NOTE: I don't want this to take arbitrary RangeBounds because it would either have
+//       to use dynamic polymorphism, or panic on RangeFrom.
+#[inline]
+pub fn range<I: Idx>(range: Range<I>) -> std::iter::Map<Range<usize>, impl Fn(usize) -> I> {
+    (range.start.index()..range.end.index()).map(I::new)
 }
 
 /// # Construction
