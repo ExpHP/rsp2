@@ -223,13 +223,13 @@ mod tests {
             &mut *flat_diff_fn,
         ).unwrap();
         println!("DerpG: {:?}", flat_diff_fn(start.to_carts().flat()).unwrap().1);
-        println!("NumrG: {:?}", ::rsp2_minimize::numerical::gradient(
+        println!("NumrG: {:?}", ::rsp2_minimize::numerical::try_gradient(
             1e-7, None,
             start.to_carts().flat(),
             |p| FailOk(flat_diff_fn(p)?.0),
         ).unwrap());
         println!(" Grad: {:?}", data.gradient);
-        println!("Numer: {:?}", ::rsp2_minimize::numerical::gradient(
+        println!("Numer: {:?}", ::rsp2_minimize::numerical::try_gradient(
             1e-7, None,
             &data.position,
             |p| FailOk(flat_diff_fn(p)?.0),

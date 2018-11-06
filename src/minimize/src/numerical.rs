@@ -62,8 +62,21 @@ impl Default for DerivativeKind {
 //    assert_eq!(binom_coefficients(5), vec![1.0, 5.0, 10., 10., 5.0, 1.0]);
 //}
 
+enum Never {}
+
 /// Compute a numerical derivative using finite differences.
-pub fn slope<E, F>(
+pub fn slope(
+    interval_width: f64,
+    kind: Option<DerivativeKind>,
+    point: f64,
+    mut value_fn: impl FnMut(f64) -> f64,
+) -> f64 {
+    try_slope::<Never, _>(interval_width, kind, point, |x| Ok(value_fn(x)))
+        .unwrap_or_else(|e| match e {})
+}
+
+/// `slope` for functions that can fail.
+pub fn try_slope<E, F>(
     interval_width: f64,
     kind: Option<DerivativeKind>,
     point: f64,
@@ -87,7 +100,18 @@ where
 /// axis of the input.  The number of function calls it makes will
 /// be linearly proportional to the input size. This might be
 /// prohibitively expensive!!
-pub fn gradient<E, F>(
+pub fn gradient(
+    interval_width: f64,
+    kind: Option<DerivativeKind>,
+    point: &[f64],
+    mut value_fn: impl FnMut(&[f64]) -> f64,
+) -> Vec<f64> {
+    try_gradient::<Never, _>(interval_width, kind, point, |x| Ok(value_fn(x)))
+        .unwrap_or_else(|e| match e {})
+}
+
+/// `gradient` for functions that can fail.
+pub fn try_gradient<E, F>(
     interval_width: f64,
     kind: Option<DerivativeKind>,
     point: &[f64],
@@ -99,8 +123,8 @@ where
     let kind = kind.unwrap_or_default();
     point.iter().enumerate()
         .map(|(i, &center)| {
-            let mut point = point.to_vec();
-            ::numerical::slope(
+            let mut point = point.to_vec(); // reset modifications
+            try_slope(
                 interval_width,
                 Some(kind),
                 center,
