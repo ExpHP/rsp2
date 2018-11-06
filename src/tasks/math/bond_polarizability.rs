@@ -52,7 +52,7 @@ fn raman_prefactor(
     }
 }
 
-#[derive(EnumMap)]
+#[derive(enum_map::Enum)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum BondType { CC, CH, HH }
 
