@@ -158,7 +158,7 @@ impl<M: Clone + 'static, P: LammpsPotential<Meta=M> + Clone + Send + Sync + 'sta
         }
 
         // (panic on lock already acquired; blocking could easily deadlock)
-        let lock = INSTANCE_LOCK.try_lock().unwrap();
+        let lock = INSTANCE_LOCK.try_lock().expect("Tried to construct multiple Lammps instances in parallel");
 
         let lammps_pot = Box::new(self.potential.clone()) as Box<LammpsPotential<Meta=P::Meta>>;
         let lmp = self.inner.build(lock, lammps_pot, coords.clone(), meta)?;
@@ -180,7 +180,7 @@ impl<M: Clone + 'static, P: LammpsPotential<Meta=M> + Clone + Send + Sync + 'sta
         }
 
         // (panic on lock already acquired; blocking could easily deadlock)
-        let lock = INSTANCE_LOCK.try_lock().unwrap();
+        let lock = INSTANCE_LOCK.try_lock().expect("Tried to construct multiple Lammps instances in parallel");
 
         let lmp_disp_fn = self.inner.build_disp_fn(lock, self.potential.clone(), coords.clone(), meta)?;
         Ok(Box::new(MyDispFn(lmp_disp_fn)) as Box<_>)

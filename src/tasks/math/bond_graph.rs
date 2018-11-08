@@ -26,8 +26,8 @@ pub mod periodic {
     /// * Parallel edges will each represent a different `image_diff`, stored
     ///   as the edge weight.  This image diff is `dest_image - src_image`.
     /// * There should be no self edges with `image_diff == [0, 0, 0]`.
-    /// * For any edge `S -> T` with `image_diff`, there is another edge
-    ///   `T -> S` with `-1 * image_diff`.
+    /// * If the `FracBonds` held directed interactions, then for any edge `S -> T` with
+    ///   `image_diff`, there is another edge `T -> S` with `-1 * image_diff`.
     #[derive(Debug, Clone)]
     pub struct PeriodicGraph(DiGraph<Node, Edge>);
 
@@ -93,6 +93,14 @@ pub mod periodic {
                 vertex_sets.union(self.to_index(a), self.to_index(b));
             }
             index_cast(vertex_sets.into_labeling())
+        }
+
+        pub fn frac_bonds_from(&self, from: usize) -> impl Iterator<Item=FracBond> + '_ {
+            self.0.edges(NodeIndex::new(from)).map(move |edge| {
+                let to = edge.target().index();
+                let image_diff = edge.weight().clone();
+                FracBond { from, to, image_diff }
+            })
         }
     }
 }

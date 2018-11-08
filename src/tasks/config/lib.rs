@@ -318,6 +318,7 @@ pub enum PotentialKind {
     #[serde(rename = "airebo")] Airebo(PotentialAirebo),
     #[serde(rename = "kc-z")] KolmogorovCrespiZ(PotentialKolmogorovCrespiZ),
     #[serde(rename = "kc-z-new")] KolmogorovCrespiZNew(PotentialKolmogorovCrespiZNew),
+    #[serde(rename = "rebo-new")] ReboNew(PotentialReboNew),
     /// V = 0
     #[serde(rename = "test-func-zero")] TestZero,
     /// Arranges atoms into a chain along the first lattice vector.
@@ -374,6 +375,22 @@ pub struct PotentialKolmogorovCrespiZNew {
     /// Cutoff radius (Angstrom?)
     #[serde(rename = "cutoff")]
     pub cutoff_begin: Option<f64>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub struct PotentialReboNew {
+    /// "brenner" or "lammps"
+    pub params: PotentialReboNewParams,
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum PotentialReboNewParams {
+    Brenner,
+    Lammps,
 }
 
 #[derive(Serialize, Deserialize)]

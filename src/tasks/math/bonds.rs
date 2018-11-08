@@ -92,6 +92,83 @@ pub struct CartBond {
 
 //=================================================================
 
+impl FracBond {
+    /// A function that returns `true` for one of the bonds representing
+    /// a pair of interacting ghosts, and `false` for the other bond.
+    ///
+    /// The definition is otherwise unspecified.
+    ///
+    /// # Panics
+    ///
+    /// Panics on self-interactions with `image_diff = [0, 0, 0]`.
+    /// (These never show up in `FracBonds` normally, but can be created through other means,
+    ///  such as directly constructing one or by using `join`)
+    pub fn is_canonical(&self) -> bool {
+        match self.from.cmp(&self.to) {
+            ::std::cmp::Ordering::Less => true,
+            ::std::cmp::Ordering::Greater => false,
+            ::std::cmp::Ordering::Equal => {
+                for &x in &self.image_diff.0 {
+                    if x != 0 {
+                        return x > 0;
+                    }
+                }
+                panic!("self interactions with zero image diff cannot be canonicalized");
+            },
+        }
+    }
+
+    /// Get the bond in the reverse direction.
+    ///
+    /// This will invert the output of `is_canonical()`.
+    #[inline]
+    pub fn flip(self) -> FracBond {
+        FracBond {
+            from: self.to,
+            to: self.from,
+            image_diff: -self.image_diff,
+        }
+    }
+
+    /// If this bond is from `A` to `B` and the other bond is from `B` to `C`, construct
+    /// a bond from `A` to `C` that has the correct `image_diff`.
+    ///
+    /// This can be useful for identifying groups of mutually interacting atoms in a manner
+    /// that properly accounts for images.
+    #[inline]
+    pub fn join(self, other: FracBond) -> Option<FracBond> {
+        if self.to == other.from {
+            Some(FracBond {
+                from: self.from,
+                to: other.to,
+                image_diff: self.image_diff + other.image_diff,
+            })
+        } else { None }
+    }
+
+    // NOTE: when working with types like PeriodicGraph, FracBonds::to_cart_bonds is not
+    //       available. There was no convenient place to put a method for getting all of the cart
+    //       vectors from a format like that, so this is a method for getting a single vector.
+    //
+    //       I went for an unambiguous signature over ergonomics or efficiency; hopefully, the
+    //       branch can be elided at use sites.
+    //
+    // FIXME: If I ever actually do add separate types for Fracs and Carts, this should simply
+    //        be of type (&Carts) -> V3.
+    //
+    /// Get the Cartesian vector, if the `coords` have cached Cartesian coordinates.
+    #[inline] // hoping for optimizations that elide the branch
+    pub fn cart_vector_using_cache(&self, coords: &Coords) -> Option<V3> {
+        let FracBond { from, to, image_diff } = *self;
+        coords.as_carts_cached().map(|carts| {
+            let cart_image_diff = image_diff.map(|x| x as f64) * coords.lattice();
+            carts[to] - carts[from] + cart_image_diff
+        })
+    }
+}
+
+//=================================================================
+
 impl FracBonds {
     pub fn from_iter(num_atoms: usize, iter: impl IntoIterator<Item=FracBond>) -> Self {
         let iter = iter.into_iter();
@@ -234,24 +311,18 @@ impl FracBonds {
         Ok(FracBonds { num_atoms, from, to, image_diff })
     }
 
+    #[inline]
     pub fn to_cart_bonds(&self, coords: &Coords) -> CartBonds {
-        let FracBonds { num_atoms, ref from, ref to, ref image_diff } = *self;
+        let FracBonds { num_atoms, ref from, ref to, .. } = *self;
         let from = from.to_vec();
         let to = to.to_vec();
 
         // (NOTE: we'd also get ruined by reordering of coordinates or mapping into
         //        the unit cell; but those are too difficult to test)
         assert_eq!(num_atoms, coords.num_atoms(), "number of atoms has changed!");
-        let lattice = coords.lattice();
-        let carts = coords.to_carts();
-
+        let coords = coords.with_carts(coords.to_carts());
         let cart_vector = {
-            zip_eq!(&from, &to, image_diff)
-                .map(|(&from, &to, image_diff)| {
-                    let cart_image_diff = image_diff.map(|x| x as f64) * lattice;
-                    carts[to] - carts[from] + cart_image_diff
-                })
-                .collect()
+            self.into_iter().map(|v| v.cart_vector_using_cache(&coords).unwrap()).collect()
         };
         CartBonds { num_atoms, from, to, cart_vector }
     }

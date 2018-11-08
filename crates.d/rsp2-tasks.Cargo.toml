@@ -61,6 +61,7 @@ path = "lib.rs"
 !!num-traits
 !!num-cpus
 !!mpi { optional = true }
+!!stack
 
 [features]
 default = []
