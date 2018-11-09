@@ -167,6 +167,7 @@ mod params {
     #[derive(Debug, Clone)]
     pub struct Params {
         pub by_type: TypeMap<TypeMap<TypeParams>>,
+        pub G: brenner_G::SplineSet,
     }
 
     #[derive(Debug, Copy, Clone)]
@@ -234,13 +235,19 @@ mod params {
                     AtomType::Hydrogen => type_params_hh,
                 },
             };
-            Params { by_type }
+            Params {
+                G: brenner_G::BRENNER_SPLINES,
+                by_type,
+            }
         }
 
-        /// Parameters consistent with LAMMPS' `Airebo.CH`.
+        /// Parameters consistent with LAMMPS' `Airebo.CH`, for comparison purposes.
         ///
         /// The HH parameters have changed a fair bit compared to the parameters
         /// originally published in Brenner's paper.
+        ///
+        /// The G splines (functions of bond angle) are also significantly different,
+        /// and quite possibly less precise.
         pub fn new_lammps() -> Self {
             // Brenner Table 2
             let type_params_cc = TypeParams {
@@ -293,7 +300,10 @@ mod params {
                     AtomType::Hydrogen => type_params_hh,
                 },
             };
-            Params { by_type }
+            Params {
+                G: brenner_G::LAMMPS_SPLINES,
+                by_type,
+            }
         }
     }
 }
@@ -496,8 +506,9 @@ pub fn compute(
             let bond_ij = __bond.index;
             let site_j = __bond.target;
 
-            d_positions[site_i] += d_deltas[bond_ij];
-            d_positions[site_j] -= d_deltas[bond_ij];
+            // delta_ij = (-pos_i) + pos_j
+            d_positions[site_i] -= d_deltas[bond_ij];
+            d_positions[site_j] += d_deltas[bond_ij];
         }
     }
     Ok((value, d_positions.raw))
@@ -509,7 +520,7 @@ fn compute_rebo_bonds(
 ) -> (f64, IndexVec<BondI, V3>) {
     use self::interactions::{Site, Bond};
     // Brenner:
-    // Eq  1:  V = sum_{i < j} V^R(r_ij) + b_{ij} V^A(r_ij)
+    // Eq  1:  V = sum_{i < j} V^R(r_ij) - b_{ij} V^A(r_ij)
     // Eq  5:  V^R(r) = f(r) (1 + Q/r) A e^{-alpha r}
     // Eq  6:  V^A(r) = f(r) sum_{n in 1..=3} B_n e^{-beta_n r}
     // Eq  3:  b_{ij} = 0.5 * (b_{ij}^{sigma-pi} + b_{ji}^{sigma-pi}) + b_ij^pi
@@ -523,18 +534,18 @@ fn compute_rebo_bonds(
 
     //-------------------
     // NOTE:
-    // We will redefine V^R and V^A to pull out the common factor of f(r),
-    // renaming them U^R and U^A:
     //
-    // Eq  1':  V = sum_{i < j} f_ij [ U^R(r_ij) + b_ij U^A(r_ij) ]
+    // We will also define U_ij (and U^A_ij, and U^R_ij) to be the V terms without the
+    // f_ij scale factor.
+    //
     // Eq  5':  U^R(r) = (1 + Q/r) A e^{-alpha r}
     // Eq  6':  U^A(r) = sum_{n in 1..=3} B_n e^{-beta_n r}
     //
     // We also redefine the sums in the potential to be over all i,j pairs, not just i < j.
     //
-    // Eq 1'':     V = sum_{i != j} f_ij U_ij
-    // Eq 2'':  U_ij = 0.5 * U^R_ij + b_ij * U^A_ij
-    // Eq 3'':  b_ij = 0.5 * b_ij^{sigma-pi} + boole(i < j) * b_ij^{pi}
+    // Eq 1':     V = sum_{i != j} V_ij
+    // Eq 2':  V_ij = 0.5 * V^R_ij - b_ij * V^A_ij
+    // Eq 3':  b_ij = 0.5 * b_ij^{sigma-pi} + boole(i < j) * b_ij^{pi}
 
     // On large systems, our performance is expected to be bounded by cache misses.
     // For this reason, we should aim to make as few passes over the data as necessary,
@@ -545,12 +556,12 @@ fn compute_rebo_bonds(
         // Brenner's f_ij
         bond_weight: SiteBondVec<f64>,
         bond_weight_d_delta: SiteBondVec<V3>,
-        // Brenner's V^R_ij, without the embedded f_ij factor
-        bond_UR: SiteBondVec<f64>,
-        bond_UR_d_delta: SiteBondVec<V3>,
-        // Brenner's V^A_ij, without the embedded f_ij factor
-        bond_UA: SiteBondVec<f64>,
-        bond_UA_d_delta: SiteBondVec<V3>,
+        // Brenner's V^R(r_ij)
+        bond_VR: SiteBondVec<f64>,
+        bond_VR_d_delta: SiteBondVec<V3>,
+        // Brenner's V^A(r_ij)
+        bond_VA: SiteBondVec<f64>,
+        bond_VA_d_delta: SiteBondVec<V3>,
     }
 
     let site_data = IndexVec::<SiteI, _>::from_raw({
@@ -559,10 +570,10 @@ fn compute_rebo_bonds(
             let type_i = __site.atom_type;
 
             let mut tcoord = 0.0;
-            let mut bond_UR = SiteBondVec::new();
-            let mut bond_UR_d_delta = SiteBondVec::new();
-            let mut bond_UA = SiteBondVec::new();
-            let mut bond_UA_d_delta = SiteBondVec::new();
+            let mut bond_VR = SiteBondVec::new();
+            let mut bond_VR_d_delta = SiteBondVec::new();
+            let mut bond_VA = SiteBondVec::new();
+            let mut bond_VA_d_delta = SiteBondVec::new();
             let mut bond_weight = SiteBondVec::new();
             let mut bond_weight_d_delta = SiteBondVec::new();
 
@@ -583,44 +594,56 @@ fn compute_rebo_bonds(
                 // these also depend only on bond length
                 // (and also conveniently don't depend on anything else)
 
-                // UA = (1 + Q/r) A e^{-alpha r}
-                // write as a product of two subexpressions
-                let UA;
-                let UA_d_delta;
+                let VR;
+                let VR_d_length;
                 {
+                    // UR_ij = (1 + Q/r_ij) A e^{-alpha r_ij}
+                    // write as a product of two subexpressions
+
                     let sub1 = 1.0 + params_ij.Q / length;
                     let sub1_d_length = - params_ij.Q / (length * length);
 
                     let sub2 = params_ij.A * f64::exp(-params_ij.alpha * length);
                     let sub2_d_length = -params_ij.alpha * sub2;
 
-                    let UA_d_length = sub1_d_length * sub2 + sub1 * sub2_d_length;
+                    let UR = sub1 * sub2;
+                    let UR_d_length = sub1_d_length * sub2 + sub1 * sub2_d_length;
 
-                    UA = sub1 * sub2;
-                    UA_d_delta = UA_d_length * length_d_delta;
+                    // VR_ij = f_ij UR_ij
+                    VR = weight * UR;
+                    VR_d_length = weight_d_length * UR + weight * UR_d_length;
                 }
-                bond_UA.push(UA);
-                bond_UA_d_delta.push(UA_d_delta);
+                println!("rs-VR: {}", VR);
+                bond_VR.push(VR);
+                bond_VR_d_delta.push(VR_d_length * length_d_delta);
 
-                // UR = sum_{n in 1..=3} B_n e^{-beta_n r}
-                let mut UR = 0.0;
-                let mut UR_d_length = 0.0;
-                for (&B, &beta) in zip_eq!(&params_ij.B, &params_ij.beta) {
-                    let term = B * f64::exp(-beta * length);
-                    let term_d_length = -beta * term;
-                    UR += term;
-                    UR_d_length += term_d_length;
+                let VA;
+                let VA_d_length;
+                {
+                    // UA_ij = sum_{n in 1..=3} B_n e^{-beta_n r_ij}
+                    let mut UA = 0.0;
+                    let mut UA_d_length = 0.0;
+                    for (&B, &beta) in zip_eq!(&params_ij.B, &params_ij.beta) {
+                        let term = B * f64::exp(-beta * length);
+                        let term_d_length = -beta * term;
+                        UA += term;
+                        UA_d_length += term_d_length;
+                    }
+
+                    // VA_ij = f_ij UA_ij
+                    VA = weight * UA;
+                    VA_d_length = weight_d_length * UA + weight * UA_d_length;
                 }
-                let UR_d_delta = UR_d_length * length_d_delta;
-                bond_UR.push(UR);
-                bond_UR_d_delta.push(UR_d_delta);
+                println!("rs-VR: {}", VA);
+                bond_VA.push(VA);
+                bond_VA_d_delta.push(VA_d_length * length_d_delta);
             } // for _ in interactions.bonds(site)
 
             FirstPassSiteData {
                 tcoord,
                 bond_weight, bond_weight_d_delta,
-                bond_UR, bond_UR_d_delta,
-                bond_UA, bond_UA_d_delta,
+                bond_VR, bond_VR_d_delta,
+                bond_VA, bond_VA_d_delta,
             }
         }).collect()
     });
@@ -631,58 +654,28 @@ fn compute_rebo_bonds(
         let FirstPassSiteData {
             tcoord: tcoord_i,
             ref bond_weight, ref bond_weight_d_delta,
-            ref bond_UR, ref bond_UR_d_delta,
-            ref bond_UA, ref bond_UA_d_delta,
+            ref bond_VR, ref bond_VR_d_delta,
+            ref bond_VA, ref bond_VA_d_delta,
         } = site_data[site_i];
 
-        // Eq 4'':  V_ij = f_ij U_ij
-        // Eq 2'':  U_ij = 0.5 * U^R_ij + b_ij * U^A_ij
+        // FIXME simplification: Assume the pi bondorder is zero.
         //
-        // site_V is a sum of V_ij over all j
+        //       This means that there's only a sigma-pi term for each bond,
+        //       whose derivatives are entirely of data local to the originating site
+        //       (i.e. we can fit them in a SiteBondVec).
         //
-        // NOTE: Due to the simplification inside the bond loop, we can assume that
-        //       we will only find derivatives with respect to this atom's bonds.
-        let mut site_V = 0.0;
-        let mut site_V_d_delta = sbvec_filled(V3::zero(), bond_weight.len());
+        //       This considerably simplifies the evaluation strategy for the rest of the
+        //       function, because we can simply visit each site in order and concatenate
+        //       the derivatives.
 
-        let iter = zip_eq![bond_UR, bond_UR_d_delta].enumerate();
-        for (index_ij, (UR_ij, UR_ij_d_delta_ij)) in iter {
-            // V_ij = f_ij * U_ij
-            let VR_ij = UR_ij * bond_weight[index_ij];
-            let VR_ij_d_UR_ij = bond_weight[index_ij];
-
-            let VR_ij_d_delta_ij = VR_ij_d_UR_ij * UR_ij_d_delta_ij;
-
-            site_V += 0.5 * VR_ij;
-            site_V_d_delta[index_ij] += 0.5 * VR_ij_d_delta_ij;
-        }
-
-        // Eq 3'':  b_ij = 0.5 * b_ij^{sigma-pi} + boole(i < j) * b_ij^{pi}
-        for (index_ij, __bond) in interactions.bonds(site_i).enumerate() {
+        // Eq 3':  b_ij = 0.5 * b_ij^{sigma-pi} + boole(i < j) * b_ij^{pi}
+        for __bond in interactions.bonds(site_i) {
             let site_j = __bond.target;
             let tcoord_j = site_data[site_j].tcoord;
             let type_j = interactions.site(site_j).atom_type;
 
-            // sigma-pi terms are present for all bonds, regardless of direction
-            let out = bond_order_sigma_pi_sitesum::Input {
-                interactions,
-                site: site_i,
-                bond_weights: bond_weight,
-            }.compute();
-            let BondOrderSigmaPiSitesum {
-                value: bsp_ij,
-                d_deltas: bsp_ij_d_deltas,
-                d_weights: bsp_ij_d_weights,
-            } = out;
-
+            // boole(i < j) * b_ij^{pi}
             if __bond.is_canonical {
-                // canonical bonds also have DH and RC terms computed
-
-                // FIXME simplification: Assume the pi bondorder is zero.
-                //
-                //       This means that there's only a sigma-pi term for each bond,
-                //       whose derivatives are entirely of data local to the originating site
-                //       (i.e. we can fit them in a SiteBondVec)
                 if !brenner_T::can_assume_zero((type_i, type_j), (tcoord_i, tcoord_j)) {
                     panic!("brenner T spline may be nonzero; this is not yet implemented");
                 }
@@ -690,37 +683,46 @@ fn compute_rebo_bonds(
                     panic!("brenner F spline may be nonzero; this is not yet implemented");
                 }
             }
+        }
 
-            // Eq 3'':  b_ij = 0.5 * b_ij^{sigma-pi} + boole(i < j) * b_ij^{pi}
+        // Eq 2':  V_ij = 0.5 * V^R_ij - b_ij * V^A_ij
+        //
+        // As stated, with the above assumption that b^pi = 0, each site's terms
+        // can only depend on the derivatives of that site's bonds, so they fit
+        // in a SiteBondVec.
 
-            // Again, by our simplification, the complete bondorder b_ij
-            // simply comes from the sigma-pi bondorder ij.
-            let b_ij = 0.5 * bsp_ij;
-            let b_ij_d_weights = sbvec_scaled(0.5, bsp_ij_d_weights);
-            let b_ij_d_deltas = sbvec_scaled(0.5, bsp_ij_d_deltas);
+        let mut site_V = 0.0;
+        let mut site_V_d_delta = sbvec_filled(V3::zero(), bond_weight.len());
 
-            // Eq 2'':  U_ij = 0.5 * U^R_ij + b_ij * U^A_ij
-            //
-            // The U^R part was already taken care of.
-            let UA_ij = bond_UA[index_ij];
-            let UA_ij_d_delta_ij = bond_UA_d_delta[index_ij];
+        // sigma-pi terms are present for all bonds, regardless of direction.
+        //
+        // This is a sum of `0.5 * V^A_ij * b_ij^{sigma-pi}` over all of the bonds at site i.
+        let out = site_sigma_pi_term::Input {
+            params,
+            interactions,
+            site: site_i,
+            bond_weights: bond_weight,
+            bond_VAs: bond_VA,
+            bond_VAs_d_delta: bond_VA_d_delta,
+        }.compute();
+        let SiteSigmaPiTerm {
+            value: Vsp_i,
+            d_deltas: Vsp_i_d_deltas,
+            d_weights: Vsp_i_d_weights,
+        } = out;
 
-            // V_ij = f_ij * U_ij
-            let VA_ij = UA_ij * bond_weight[index_ij];
-            let VA_ij_d_UA_ij = bond_weight[index_ij];
+        // Add in the repulsive terms, which each only depend on one bond delta.
+        // (written tersely here for vectorization...)
+        site_V += 0.5 * bond_VR.iter().sum::<f64>();
+        axpy_mut(&mut site_V_d_delta, 0.5, &bond_VR_d_delta);
 
-            let VA_ij_d_delta_ij = VA_ij_d_UA_ij * UA_ij_d_delta_ij;
-
-            site_V += VA_ij * b_ij;
-            site_V_d_delta[index_ij] += VA_ij_d_delta_ij * b_ij;
-            for index_ik in 0..bond_weight.len() {
-                let b_ij_d_weight_ik = b_ij_d_weights[index_ik];
-                let b_ij_d_delta_ik = b_ij_d_deltas[index_ik];
-                let weight_ik_d_delta_ik = bond_weight_d_delta[index_ik];
-
-                site_V_d_delta[index_ik] += VA_ij * b_ij_d_weight_ik * weight_ik_d_delta_ik;
-                site_V_d_delta[index_ik] += VA_ij * b_ij_d_delta_ik;
-            }
+        // Attractive terms are fully encompassed in Vsp
+        site_V -= Vsp_i;
+        axpy_mut(&mut site_V_d_delta, -1.0, &Vsp_i_d_deltas);
+        for (index_ij, _) in interactions.bonds(site_i).enumerate() {
+            let Vsp_i_d_weight_ij = Vsp_i_d_weights[index_ij];
+            let weight_ij_d_delta_ij = bond_weight_d_delta[index_ij];
+            site_V_d_delta[index_ij] += -1.0 * Vsp_i_d_weight_ij * weight_ij_d_delta_ij;
         }
 
         (site_V, site_V_d_delta)
@@ -750,24 +752,28 @@ fn compute_rebo_bonds(
     (value, d_deltas)
 }
 
-use self::bond_order_sigma_pi_sitesum::BondOrderSigmaPiSitesum;
-mod bond_order_sigma_pi_sitesum {
-    //! Represents the sum of `b_{ij}^{sigma-pi}` over all `j` for a given `i`.
+use self::site_sigma_pi_term::SiteSigmaPiTerm;
+mod site_sigma_pi_term {
+    //! Represents the sum of `0.5 * b_{ij}^{sigma-pi} * VR` over all `j` for a given `i`.
     //!
     //! This quantity is useful to consider in its own right because it encapsulates
-    //! the need for the P spline values, and it only has derivatives with respect
-    //! to the bond vectors of site `i`; these properties give it a fairly simple
-    //! signature to make up for its absurdly long name.
+    //! the need for the P spline values (only two of which are needed per site),
+    //! and it only has derivatives with respect to the bond vectors of site `i`;
+    //! these properties give it a fairly simple signature.
 
     use super::*;
 
-    pub type Output = BondOrderSigmaPiSitesum;
+    pub type Output = SiteSigmaPiTerm;
     pub struct Input<'a> {
+        pub params: &'a Params,
         pub interactions: &'a Interactions,
         pub site: SiteI,
         pub bond_weights: &'a [f64],
+        // The VA_ij terms for each bond at site i.
+        pub bond_VAs: &'a SiteBondVec<f64>,
+        pub bond_VAs_d_delta: &'a SiteBondVec<V3>,
     }
-    pub struct BondOrderSigmaPiSitesum {
+    pub struct SiteSigmaPiTerm {
         pub value: f64,
         /// Derivatives with respect to the bonds listed in order of `interactions.bonds(site_i)`.
         pub d_deltas: SiteBondVec<V3>,
@@ -785,7 +791,8 @@ mod bond_order_sigma_pi_sitesum {
         //                       + P_{ij}(N_i^C, N_i^H)
         //        )
         let Input {
-            interactions, bond_weights,
+            params, interactions, bond_weights,
+            bond_VAs, bond_VAs_d_delta,
             site: site_i,
         } = input;
         let type_i = interactions.site(site_i).atom_type;
@@ -859,55 +866,76 @@ mod bond_order_sigma_pi_sitesum {
                 coses_ijk_d_delta_ik = tmp_coses_ijk_d_delta_ik;
             }
 
-            // We're finally ready to compute this term.
-            let out = bondorder_sigma_pi::Input {
-                type_i, type_j, ccoord_i, hcoord_i,
-                coses_ijk: &coses_ijk,
-                types_k: &bond_target_types,
-                weights_ik: bond_weights,
-                skip_index: index_ij, // used to exclude the ijj angle
-                P_ij: P_by_type[type_j].expect(""),
-            }.compute();
-            let BondOrderSigmaPi {
-                value: term,
-                d_ccoord_i: term_d_ccoord_i,
-                d_hcoord_i: term_d_hcoord_i,
-                d_coses_ijk: term_d_coses_ijk,
-                d_weights_ik: term_d_weights_ik,
-            } = out;
+            // We're finally ready to compute the bond order.
 
-            // Add the term.
-            value += term;
+            let bsp_ij;
+            let bsp_ij_d_deltas;
+            let bsp_ij_d_weights;
+            {
+                // Compute bsp as a function of many things...
+                let out = bondorder_sigma_pi::Input {
+                    params,
+                    type_i, type_j, ccoord_i, hcoord_i,
+                    coses_ijk: &coses_ijk,
+                    types_k: &bond_target_types,
+                    weights_ik: bond_weights,
+                    skip_index: index_ij, // used to exclude the ijj angle
+                    P_ij: P_by_type[type_j].expect(""),
+                }.compute();
+                let BondOrderSigmaPi {
+                    value: tmp_value,
+                    d_ccoord_i: bsp_ij_d_ccoord_i,
+                    d_hcoord_i: bsp_ij_d_hcoord_i,
+                    d_coses_ijk: bsp_ij_d_coses_ijk,
+                    d_weights_ik: bsp_ij_d_weights_ik,
+                } = out;
 
-            // Simplify all derivatives of the term to be with respect to deltas and weights.
+                // ...and now reformulate it as a function solely of the deltas and weights.
+                let mut tmp_d_deltas: SiteBondVec<V3> = sbvec_filled(V3::zero(), bond_weights.len());
+                let mut tmp_d_weights: SiteBondVec<f64> = sbvec_filled(0.0, bond_weights.len());
 
-            // Even though this term describes a single bond, its dependence on the coordination
-            // numbers produce derivatives with respect to all of the bond weights.
-            if (term_d_ccoord_i, term_d_hcoord_i) != (0.0, 0.0) {
-                for (index, ty) in bond_target_types.iter().enumerate() {
-                    match ty {
-                        // ccoord_i_d_weight = 1.0,  hcoord_i_d_weight = 0.0
-                        AtomType::Carbon => d_weights[index] += term_d_ccoord_i,
-                        // ccoord_i_d_weight = 0.0,  hcoord_i_d_weight = 1.0
-                        AtomType::Hydrogen => d_weights[index] += term_d_hcoord_i,
+                // Even though this term describes a single bond, its dependence on the coordination
+                // numbers produce derivatives with respect to all of the bond weights.
+                if (bsp_ij_d_ccoord_i, bsp_ij_d_hcoord_i) != (0.0, 0.0) {
+                    for (index, ty) in bond_target_types.iter().enumerate() {
+                        match ty {
+                            // ccoord_i_d_weight = 1.0,  hcoord_i_d_weight = 0.0
+                            AtomType::Carbon => tmp_d_weights[index] += bsp_ij_d_ccoord_i,
+                            // ccoord_i_d_weight = 0.0,  hcoord_i_d_weight = 1.0
+                            AtomType::Hydrogen => tmp_d_weights[index] += bsp_ij_d_hcoord_i,
+                        }
                     }
                 }
-            }
 
-            // Some derivatives also come from the ik bonds.
-            let iter = zip_eq!(term_d_weights_ik, term_d_coses_ijk).enumerate();
-            for (index_ik, (term_d_weight_ik, term_d_cos_ijk)) in iter {
-                // Mind the gap
-                if index_ij == index_ik {
-                    continue;
+                // Some derivatives also come from the ik bonds.
+                let iter = zip_eq!(bsp_ij_d_weights_ik, bsp_ij_d_coses_ijk).enumerate();
+                for (index_ik, (bsp_ij_d_weight_ik, bsp_ij_d_cos_ijk)) in iter {
+                    // Mind the gap
+                    if index_ij == index_ik {
+                        continue;
+                    }
+                    let cos_ijk_d_delta_ij = coses_ijk_d_delta_ij[index_ik];
+                    let cos_ijk_d_delta_ik = coses_ijk_d_delta_ik[index_ik];
+
+                    tmp_d_weights[index_ik] += bsp_ij_d_weight_ik;
+                    tmp_d_deltas[index_ij] += bsp_ij_d_cos_ijk * cos_ijk_d_delta_ij;
+                    tmp_d_deltas[index_ik] += bsp_ij_d_cos_ijk * cos_ijk_d_delta_ik;
                 }
-                let cos_ijk_d_delta_ij = coses_ijk_d_delta_ij[index_ik];
-                let cos_ijk_d_delta_ik = coses_ijk_d_delta_ik[index_ik];
 
-                d_weights[index_ik] += term_d_weight_ik;
-                d_deltas[index_ij] += term_d_cos_ijk * cos_ijk_d_delta_ij;
-                d_deltas[index_ik] += term_d_cos_ijk * cos_ijk_d_delta_ik;
+                bsp_ij = tmp_value;
+                bsp_ij_d_deltas = tmp_d_deltas;
+                bsp_ij_d_weights = tmp_d_weights;
+                println!("rs-bsp: {}", bsp_ij);
             }
+
+            // True term to add to sum is 0.5 * VR_ij * bsp_ij
+            let VA_ij = bond_VAs[index_ij];
+            let VA_ij_d_delta_ij = bond_VAs_d_delta[index_ij];
+
+            value += 0.5 * VA_ij * bsp_ij;
+            d_deltas[index_ij] += 0.5 * VA_ij_d_delta_ij * bsp_ij;
+            axpy_mut(&mut d_deltas, 0.5 * VA_ij, &bsp_ij_d_deltas);
+            axpy_mut(&mut d_weights, 0.5 * VA_ij, &bsp_ij_d_weights);
         }
         Output { value, d_weights, d_deltas }
     }
@@ -919,6 +947,7 @@ mod bondorder_sigma_pi {
 
     pub type Output = BondOrderSigmaPi;
     pub struct Input<'a> {
+        pub params: &'a Params,
         // bond from atom i to another atom j
         pub type_i: AtomType,
         pub type_j: AtomType,
@@ -953,6 +982,7 @@ mod bondorder_sigma_pi {
         //                       + P_{ij}(N_i^C, N_i^H)
         //        )
         let Input {
+            params,
             type_i, type_j,
             ccoord_i, hcoord_i, P_ij,
             types_k, weights_ik, coses_ijk,
@@ -995,12 +1025,15 @@ mod bondorder_sigma_pi {
                     tmp_d_weights_ik.push(NAN);
                 } else {
                     let exp_lambda = brenner_exp_lambda(type_i, (type_j, type_k));
+                    println!("rs-explambda: {}", exp_lambda);
+                    println!("rs-tcoord: {}", tcoord);
 
                     let BrennerG {
                         value: G,
                         d_cos: G_d_cos,
                         d_tcoord: G_d_tcoord,
-                    } = brenner_G::Input { type_i, cos: cos_ijk, tcoord }.compute();
+                    } = brenner_G::Input { params, type_i, cos: cos_ijk, tcoord }.compute();
+                    println!("rs-g gc dN {} {} {}", G, G_d_cos, G_d_tcoord);
 
                     let G_d_ccoord = G_d_tcoord * tcoord_d_ccoord_i;
                     let G_d_hcoord = G_d_tcoord * tcoord_d_hcoord_i;
@@ -1461,7 +1494,7 @@ mod bond_cosine {
 use self::brenner_P::BrennerP;
 mod brenner_P {
     use super::*;
-
+    
     pub type Output = BrennerP;
     pub struct Input {
         pub type_i: AtomType,
@@ -1514,26 +1547,30 @@ mod brenner_P {
             //       are saddle points, as "all derivatives not listed are zero" and none
             //       are listed.
             (AtomType::Carbon, AtomType::Carbon) => {
+                // NOTE: comments show the values from AIREBO (Stuart, 2000),
+                //       three of which are modified to counteract terms introduced from
+                //       torsion in undercoordinated systems like graphite.
                 match (int_ccoord, int_hcoord) {
-                    (1, 1) => Output::with_zero_deriv(0.003_026_697_473_481),
-                    (0, 2) => Output::with_zero_deriv(0.007_860_700_254_745),
-                    (0, 3) => Output::with_zero_deriv(0.016_125_364_564_267),
-                    (2, 1) => Output::with_zero_deriv(0.003_179_530_830_731),
-                    (1, 2) => Output::with_zero_deriv(0.006_326_248_241_119),
+                    (1, 1) => Output::with_zero_deriv(0.003_026_697_473_481), // -0.010_960 (!!!)
+                    (0, 2) => Output::with_zero_deriv(0.007_860_700_254_745), // -0.000_500 (!!!)
+                    (0, 3) => Output::with_zero_deriv(0.016_125_364_564_267), //  0.016_125
+                    (2, 1) => Output::with_zero_deriv(0.003_179_530_830_731), //  0.003_180
+                    (1, 2) => Output::with_zero_deriv(0.006_326_248_241_119), //  0.006_326
+                    // (2, 0) =>                                              // -0.027_603 (!!!)
                     _ => Output::zero(),
                 }
             },
             (AtomType::Carbon, AtomType::Hydrogen) => {
                 match (int_ccoord, int_hcoord) {
-                    (0, 1) => Output::with_zero_deriv(0.209_336_732_825_0380),
-                    (0, 2) => Output::with_zero_deriv(-0.064_449_615_432_525),
-                    (0, 3) => Output::with_zero_deriv(-0.303_927_546_346_162),
-                    (1, 0) => Output::with_zero_deriv(0.01),
-                    (2, 0) => Output::with_zero_deriv(-0.122_042_146_278_2555),
-                    (1, 1) => Output::with_zero_deriv(-0.125_123_400_628_7090),
-                    (1, 2) => Output::with_zero_deriv(-0.298_905_245_783),
-                    (3, 0) => Output::with_zero_deriv(-0.307_584_705_066),
-                    (2, 1) => Output::with_zero_deriv(-0.300_529_172_406_7579),
+                    (0, 1) => Output::with_zero_deriv(0.209_336_732_825_0380),  //  0.209_337
+                    (0, 2) => Output::with_zero_deriv(-0.064_449_615_432_525),  // -0.064_450
+                    (0, 3) => Output::with_zero_deriv(-0.303_927_546_346_162),  // -0.303.928
+                    (1, 0) => Output::with_zero_deriv(0.01),                    //  0.010_000
+                    (2, 0) => Output::with_zero_deriv(-0.122_042_146_278_2555), // -0.122_042
+                    (1, 1) => Output::with_zero_deriv(-0.125_123_400_628_7090), // -0.125_123
+                    (1, 2) => Output::with_zero_deriv(-0.298_905_245_783),      // -0.298_905
+                    (3, 0) => Output::with_zero_deriv(-0.307_584_705_066),      // -0.307_585
+                    (2, 1) => Output::with_zero_deriv(-0.300_529_172_406_7579), // -0.300_529
                     _ => Output::zero(),
                 }
             },
@@ -1881,7 +1918,8 @@ mod brenner_G {
     use super::*;
 
     pub type Output = BrennerG;
-    pub struct Input {
+    pub struct Input<'a> {
+        pub params: &'a Params,
         pub type_i: AtomType,
         pub cos: f64,
         pub tcoord: f64,
@@ -1893,13 +1931,13 @@ mod brenner_G {
         pub d_tcoord: f64,
     }
 
-    impl Input {
+    impl<'a> Input<'a> {
         pub fn compute(self) -> Output { compute(self) }
     }
 
     // free function for smaller indent
-    fn compute(input: Input) -> Output {
-        let Input { type_i, cos, tcoord } = input;
+    fn compute(input: Input<'_>) -> Output {
+        let Input { params, type_i, cos, tcoord } = input;
 
         // Almost all cases can be referred to a single polynomial evaluation
         // with no local dependence on tcoord.
@@ -1908,56 +1946,37 @@ mod brenner_G {
         macro_rules! use_single_poly {
             ($poly:expr) => {{
                 let d_tcoord = 0.0;
-                let (value, d_cos) = polyval_dec(&$poly, cos);
+                let (value, d_cos) = $poly.evaluate(cos);
                 Output { value, d_cos, d_tcoord }
             }}
         }
 
-        // NOTE: this matching and switching is done many times for the same `i`,
-        //       and the coeffs from switch() could probably be precomputed.
         match type_i {
             AtomType::Carbon => {
-                debug_assert!(cos > C_X_0 - 1e-9, "{} vs {}", cos, C_X_0);
-                debug_assert!(cos < C_X_3 + 1e-9, "{} vs {}", cos, C_X_3);
+                let (alpha, alpha_d_tcoord) = switch((3.2, 3.7), tcoord);
 
-                // prioritize the branch taken by graphene
-                if cos < C_X_1 {
-                    warn!("untested codepath: c17f90cf-a390-4f02-9233-78f2a7c9c424");
-                    use_single_poly!(&C_COEFFS_1)
-
-                    // branch point at 120 degrees
-                } else if cos < C_X_2 {
-                    warn!("untested codepath: e7367196-1df8-407b-8bad-357064cf6911");
-                    use_single_poly!(&C_COEFFS_2)
-
-                    // branch point at tetrahedral angle
+                // easy way out for now
+                //
+                // condition on alpha_d_tcoord is necessary for cases that are just barely
+                // in the switching regime that may happen to have zero alpha
+                if alpha == 0.0 && alpha_d_tcoord == 0.0 {
+                    use_single_poly!(&params.G.carbon_low_coord)
+                } else if alpha == 1.0 && alpha_d_tcoord == 0.0 {
+                    warn!("untested codepath: 37236e5f-9810-4ee5-a8c3-0a5150d9bd26");
+                    use_single_poly!(&params.G.carbon_high_coord)
                 } else {
-                    let (alpha, alpha_d_tcoord) = switch((3.2, 3.7), tcoord);
+                    warn!("untested codepath: fd6eff7e-b4b2-4bbf-ad89-3227a6099d59");
+                    // The one case where use_single_poly! cannot be used.
 
-                    // easy way out for now
-                    //
-                    // condition on alpha_d_tcoord is necessary for cases that are just barely
-                    // in the switching regime that may happen to have zero alpha
-                    if alpha == 0.0 && alpha_d_tcoord == 0.0 {
-                        warn!("untested codepath: cad37a46-e4ee-4baa-80bf-f1b689cebaa9");
-                        use_single_poly!(C_COEFFS_3_LOW_COORDINATION)
-                    } else if alpha == 1.0 && alpha_d_tcoord == 0.0 {
-                        warn!("untested codepath: 37236e5f-9810-4ee5-a8c3-0a5150d9bd26");
-                        use_single_poly!(&C_COEFFS_3_HIGH_COORDINATION)
-                    } else {
-                        warn!("untested codepath: fd6eff7e-b4b2-4bbf-ad89-3227a6099d59");
-                        // The one case where use_single_poly! cannot be used.
-
-                        // d(linterp(α, A, B)) = d(α A + (1 - α) B)
-                        //                     = (A - B) dα + α dA + (1 - α) dB
-                        //                     = ...let's not do this right now
-                        unimplemented!()
-                    }
+                    // d(linterp(α, A, B)) = d(α A + (1 - α) B)
+                    //                     = (A - B) dα + α dA + (1 - α) dB
+                    //                     = ...let's not do this right now
+                    unimplemented!()
                 }
             },
             AtomType::Hydrogen => {
                 warn!("untested codepath: 4d03fe04-5312-468e-9e30-01beddec4793");
-                use_single_poly!(&H_COEFFS)
+                use_single_poly!(&params.G.hydrogen)
             },
         }
     }
@@ -2041,140 +2060,290 @@ for (name, heading, terms) in pieces:
         print(f"{x},")
     print(f"];")
 */
-    // Coeffs listed from x**5 to x**0
-    const C_X_0: f64 = -1.0;
-    const C_X_1: f64 = -0.5;
-    const C_X_2: f64 = -1.0/3.0;
-    const C_X_3: f64 = 1.0;
-
     // Switch interval for tcoord in third region
     const C_T_LOW_COORDINATION: f64 = 3.2;
     const C_T_HIGH_COORDINATION: f64 = 3.7;
 
-    // Segment 1: -1 to -1/2  (pi to 2pi/3)
-    const C_COEFFS_1: &'static [f64] = &[
-        -1.342399999999925, -4.927999999999722, -6.829999999999602,
-        -4.3459999999997265, -1.0979999999999095, 0.002600000000011547,
-    ];
+    /// A piecewise polynomial, optimized for the use case of only having a few segments.
+    ///
+    /// Between each two elements of x_div, it uses a polynomial from `coeffs`.
+    #[derive(Debug, Clone)]
+    struct SmallSpline1d<Array: AsRef<[f64]> + 'static> {
+        x_div: &'static [f64],
+        /// Polynomials between each two points in `x_div`, with coefficients in
+        /// descending order.
+        coeffs: &'static [Array],
+    }
 
-    // Segment 2: -1/2 to -1/3  (2pi/3 to 109.47°)
-    const C_COEFFS_2: &'static [f64] = &[
-        35.3116800000094, 69.87600000001967, 55.94760000001625,
-        23.43200000000662, 5.544400000001327, 0.6966900000001047,
-    ];
+    #[derive(Debug, Clone)]
+    pub struct SplineSet {
+        carbon_high_coord: SmallSpline1d<[f64; 6]>,
+        carbon_low_coord: SmallSpline1d<[f64; 6]>,
+        hydrogen: SmallSpline1d<[f64; 6]>,
+    }
 
-    // Segment 3 (G): -1/3 to +1  (109.47° to 0°)
-    const C_COEFFS_3_HIGH_COORDINATION: &'static [f64] = &[
-        0.5064259725000047, 1.4271989062499966, 2.028821591249997,
-        2.254920828750001, 1.4071827012500007, 0.37545,
-    ];
+    impl SplineSet {
+        #[cfg(test)]
+        fn all_splines(&self) -> Vec<SmallSpline1d<[f64; 6]>> {
+            vec![
+                self.carbon_high_coord.clone(),
+                self.carbon_low_coord.clone(),
+                self.hydrogen.clone(),
+            ]
+        }
+    }
 
-    // Segment 3 (gamma): -1/3 to +1  (109.47° to 0°)
-    const C_COEFFS_3_LOW_COORDINATION: &'static [f64] = &[
-        -0.03793074749999925, 1.2711119062499994, -0.5613989287500004,
-        -0.4328552912499998, 0.4892170612500001, 0.271856,
-    ];
+    /// Splines produced by fitting the data in Brenner Table 3.
+    pub const BRENNER_SPLINES: SplineSet = SplineSet {
+        carbon_high_coord: SmallSpline1d {
+            x_div: &[-1.0, -0.5, -1.0/3.0, 1.0],
+            coeffs: &[[
+                // Segment 1: -1 to -1/2  (pi to 2pi/3)
+                -1.342399999999925, -4.927999999999722, -6.829999999999602,
+                -4.3459999999997265, -1.0979999999999095, 0.002600000000011547,
+            ], [
+                // Segment 2: -1/2 to -1/3  (2pi/3 to 109.47°)
+                35.3116800000094, 69.87600000001967, 55.94760000001625,
+                23.43200000000662, 5.544400000001327, 0.6966900000001047,
+            ], [
+                // Segment 3 (G): -1/3 to +1  (109.47° to 0°)
+                0.5064259725000047, 1.4271989062499966, 2.028821591249997,
+                2.254920828750001, 1.4071827012500007, 0.37545,
+            ]],
+        },
+        carbon_low_coord: SmallSpline1d {
+            x_div: &[-1.0, -0.5, -1.0/3.0, 1.0],
+            coeffs: &[[
+                // Segment 1: -1 to -1/2  (pi to 2pi/3)
+                -1.342399999999925, -4.927999999999722, -6.829999999999602,
+                -4.3459999999997265, -1.0979999999999095, 0.002600000000011547,
+            ], [
+                // Segment 2: -1/2 to -1/3  (2pi/3 to 109.47°)
+                35.3116800000094, 69.87600000001967, 55.94760000001625,
+                23.43200000000662, 5.544400000001327, 0.6966900000001047,
+            ], [
+                // Segment 3 (G): -1/3 to +1  (109.47° to 0°)
+                -0.03793074749999925, 1.2711119062499994, -0.5613989287500004,
+                -0.4328552912499998, 0.4892170612500001, 0.271856,
+            ]],
+        },
+        hydrogen: SmallSpline1d {
+            x_div: &[-1.0, 1.0],
+            coeffs: &[[
+                -9.287290931116942, -0.29608733333332005, 13.589744997229507,
+                -3.1552081666666805, 0.0755044338874331, 19.065124,
+            ]],
+        },
+    };
 
-    // Full curve for hydrogen
-    const H_COEFFS: &'static [f64] = &[
-        -9.287290931116942, -0.29608733333332005, 13.589744997229507,
-        -3.1552081666666805, 0.0755044338874331, 19.065124,
-    ];
+    /// From CH.airebo.
+    ///
+    /// These are.... quite different from the function described by Brenner!
+    ///
+    /// (TODO: look further into this; is this what AIREBO does?)
+    ///
+    /// They also appear to be rounded to dangerously low precision, which
+    /// might introduce discontinuities at the switch points (most troublingly so at 120°).
+    pub const LAMMPS_SPLINES: SplineSet = SplineSet {
+        carbon_high_coord: SmallSpline1d {
+            x_div: &[-1.0, -0.6666666667, -0.5, -0.3333333333, 1.0],
+            coeffs: &[[
+                0.3862485000, 1.5544035000, 2.5334145000,
+                2.1363075000, 1.0627430000, 0.2816950000,
+            ], [
+                0.4025160000, 1.6019100000, 2.5885710000,
+                2.1681365000, 1.0718770000, 0.2827390000,
+            ], [
+                34.7051520000, 68.6124000000, 54.9086400000,
+                23.0108000000, 5.4601600000, 0.6900250000,
+            ], [
+                0.5063519355, 1.4269207324, 2.0288747461,
+                2.2551320117, 1.4072691309, 0.3754514434,
+            ]],
+        },
+        carbon_low_coord: SmallSpline1d {
+            x_div: &[-1.0, -0.6666666667, -0.5, -0.3333333333, 1.0],
+            coeffs: &[[
+                0.3862485000, 1.5544035000, 2.5334145000,
+                2.1363075000, 1.0627430000, 0.2816950000,
+            ], [
+                0.4025160000, 1.6019100000, 2.5885710000,
+                2.1681365000, 1.0718770000, 0.2827390000,
+            ], [
+                34.7051520000, 68.6124000000, 54.9086400000,
+                23.0108000000, 5.4601600000, 0.6900250000,
+            ], [
+                -0.0375008379, 1.2708702246, -0.5616817383,
+                -0.4328177539, 0.4892740137, 0.2718560918,
+            ]],
+        },
+        hydrogen: SmallSpline1d {
+            x_div: &[-1.0, -0.8333333333, -0.5, 1.0],
+            coeffs: &[[
+                630.6336000042, 2721.4308000191, 4582.1544000348,
+                3781.7719000316, 1549.6358000143, 270.4568000026,
+            ], [
+                -94.9946400000, -229.8471299999, -210.6432299999,
+                -102.4683000000, -21.0823875000, 16.9534406250,
+            ], [
+                0.8376699753, -2.6535615062, 3.2913322346,
+                -2.5664219198, 2.0177562840, 19.0650249321,
+            ]],
+        },
+    };
+
+    impl<Array: AsRef<[f64]> + 'static> SmallSpline1d<Array> {
+        fn evaluate(&self, x: f64) -> (f64, f64) {
+            // NOTE: This linear search will *almost always* stop at one of the first two
+            //       elements.  Large cosine means small angles, which are rare.
+            for (i, &div) in self.x_div.iter().skip(1).enumerate() {
+                if x <= div {
+                    return polyval_dec(self.coeffs[i].as_ref(), x);
+                }
+            }
+
+            // tolerate fuzz
+            let high = *self.x_div.last().unwrap();
+            let width = high - self.x_div[0];
+            assert!(x < high + width * 1e-8);
+
+            polyval_dec(self.coeffs.last().unwrap().as_ref(), x)
+        }
+    }
 
     /// Evaluate a polynomial with coefficients listed in decreasing order
     pub(super) fn polyval_dec(coeffs: &[f64], x: f64) -> (f64, f64) {
         let poly_coeffs = coeffs.iter().cloned();
-        let deriv_coeffs = coeffs.iter().rev().skip(1).enumerate().map(|(n, x)| (n + 1) as f64 * x).rev();
+        let deriv_coeffs = polyder_dec(coeffs.iter().cloned());
         (_polyval_dec(poly_coeffs, x), _polyval_dec(deriv_coeffs, x))
     }
 
+    pub(super) fn polyder_dec(
+        coeffs: impl DoubleEndedIterator<Item=f64> + ExactSizeIterator + Clone,
+    ) -> impl DoubleEndedIterator<Item=f64> + ExactSizeIterator + Clone
+    { coeffs.rev().skip(1).enumerate().map(|(n, x)| (n + 1) as f64 * x).rev() }
+
+    #[inline(always)]
     pub(super) fn _polyval_dec(coeffs: impl Iterator<Item=f64>, x: f64) -> f64 {
         coeffs.fold(0.0, |acc, c| acc * x + c)
     }
 
     #[test]
     fn common_cases() {
-        // graphite
-        let BrennerG { value, d_cos, d_tcoord } = Input {
-            type_i: AtomType::Carbon,
-            cos: f64::cos(120.0 * PI / 180.0) + 1e-12,
-            tcoord: 3.0,
-        }.compute();
-        // Brenner Table 3
-        assert_close!(value, 0.05280);
-        assert_close!(d_cos, 0.17000);
-        assert_eq!(d_tcoord, 0.0);
+        let all_params = vec![Params::new_lammps(), Params::new_brenner()];
+        for params in &all_params {
+            // graphite
+            let BrennerG { value, d_cos, d_tcoord } = Input {
+                params,
+                type_i: AtomType::Carbon,
+                cos: f64::cos(120.0 * PI / 180.0) + 1e-12,
+                tcoord: 3.0,
+            }.compute();
+            // Brenner Table 3
+            assert_close!(value, 0.05280);
+            assert_close!(d_cos, 0.17000);
+            assert_eq!(d_tcoord, 0.0);
 
-        let BrennerG { value, d_cos, d_tcoord } = Input {
-            type_i: AtomType::Carbon,
-            cos: f64::cos(120.0 * PI / 180.0) - 1e-12,
-            tcoord: 3.0,
-        }.compute();
-        assert_close!(value, 0.05280);
-        assert_close!(d_cos, 0.17000);
-        assert_eq!(d_tcoord, 0.0);
+            let BrennerG { value, d_cos, d_tcoord } = Input {
+                params,
+                type_i: AtomType::Carbon,
+                cos: f64::cos(120.0 * PI / 180.0) - 1e-12,
+                tcoord: 3.0,
+            }.compute();
+            assert_close!(value, 0.05280);
+            assert_close!(d_cos, 0.17000);
+            assert_eq!(d_tcoord, 0.0);
 
-        // diamond
-        let BrennerG { value, d_cos, d_tcoord } = Input {
-            type_i: AtomType::Carbon,
-            cos: -1.0/3.0 + 1e-12,
-            tcoord: 4.0,
-        }.compute();
-        assert_close!(value, 0.09733);
-        assert_close!(d_cos, 0.40000);
-        assert_eq!(d_tcoord, 0.0);
+            // diamond
+            let BrennerG { value, d_cos, d_tcoord } = Input {
+                params,
+                type_i: AtomType::Carbon,
+                cos: -1.0/3.0 + 1e-12,
+                tcoord: 4.0,
+            }.compute();
+            assert_close!(value, 0.09733);
+            assert_close!(d_cos, 0.40000);
+            assert_eq!(d_tcoord, 0.0);
 
-        let BrennerG { value, d_cos, d_tcoord } = Input {
-            type_i: AtomType::Carbon,
-            cos: -1.0/3.0 - 1e-12,
-            tcoord: 4.0,
-        }.compute();
-        assert_close!(value, 0.09733);
-        assert_close!(d_cos, 0.40000);
-        assert_eq!(d_tcoord, 0.0);
+            let BrennerG { value, d_cos, d_tcoord } = Input {
+                params,
+                type_i: AtomType::Carbon,
+                cos: -1.0/3.0 - 1e-12,
+                tcoord: 4.0,
+            }.compute();
+            assert_close!(value, 0.09733);
+            assert_close!(d_cos, 0.40000);
+            assert_eq!(d_tcoord, 0.0);
+        }
     }
 
     #[test]
     fn numerical_derivatives() {
         macro_rules! check_derivatives {
             ($input:expr) => {{
-                let Input { type_i, cos, tcoord } = $input;
+                let Input { params, type_i, cos, tcoord } = $input;
                 let BrennerG { value: _, d_cos, d_tcoord } = $input.compute();
                 assert_close!(
                     rel=1e-7,
                     d_cos,
-                    numerical::slope(1e-7, None, cos, |cos| Input { type_i, cos, tcoord }.compute().value),
+                    numerical::slope(1e-7, None, cos, |cos| Input { params, type_i, cos, tcoord }.compute().value),
                 );
                 assert_close!(
                     rel=1e-7,
                     d_tcoord,
-                    numerical::slope(1e-7, None, tcoord, |tcoord| Input { type_i, cos, tcoord }.compute().value),
+                    numerical::slope(1e-7, None, tcoord, |tcoord| Input { params, type_i, cos, tcoord }.compute().value),
                 );
             }}
         }
 
         // 120 degrees is a branch point so try both sides as well as straddling it
-        for type_i in AtomType::iter_all() {
-            let coses = [
-                // within a region
-                C_X_0 + 1e-4, C_X_1 - 1e-4,
-                C_X_1 + 1e-4, C_X_2 - 1e-4,
-                C_X_2 + 1e-4, C_X_3 - 1e-4,
-                // straddle two regions
-                C_X_1,
-                C_X_2,
-            ];
-            let tcoords = [
-                C_T_LOW_COORDINATION - 1e-4,
-                C_T_LOW_COORDINATION + 1e-4,
-                C_T_HIGH_COORDINATION - 1e-4,
-                C_T_HIGH_COORDINATION + 1e-4,
-                C_T_HIGH_COORDINATION,
-                C_T_LOW_COORDINATION,
-            ];
-            for &cos in &coses {
-                for &tcoord in &tcoords {
-                    check_derivatives!{ Input { type_i, cos, tcoord } }
+        for ref params in vec![Params::new_brenner(), Params::new_lammps()] {
+            for type_i in AtomType::iter_all() {
+                let x_divs = match type_i {
+                    AtomType::Carbon => params.G.carbon_low_coord.x_div,
+                    AtomType::Hydrogen => params.G.hydrogen.x_div,
+                };
+
+                let mut coses = vec![];
+                // points within a region
+                coses.extend(x_divs[1..].iter().map(|x| x - 1e-4));
+                // points straddling two regions
+                coses.extend(x_divs[1..x_divs.len()-1].iter().cloned());
+
+                let mut tcoords = vec![
+                    3.0,
+                    // FIXME: points around 3.2 and 3.7 once the interpolation is implemented
+                ];
+                for &cos in &coses {
+                    for &tcoord in &tcoords {
+                        check_derivatives!{ Input { params, type_i, cos, tcoord } }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn continuity() {
+        let iter = vec![
+            (1e-13, Params::new_brenner()),
+            (1e-9, Params::new_lammps()), // these coeffs are rounded pretty badly
+        ];
+        for (tol, ref params) in iter {
+            println!("set");
+            for spline in params.G.all_splines() {
+                for i in 1..spline.coeffs.len() {
+                    // Should be continuous up to 2nd derivative
+                    let x = spline.x_div[i];
+                    let coeffs_a = spline.coeffs[i-1].iter().cloned();
+                    let coeffs_b = spline.coeffs[i].iter().cloned();
+                    let coeffs_da = polyder_dec(coeffs_a.clone());
+                    let coeffs_db = polyder_dec(coeffs_b.clone());
+                    let coeffs_dda = polyder_dec(coeffs_da.clone());
+                    let coeffs_ddb = polyder_dec(coeffs_db.clone());
+                    assert_close!(rel=tol, _polyval_dec(coeffs_a, x), _polyval_dec(coeffs_b, x));
+                    assert_close!(rel=tol, _polyval_dec(coeffs_da, x), _polyval_dec(coeffs_db, x));
+                    assert_close!(rel=tol, _polyval_dec(coeffs_dda, x), _polyval_dec(coeffs_ddb, x));
                 }
             }
         }
@@ -2357,12 +2526,23 @@ fn sbvec_scaled<T: ::std::ops::MulAssign<f64>>(f: f64, mut xs: SiteBondVec<T>) -
 fn sbvec_filled<T: Clone>(fill: T, len: usize) -> SiteBondVec<T>
 { ::std::iter::repeat(fill).take(len).collect() }
 
+#[inline(always)] // elide large stack-to-stack copies
+fn axpy_mut<T: Copy>(a: &mut [T], alpha: f64, b: &[T])
+where f64: ::std::ops::Mul<T, Output=T>, T: ::std::ops::AddAssign<T>,
+{
+    for (a, b) in zip_eq!(a, b) {
+        *a += alpha * *b;
+    }
+}
+
 fn scaled<T: ::std::ops::MulAssign<f64>>(f: f64, mut xs: Vec<T>) -> Vec<T>
 { scale_mut(f, &mut xs); xs }
 
 
 fn scale_mut<T: ::std::ops::MulAssign<f64>>(factor: f64, xs: &mut [T]) {
-    for x in xs { *x *= factor; }
+    for x in xs {
+        *x *= factor;
+    }
 }
 
 fn cleared<T>(mut vec: Vec<T>) -> Vec<T> {

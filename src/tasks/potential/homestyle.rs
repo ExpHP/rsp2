@@ -219,7 +219,7 @@ fn test_rebo_diff() -> FailResult<()> {
     let diff_lmp = pot_lmp.initialize_diff_fn(&coords, meta.sift())?.compute(&coords, meta.sift())?;
     let diff_rsp2 = pot_rsp2.initialize_diff_fn(&coords, meta.sift())?.compute(&coords, meta.sift())?;
 
-    let num_grad = numerical::try_gradient(1e-7, None, &coords.to_carts().flat(), |carts| {
+    let num_grad = numerical::try_gradient(1e-4, None, &coords.to_carts().flat(), |carts| {
         let coords = coords.clone().with_carts(carts.nest().to_vec());
         pot_rsp2.initialize_diff_fn(&coords, meta.sift())?.compute(&coords, meta.sift())
             .map(|x| x.0)
@@ -231,12 +231,12 @@ fn test_rebo_diff() -> FailResult<()> {
 }
 
 #[test]
-fn test_rebo() -> FailResult<()> {
+fn test_rebo_value() -> FailResult<()> {
     use ::rsp2_structure::{Lattice, CoordsKind, consts as elem};
     use ::rsp2_array_types::{Envee, Unvee};
     use ::meta::{self, prelude::*};
 
-    let coords = Coords::new(
+    let mut coords = Coords::new(
         Lattice::from([
             [2.459270778739769, 0.0, 0.0],
             [-1.2296353893698847, 2.129790969173379, 0.0],
@@ -247,6 +247,8 @@ fn test_rebo() -> FailResult<()> {
             [1.2296353893698847, 0.7099303230577932, 5.0],
         ].envee()),
     );
+    coords.carts_mut()[1][0] += 0.1;
+    coords.carts_mut()[1][2] += 0.1;
     let cfg_lmp: cfg::PotentialKind = from_json!{{
         "rebo": {
             "omp": false,

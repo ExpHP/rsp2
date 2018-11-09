@@ -15,16 +15,20 @@
 //! likely that other crates which use rsp2_minimize may want to
 //! use these to debug the potentials they are giving to this crate.
 
-/// Computation method for a numerical 1D derivative.
+/// Approximation method for a numerical 1D derivative.
 #[derive(Copy, Clone, Debug)]
 pub enum DerivativeKind {
     /// Central difference approximation.
     CentralDifference,
+    /// 4-point central difference with 4th order error.
+    ///
+    /// FIXME (this shouldn't exist, replace with a generalization)
+    CentralDifference4,
 }
 
 impl Default for DerivativeKind {
     fn default() -> DerivativeKind {
-        DerivativeKind::CentralDifference
+        DerivativeKind::CentralDifference4
     }
 }
 
@@ -90,6 +94,13 @@ where
             let val_plus = value_fn(point + 0.5 * interval_width)?;
             let val_minus = value_fn(point - 0.5 * interval_width)?;
             Ok((val_plus - val_minus) / interval_width)
+        },
+        DerivativeKind::CentralDifference4 => {
+            let val_plus2 = value_fn(point + 2.0 * interval_width)?;
+            let val_plus = value_fn(point + interval_width)?;
+            let val_minus = value_fn(point - interval_width)?;
+            let val_minus2 = value_fn(point - 2.0 * interval_width)?;
+            Ok((-val_plus2 + 8.0 * val_plus - 8.0 * val_minus + val_minus2) / (12.0 * interval_width))
         },
     }
 }
