@@ -27,7 +27,7 @@ extern crate rsp2_minimize;
 extern crate rsp2_structure;
 extern crate rsp2_structure_io;
 extern crate rsp2_phonopy_io;
-extern crate rsp2_array_utils;
+#[macro_use] extern crate rsp2_array_utils;
 extern crate rsp2_array_types;
 extern crate rsp2_soa_ops;
 extern crate rsp2_slice_math;
