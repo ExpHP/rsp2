@@ -178,6 +178,7 @@ mod params {
     pub struct Params {
         pub by_type: TypeMap<TypeMap<TypeParams>>,
         pub G: brenner_G::SplineSet,
+        pub use_airebo_lambda: bool,
     }
 
     #[derive(Debug, Copy, Clone)]
@@ -246,6 +247,7 @@ mod params {
                 },
             };
             Params {
+                use_airebo_lambda: false,
                 G: brenner_G::BRENNER_SPLINES,
                 by_type,
             }
@@ -311,6 +313,7 @@ mod params {
                 },
             };
             Params {
+                use_airebo_lambda: true,
                 G: brenner_G::LAMMPS_SPLINES,
                 by_type,
             }
@@ -644,7 +647,7 @@ fn compute_rebo_bonds(
                     VA = weight * UA;
                     VA_d_length = weight_d_length * UA + weight * UA_d_length;
                 }
-                println!("rs-VR: {}", VA);
+                println!("rs-VA: {}", VA);
                 bond_VA.push(VA);
                 bond_VA_d_delta.push(VA_d_length * length_d_delta);
             } // for _ in interactions.bonds(site)
@@ -679,17 +682,26 @@ fn compute_rebo_bonds(
         //       the derivatives.
 
         // Eq 3':  b_ij = 0.5 * b_ij^{sigma-pi} + boole(i < j) * b_ij^{pi}
-        for __bond in interactions.bonds(site_i) {
+        for (index_ij, __bond) in interactions.bonds(site_i).enumerate() {
             let site_j = __bond.target;
             let tcoord_j = site_data[site_j].tcoord;
             let type_j = interactions.site(site_j).atom_type;
+            let weight_ij = bond_weight[index_ij];
+
+            let weight_ji = weight_ij;
+
+            // This is what Ni almost always *actually* means in Brenner.
+            // (he really should have called it Nij, with two indices; Stuart's AIREBO
+            //  paper does it better)
+            let tcoord_ij = tcoord_i - weight_ij;
+            let tcoord_ji = tcoord_j - weight_ji;
 
             // boole(i < j) * b_ij^{pi}
             if __bond.is_canonical {
-                if !brenner_T::can_assume_zero((type_i, type_j), (tcoord_i, tcoord_j)) {
+                if !brenner_T::can_assume_zero((type_i, type_j), (tcoord_ij, tcoord_ji)) {
                     panic!("brenner T spline may be nonzero; this is not yet implemented");
                 }
-                if !brenner_F::can_assume_zero((type_i, type_j), (tcoord_i, tcoord_j)) {
+                if !brenner_F::can_assume_zero((type_i, type_j), (tcoord_ij, tcoord_ji)) {
                     panic!("brenner F spline may be nonzero; this is not yet implemented");
                 }
             }
@@ -798,7 +810,7 @@ mod site_sigma_pi_term {
     fn compute(input: Input<'_>) -> Output {
         // Eq 8:  b_{ij}^{sigma-pi} = sqrt(
         //                     1 + sum_{k /= i, j} f^c(r_{ik}) G(cos(t_{ijk}) e^{lambda_{ijk}
-        //                       + P_{ij}(N_i^C, N_i^H)
+        //                       + P_{ij}(N_ij^C, N_ij^H)
         //        )
         let Input {
             params, interactions, bond_weights,
@@ -822,18 +834,6 @@ mod site_sigma_pi_term {
             type_present[target_type] = true;
         }
 
-        // P only needs to be evaluated up to two times per atom
-        // (depending on the types of its neighbors)
-        let P_by_type = enum_map!{
-            target_type => {
-                let type_j = target_type;
-                match type_present[target_type] {
-                    true => Some(brenner_P::Input { type_i, type_j, ccoord_i, hcoord_i }.compute()),
-                    false => None,
-                }
-            }
-        };
-
         // Handle all terms
         let mut value = 0.0;
         let mut d_deltas: SiteBondVec<V3> = sbvec_filled(V3::zero(), bond_weights.len());
@@ -842,6 +842,20 @@ mod site_sigma_pi_term {
         for (index_ij, __bond) in interactions.bonds(site_i).enumerate() {
             let type_j = bond_target_types[index_ij];
             let delta_ij = __bond.cart_vector;
+            let weight_ij = bond_weights[index_ij];
+
+            // These are what Brenner's Ni REALLY are.
+            let ccoord_ij = ccoord_i - boole(type_j == AtomType::Carbon) * weight_ij;
+            let hcoord_ij = hcoord_i - boole(type_j == AtomType::Hydrogen) * weight_ij;
+
+            // NOTE: When all weights are integers, each site will only ever have at most
+            //       two unique values of P computed. (one for each target type).
+            //
+            //       However, for fractional weights, the Nij may not all be equal.
+            //
+            //       Given that integer weights already take a fast path in BrennerP,
+            //       it's not worth optimizing this; we'll just compute it for every bond.
+            let P_ij = brenner_P::Input { type_i, type_j, ccoord_ij, hcoord_ij }.compute();
 
             // Gather all cosines between bond i->j and other bonds i->k.
             let coses_ijk;
@@ -885,17 +899,16 @@ mod site_sigma_pi_term {
                 // Compute bsp as a function of many things...
                 let out = bondorder_sigma_pi::Input {
                     params,
-                    type_i, type_j, ccoord_i, hcoord_i,
+                    type_i, type_j, ccoord_ij, hcoord_ij, P_ij,
                     coses_ijk: &coses_ijk,
                     types_k: &bond_target_types,
                     weights_ik: bond_weights,
                     skip_index: index_ij, // used to exclude the ijj angle
-                    P_ij: P_by_type[type_j].expect(""),
                 }.compute();
                 let BondOrderSigmaPi {
                     value: tmp_value,
-                    d_ccoord_i: bsp_ij_d_ccoord_i,
-                    d_hcoord_i: bsp_ij_d_hcoord_i,
+                    d_ccoord_ij: bsp_ij_d_ccoord_ij,
+                    d_hcoord_ij: bsp_ij_d_hcoord_ij,
                     d_coses_ijk: bsp_ij_d_coses_ijk,
                     d_weights_ik: bsp_ij_d_weights_ik,
                 } = out;
@@ -904,15 +917,20 @@ mod site_sigma_pi_term {
                 let mut tmp_d_deltas: SiteBondVec<V3> = sbvec_filled(V3::zero(), bond_weights.len());
                 let mut tmp_d_weights: SiteBondVec<f64> = sbvec_filled(0.0, bond_weights.len());
 
-                // Even though this term describes a single bond, its dependence on the coordination
-                // numbers produce derivatives with respect to all of the bond weights.
-                if (bsp_ij_d_ccoord_i, bsp_ij_d_hcoord_i) != (0.0, 0.0) {
-                    for (index, ty) in bond_target_types.iter().enumerate() {
-                        match ty {
-                            // ccoord_i_d_weight = 1.0,  hcoord_i_d_weight = 0.0
-                            AtomType::Carbon => tmp_d_weights[index] += bsp_ij_d_ccoord_i,
-                            // ccoord_i_d_weight = 0.0,  hcoord_i_d_weight = 1.0
-                            AtomType::Hydrogen => tmp_d_weights[index] += bsp_ij_d_hcoord_i,
+                // Even though this term describes a single bond, its dependence on the tcoord_ij
+                // produce derivatives with respect to all of the bond weights *except* that of ij.
+                if (bsp_ij_d_ccoord_ij, bsp_ij_d_hcoord_ij) != (0.0, 0.0) {
+                    for (index_ik, ty) in bond_target_types.iter().enumerate() {
+                        if index_ik == index_ij {
+                            // ccoord_ij_d_weight_ik = 0.0,  hcoord_ij_d_weight_ik = 0.0
+                            continue;
+                        } else {
+                            match ty {
+                                // ccoord_ij_d_weight_ik = 1.0,  hcoord_ij_d_weight_ik = 0.0
+                                AtomType::Carbon => tmp_d_weights[index_ik] += bsp_ij_d_ccoord_ij,
+                                // ccoord_ij_d_weight_ik = 0.0,  hcoord_ij_d_weight_ik = 1.0
+                                AtomType::Hydrogen => tmp_d_weights[index_ik] += bsp_ij_d_hcoord_ij,
+                            }
                         }
                     }
                 }
@@ -961,8 +979,8 @@ mod bondorder_sigma_pi {
         // bond from atom i to another atom j
         pub type_i: AtomType,
         pub type_j: AtomType,
-        pub ccoord_i: f64,
-        pub hcoord_i: f64,
+        pub ccoord_ij: f64,
+        pub hcoord_ij: f64,
         // precomputed spline that depends on the coordination at i and the atom type at j
         pub P_ij: BrennerP,
         // cosines of this bond with every other bond at i, and their weights
@@ -974,8 +992,8 @@ mod bondorder_sigma_pi {
     }
     pub struct BondOrderSigmaPi {
         pub value: f64,
-        pub d_ccoord_i: f64,
-        pub d_hcoord_i: f64,
+        pub d_ccoord_ij: f64,
+        pub d_hcoord_ij: f64,
         // values at skip_index are unspecified
         pub d_coses_ijk: SiteBondVec<f64>,
         pub d_weights_ik: SiteBondVec<f64>,
@@ -994,24 +1012,24 @@ mod bondorder_sigma_pi {
         let Input {
             params,
             type_i, type_j,
-            ccoord_i, hcoord_i, P_ij,
+            ccoord_ij, hcoord_ij, P_ij,
             types_k, weights_ik, coses_ijk,
             skip_index,
         } = input;
-        let tcoord = ccoord_i + hcoord_i;
-        let tcoord_d_ccoord_i = 1.0;
-        let tcoord_d_hcoord_i = 1.0;
+        let tcoord_ij = ccoord_ij + hcoord_ij;
+        let tcoord_ij_d_ccoord_ij = 1.0;
+        let tcoord_ij_d_hcoord_ij = 1.0;
 
         // properties of the stuff in the square root
         let inner_value;
-        let inner_d_ccoord_i;
-        let inner_d_hcoord_i;
+        let inner_d_ccoord_ij;
+        let inner_d_hcoord_ij;
         let inner_d_coses_ijk;
         let inner_d_weights_ik;
         {
             let mut tmp_value = 0.0;
-            let mut tmp_d_ccoord_i = 0.0;
-            let mut tmp_d_hcoord_i = 0.0;
+            let mut tmp_d_ccoord_ij = 0.0;
+            let mut tmp_d_hcoord_ij = 0.0;
             let mut tmp_d_coses_ijk = SiteBondVec::new();
             let mut tmp_d_weights_ik = SiteBondVec::new();
 
@@ -1021,12 +1039,12 @@ mod bondorder_sigma_pi {
 
             let BrennerP {
                 value: P,
-                d_ccoord_i: P_d_ccoord_i,
-                d_hcoord_i: P_d_hcoord_i,
+                d_ccoord_ij: P_d_ccoord_ij,
+                d_hcoord_ij: P_d_hcoord_ij,
             } = P_ij;
             tmp_value += P;
-            tmp_d_ccoord_i += P_d_ccoord_i;
-            tmp_d_hcoord_i += P_d_hcoord_i;
+            tmp_d_ccoord_ij += P_d_ccoord_ij;
+            tmp_d_hcoord_ij += P_d_hcoord_ij;
 
             let iter = zip_eq!(weights_ik, coses_ijk, types_k).enumerate();
             for (index_ik, (&weight_ik, &cos_ijk, &type_k)) in iter {
@@ -1034,31 +1052,34 @@ mod bondorder_sigma_pi {
                     tmp_d_coses_ijk.push(NAN);
                     tmp_d_weights_ik.push(NAN);
                 } else {
-                    let exp_lambda = brenner_exp_lambda(type_i, (type_j, type_k));
+                    let exp_lambda = match params.use_airebo_lambda {
+                        true => airebo_exp_lambda(type_i, (type_j, type_k)),
+                        false => brenner_exp_lambda(type_i, (type_j, type_k)),
+                    };
                     println!("rs-explambda: {}", exp_lambda);
-                    println!("rs-tcoord: {}", tcoord);
+                    println!("rs-tcoord: {}", tcoord_ij);
 
                     let BrennerG {
                         value: G,
-                        d_cos: G_d_cos,
-                        d_tcoord: G_d_tcoord,
-                    } = brenner_G::Input { params, type_i, cos: cos_ijk, tcoord }.compute();
-                    println!("rs-g gc dN {} {} {}", G, G_d_cos, G_d_tcoord);
+                        d_cos_ijk: G_d_cos_ijk,
+                        d_tcoord_ij: G_d_tcoord_ij,
+                    } = brenner_G::Input { params, type_i, cos_ijk, tcoord_ij }.compute();
+                    println!("rs-g gc dN {} {} {}", G, G_d_cos_ijk, G_d_tcoord_ij);
 
-                    let G_d_ccoord = G_d_tcoord * tcoord_d_ccoord_i;
-                    let G_d_hcoord = G_d_tcoord * tcoord_d_hcoord_i;
+                    let G_d_ccoord_ij = G_d_tcoord_ij * tcoord_ij_d_ccoord_ij;
+                    let G_d_hcoord_ij = G_d_tcoord_ij * tcoord_ij_d_hcoord_ij;
 
                     tmp_value += exp_lambda * weight_ik * G;
-                    tmp_d_ccoord_i += exp_lambda * weight_ik * G_d_ccoord;
-                    tmp_d_hcoord_i += exp_lambda * weight_ik * G_d_hcoord;
-                    tmp_d_coses_ijk.push(exp_lambda * weight_ik * G_d_cos);
+                    tmp_d_ccoord_ij += exp_lambda * weight_ik * G_d_ccoord_ij;
+                    tmp_d_hcoord_ij += exp_lambda * weight_ik * G_d_hcoord_ij;
+                    tmp_d_coses_ijk.push(exp_lambda * weight_ik * G_d_cos_ijk);
                     tmp_d_weights_ik.push(exp_lambda * 1.0 * G);
                 }
             }
 
             inner_value = tmp_value;
-            inner_d_ccoord_i = tmp_d_ccoord_i;
-            inner_d_hcoord_i = tmp_d_hcoord_i;
+            inner_d_ccoord_ij = tmp_d_ccoord_ij;
+            inner_d_hcoord_ij = tmp_d_hcoord_ij;
             inner_d_coses_ijk = tmp_d_coses_ijk;
             inner_d_weights_ik = tmp_d_weights_ik;
         }
@@ -1070,8 +1091,8 @@ mod bondorder_sigma_pi {
         let prefactor = 0.5 / value;
         Output {
             value: value,
-            d_ccoord_i: prefactor * inner_d_ccoord_i,
-            d_hcoord_i: prefactor * inner_d_hcoord_i,
+            d_ccoord_ij: prefactor * inner_d_ccoord_ij,
+            d_hcoord_ij: prefactor * inner_d_hcoord_ij,
             d_coses_ijk: sbvec_scaled(prefactor, inner_d_coses_ijk),
             d_weights_ik: sbvec_scaled(prefactor, inner_d_weights_ik),
         }
@@ -1087,8 +1108,8 @@ mod bondorder_sigma_pi {
 //    pub struct Input<I: IntoIterator<Item=DihedralItem>> {
 //        pub type_i: AtomType,
 //        pub type_j: AtomType,
-//        pub tcoord_i: f64,
-//        pub tcoord_j: f64,
+//        pub tcoord_ij: f64,
+//        pub tcoord_ji: f64,
 //        pub xcoord_ij: f64,
 //        pub dihedrals_ijkl: I,
 //    }
@@ -1099,8 +1120,8 @@ mod bondorder_sigma_pi {
 //    }
 //    pub struct BondOrderDihedral {
 //        pub value: f64,
-//        pub d_tcoord_i: f64,
-//        pub d_tcoord_j: f64,
+//        pub d_tcoord_ij: f64,
+//        pub d_tcoord_ji: f64,
 //        pub d_xcoord_ij: f64,
 //        pub d_sinsqs_ijkl: Vec<f64>,
 //        pub d_weights_ik: Vec<f64>,
@@ -1121,13 +1142,13 @@ mod bondorder_sigma_pi {
 //        // value = T * sum
 //
 //        // T = a tricubic spline
-//        let Input { type_i, type_j, tcoord_i, tcoord_j, xcoord_ij, dihedrals_ijkl } = input;
+//        let Input { type_i, type_j, tcoord_ij, tcoord_ji, xcoord_ij, dihedrals_ijkl } = input;
 //        let BrennerT {
 //            value: T,
-//            d_tcoord_i: T_d_tcoord_i,
-//            d_tcoord_j: T_d_tcoord_j,
+//            d_tcoord_ij: T_d_tcoord_ij,
+//            d_tcoord_ji: T_d_tcoord_ji,
 //            d_xcoord_ij: T_d_xcoord_ij,
-//        } = brenner_T::Input { type_i, type_j, tcoord_i, tcoord_j, xcoord_ij }.compute();
+//        } = brenner_T::Input { type_i, type_j, tcoord_ij, tcoord_ji, xcoord_ij }.compute();
 //
 //        // sum = ∑_{k,l} ((1 - cos(Θ_{ijkl})^2) f_{ik} f_{jl})
 //        let mut sum = 0.0;
@@ -1145,8 +1166,8 @@ mod bondorder_sigma_pi {
 //        // output is product
 //        Output {
 //            value: T * sum,
-//            d_tcoord_i: T_d_tcoord_i * sum,
-//            d_tcoord_j: T_d_tcoord_j * sum,
+//            d_tcoord_ij: T_d_tcoord_ij * sum,
+//            d_tcoord_ji: T_d_tcoord_ji * sum,
 //            d_xcoord_ij: T_d_xcoord_ij * sum,
 //            d_sinsqs_ijkl: scaled(T, sum_d_sinsqs_ijkl),
 //            d_weights_ik: scaled(T, sum_d_weights_ik),
@@ -1319,6 +1340,28 @@ fn brenner_exp_lambda(i: AtomType, jk: (AtomType, AtomType)) -> f64 {
         },
     }
 }
+
+fn airebo_exp_lambda(i: AtomType, jk: (AtomType, AtomType)) -> f64 {
+    match (i, jk) {
+        (AtomType::Carbon, _) |
+        (AtomType::Hydrogen, (AtomType::Carbon, AtomType::Carbon)) => 1.0, // exp(0)
+
+        (AtomType::Hydrogen, (AtomType::Hydrogen, AtomType::Hydrogen)) => f64::exp(4.0),
+
+        (AtomType::Hydrogen, (AtomType::Carbon, AtomType::Hydrogen)) |
+        (AtomType::Hydrogen, (AtomType::Hydrogen, AtomType::Carbon)) => {
+            // FIXME: The brenner paper says they fit this, but I can't find the value anywhere.
+            //
+            // (lammps does something weird here involving the bond lengths and a parameter
+            //  they call rho... did I miss something?)
+            panic!{"\
+                Bond-bond interactions of type HHC (an H and a C both bonded to an H) are \
+                currently missing an interaction parameter\
+            "}
+        },
+    }
+}
+
 
 // `1 - \cos(\Theta_{ijkl})^2` in Brenner (equation 19)
 use self::dihedral_sine_sq::DihedralSineSq;
@@ -1509,20 +1552,20 @@ mod brenner_P {
     pub struct Input {
         pub type_i: AtomType,
         pub type_j: AtomType,
-        pub ccoord_i: f64,
-        pub hcoord_i: f64,
+        pub ccoord_ij: f64,
+        pub hcoord_ij: f64,
     }
 
     #[derive(Debug, Copy, Clone)]
     pub struct BrennerP {
         pub value: f64,
-        pub d_ccoord_i: f64,
-        pub d_hcoord_i: f64,
+        pub d_ccoord_ij: f64,
+        pub d_hcoord_ij: f64,
     }
 
     impl BrennerP {
         fn with_zero_deriv(value: f64) -> Self {
-            BrennerP { value, d_ccoord_i: 0.0, d_hcoord_i: 0.0 }
+            BrennerP { value, d_ccoord_ij: 0.0, d_hcoord_ij: 0.0 }
         }
         fn zero() -> Self { Self::with_zero_deriv(0.0) }
     }
@@ -1534,7 +1577,7 @@ mod brenner_P {
     }
 
     fn compute(input: Input) -> Output {
-        let Input { type_i, type_j, ccoord_i, hcoord_i } = input;
+        let Input { type_i, type_j, ccoord_ij, hcoord_ij } = input;
 
         // NOTE:
         //
@@ -1542,9 +1585,9 @@ mod brenner_P {
         // that requires the reactive parts of the potential.
         //
         // Thus, this function is a cop-out.
-        let int_ccoord = ccoord_i as i64;
-        let int_hcoord = hcoord_i as i64;
-        if int_ccoord as f64 != ccoord_i || int_hcoord as f64 != hcoord_i {
+        let int_ccoord = ccoord_ij as i64;
+        let int_hcoord = hcoord_ij as i64;
+        if int_ccoord as f64 != ccoord_ij || int_hcoord as f64 != hcoord_ij {
             panic!("Fractional coordination not yet implemented for Brenner P splines.");
         }
 
@@ -1596,15 +1639,15 @@ mod brenner_F {
     pub struct Input {
         pub type_i: AtomType,
         pub type_j: AtomType,
-        pub tcoord_i: f64,
-        pub tcoord_j: f64,
+        pub tcoord_ij: f64,
+        pub tcoord_ji: f64,
         pub xcoord_ij: f64,
     }
 
     pub struct BrennerF {
         pub value: f64,
-        pub d_ccoord_i: f64,
-        pub d_hcoord_i: f64,
+        pub d_tcoord_ij: f64,
+        pub d_tcoord_ji: f64,
         pub d_xcoord_ij: f64,
     }
 
@@ -1612,8 +1655,8 @@ mod brenner_F {
         fn zero() -> Self {
             BrennerF {
                 value: 0.0,
-                d_ccoord_i: 0.0,
-                d_hcoord_i: 0.0,
+                d_tcoord_ij: 0.0,
+                d_tcoord_ji: 0.0,
                 d_xcoord_ij: 0.0,
             }
         }
@@ -1625,7 +1668,7 @@ mod brenner_F {
 
     // Tables 4, 6, and 9
     fn compute(input: Input) -> Output {
-        let Input { type_i, type_j, tcoord_i, tcoord_j, xcoord_ij } = input;
+        let Input { type_i, type_j, tcoord_ij, tcoord_ji, xcoord_ij } = input;
 
 
         // NOTE:
@@ -1635,8 +1678,8 @@ mod brenner_F {
         //
         // Thus, this function is a complete cop-out.
         panic!(
-            "Not yet implemented for Brenner F: {}{} bond, Ni = {}, Nj = {}, Nconj = {}",
-            type_i.char(), type_j.char(), tcoord_i, tcoord_j, xcoord_ij,
+            "Not yet implemented for Brenner F: {}{} bond, Nij = {}, Nji = {}, Nconj = {}",
+            type_i.char(), type_j.char(), tcoord_ij, tcoord_ji, xcoord_ij,
         );
     }
 
@@ -1644,9 +1687,9 @@ mod brenner_F {
     // without needing to compute N^{conj}
     pub fn can_assume_zero(
         (type_i, type_j): (AtomType, AtomType),
-        (tcoord_i, tcoord_j): (f64, f64),
+        (tcoord_ij, tcoord_ji): (f64, f64),
     ) -> bool {
-        let frac_point = V2([tcoord_i, tcoord_j]);
+        let frac_point = V2([tcoord_ij, tcoord_ji]);
         let int_point = frac_point.map(|x| x as i32);
         if frac_point != int_point.map(|x| x as f64) {
             return false;
@@ -1689,9 +1732,9 @@ mod brenner_F {
 //
 //    type ParamArray = nd![f64; N_COORDINATION; N_COORDINATION; N_CONJ];
 //    struct FCarbonCarbon {
-//        value: ParamArray,   // indices are N_i^T, N_j^T, N_{ij}^{conj}
-//        d_di: ParamArray,    // Derivative with respect to N_i^T
-//        d_dj: ParamArray,    // Derivative with respect to N_j^T
+//        value: ParamArray,   // indices are N_ij^T, N_ji^T, N_{ij}^{conj}
+//        d_di: ParamArray,    // Derivative with respect to N_ij^T
+//        d_dj: ParamArray,    // Derivative with respect to N_ji^T
 //        d_dconj: ParamArray, // Derivative with respect to N_{ij}^{conj}
 //    }
 //
@@ -1730,8 +1773,8 @@ mod brenner_F {
 //            // (notice how F[2][2][3] > F[2][2][2])
 //            //
 //            // NOTE: For reference, LAMMPS does use the values exactly as written in the paper.
-//            //       (although it's hard to tell at first since they uniformly scale all parameters
-//            //        by 1/2)
+//            //       (although it's hard to tell at first since they also fix Brenner's mistake
+//            //        of doubling the value of each parameter)
 //            // !!!!!!!!!!!!
 //            out.value[2][2][3] = 0.039_705_87;
 //            out.value[2][2][4] = 0.033_088_22;
@@ -1798,6 +1841,17 @@ mod brenner_F {
 //                    out.d_dj[i][j].copy_from_slice(&out.value[j][i]);
 //                }
 //            }
+//
+//            // HACK: The values in Brenner (2002) are actually 2 * F.
+//            //
+//            // (TODO: Fix the values above)
+//            for i in 0..N_COORDINATION {
+//                for j in 0..N_COORDINATION {
+//                    for k in 0..N_CONJ {
+//                        out.d_dj[i][j][k] /= 2.0;
+//                    }
+//                }
+//            }
 //        }
 //    }
 }
@@ -1812,15 +1866,15 @@ mod brenner_T {
     pub struct Input {
         pub type_i: AtomType,
         pub type_j: AtomType,
-        pub tcoord_i: f64,
-        pub tcoord_j: f64,
+        pub tcoord_ij: f64,
+        pub tcoord_ji: f64,
         pub xcoord_ij: f64,
     }
 
     pub struct BrennerT {
         pub value: f64,
-        pub d_tcoord_i: f64,
-        pub d_tcoord_j: f64,
+        pub d_tcoord_ij: f64,
+        pub d_tcoord_ji: f64,
         pub d_xcoord_ij: f64,
     }
 
@@ -1828,8 +1882,8 @@ mod brenner_T {
         fn with_zero_deriv(value: f64) -> Self {
             Output {
                 value,
-                d_tcoord_i: 0.0,
-                d_tcoord_j: 0.0,
+                d_tcoord_ij: 0.0,
+                d_tcoord_ji: 0.0,
                 d_xcoord_ij: 0.0,
             }
         }
@@ -1842,7 +1896,7 @@ mod brenner_T {
 
     // free function for smaller indent
     fn compute(input: Input) -> Output {
-        let Input { type_i, type_j, tcoord_i, tcoord_j, xcoord_ij } = input;
+        let Input { type_i, type_j, tcoord_ij, tcoord_ji, xcoord_ij } = input;
 
         // NOTE:
         //
@@ -1850,7 +1904,7 @@ mod brenner_T {
         // that requires the reactive parts of the potential.
         //
         // Thus, this function is a complete cop-out.
-        let frac_point = V3([tcoord_i, tcoord_j, xcoord_ij]);
+        let frac_point = V3([tcoord_ij, tcoord_ji, xcoord_ij]);
         let int_point = frac_point.map(|x| {
             let out = x as i32;
             assert_eq!(
@@ -1863,8 +1917,8 @@ mod brenner_T {
         macro_rules! not_supported {
             () => {{
                 panic!(
-                    "Not yet implemented for Brenner T: {}{} bond, Ni = {}, Nj = {}, Nconj = {}",
-                    type_i.char(), type_j.char(), tcoord_i, tcoord_j, xcoord_ij,
+                    "Not yet implemented for Brenner T: {}{} bond, Nij = {}, Nji = {}, Nconj = {}",
+                    type_i.char(), type_j.char(), tcoord_ij, tcoord_ji, xcoord_ij,
                 )
             }};
         }
@@ -1895,9 +1949,9 @@ mod brenner_T {
     // without needing to compute N^{conj}
     pub fn can_assume_zero(
         (type_i, type_j): (AtomType, AtomType),
-        (tcoord_i, tcoord_j): (f64, f64),
+        (tcoord_ij, tcoord_ji): (f64, f64),
     ) -> bool {
-        let frac_point = V2([tcoord_i, tcoord_j]);
+        let frac_point = V2([tcoord_ij, tcoord_ji]);
         let int_point = frac_point.map(|x| x as i32);
         if frac_point != int_point.map(|x| x as f64) {
             return false;
@@ -1931,14 +1985,14 @@ mod brenner_G {
     pub struct Input<'a> {
         pub params: &'a Params,
         pub type_i: AtomType,
-        pub cos: f64,
-        pub tcoord: f64,
+        pub tcoord_ij: f64,
+        pub cos_ijk: f64,
     }
 
     pub struct BrennerG {
         pub value: f64,
-        pub d_cos: f64,
-        pub d_tcoord: f64,
+        pub d_tcoord_ij: f64,
+        pub d_cos_ijk: f64,
     }
 
     impl<'a> Input<'a> {
@@ -1947,31 +2001,34 @@ mod brenner_G {
 
     // free function for smaller indent
     fn compute(input: Input<'_>) -> Output {
-        let Input { params, type_i, cos, tcoord } = input;
+        let Input { params, type_i, cos_ijk, tcoord_ij } = input;
 
+        // FIXME: Double-double check this with Stuart.  Why is the switching regime for
+        //        a coordination number larger than diamond?  (remember N_ij is usually
+        //        coordination number minus one)
         // Almost all cases can be referred to a single polynomial evaluation
-        // with no local dependence on tcoord.
+        // with no local dependence on tcoord_ij.
         //
-        // The sole exception is the regime 3.2 <= tcoord <= 3.7 for carbon.
+        // The sole exception is the regime 3.2 <= tcoord_ij <= 3.7 for carbon.
         macro_rules! use_single_poly {
             ($poly:expr) => {{
-                let d_tcoord = 0.0;
-                let (value, d_cos) = $poly.evaluate(cos);
-                Output { value, d_cos, d_tcoord }
+                let d_tcoord_ij = 0.0;
+                let (value, d_cos_ijk) = $poly.evaluate(cos_ijk);
+                Output { value, d_cos_ijk, d_tcoord_ij }
             }}
         }
 
         match type_i {
             AtomType::Carbon => {
-                let (alpha, alpha_d_tcoord) = switch((3.2, 3.7), tcoord);
+                let (alpha, alpha_d_tcoord_ij) = switch((3.2, 3.7), tcoord_ij);
 
                 // easy way out for now
                 //
                 // condition on alpha_d_tcoord is necessary for cases that are just barely
                 // in the switching regime that may happen to have zero alpha
-                if alpha == 0.0 && alpha_d_tcoord == 0.0 {
+                if alpha == 0.0 && alpha_d_tcoord_ij == 0.0 {
                     use_single_poly!(&params.G.carbon_low_coord)
-                } else if alpha == 1.0 && alpha_d_tcoord == 0.0 {
+                } else if alpha == 1.0 && alpha_d_tcoord_ij == 0.0 {
                     warn!("untested codepath: 37236e5f-9810-4ee5-a8c3-0a5150d9bd26");
                     use_single_poly!(&params.G.carbon_high_coord)
                 } else {
@@ -2243,47 +2300,47 @@ for (name, heading, terms) in pieces:
         let all_params = vec![Params::new_lammps(), Params::new_brenner()];
         for params in &all_params {
             // graphite
-            let BrennerG { value, d_cos, d_tcoord } = Input {
+            let BrennerG { value, d_cos_ijk, d_tcoord_ij } = Input {
                 params,
                 type_i: AtomType::Carbon,
-                cos: f64::cos(120.0 * PI / 180.0) + 1e-12,
-                tcoord: 3.0,
+                cos_ijk: f64::cos(120.0 * PI / 180.0) + 1e-12,
+                tcoord_ij: 3.0,
             }.compute();
             // Brenner Table 3
             assert_close!(value, 0.05280);
-            assert_close!(d_cos, 0.17000);
-            assert_eq!(d_tcoord, 0.0);
+            assert_close!(d_cos_ijk, 0.17000);
+            assert_eq!(d_tcoord_ij, 0.0);
 
-            let BrennerG { value, d_cos, d_tcoord } = Input {
+            let BrennerG { value, d_cos_ijk, d_tcoord_ij } = Input {
                 params,
                 type_i: AtomType::Carbon,
-                cos: f64::cos(120.0 * PI / 180.0) - 1e-12,
-                tcoord: 3.0,
+                cos_ijk: f64::cos(120.0 * PI / 180.0) - 1e-12,
+                tcoord_ij: 3.0,
             }.compute();
             assert_close!(value, 0.05280);
-            assert_close!(d_cos, 0.17000);
-            assert_eq!(d_tcoord, 0.0);
+            assert_close!(d_cos_ijk, 0.17000);
+            assert_eq!(d_tcoord_ij, 0.0);
 
             // diamond
-            let BrennerG { value, d_cos, d_tcoord } = Input {
+            let BrennerG { value, d_cos_ijk, d_tcoord_ij } = Input {
                 params,
                 type_i: AtomType::Carbon,
-                cos: -1.0/3.0 + 1e-12,
-                tcoord: 4.0,
+                cos_ijk: -1.0/3.0 + 1e-12,
+                tcoord_ij: 4.0,
             }.compute();
             assert_close!(value, 0.09733);
-            assert_close!(d_cos, 0.40000);
-            assert_eq!(d_tcoord, 0.0);
+            assert_close!(d_cos_ijk, 0.40000);
+            assert_eq!(d_tcoord_ij, 0.0);
 
-            let BrennerG { value, d_cos, d_tcoord } = Input {
+            let BrennerG { value, d_cos_ijk, d_tcoord_ij } = Input {
                 params,
                 type_i: AtomType::Carbon,
-                cos: -1.0/3.0 - 1e-12,
-                tcoord: 4.0,
+                cos_ijk: -1.0/3.0 - 1e-12,
+                tcoord_ij: 4.0,
             }.compute();
             assert_close!(value, 0.09733);
-            assert_close!(d_cos, 0.40000);
-            assert_eq!(d_tcoord, 0.0);
+            assert_close!(d_cos_ijk, 0.40000);
+            assert_eq!(d_tcoord_ij, 0.0);
         }
     }
 
@@ -2291,17 +2348,17 @@ for (name, heading, terms) in pieces:
     fn numerical_derivatives() {
         macro_rules! check_derivatives {
             ($input:expr) => {{
-                let Input { params, type_i, cos, tcoord } = $input;
-                let BrennerG { value: _, d_cos, d_tcoord } = $input.compute();
+                let Input { params, type_i, cos_ijk, tcoord_ij } = $input;
+                let BrennerG { value: _, d_cos_ijk, d_tcoord_ij } = $input.compute();
                 assert_close!(
                     rel=1e-7,
-                    d_cos,
-                    numerical::slope(1e-7, None, cos, |cos| Input { params, type_i, cos, tcoord }.compute().value),
+                    d_cos_ijk,
+                    numerical::slope(1e-7, None, cos_ijk, |cos_ijk| Input { params, type_i, cos_ijk, tcoord_ij }.compute().value),
                 );
                 assert_close!(
                     rel=1e-7,
-                    d_tcoord,
-                    numerical::slope(1e-7, None, tcoord, |tcoord| Input { params, type_i, cos, tcoord }.compute().value),
+                    d_tcoord_ij,
+                    numerical::slope(1e-7, None, tcoord_ij, |tcoord_ij| Input { params, type_i, cos_ijk, tcoord_ij }.compute().value),
                 );
             }}
         }
@@ -2324,9 +2381,9 @@ for (name, heading, terms) in pieces:
                     3.0,
                     // FIXME: points around 3.2 and 3.7 once the interpolation is implemented
                 ];
-                for &cos in &coses {
-                    for &tcoord in &tcoords {
-                        check_derivatives!{ Input { params, type_i, cos, tcoord } }
+                for &cos_ijk in &coses {
+                    for &tcoord_ij in &tcoords {
+                        check_derivatives!{ Input { params, type_i, cos_ijk, tcoord_ij } }
                     }
                 }
             }
@@ -2524,6 +2581,11 @@ fn linterp_from((x_lo, x_hi): (f64, f64), y_interval: (f64, f64), x: f64) -> (f6
     let alpha_d_x = x_width.recip();
     let (val, val_d_alpha) = linterp(y_interval, alpha);
     (val, val_d_alpha * alpha_d_x)
+}
+
+#[inline(always)]
+fn boole(cond: bool) -> f64 {
+    match cond { true => 1.0, false => 0.0 }
 }
 
 //-----------------------------------------------------------------------------
