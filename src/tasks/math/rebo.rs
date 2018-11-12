@@ -13,6 +13,7 @@
 #![allow(non_shorthand_field_patterns)]
 #![allow(unused_imports)] // FIXME REMOVE
 #![allow(dead_code)] // FIXME REMOVE
+#![allow(unreachable_code)] // FIXME REMOVE
 
 //! Implementation of the REBO reactive potential. (currently without any of the reactive bits)
 //!
@@ -27,6 +28,7 @@ use ::stack::{ArrayVec, Vector as StackVector};
 #[cfg(test)]
 use ::std::f64::{consts::PI};
 use ::std::f64::NAN;
+use ::std::borrow::Cow;
 use ::rsp2_array_types::{V2, V3, M33, M3};
 use ::rsp2_structure::Coords;
 #[allow(unused)] // https://github.com/rust-lang/rust/issues/45268
@@ -177,7 +179,10 @@ mod params {
     #[derive(Debug, Clone)]
     pub struct Params {
         pub by_type: TypeMap<TypeMap<TypeParams>>,
-        pub G: brenner_G::SplineSet,
+        pub G: Cow<'static, spline_G::SplineSet>,
+        pub T: Cow<'static, spline_T::SplineSet>,
+        pub F: Cow<'static, spline_F::SplineSet>,
+        pub P: Cow<'static, spline_P::SplineSet>,
         pub use_airebo_lambda: bool,
     }
 
@@ -248,7 +253,10 @@ mod params {
             };
             Params {
                 use_airebo_lambda: false,
-                G: brenner_G::BRENNER_SPLINES,
+                G: Cow::Owned(spline_G::BRENNER_SPLINES),
+                P: Cow::Borrowed(&spline_P::BRENNER_SPLINES),
+                T: Cow::Borrowed(&spline_T::BRENNER_SPLINES),
+                F: Cow::Borrowed(&spline_F::BRENNER_SPLINES),
                 by_type,
             }
         }
@@ -314,7 +322,10 @@ mod params {
             };
             Params {
                 use_airebo_lambda: true,
-                G: brenner_G::LAMMPS_SPLINES,
+                G: Cow::Owned(spline_G::LAMMPS_SPLINES),
+                P: Cow::Borrowed(&spline_P::FAVATA_SPLINES),
+                F: Cow::Borrowed(&spline_F::BRENNER_SPLINES),
+                T: Cow::Borrowed(&spline_T::STUART_SPLINES),
                 by_type,
             }
         }
@@ -696,12 +707,14 @@ fn compute_rebo_bonds(
             let tcoord_ij = tcoord_i - weight_ij;
             let tcoord_ji = tcoord_j - weight_ji;
 
+            let xcoord_ij = (|| unimplemented!())();
+
             // boole(i < j) * b_ij^{pi}
             if __bond.is_canonical {
-                if !brenner_T::can_assume_zero((type_i, type_j), (tcoord_ij, tcoord_ji)) {
+                if !(spline_T::Input { params, type_i, type_j, tcoord_ij, tcoord_ji, xcoord_ij }.can_assume_zero()) {
                     panic!("brenner T spline may be nonzero; this is not yet implemented");
                 }
-                if !brenner_F::can_assume_zero((type_i, type_j), (tcoord_ij, tcoord_ji)) {
+                if !(spline_F::Input { params, type_i, type_j, tcoord_ij, tcoord_ji, xcoord_ij }.can_assume_zero()) {
                     panic!("brenner F spline may be nonzero; this is not yet implemented");
                 }
             }
@@ -855,7 +868,7 @@ mod site_sigma_pi_term {
             //
             //       Given that integer weights already take a fast path in BrennerP,
             //       it's not worth optimizing this; we'll just compute it for every bond.
-            let P_ij = brenner_P::Input { type_i, type_j, ccoord_ij, hcoord_ij }.compute();
+            let P_ij = spline_P::Input { params, type_i, type_j, ccoord_ij, hcoord_ij }.compute();
 
             // Gather all cosines between bond i->j and other bonds i->k.
             let coses_ijk;
@@ -982,7 +995,7 @@ mod bondorder_sigma_pi {
         pub ccoord_ij: f64,
         pub hcoord_ij: f64,
         // precomputed spline that depends on the coordination at i and the atom type at j
-        pub P_ij: BrennerP,
+        pub P_ij: SplineP,
         // cosines of this bond with every other bond at i, and their weights
         pub types_k: &'a [AtomType],
         pub weights_ik: &'a [f64],
@@ -1037,7 +1050,7 @@ mod bondorder_sigma_pi {
             //   + sum_{k /= i, j} e^{\lambda_{ijk}} f^c(r_{ik}) G(cos(t_{ijk})
             tmp_value += 1.0;
 
-            let BrennerP {
+            let SplineP {
                 value: P,
                 d_ccoord_ij: P_d_ccoord_ij,
                 d_hcoord_ij: P_d_hcoord_ij,
@@ -1059,11 +1072,11 @@ mod bondorder_sigma_pi {
                     println!("rs-explambda: {}", exp_lambda);
                     println!("rs-tcoord: {}", tcoord_ij);
 
-                    let BrennerG {
+                    let SplineG {
                         value: G,
                         d_cos_ijk: G_d_cos_ijk,
                         d_tcoord_ij: G_d_tcoord_ij,
-                    } = brenner_G::Input { params, type_i, cos_ijk, tcoord_ij }.compute();
+                    } = spline_G::Input { params, type_i, cos_ijk, tcoord_ij }.compute();
                     println!("rs-g gc dN {} {} {}", G, G_d_cos_ijk, G_d_tcoord_ij);
 
                     let G_d_ccoord_ij = G_d_tcoord_ij * tcoord_ij_d_ccoord_ij;
@@ -1362,7 +1375,6 @@ fn airebo_exp_lambda(i: AtomType, jk: (AtomType, AtomType)) -> f64 {
     }
 }
 
-
 // `1 - \cos(\Theta_{ijkl})^2` in Brenner (equation 19)
 use self::dihedral_sine_sq::DihedralSineSq;
 mod dihedral_sine_sq {
@@ -1544,444 +1556,14 @@ mod bond_cosine {
     }
 }
 
-use self::brenner_P::BrennerP;
-mod brenner_P {
+//-----------------------------------------------------------------------------
+// Splines
+
+use self::spline_G::SplineG;
+mod spline_G {
     use super::*;
 
-    pub type Output = BrennerP;
-    pub struct Input {
-        pub type_i: AtomType,
-        pub type_j: AtomType,
-        pub ccoord_ij: f64,
-        pub hcoord_ij: f64,
-    }
-
-    #[derive(Debug, Copy, Clone)]
-    pub struct BrennerP {
-        pub value: f64,
-        pub d_ccoord_ij: f64,
-        pub d_hcoord_ij: f64,
-    }
-
-    impl BrennerP {
-        fn with_zero_deriv(value: f64) -> Self {
-            BrennerP { value, d_ccoord_ij: 0.0, d_hcoord_ij: 0.0 }
-        }
-        fn zero() -> Self { Self::with_zero_deriv(0.0) }
-    }
-
-    impl Input {
-        pub fn compute(self) -> Output {
-            compute(self)
-        }
-    }
-
-    fn compute(input: Input) -> Output {
-        let Input { type_i, type_j, ccoord_ij, hcoord_ij } = input;
-
-        // NOTE:
-        //
-        // RSP2 does not need the spline because it does not do anything
-        // that requires the reactive parts of the potential.
-        //
-        // Thus, this function is a cop-out.
-        let int_ccoord = ccoord_ij as i64;
-        let int_hcoord = hcoord_ij as i64;
-        if int_ccoord as f64 != ccoord_ij || int_hcoord as f64 != hcoord_ij {
-            panic!("Fractional coordination not yet implemented for Brenner P splines.");
-        }
-
-        match (type_i, type_j) {
-            (AtomType::Hydrogen, _) => Output::zero(),
-
-            // NOTE: In the paper, Table 8 has the columns for i and j flipped.
-            //
-            // NOTE: My interpretation of the table is that all integer points of this spline
-            //       are saddle points, as "all derivatives not listed are zero" and none
-            //       are listed.
-            (AtomType::Carbon, AtomType::Carbon) => {
-                // NOTE: comments show the values from AIREBO (Stuart, 2000),
-                //       three of which are modified to counteract terms introduced from
-                //       torsion in undercoordinated systems like graphite.
-                match (int_ccoord, int_hcoord) {
-                    (1, 1) => Output::with_zero_deriv(0.003_026_697_473_481), // -0.010_960 (!!!)
-                    (0, 2) => Output::with_zero_deriv(0.007_860_700_254_745), // -0.000_500 (!!!)
-                    (0, 3) => Output::with_zero_deriv(0.016_125_364_564_267), //  0.016_125
-                    (2, 1) => Output::with_zero_deriv(0.003_179_530_830_731), //  0.003_180
-                    (1, 2) => Output::with_zero_deriv(0.006_326_248_241_119), //  0.006_326
-                    // (2, 0) =>                                              // -0.027_603 (!!!)
-                    _ => Output::zero(),
-                }
-            },
-            (AtomType::Carbon, AtomType::Hydrogen) => {
-                match (int_ccoord, int_hcoord) {
-                    (0, 1) => Output::with_zero_deriv(0.209_336_732_825_0380),  //  0.209_337
-                    (0, 2) => Output::with_zero_deriv(-0.064_449_615_432_525),  // -0.064_450
-                    (0, 3) => Output::with_zero_deriv(-0.303_927_546_346_162),  // -0.303.928
-                    (1, 0) => Output::with_zero_deriv(0.01),                    //  0.010_000
-                    (2, 0) => Output::with_zero_deriv(-0.122_042_146_278_2555), // -0.122_042
-                    (1, 1) => Output::with_zero_deriv(-0.125_123_400_628_7090), // -0.125_123
-                    (1, 2) => Output::with_zero_deriv(-0.298_905_245_783),      // -0.298_905
-                    (3, 0) => Output::with_zero_deriv(-0.307_584_705_066),      // -0.307_585
-                    (2, 1) => Output::with_zero_deriv(-0.300_529_172_406_7579), // -0.300_529
-                    _ => Output::zero(),
-                }
-            },
-        }
-    }
-}
-
-use self::brenner_F::BrennerF;
-mod brenner_F {
-    use super::*;
-
-    pub type Output = BrennerF;
-    pub struct Input {
-        pub type_i: AtomType,
-        pub type_j: AtomType,
-        pub tcoord_ij: f64,
-        pub tcoord_ji: f64,
-        pub xcoord_ij: f64,
-    }
-
-    pub struct BrennerF {
-        pub value: f64,
-        pub d_tcoord_ij: f64,
-        pub d_tcoord_ji: f64,
-        pub d_xcoord_ij: f64,
-    }
-
-    impl BrennerF {
-        fn zero() -> Self {
-            BrennerF {
-                value: 0.0,
-                d_tcoord_ij: 0.0,
-                d_tcoord_ji: 0.0,
-                d_xcoord_ij: 0.0,
-            }
-        }
-    }
-
-    impl Input {
-        pub fn compute(self) -> Output { compute(self) }
-    }
-
-    // Tables 4, 6, and 9
-    fn compute(input: Input) -> Output {
-        let Input { type_i, type_j, tcoord_ij, tcoord_ji, xcoord_ij } = input;
-
-
-        // NOTE:
-        //
-        // RSP2 does not need the spline because it does not do anything
-        // that requires the reactive parts of the potential.
-        //
-        // Thus, this function is a complete cop-out.
-        panic!(
-            "Not yet implemented for Brenner F: {}{} bond, Nij = {}, Nji = {}, Nconj = {}",
-            type_i.char(), type_j.char(), tcoord_ij, tcoord_ji, xcoord_ij,
-        );
-    }
-
-    // check if the value and all derivatives can be assumed to be zero,
-    // without needing to compute N^{conj}
-    pub fn can_assume_zero(
-        (type_i, type_j): (AtomType, AtomType),
-        (tcoord_ij, tcoord_ji): (f64, f64),
-    ) -> bool {
-        let frac_point = V2([tcoord_ij, tcoord_ji]);
-        let int_point = frac_point.map(|x| x as i32);
-        if frac_point != int_point.map(|x| x as f64) {
-            return false;
-        }
-
-        match (type_i, type_j) {
-            // Table 4, a monstrous-looking terror containing a couple of
-            // highly suspicious-looking entries.
-            //
-            // ...I don't want to deal with this right now.
-            (AtomType::Carbon, AtomType::Carbon) => match int_point.0 {
-                // graphene
-                // The table has no entries for (3, 3, ..) so...
-                [3, 3] => true,
-                _ => false,
-            },
-
-            // Table 6?
-            (AtomType::Hydrogen, AtomType::Hydrogen) => {
-                false
-            },
-
-            // Table 9
-            (AtomType::Carbon, AtomType::Hydrogen) |
-            (AtomType::Hydrogen, AtomType::Carbon) => {
-                false
-            },
-        }
-    }
-
-    // NOTE: Parameters for F_CC.
-    //
-    //       There's so much room for error, and almost none of these values will
-    //       be tested by rsp2, whose use cases do not require the reactive parts
-    //       of the potential.
-    //
-
-//    const N_COORDINATION: usize = 4;
-//    const N_CONJ: usize = 10;
-//
-//    type ParamArray = nd![f64; N_COORDINATION; N_COORDINATION; N_CONJ];
-//    struct FCarbonCarbon {
-//        value: ParamArray,   // indices are N_ij^T, N_ji^T, N_{ij}^{conj}
-//        d_di: ParamArray,    // Derivative with respect to N_ij^T
-//        d_dj: ParamArray,    // Derivative with respect to N_ji^T
-//        d_dconj: ParamArray, // Derivative with respect to N_{ij}^{conj}
-//    }
-//
-//    // FIXME: Largely untested outside of values at `[3][3][..]`... which are all zero.
-//    //        So yeah. Don't trust this.
-//    //
-//    // Brenner, Table 4
-//    impl FCarbonCarbon {
-//        fn get() -> Self {
-//            let fill = |xs, fill| for p in &mut xs { *p = fill; };
-//
-//            // "All values and derivatives not listed are equal to zero."
-//            let mut out = FCarbonCarbon {
-//                value: Default::default(),
-//                d_di: Default::default(),
-//                d_dj: Default::default(),
-//                d_dconj: Default::default(),
-//            };
-//
-//            // TODO: flatten out above 3
-//
-//            out.value[1][1][1] = 0.105_000; // Acetylene
-//            out.value[1][1][2] = -0.004_177_5; // H2C=C=CH
-//            fill(&mut out.value[1][1][3..=9], -0.016_085_6); // C4
-//            out.value[2][2][1] = 0.094_449_57; // (CH3)2C=C(CH3)2
-//            out.value[2][2][2] = 0.022_000_00; // Benzene
-//
-//            // !!!!!!!!!!!!
-//            // FIXME: Are these correct?
-//            //
-//            // These are the exact values written in the paper, but it describes them as
-//            // "Average from difference F(2, 2, 2) to difference F(2, 2, 9)".
-//            //
-//            // They do have a constant difference, but if we were really starting from
-//            // the value of F[2][2][2], then that difference should be around 0.00314, not 0.00662.
-//            // (notice how F[2][2][3] > F[2][2][2])
-//            //
-//            // NOTE: For reference, LAMMPS does use the values exactly as written in the paper.
-//            //       (although it's hard to tell at first since they also fix Brenner's mistake
-//            //        of doubling the value of each parameter)
-//            // !!!!!!!!!!!!
-//            out.value[2][2][3] = 0.039_705_87;
-//            out.value[2][2][4] = 0.033_088_22;
-//            out.value[2][2][5] = 0.026_470_58;
-//            out.value[2][2][6] = 0.019_852_93;
-//            out.value[2][2][7] = 0.013_235_29;
-//            out.value[2][2][8] = 0.006_617_64;
-//            out.value[2][2][9] = 0.0;
-//
-//            out.value[0][1][1] = 0.043_386_99; // C2H
-//
-//            out.value[0][1][2] = 0.009_917_2158; // C3
-//            out.value[0][2][1] = 0.049_397_6637; // CCH2
-//            out.value[0][2][2] = -0.011_942_669; // CCH(CH2)
-//            fill(&mut out.value[0][3][1..=9], -0.119_798_935); // H3CC
-//
-//            out.value[1][2][1] = 0.009_649_5698; // H2CCH
-//            out.value[1][2][2] = 0.030; // H2C=C=CH2
-//            out.value[1][2][3] = -0.0200; // C6H5
-//
-//            // "Average from F(1,2,3) to F(1,2,6)".
-//            // At least this time, the description checks out.
-//            out.value[1][2][4] = -0.023_377_8774;
-//            out.value[1][2][5] = -0.026_755_7548;
-//
-//            fill(&mut out.value[1][2][6..=9], -0.030_133_632); // Graphite vacancy
-//            fill(&mut out.value[1][3][2..=9], -0.124_836_752); // H3C–CCH
-//            fill(&mut out.value[2][3][1..=9], -0.044_709_383); // Diamond vacancy
-//
-//            // --------------------------
-//            // Derivatives
-//
-//            out.d_di[2][1][1] = -0.052_500;
-//            fill(&mut out.d_di[2][1][5..=9], -0.054_376);
-//            out.d_di[2][3][1] = 0.000_00;
-//
-//            // NOTE: another oddity. These two ranges are written separately
-//            //       in the paper even though they could be a single range 2..=9.
-//            //       Does one contain an error?
-//            fill(&mut out.d_di[2][3][2..=6], 0.062_418);
-//            fill(&mut out.d_di[2][3][7..=9], 0.062_418);
-//
-//            // !!!!!!!!!!!!!!!!!!
-//            // FIXME
-//            //
-//            // This derivative is related to the seemingly problematic values
-//            // in F[2][2][3..=8]
-//            // !!!!!!!!!!!!!!!!!!
-//            fill(&mut out.d_dconj[2][2][4..=8], -0.006_618);
-//            out.d_dconj[1][1][2] = -0.060_543;
-//            out.d_dconj[1][2][4] = -0.020_044;
-//            out.d_dconj[1][2][5] = -0.020_044;
-//
-//            // symmetrize
-//            for upper in 0..N_COORDINATION {
-//                for lower in 0..upper {
-//                    assert_eq!(out.value[upper][lower], 0.0);
-//                    out.value[upper][lower].copy_from_slice(&out.value[lower][upper]);
-//                    out.d_dconj[upper][lower].copy_from_slice(&out.d_dconj[lower][upper]);
-//                }
-//            }
-//            for i in 0..N_COORDINATION {
-//                for j in 0..N_COORDINATION {
-//                    out.d_dj[i][j].copy_from_slice(&out.value[j][i]);
-//                }
-//            }
-//
-//            // HACK: The values in Brenner (2002) are actually 2 * F.
-//            //
-//            // (TODO: Fix the values above)
-//            for i in 0..N_COORDINATION {
-//                for j in 0..N_COORDINATION {
-//                    for k in 0..N_CONJ {
-//                        out.d_dj[i][j][k] /= 2.0;
-//                    }
-//                }
-//            }
-//        }
-//    }
-}
-
-use self::brenner_T::BrennerT;
-mod brenner_T {
-    //! T spline (Brenner, Table 5)
-
-    use super::*;
-
-    pub type Output = BrennerT;
-    pub struct Input {
-        pub type_i: AtomType,
-        pub type_j: AtomType,
-        pub tcoord_ij: f64,
-        pub tcoord_ji: f64,
-        pub xcoord_ij: f64,
-    }
-
-    pub struct BrennerT {
-        pub value: f64,
-        pub d_tcoord_ij: f64,
-        pub d_tcoord_ji: f64,
-        pub d_xcoord_ij: f64,
-    }
-
-    impl Output {
-        fn with_zero_deriv(value: f64) -> Self {
-            Output {
-                value,
-                d_tcoord_ij: 0.0,
-                d_tcoord_ji: 0.0,
-                d_xcoord_ij: 0.0,
-            }
-        }
-        fn zero() -> Self { Self::with_zero_deriv(0.0) }
-    }
-
-    impl Input {
-        pub fn compute(self) -> Output { compute(self) }
-    }
-
-    // free function for smaller indent
-    fn compute(input: Input) -> Output {
-        let Input { type_i, type_j, tcoord_ij, tcoord_ji, xcoord_ij } = input;
-
-        // NOTE:
-        //
-        // RSP2 does not need the spline because it does not do anything
-        // that requires the reactive parts of the potential.
-        //
-        // Thus, this function is a complete cop-out.
-        let frac_point = V3([tcoord_ij, tcoord_ji, xcoord_ij]);
-        let int_point = frac_point.map(|x| {
-            let out = x as i32;
-            assert_eq!(
-                out as f64, x,
-                "Fractional coordination not yet implemented for Brenner T splines.",
-            );
-            out
-        });
-
-        macro_rules! not_supported {
-            () => {{
-                panic!(
-                    "Not yet implemented for Brenner T: {}{} bond, Nij = {}, Nji = {}, Nconj = {}",
-                    type_i.char(), type_j.char(), tcoord_ij, tcoord_ji, xcoord_ij,
-                )
-            }};
-        }
-
-        match (type_i, type_j) {
-            // Brenner, Table 5
-            //
-            // NOTE: My interpretation of the table is that all integer points of this spline
-            //       are saddle points, as "all derivatives not listed are zero" and none
-            //       are listed.
-            (AtomType::Carbon, AtomType::Carbon) => match int_point.0 {
-                [2, 2, 1] => Output::with_zero_deriv(-0.070_280_085), // Ethane
-                [2, 2, 9] => Output::with_zero_deriv(-0.008_096_75),  // Graphene/graphite
-                _ => Output::zero(),
-            },
-
-            // NOTE: My understanding is that these are all zero since I can't find any
-            //       mention of them, but I should check with other implementations first.
-            (AtomType::Hydrogen, AtomType::Hydrogen) |
-            (AtomType::Carbon, AtomType::Hydrogen) |
-            (AtomType::Hydrogen, AtomType::Carbon) => {
-                not_supported!()
-            },
-        }
-    }
-
-    // check if the value and all derivatives can be assumed to be zero,
-    // without needing to compute N^{conj}
-    pub fn can_assume_zero(
-        (type_i, type_j): (AtomType, AtomType),
-        (tcoord_ij, tcoord_ji): (f64, f64),
-    ) -> bool {
-        let frac_point = V2([tcoord_ij, tcoord_ji]);
-        let int_point = frac_point.map(|x| x as i32);
-        if frac_point != int_point.map(|x| x as f64) {
-            return false;
-        }
-
-        match (type_i, type_j) {
-            // Brenner, Table 5
-            //
-            // NOTE: My interpretation of the table is that all integer points of this spline
-            //       are saddle points, as "all derivatives not listed are zero" and none
-            //       are listed.
-            (AtomType::Carbon, AtomType::Carbon) => match int_point.0 {
-                [2, 2] => false,
-                _ => true,
-            },
-
-            // NOTE: My understanding is that these are all zero since I can't find any
-            //       mention of them, but I should check with other implementations first.
-            (AtomType::Hydrogen, AtomType::Hydrogen) |
-            (AtomType::Carbon, AtomType::Hydrogen) |
-            (AtomType::Hydrogen, AtomType::Carbon) => false,
-        }
-    }
-}
-
-use self::brenner_G::BrennerG;
-mod brenner_G {
-    use super::*;
-
-    pub type Output = BrennerG;
+    pub type Output = SplineG;
     pub struct Input<'a> {
         pub params: &'a Params,
         pub type_i: AtomType,
@@ -1989,7 +1571,7 @@ mod brenner_G {
         pub cos_ijk: f64,
     }
 
-    pub struct BrennerG {
+    pub struct SplineG {
         pub value: f64,
         pub d_tcoord_ij: f64,
         pub d_cos_ijk: f64,
@@ -2205,12 +1787,17 @@ for (name, heading, terms) in pieces:
 
     /// From CH.airebo.
     ///
-    /// These are.... quite different from the function described by Brenner!
+    /// These appear to have been produced by fitting the data in the AIREBO paper. (Stuart 2000)
     ///
-    /// (TODO: look further into this; is this what AIREBO does?)
+    /// My current understanding is that it is okay to use these for REBO, and that they are
+    /// simply an improvement upon the curves provided in Brenner (2002) that goes hand-in-hand
+    /// with the modifications to `lambda_ijk`.
     ///
-    /// They also appear to be rounded to dangerously low precision, which
-    /// might introduce discontinuities at the switch points (most troublingly so at 120°).
+    /// ...however, the coefficients here are rounded to dangerously low precision, which
+    /// might introduce discontinuities at the switch points (most troublingly so at 120°)
+    /// that could ruin optimization algorithms.
+    ///
+    /// TODO: Build our own splines without such insane rounding errors
     pub const LAMMPS_SPLINES: SplineSet = SplineSet {
         carbon_high_coord: SmallSpline1d {
             x_div: &[-1.0, -0.6666666667, -0.5, -0.3333333333, 1.0],
@@ -2304,7 +1891,7 @@ for (name, heading, terms) in pieces:
         ];
         for (tol, ref params) in all_params {
             // graphite
-            let BrennerG { value, d_cos_ijk, d_tcoord_ij } = Input {
+            let SplineG { value, d_cos_ijk, d_tcoord_ij } = Input {
                 params,
                 type_i: AtomType::Carbon,
                 cos_ijk: f64::cos(120.0 * PI / 180.0) + 1e-12,
@@ -2315,7 +1902,7 @@ for (name, heading, terms) in pieces:
             assert_close!(rel=tol, d_cos_ijk, 0.17000);
             assert_eq!(d_tcoord_ij, 0.0);
 
-            let BrennerG { value, d_cos_ijk, d_tcoord_ij } = Input {
+            let SplineG { value, d_cos_ijk, d_tcoord_ij } = Input {
                 params,
                 type_i: AtomType::Carbon,
                 cos_ijk: f64::cos(120.0 * PI / 180.0) - 1e-12,
@@ -2326,7 +1913,7 @@ for (name, heading, terms) in pieces:
             assert_eq!(d_tcoord_ij, 0.0);
 
             // diamond
-            let BrennerG { value, d_cos_ijk, d_tcoord_ij } = Input {
+            let SplineG { value, d_cos_ijk, d_tcoord_ij } = Input {
                 params,
                 type_i: AtomType::Carbon,
                 cos_ijk: -1.0/3.0 + 1e-12,
@@ -2336,7 +1923,7 @@ for (name, heading, terms) in pieces:
             assert_close!(rel=tol, d_cos_ijk, 0.40000);
             assert_eq!(d_tcoord_ij, 0.0);
 
-            let BrennerG { value, d_cos_ijk, d_tcoord_ij } = Input {
+            let SplineG { value, d_cos_ijk, d_tcoord_ij } = Input {
                 params,
                 type_i: AtomType::Carbon,
                 cos_ijk: -1.0/3.0 - 1e-12,
@@ -2374,7 +1961,7 @@ for (name, heading, terms) in pieces:
                 for &cos_ijk in &coses {
                     for &tcoord_ij in &tcoords {
                         let input = Input { params, type_i, cos_ijk, tcoord_ij };
-                        let BrennerG { value: _, d_cos_ijk, d_tcoord_ij } = input.compute();
+                        let SplineG { value: _, d_cos_ijk, d_tcoord_ij } = input.compute();
                         assert_close!(
                             rel=tol, abs=tol,
                             d_cos_ijk,
@@ -2423,6 +2010,545 @@ for (name, heading, terms) in pieces:
                 }
             }
         }
+    }
+}
+
+use self::spline_P::SplineP;
+mod spline_P {
+    use super::*;
+
+    use self::spline_grid::bicubic;
+
+    pub type Output = SplineP;
+    pub struct Input<'a> {
+        pub params: &'a Params,
+        pub type_i: AtomType,
+        pub type_j: AtomType,
+        pub ccoord_ij: f64,
+        pub hcoord_ij: f64,
+    }
+
+    pub struct SplineP {
+        pub value: f64,
+        pub d_ccoord_ij: f64,
+        pub d_hcoord_ij: f64,
+    }
+
+    impl Output {
+        fn zero() -> Output {
+            Output { value: 0.0, d_ccoord_ij: 0.0, d_hcoord_ij: 0.0 }
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct SplineSet {
+        CC: BicubicGrid,
+        CH: BicubicGrid, // P_CH only. (P_HC is zero)
+    }
+
+    impl<'a> Input<'a> {
+        pub fn compute(&self) -> Output {
+            let Input { ref params, type_i, type_j, ccoord_ij, hcoord_ij } = *self;
+
+            let poly = match (type_i, type_j) {
+                (AtomType::Hydrogen, _) => return Output::zero(),
+                (AtomType::Carbon, AtomType::Carbon) => &params.P.CC,
+                (AtomType::Carbon, AtomType::Hydrogen) => &params.P.CH,
+            };
+            let (value, grad) = poly.evaluate(V2([ccoord_ij, hcoord_ij]));
+            let V2([d_ccoord_ij, d_hcoord_ij]) = grad;
+
+            Output { value, d_ccoord_ij, d_hcoord_ij }
+        }
+    }
+
+    lazy_static!{
+        /// The only fully correct choice for PCC in second-generation REBO.
+        ///
+        /// Brenner (2002), Table 8.
+        pub static ref BRENNER_SPLINES: SplineSet = SplineSet {
+            CC: brenner_CC_input().solve().unwrap(),
+            CH: brenner_CH(),
+        };
+
+        /// Suitable for AIREBO. (with the torsion term enabled)
+        ///
+        /// * Stuart (2000) Table VIII
+        /// * LAMMPS, `pair_style airebo`.
+        /// * LAMMPS, `pair_style rebo` prior ot 05Oct2016.
+        ///
+        /// Modifies a few of the terms to counteract AIREBO's torsional
+        /// forces in unsaturated systems. (e.g. graphene)
+        ///
+        /// The rounding of values is chosen to match Brenner where
+        /// available, and Stuart otherwise.
+        pub static ref STUART_SPLINES: SplineSet = SplineSet {
+            CC: stuart_CC(),
+            CH: brenner_CH(),
+        };
+
+        /// Used by LAMMPS 05Oct2016–current (09Nov2018) in `pair_style rebo`.
+        ///
+        /// In 2016, Favata et. al reported that `pair_style rebo` erroneously
+        /// used a parameter from AIREBO. LAMMPS was updated accordingly.
+        ///
+        /// However, there are actually three parameters that change, and
+        /// this update only corrected one of them. Hence, this spline is not
+        /// fully correct for neither REBO nor AIREBO.
+        pub static ref FAVATA_SPLINES: SplineSet = SplineSet {
+            CC: favata_CC(),
+            CH: brenner_CH(),
+        };
+    }
+
+    // * Brenner Table 8
+    fn brenner_CC_input() -> bicubic::Input {
+        let mut input = bicubic::Input::default();
+
+        // NOTE: In the paper, Table 8 has the columns for i and j flipped.
+        input.value[1][1] = 0.003_026_697_473_481; // (CH3)HC=CH(CH3)
+        input.value[0][2] = 0.007_860_700_254_745; // C2H4
+        input.value[0][3] = 0.016_125_364_564_267; // C2H6
+        input.value[2][1] = 0.003_179_530_830_731; // i-C4H10
+        input.value[1][2] = 0.006_326_248_241_119; // c-c6H12
+        input
+    }
+
+    // * Brenner (Table 8)
+    // * Stuart (Table VIII)  (at much lower precision)
+    // * LAMMPS REBO/AIREBO  (rounded only sightly differently)
+    fn brenner_CH() -> BicubicGrid {
+        let mut input =  bicubic::Input::default();
+        input.value[0][1] = 0.209_336_732_825_0380;  // CH2
+        input.value[0][2] = -0.064_449_615_432_525;  // CH3
+        input.value[0][3] = -0.303_927_546_346_162;  // CH4
+        input.value[1][0] = 0.01;                    // C2H2
+        input.value[2][0] = -0.122_042_146_278_2555; // (CH3)HC=CH(CH3)
+        input.value[1][1] = -0.125_123_400_628_7090; // C2H4
+        input.value[1][2] = -0.298_905_245_783;      // C2H6
+        input.value[3][0] = -0.307_584_705_066;      // i-C4H10
+        input.value[2][1] = -0.300_529_172_406_7579; // c-C6H12
+        input.solve().unwrap()
+    }
+
+    fn stuart_CC() -> BicubicGrid {
+        let mut input = brenner_CC_input();
+
+        // Terms modified to counteract AIREBO's torsion.
+        input.value[1][1] = -0.010_960;
+        input.value[0][2] = -0.000_500;
+        input.value[2][0] = -0.027_603;
+        input.solve().unwrap()
+    }
+
+    fn favata_CC() -> BicubicGrid {
+        let mut input = brenner_CC_input();
+
+        // Beginning from the AIREBO params, Favata fixes one of the terms to match REBO
+        // while leaving the other two. (because we're starting from REBO, we change the other two)
+        input.value[1][1] = -0.010_960;
+        input.value[0][2] = -0.000_500;
+        // [2][0] is the one that was fixed.
+
+        input.solve().unwrap()
+    }
+}
+
+use self::spline_F::SplineF;
+mod spline_F {
+    use super::*;
+
+    use self::spline_grid::tricubic::{self, ArrayAssignExt};
+
+    // FIXME:
+    //
+    // The fitting data for the F spline is a terror to behold.
+    // Brenner's table also contains numerous suspicious-looking things (i.e. possible errors)
+    // that I don't want to have to fret over right now.
+    //
+    // For that reason, we don't actually currently use the tricubic splines, and instead just
+    // check for a few special cases.
+    pub type Output = SplineF;
+    pub struct Input<'a> {
+        pub params: &'a Params,
+        pub type_i: AtomType,
+        pub type_j: AtomType,
+        pub tcoord_ij: f64,
+        pub tcoord_ji: f64,
+        pub xcoord_ij: f64,
+    }
+
+    impl<'a> Input<'a> {
+        fn flip(self) -> Self {
+            Input {
+                params: self.params,
+                type_i: self.type_j,
+                type_j: self.type_i,
+                tcoord_ij: self.tcoord_ji,
+                tcoord_ji: self.tcoord_ij,
+                xcoord_ij: self.xcoord_ij,
+            }
+        }
+    }
+
+    pub struct SplineF {
+        pub value: f64,
+        pub d_tcoord_ij: f64,
+        pub d_tcoord_ji: f64,
+        pub d_xcoord_ij: f64,
+    }
+
+    impl SplineF {
+        fn zero() -> Self {
+            SplineF {
+                value: 0.0,
+                d_tcoord_ij: 0.0,
+                d_tcoord_ji: 0.0,
+                d_xcoord_ij: 0.0,
+            }
+        }
+
+        fn flip(self) -> Self {
+            SplineF {
+                value: self.value,
+                d_tcoord_ij: self.d_tcoord_ji,
+                d_tcoord_ji: self.d_tcoord_ij,
+                d_xcoord_ij: self.d_xcoord_ij,
+            }
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct SplineSet {
+        CC: TricubicGrid,
+        CH: TricubicGrid, // F_CH and F_HC.
+        HH: TricubicGrid,
+    }
+
+    impl<'a> Input<'a> {
+        pub fn compute(self) -> Output { compute(self) }
+    }
+
+    // Tables 4, 6, and 9
+    fn compute(input: Input<'_>) -> Output {
+        let Input { params, type_i, type_j, tcoord_ij, tcoord_ji, xcoord_ij } = input;
+
+        // NOTE: We're bailing out because I currently don't trust this spline.
+        (|| panic!(
+            "Not yet implemented for Brenner F: {}{} bond, Nij = {}, Nji = {}, Nconj = {}",
+            type_i.char(), type_j.char(), tcoord_ij, tcoord_ji, xcoord_ij,
+        ))();
+
+        let poly = match (type_i, type_j) {
+            (AtomType::Hydrogen, AtomType::Carbon) => return input.flip().compute().flip(),
+            (AtomType::Carbon, AtomType::Carbon) => &params.F.CC,
+            (AtomType::Carbon, AtomType::Hydrogen) => &params.F.CH,
+            (AtomType::Hydrogen, AtomType::Hydrogen) => &params.F.HH,
+        };
+        let (value, grad) = poly.evaluate(V3([tcoord_ij, tcoord_ji, xcoord_ij]));
+        let V3([d_tcoord_ij, d_tcoord_ji, d_xcoord_ij]) = grad;
+
+        Output { value, d_tcoord_ij, d_tcoord_ji, d_xcoord_ij }
+    }
+
+    // check if the value and all derivatives can be assumed to be zero,
+    // without needing to compute N^{conj}, because I currently have
+    // very little confidence in the spline for this one and would rather
+    // bail out than use it (until it is better tested).
+    impl<'a> Input<'a> {
+        pub fn can_assume_zero(&self) -> bool {
+            let Input { params: _, type_i, type_j, tcoord_ij, tcoord_ji, xcoord_ij } = *self;
+
+            let frac_point = V3([tcoord_ij, tcoord_ji, xcoord_ij]);
+            let int_point = frac_point.map(|x| x as i32);
+            if frac_point != int_point.map(|x| x as f64) {
+                return false;
+            }
+
+            match (type_i, type_j) {
+                (AtomType::Carbon, AtomType::Carbon) => match int_point.0 {
+                    [2, 2, 9] => true, // graphene/graphite
+                    [3, 3, _] => true, // diamond
+                    _ => false,
+                },
+
+                // Tables 6 and 9
+                _ => false,
+            }
+        }
+    }
+
+    lazy_static! {
+        /// Brenner (2002), Tables 4, 6, and 9.
+        ///
+        /// This has NOT been thoroughly checked against Stuart and LAMMPS, although
+        /// all of what I have checked so far against Stuart matches.  (LAMMPS takes
+        /// some creative freedom with the values of the splines near some of the
+        /// boundaries, and I haven't yet figured out precisely what it does)
+        ///
+        /// **Caution:** This very likely contains errors, and using it is currently
+        /// inadvisable.
+        pub static ref BRENNER_SPLINES: SplineSet = SplineSet {
+            CC: brenner_CC(),
+            HH: brenner_HH(),
+            CH: brenner_CH(),
+        };
+    }
+
+    // Brenner, Table 4
+    fn brenner_CC() -> TricubicGrid {
+        let mut input = tricubic::Input::default();
+
+        // NOTE: LAMMPS flattens out some values at high coordinates rather than having them
+        //       go to zero. This might be a good idea for an alternate parameterization.
+
+        input.value.assign((1, 1, 1), 0.105_000); // Acetylene
+        input.value.assign((1, 1, 2), -0.004_177_5); // H2C=C=CH
+        input.value.assign((1, 1, 3..=9), -0.016_085_6); // C4
+        input.value.assign((2, 2, 1), 0.094_449_57); // (CH3)2C=C(CH3)2
+        input.value.assign((2, 2, 2), 0.022_000_00); // Benzene
+
+        // !!!!!!!!!!!!
+        // FIXME: Are these correct?
+        //
+        // These are the exact values written in the paper, but it describes them as
+        // "Average from difference F(2, 2, 2) to difference F(2, 2, 9)".
+        //
+        // They do have a constant difference, but if we were really starting from
+        // the value of F[2][2][2], then that difference should be around 0.00314, not 0.00662.
+        // (notice how F[2][2][3] > F[2][2][2])
+        //
+        // NOTE: The corresponding derivative is written as dF[2, 2, 4..=8]/dk, which is
+        //       consistent with the values. Perhaps simply the comment in the paper is wrong.
+        //
+        // NOTE: Stuart and LAMMPS both also use these values.
+        // !!!!!!!!!!!!
+        input.value.assign((2, 2, 3), 0.039_705_87);
+        input.value.assign((2, 2, 4), 0.033_088_22);
+        input.value.assign((2, 2, 5), 0.026_470_58);
+        input.value.assign((2, 2, 6), 0.019_852_93);
+        input.value.assign((2, 2, 7), 0.013_235_29);
+        input.value.assign((2, 2, 8), 0.006_617_64);
+        input.value.assign((2, 2, 9), 0.0);
+
+        input.value.assign((0, 1, 1), 0.043_386_99); // C2H
+
+        input.value.assign((0, 1, 2), 0.009_917_2158); // C3
+        input.value.assign((0, 2, 1), 0.049_397_6637); // CCH2
+        input.value.assign((0, 2, 2), -0.011_942_669); // CCH(CH2)
+        input.value.assign((0, 3, 1..=9), -0.119_798_935); // H3CC
+
+        input.value.assign((1, 2, 1), 0.009_649_5698); // H2CCH
+        input.value.assign((1, 2, 2), 0.030); // H2C=C=CH2
+        input.value.assign((1, 2, 3), -0.0200); // C6H5
+
+        // "Average from F(1,2,3) to F(1,2,6)".
+        // At least this time, the description checks out.
+        input.value.assign((1, 2, 4), -0.023_377_8774);
+        input.value.assign((1, 2, 5), -0.026_755_7548);
+
+        input.value.assign((1, 2, 6..=9), -0.030_133_632); // Graphite vacancy
+        input.value.assign((1, 3, 2..=9), -0.124_836_752); // H3C–CCH
+        input.value.assign((2, 3, 1..=9), -0.044_709_383); // Diamond vacancy
+
+        // --------------------------
+        // Derivatives
+
+        input.di.assign((2, 1, 1), -0.052_500);
+        input.di.assign((2, 1, 5..=9), -0.054_376);
+        input.di.assign((2, 3, 1), 0.000_00);
+
+        // NOTE: another oddity. These two ranges are written separately
+        //       in the paper even though they could be a single range 2..=9.
+        //       Does one contain an error?
+        input.di.assign((2, 3, 2..=6), 0.062_418);
+        input.di.assign((2, 3, 7..=9), 0.062_418);
+
+        // !!!!!!!!!!!!!!!!!!
+        // NOTE
+        //
+        // This derivative is related to the seemingly problematic values
+        // in F[2][2][3..=8]
+        // !!!!!!!!!!!!!!!!!!
+        input.dk.assign((2, 2, 4..=8), -0.006_618);
+
+        input.dk.assign((1, 1, 2), -0.060_543);
+
+        // !!!!!!!!!!!!!!!!!!
+        // FIXME
+        //
+        // This is highly suspicious; it seems this is intended to be the slope
+        // from the linear equation describing F[1][2][3..=6], but it is at least
+        // an order of magnitude off!
+        //
+        // This apparent error is unfortunately replicated in Stuart (2000) as
+        // well as LAMMPS.
+        // !!!!!!!!!!!!!!!!!!
+        input.dk.assign((1, 2, 4), -0.020_044);
+        input.dk.assign((1, 2, 5), -0.020_044);
+
+        // symmetrize
+        let n = input.value.len();
+        for upper in 0..n {
+            for lower in 0..upper {
+                for k in 0..input.value[0][0].len() {
+                    assert_eq!(input.value[upper][lower][k], 0.0);
+                    input.value[upper][lower][k] = input.value[lower][upper][k];
+                    input.dk[upper][lower][k] = input.dk[lower][upper][k];
+                }
+            }
+        }
+        for i in 0..n {
+            for j in 0..n {
+                input.dj[i][j].copy_from_slice(&input.di[j][i]);
+            }
+        }
+
+        // The values in Brenner (2002) are actually 2 * F.
+        let input = input.scale(0.5);
+        input.solve().unwrap()
+    }
+
+    // Brenner, Table 6
+    // TODO: Check against Stuart and LAMMPS
+    fn brenner_HH() -> TricubicGrid {
+        let mut input = tricubic::Input::default();
+        input.value.assign((1, 1, 1), 0.249_831_916);
+
+        // The values in Brenner (2002) are actually 2 * F.
+        let input = input.scale(0.5);
+        input.solve().unwrap()
+    }
+
+    // Brenner, Table 9
+    // TODO: Check against Stuart and LAMMPS
+    fn brenner_CH() -> TricubicGrid {
+        let mut input = tricubic::Input::default();
+
+        input.value.assign((0, 2, 5..=9), -0.009_047_787_516_128_8110); // C6H6
+        input.value.assign((1, 2, 1..=9), -0.25);  // Equations (23)–(25)
+        input.value.assign((1, 3, 1..=9), -0.213); // Equations (23)–(25)
+        input.value.assign((1, 1, 1..=9), -0.5);   // Equations (23)–(25)
+
+        // The values in Brenner (2002) are actually 2 * F.
+        let input = input.scale(0.5);
+        input.solve().unwrap()
+    }
+}
+
+use self::spline_T::SplineT;
+mod spline_T {
+    //! T spline
+    //!
+    //! * Brenner, Table 5
+    //! * Stuart, Table X
+
+    use super::*;
+
+    pub type Output = SplineT;
+    pub struct Input<'a> {
+        pub params: &'a Params,
+        pub type_i: AtomType,
+        pub type_j: AtomType,
+        pub tcoord_ij: f64,
+        pub tcoord_ji: f64,
+        pub xcoord_ij: f64,
+    }
+
+    pub struct SplineT {
+        pub value: f64,
+        pub d_tcoord_ij: f64,
+        pub d_tcoord_ji: f64,
+        pub d_xcoord_ij: f64,
+    }
+
+    impl Output {
+        fn zero() -> Output {
+            Output {
+                value: 0.0,
+                d_tcoord_ij: 0.0,
+                d_tcoord_ji: 0.0,
+                d_xcoord_ij: 0.0,
+            }
+        }
+    }
+
+
+    #[derive(Debug, Clone)]
+    pub struct SplineSet {
+        CC: TricubicGrid,
+    }
+
+    impl<'a> Input<'a> {
+        pub fn compute(self) -> Output { compute(self) }
+
+        // FIXME remove
+        pub fn can_assume_zero(&self) -> bool {
+            false
+        }
+    }
+
+    // Tables 4, 6, and 9
+    fn compute(input: Input<'_>) -> Output {
+        let Input { params, type_i, type_j, tcoord_ij, tcoord_ji, xcoord_ij } = input;
+
+        let poly = match (type_i, type_j) {
+            (AtomType::Carbon, AtomType::Carbon) => &params.T.CC,
+            (AtomType::Hydrogen, _) |
+            (_, AtomType::Hydrogen) => return Output::zero(),
+        };
+        let (value, grad) = poly.evaluate(V3([tcoord_ij, tcoord_ji, xcoord_ij]));
+        let V3([d_tcoord_ij, d_tcoord_ji, d_xcoord_ij]) = grad;
+
+        Output { value, d_tcoord_ij, d_tcoord_ji, d_xcoord_ij }
+    }
+
+    lazy_static!{
+        /// The TCC spline found in:
+        ///
+        /// * The 2nd-gen REBO paper (Brenner, 2002)
+        ///
+        /// This differs from Stuart's in a manner which *seems* that it could
+        /// possibly be a typo. (I have not yet looked further into this.)
+        ///
+        /// (namely, a value defined by Brenner at only `Tij(2,2,9)` is defined
+        ///  by Stuart on `Tij(2,2,2..=9)` without any ceremony).
+        pub static ref BRENNER_SPLINES: SplineSet = SplineSet {
+            CC: brenner_CC(),
+        };
+
+        /// The TCC spline found in:
+        ///
+        /// * The AIREBO paper (Stuart, 2000)
+        /// * The LAMMPS implementation of REBO and AIREBO
+        ///
+        /// It seems plausible that this is a "bugfix" of Brenner's table.
+        pub static ref STUART_SPLINES: SplineSet = SplineSet {
+            CC: stuart_CC(),
+        };
+    }
+
+    /// Brenner, Table 5\
+    fn brenner_CC() -> TricubicGrid {
+        use self::spline_grid::tricubic::{self, ArrayAssignExt};
+
+        let mut input = tricubic::Input::default();
+        input.value.assign((2, 2, 1), -0.070_280_085); // Ethane
+        input.value.assign((2, 2, 9), -0.008_096_75);  // "Solid state carbon." (Graphene/graphite)
+
+        let input = input.scale(0.5); // The values in Brenner's table are doubled
+        input.solve().unwrap()
+    }
+
+    /// Stuart, Table X
+    fn stuart_CC() -> TricubicGrid {
+        use self::spline_grid::tricubic::{self, ArrayAssignExt};
+
+        let mut input = tricubic::Input::default();
+        input.value.assign((2, 2, 1), -0.035_140);
+        input.value.assign((2, 2, 2..=9), -0.004_048); // NOTE: different from Brenner
+
+        input.solve().unwrap()
     }
 }
 
@@ -2634,6 +2760,7 @@ fn cleared<T>(mut vec: Vec<T>) -> Vec<T> {
 //-----------------------------------------------------------------------------
 
 /// A tricubic or bicubic spline with constraints defined on an integer grid.
+pub use self::spline_grid::{TricubicGrid, BicubicGrid};
 pub mod spline_grid {
     use super::*;
 
@@ -2649,6 +2776,7 @@ pub mod spline_grid {
     pub use self::tricubic::TricubicGrid;
     pub mod tricubic {
         use super::*;
+        use ::std::ops::RangeInclusive;
 
         /// A grid of "fencepost" values.
         pub type EndpointGrid<T> = nd![T; MAX_I+1; MAX_J+1; MAX_K+1];
@@ -2669,7 +2797,7 @@ pub mod spline_grid {
         ///
         /// F. Lekien and J. Marsden, Tricubic interpolation in three dimensions,
         /// Int. J. Numer. Meth. Engng 2005; 63:455–471
-        #[derive(Clone)]
+        #[derive(Debug, Clone, Default)]
         pub struct _Input<G> {
             pub value: G,
             pub di: G,
@@ -2679,6 +2807,28 @@ pub mod spline_grid {
 
         //------------------------------------
 
+        // uniform interface for assigning a single element or a range
+        pub trait ArrayAssignExt<I> {
+            fn assign(&mut self, i: I, fill: f64);
+        }
+
+        impl ArrayAssignExt<(usize, usize, usize)> for EndpointGrid<f64> {
+            fn assign(&mut self, (i, j, k): (usize, usize, usize), fill: f64) {
+                self[i][j][k] = fill;
+            }
+        }
+
+        impl ArrayAssignExt<(usize, usize, RangeInclusive<usize>)> for EndpointGrid<f64> {
+            fn assign(&mut self, (i, j, k): (usize, usize, RangeInclusive<usize>), fill: f64) {
+                for x in &mut self[i][j][k] {
+                    *x = fill;
+                }
+            }
+        }
+
+        //------------------------------------
+
+        #[derive(Debug, Clone)]
         pub struct TricubicGrid {
             pub(super) fit_params: Box<Input>,
             pub(super) polys: Box<Grid<(TriPoly3, V3<TriPoly3>)>>,
@@ -2770,6 +2920,32 @@ pub mod spline_grid {
                 let fit_params = Box::new(self.clone());
                 Ok(TricubicGrid { fit_params, polys })
             }
+
+            pub fn scale(mut self, factor: f64) -> Self {
+                { // FIXME: block will be unnecessary once NLL lands
+                    let Input { value, di, dj, dk } = &mut self;
+                    for &mut &mut ref mut array in &mut[value, di, dj, dk] {
+                        for plane in array {
+                            for row in plane {
+                                for x in row {
+                                    *x *= factor;
+                                }
+                            }
+                        }
+                    }
+                }
+                self
+            }
+
+            #[cfg(test)]
+            pub fn random(scale: f64) -> Self {
+                Input {
+                    value: ::rand::random(),
+                    di: ::rand::random(),
+                    dj: ::rand::random(),
+                    dk: ::rand::random(),
+                }.scale(scale).ensure_clipping_is_valid()
+            }
         }
 
         impl Input {
@@ -2827,7 +3003,7 @@ pub mod spline_grid {
         //------------------------------------
 
         /// A third-order polynomial in three variables.
-        #[derive(Clone)]
+        #[derive(Debug, Clone)]
         pub struct TriPoly3 {
             /// coeffs along each index are listed in order of increasing power
             coeff: Box<nd![f64; 4; 4; 4]>,
@@ -3005,13 +3181,7 @@ pub mod spline_grid {
 
         #[test]
         fn test_spline_fast_path() -> FailResult<()> {
-            let fit_params = Input {
-                value: ::rand::random(),
-                di: ::rand::random(),
-                dj: ::rand::random(),
-                dk: ::rand::random(),
-            }.ensure_clipping_is_valid();
-
+            let fit_params = Input::random(1.0);
             let spline = fit_params.solve()?;
 
             // every valid integer point should be evaluated quickly
@@ -3065,13 +3235,7 @@ pub mod spline_grid {
         #[test]
         fn test_spline_fit_accuracy() -> FailResult<()> {
             for _ in 0..3 {
-                let fit_params = Input {
-                    value: ::rand::random(),
-                    di: ::rand::random(),
-                    dj: ::rand::random(),
-                    dk: ::rand::random(),
-                }.ensure_clipping_is_valid();;
-
+                let fit_params = Input::random(1.0);
                 let spline = fit_params.solve()?;
 
                 // index of a polynomial
@@ -3169,12 +3333,14 @@ pub mod spline_grid {
         /// Input for a bicubic spline.
         ///
         /// Not included is an implicit constraint that `d^2/didj = 0` at all integer points.
+        #[derive(Default)]
         pub struct Input {
             pub value: EndpointGrid<f64>,
             pub di: EndpointGrid<f64>,
             pub dj: EndpointGrid<f64>,
         }
 
+        #[derive(Debug, Clone)]
         pub struct BicubicGrid {
             // "Do the simplest thing that will work."
             tricubic: TricubicGrid,
@@ -3224,9 +3390,10 @@ pub mod spline_grid {
                 use ::rsp2_array_utils::{map_arr};
 
                 let tricubic::Input { value, di, dj, dk } = *input;
-                assert_eq!(dk, <tricubic::EndpointGrid<f64>>::default());
 
                 let unextend = |arr| map_arr(arr, |plane| map_arr(plane, |row: [_; MAX_K+1]| row[0]));
+
+                assert_eq!(unextend(dk), unextend(<tricubic::EndpointGrid<f64>>::default()));
                 Input {
                     value: unextend(value),
                     di: unextend(di),
@@ -3235,8 +3402,8 @@ pub mod spline_grid {
             }
 
             #[cfg(test)]
-            fn ensure_clipping_is_valid(self) -> Self {
-                Self::from_tricubic_input(&self.to_tricubic_input().ensure_clipping_is_valid())
+            pub fn random(scale: f64) -> Self {
+                Self::from_tricubic_input(&tricubic::Input::random(scale))
             }
         }
 
@@ -3245,12 +3412,7 @@ pub mod spline_grid {
 
         #[test]
         fn test_spline_fast_path() -> FailResult<()> {
-            let fit_params = Input {
-                value: ::rand::random(),
-                di: ::rand::random(),
-                dj: ::rand::random(),
-            }.ensure_clipping_is_valid();
-
+            let fit_params = Input::random(1.0);
             let spline = fit_params.solve()?;
 
             // every valid integer point should be evaluated quickly
@@ -3300,12 +3462,7 @@ pub mod spline_grid {
         #[test]
         fn test_spline_fit_accuracy() -> FailResult<()> {
             for _ in 0..3 {
-                let fit_params = Input {
-                    value: ::rand::random(),
-                    di: ::rand::random(),
-                    dj: ::rand::random(),
-                }.ensure_clipping_is_valid();;
-
+                let fit_params = Input::random(1.0);
                 let spline = fit_params.solve()?;
 
                 // index of a polynomial
