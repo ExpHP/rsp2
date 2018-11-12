@@ -18,7 +18,7 @@ rsp2-assert-close = { path = "../util/assert-close" }
 rsp2-array-types = { path = "../util/array-types" }
 rsp2-numtheory = { path = "../util/numtheory" }
 failure = "0.1.2"
-slice-of-array = "0.2"
+slice-of-array = "0.2.1"
 #!!frunk
 lapacke = "0.1.4"
 lapack-src = { version = "0.1.4", features = ["openblas"] }

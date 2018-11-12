@@ -85,7 +85,7 @@ serde_yaml = "0.7"
 serde_ignored = "0.0.4"
 tempdir = "0.3"
 ansi_term = "0.10"
-slice-of-array = "0.2"
+slice-of-array = "0.2.1"
 rsp2-kets = { version = "0.3.6", git = "https://github.com/ExpHP/rsp2-kets", features = ["serde"] }
 #rsp2-kets = { path = "/home/lampam/cpp/other/rust/rsp2-kets" }
 #lammps-sys = { branch = "master", git = "https://github.com/ExpHP/lammps-sys" }

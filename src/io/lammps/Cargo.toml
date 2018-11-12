@@ -22,7 +22,7 @@ log = "0.4"
 lazy_static = "0.2"
 chrono = "0.4"
 failure = "0.1.2"
-slice-of-array = "0.2"
+slice-of-array = "0.2.1"
 mpi = { version = "0.5.4", optional = true }
 
 [dev-dependencies]

@@ -97,7 +97,7 @@ fern = { version = "0.5", features = ["colored"] }
 env_logger = "0.5.10"
 clap = "2"
 rsp2-kets = { version = "0.3.6", git = "https://github.com/ExpHP/rsp2-kets", features = ["serde"] }
-slice-of-array = "0.2"
+slice-of-array = "0.2.1"
 ansi_term = "0.10"
 itertools = "0.7"
 failure = "0.1.2"

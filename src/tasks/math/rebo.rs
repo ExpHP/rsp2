@@ -2677,7 +2677,7 @@ pub mod tricubic_grid {
     /// A grid of "fence segment" values.
     pub type Grid<T> = nd![T; MAX_I; MAX_J; MAX_K];
 
-    pub type Input = _Input<Grid<f64>>;
+    pub type Input = _Input<EndpointGrid<f64>>;
 
     /// The values and derivatives that are fitted to produce a tricubic spline.
     ///
@@ -2700,6 +2700,8 @@ pub mod tricubic_grid {
         pub dk: G,
     }
 
+    //------------------------------------
+
     pub struct TricubicGrid {
         fit_params: Box<Input>,
         polys: Box<Grid<(TriPoly3, V3<TriPoly3>)>>,
@@ -2709,7 +2711,6 @@ pub mod tricubic_grid {
         pub fn evaluate(&self, point: V3) -> (f64, V3) { self._evaluate(point).1 }
 
         fn _evaluate(&self, point: V3) -> (EvalKind, (f64, V3)) {
-            panic!("lol");
             // We assume the splines are flat with constant value outside the fitted regions.
             let point = clip_point(point);
 
@@ -2741,27 +2742,63 @@ pub mod tricubic_grid {
                 j = j.min(MAX_J - 1);
                 k = k.min(MAX_K - 1);
 
+                let frac_point = point - V3([i, j, k]).map(|x| x as f64);
                 let (value_poly, diff_polys) = &self.polys[i][j][k];
                 let value = value_poly.evaluate(point);
-                let diff = V3::from_fn(|axis| diff_polys[axis].evaluate(point));
+                let diff = V3::from_fn(|axis| diff_polys[axis].evaluate(frac_point));
                 (EvalKind::Slow, (value, diff))
             }
+        }
+    }
+
+    impl<A> _Input<A> {
+        fn map_grids<B>(&self, mut func: impl FnMut(&A) -> B) -> _Input<B> {
+            _Input {
+                value: func(&self.value),
+                di: func(&self.di),
+                dj: func(&self.dj),
+                dk: func(&self.dk),
+            }
+        }
+    }
+
+    impl Input {
+        pub fn solve(&self) -> FailResult<TricubicGrid> {
+            use ::rsp2_array_utils::{try_arr_from_fn, arr_from_fn, map_arr};
+            self.verify_clipping_is_valid()?;
+
+            let polys = Box::new({
+                try_arr_from_fn(|i| {
+                    try_arr_from_fn(|j| {
+                        try_arr_from_fn(|k| -> FailResult<_> {
+                            // Gather the 8 points describing this region.
+                            // (ni,nj,nk = 0 or 1)
+                            let poly_input: TriPoly3Input = self.map_grids(|grid| {
+                                arr_from_fn(|ni| {
+                                    arr_from_fn(|nj| {
+                                        arr_from_fn(|nk| {
+                                            grid[i + ni][j + nj][k + nk]
+                                        })
+                                    })
+                                })
+                            });
+                            let value_poly = poly_input.solve()?;
+                            let diff_polys = V3::from_fn(|axis| value_poly.axis_derivative(axis));
+                            Ok((value_poly, diff_polys))
+                        })
+                    })
+                })?
+            });
+
+            let fit_params = Box::new(self.clone());
+            Ok(TricubicGrid { fit_params, polys })
         }
     }
 
     #[derive(Debug, Copy, Clone, PartialEq, Eq)]
     enum EvalKind { Fast, Slow }
 
-    pub fn clip_point(point: V3) -> V3 {
-        let mut point = point.map(|x| f64::max(x, 0.0));
-        point[0] = point[0].min(MAX_I as f64);
-        point[1] = point[1].min(MAX_J as f64);
-        point[2] = point[2].min(MAX_K as f64);
-        point
-    }
-
     impl Input {
-
         // To make clipping always valid, we envision that the spline is flat outside of
         // the fitted region.  For C1 continuity, this means the derivatives at these
         // boundaries must be zero.
@@ -2805,53 +2842,15 @@ pub mod tricubic_grid {
         }
     }
 
-
-    impl<A> _Input<A> {
-        fn map_grids<B>(&self, mut func: impl FnMut(&A) -> B) -> _Input<B> {
-            _Input {
-                value: func(&self.value),
-                di: func(&self.di),
-                dj: func(&self.dj),
-                dk: func(&self.dk),
-            }
-        }
+    pub fn clip_point(point: V3) -> V3 {
+        let mut point = point.map(|x| f64::max(x, 0.0));
+        point[0] = point[0].min(MAX_I as f64);
+        point[1] = point[1].min(MAX_J as f64);
+        point[2] = point[2].min(MAX_K as f64);
+        point
     }
 
-    impl Input {
-        pub fn solve(&self) -> FailResult<TricubicGrid> {
-            use ::rsp2_array_utils::{arr_from_fn, map_arr};
-            self.verify_clipping_is_valid()?;
-
-            let polys = Box::new({
-                arr_from_fn(|i| {
-                    arr_from_fn(|j| {
-                        arr_from_fn(|k| {
-                            let low_xyz = V3([i, j, k]).map(|x| x as f64);
-                            let high_xyz = low_xyz.map(|x| x + 1.0);
-
-                            // Gather the 8 points describing this region.
-                            // (ni,nj,nk = 0 or 1)
-                            let poly_input: TriPoly3Input = self.map_grids(|grid| {
-                                arr_from_fn(|ni| {
-                                    arr_from_fn(|nj| {
-                                        arr_from_fn(|nk| {
-                                            grid[i + ni][j + nj][k + nk]
-                                        })
-                                    })
-                                })
-                            });
-                            let value_poly = poly_input.solve(low_xyz.0, high_xyz.0);
-                            let diff_polys = V3::from_fn(|axis| value_poly.axis_derivative(axis));
-                            (value_poly, diff_polys)
-                        })
-                    })
-                })
-            });
-
-            let fit_params = Box::new(self.clone());
-            Ok(TricubicGrid { fit_params, polys })
-        }
-    }
+    //------------------------------------
 
     /// A third-order polynomial in three variables.
     #[derive(Clone)]
@@ -2861,12 +2860,23 @@ pub mod tricubic_grid {
     }
 
     pub type TriPoly3Input = _Input<nd![f64; 2; 2; 2]>;
-
     impl TriPoly3Input {
-        fn solve(&self, _low: [f64; 3], _high: [f64; 3]) -> TriPoly3 {
-            // TODO: Solve the linear system of equations to obtain the tricubic spline
-            //       coefficients in this region.
-            unimplemented!()
+        fn solve(&self) -> FailResult<TriPoly3> {
+            let b_vec: nd![f64; 8; 2; 2; 2] = [
+                self.value,
+                self.di, self.dj, self.dk,
+                Default::default(), // constraints on didj
+                Default::default(), // constraints on didk
+                Default::default(), // constraints on djdk
+                Default::default(), // constraints on didjdk
+            ];
+            let b_vec: &[[f64; 1]] = b_vec.flat().flat().flat().nest();
+            let b_vec: ::rsp2_linalg::CMatrix = b_vec.into();
+
+            let coeff = ::rsp2_linalg::lapacke_linear_solve(ZERO_ONE_CMATRIX.clone(), b_vec)?;
+            Ok(TriPoly3 {
+                coeff: Box::new(coeff.c_order_data().nest().nest().to_array()),
+            })
         }
     }
 
@@ -2874,6 +2884,7 @@ pub mod tricubic_grid {
         pub fn zero() -> Self {
             TriPoly3 { coeff: Box::new(<nd![f64; 4; 4; 4]>::default()) }
         }
+
         pub fn evaluate(&self, point: V3) -> f64 {
             let V3([i, j, k]) = point;
 
@@ -2916,6 +2927,109 @@ pub mod tricubic_grid {
         }
     }
 
+
+    lazy_static! {
+        // The matrix representing the system of equations that must be solved for
+        // a piece of a tricubic spline with boundaries at zero and one.
+        //
+        // Indices are, from slowest to fastest:
+        // - row (8x2x2x2 = 64), broken into two levels:
+        //   - constraint kind (8: [value, di, dj, dk, didj, didk, djdk, didjdk])
+        //   - constraint location (2x2x2: [i=0, i=1] x [j=0, j=1] x [k=0, k=1])
+        // - col (4x4x4 = 64), where each axis is the power of one of the variables
+        //   for the coefficient belonging to this column
+        static ref ZERO_ONE_MATRIX: nd![f64; 8; 2; 2; 2; 4; 4; 4] = compute_zero_one_matrix();
+        static ref ZERO_ONE_CMATRIX: ::rsp2_linalg::CMatrix = {
+            ZERO_ONE_MATRIX
+                .flat().flat().flat().flat()
+                .flat().flat().nest::<[_; 64]>()
+                .into()
+        };
+    }
+
+    fn compute_zero_one_matrix() -> nd![f64; 8; 2; 2; 2; 4; 4; 4] {
+        use ::rsp2_array_utils::{arr_from_fn, map_arr};
+
+        // we build a system of equations from our constraints
+        //
+        // we end up with an equation of the form  M a = b,
+        // where M is a square matrix whose elements are products of the end-point coords
+        // raised to various powers.
+
+        #[derive(Debug, Copy, Clone)]
+        struct Monomial {
+            coeff: f64,
+            powers: [u32; 3],
+        }
+        impl Monomial {
+            fn axis_derivative(mut self, axis: usize) -> Self {
+                self.coeff *= self.powers[axis] as f64;
+                if self.powers[axis] > 0 {
+                    self.powers[axis] -= 1;
+                }
+                self
+            }
+
+            fn evaluate(&self, point: V3) -> f64 {
+                let mut out = self.coeff;
+                for i in 0..3 {
+                    out *= point[i].powi(self.powers[i] as i32);
+                }
+                out
+            }
+        }
+
+        // Polynomials here are represented as values to be multiplied against each coefficient.
+        //
+        // e.g. [1, x, x^2, x^3, y, y*x, y*x^2, y*x^3, ... ]
+        let derive = |poly: &[Monomial], axis| -> Vec<Monomial> {
+            poly.iter().map(|m| m.axis_derivative(axis)).collect()
+        };
+
+        let value_poly: nd![Monomial; 4; 4; 4] = {
+            arr_from_fn(|i| {
+                arr_from_fn(|j| {
+                    arr_from_fn(|k| {
+                        Monomial { coeff: 1.0, powers: [i as u32, j as u32, k as u32] }
+                    })
+                })
+            })
+        };
+        let value_poly = value_poly.flat().flat().to_vec();
+        let di_poly = derive(&value_poly, 0);
+        let dj_poly = derive(&value_poly, 1);
+        let dk_poly = derive(&value_poly, 2);
+        let didj_poly = derive(&di_poly, 1);
+        let didk_poly = derive(&di_poly, 2);
+        let djdk_poly = derive(&dj_poly, 2);
+        let didjdk_poly = derive(&didj_poly, 2);
+
+        map_arr([
+            value_poly, di_poly, dj_poly, dk_poly,
+            didj_poly, didk_poly, djdk_poly, didjdk_poly,
+        ], |poly| {
+            // coords of each corner (0 or 1)
+            arr_from_fn(|i| {
+                arr_from_fn(|j| {
+                    arr_from_fn(|k| {
+                        // powers
+                        let poly: &nd![_; 4; 4; 4] = poly.nest().nest().as_array();
+                        arr_from_fn(|ei| {
+                            arr_from_fn(|ej| {
+                                arr_from_fn(|ek| {
+                                    poly[ei][ej][ek].evaluate(V3([i, j, k]).map(|x| x as f64))
+                                })
+                            })
+                        })
+                    })
+                })
+            })
+        })
+    }
+
+    //------------------------------------
+    // tests
+
     #[test]
     fn test_spline_fast_path() -> FailResult<()> {
         let fit_params = Input {
@@ -2947,15 +3061,24 @@ pub mod tricubic_grid {
         let base_point = V3([2.0, 2.0, 2.0]);
         let base_index = V3([2, 2, 2]);
         for axis in 0..3 {
-            for (new_value, new_index) in vec![(-1.2, 0), (MAX_J as f64 + 3.2, MAX_J)] {
-                let mut point = base_point;
-                let mut index = base_index;
-                point[axis] = new_value;
-                index[axis] = new_index;
-                let V3([i, j, k]) = index;
+            for do_right_side in vec![false, true] {
+                let mut input_point = base_point;
+                let mut expected_index = base_index;
+                match do_right_side {
+                    false => {
+                        input_point[axis] = -1.2;
+                        expected_index[axis] = 0;
+                    },
+                    true => {
+                        input_point[axis] = [MAX_I, MAX_J, MAX_K][axis] as f64 + 3.2;
+                        expected_index[axis] = [MAX_I, MAX_J, MAX_K][axis];
+                    }
+                }
 
-                let (kind, output) = spline._evaluate(point);
+                let (kind, output) = spline._evaluate(input_point);
                 let (value, grad) = output;
+
+                let V3([i, j, k]) = expected_index;
                 assert_eq!(kind, EvalKind::Fast);
                 assert_eq!(value, fit_params.value[i][j][k]);
                 assert_eq!(grad[0], fit_params.di[i][j][k]);
@@ -2988,14 +3111,14 @@ pub mod tricubic_grid {
                                 for nk in 0..2 {
                                     // index of the point of evaluation
                                     let V3([pi, pj, pk]) = V3([i + ni, j + nj, k + nk]);
-                                    let point = V3([pi, pj, pk]).map(|x| x as f64);
+                                    let frac_point = V3([ni, nj, nk]).map(|x| x as f64);
 
                                     let (value_poly, diff_polys) = &spline.polys[i][j][k];
                                     let V3([di_poly, dj_poly, dk_poly]) = diff_polys;
-                                    assert_close!(value_poly.evaluate(point), fit_params.value[pi][pj][pk]);
-                                    assert_close!(di_poly.evaluate(point), fit_params.di[pi][pj][pk]);
-                                    assert_close!(dj_poly.evaluate(point), fit_params.dj[pi][pj][pk]);
-                                    assert_close!(dk_poly.evaluate(point), fit_params.dk[pi][pj][pk]);
+                                    assert_close!(rel=1e-8, abs=1e-8, value_poly.evaluate(frac_point), fit_params.value[pi][pj][pk]);
+                                    assert_close!(rel=1e-8, abs=1e-8, di_poly.evaluate(frac_point), fit_params.di[pi][pj][pk]);
+                                    assert_close!(rel=1e-8, abs=1e-8, dj_poly.evaluate(frac_point), fit_params.dj[pi][pj][pk]);
+                                    assert_close!(rel=1e-8, abs=1e-8, dk_poly.evaluate(frac_point), fit_params.dk[pi][pj][pk]);
                                 }
                             }
                         }

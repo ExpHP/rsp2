@@ -38,7 +38,7 @@ rsp2-newtype-indices = { path = "../util/newtype-indices" }
 rsp2-python = { path = "../python" }
 
 clap = "2"
-slice-of-array = "0.2"
+slice-of-array = "0.2.1"
 rsp2-kets = { version = "0.3.6", git = "https://github.com/ExpHP/rsp2-kets", features = ["serde"] }
 rand = "0.3"
 log = "0.4"
