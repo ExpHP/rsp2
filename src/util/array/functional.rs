@@ -79,6 +79,8 @@ pub trait ArrayMapExt<B>: IsArray + WithElement<B>
     fn try_map_the_thing<E, F>(self, mut f: F) -> Result<Brother!{Self, B}, E>
     where F: FnMut(Self::Element) -> Result<B, E>,
     {
+        // !!! FIXME: use of uninitialized is unsound if B is uninhabited !!!
+
         // SAFETY:
         //  - uninitialized() data must never be read; beware of drops!
         //  - ptr::{write, read} argument must be aligned

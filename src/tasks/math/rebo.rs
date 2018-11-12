@@ -2297,8 +2297,12 @@ for (name, heading, terms) in pieces:
 
     #[test]
     fn common_cases() {
-        let all_params = vec![Params::new_lammps(), Params::new_brenner()];
-        for params in &all_params {
+        let all_params = vec![
+            // The precision of lammps' precomputed splines is a joke
+            (1e-4, Params::new_lammps()),
+            (1e-10, Params::new_brenner()),
+        ];
+        for (tol, ref params) in all_params {
             // graphite
             let BrennerG { value, d_cos_ijk, d_tcoord_ij } = Input {
                 params,
@@ -2307,8 +2311,8 @@ for (name, heading, terms) in pieces:
                 tcoord_ij: 3.0,
             }.compute();
             // Brenner Table 3
-            assert_close!(value, 0.05280);
-            assert_close!(d_cos_ijk, 0.17000);
+            assert_close!(rel=tol, value, 0.05280);
+            assert_close!(rel=tol, d_cos_ijk, 0.17000);
             assert_eq!(d_tcoord_ij, 0.0);
 
             let BrennerG { value, d_cos_ijk, d_tcoord_ij } = Input {
@@ -2317,8 +2321,8 @@ for (name, heading, terms) in pieces:
                 cos_ijk: f64::cos(120.0 * PI / 180.0) - 1e-12,
                 tcoord_ij: 3.0,
             }.compute();
-            assert_close!(value, 0.05280);
-            assert_close!(d_cos_ijk, 0.17000);
+            assert_close!(rel=tol, value, 0.05280);
+            assert_close!(rel=tol, d_cos_ijk, 0.17000);
             assert_eq!(d_tcoord_ij, 0.0);
 
             // diamond
@@ -2328,8 +2332,8 @@ for (name, heading, terms) in pieces:
                 cos_ijk: -1.0/3.0 + 1e-12,
                 tcoord_ij: 4.0,
             }.compute();
-            assert_close!(value, 0.09733);
-            assert_close!(d_cos_ijk, 0.40000);
+            assert_close!(rel=tol, value, 0.09733);
+            assert_close!(rel=tol, d_cos_ijk, 0.40000);
             assert_eq!(d_tcoord_ij, 0.0);
 
             let BrennerG { value, d_cos_ijk, d_tcoord_ij } = Input {
@@ -2338,33 +2342,19 @@ for (name, heading, terms) in pieces:
                 cos_ijk: -1.0/3.0 - 1e-12,
                 tcoord_ij: 4.0,
             }.compute();
-            assert_close!(value, 0.09733);
-            assert_close!(d_cos_ijk, 0.40000);
+            assert_close!(rel=tol, value, 0.09733);
+            assert_close!(rel=tol, d_cos_ijk, 0.40000);
             assert_eq!(d_tcoord_ij, 0.0);
         }
     }
 
     #[test]
     fn numerical_derivatives() {
-        macro_rules! check_derivatives {
-            ($input:expr) => {{
-                let Input { params, type_i, cos_ijk, tcoord_ij } = $input;
-                let BrennerG { value: _, d_cos_ijk, d_tcoord_ij } = $input.compute();
-                assert_close!(
-                    rel=1e-7,
-                    d_cos_ijk,
-                    numerical::slope(1e-7, None, cos_ijk, |cos_ijk| Input { params, type_i, cos_ijk, tcoord_ij }.compute().value),
-                );
-                assert_close!(
-                    rel=1e-7,
-                    d_tcoord_ij,
-                    numerical::slope(1e-7, None, tcoord_ij, |tcoord_ij| Input { params, type_i, cos_ijk, tcoord_ij }.compute().value),
-                );
-            }}
-        }
-
-        // 120 degrees is a branch point so try both sides as well as straddling it
-        for ref params in vec![Params::new_brenner(), Params::new_lammps()] {
+        let all_params = vec![
+            (1e-7, Params::new_brenner()),
+            (1e-4, Params::new_lammps()),
+        ];
+        for (tol, ref params) in all_params {
             for type_i in AtomType::iter_all() {
                 let x_divs = match type_i {
                     AtomType::Carbon => params.G.carbon_low_coord.x_div,
@@ -2383,7 +2373,26 @@ for (name, heading, terms) in pieces:
                 ];
                 for &cos_ijk in &coses {
                     for &tcoord_ij in &tcoords {
-                        check_derivatives!{ Input { params, type_i, cos_ijk, tcoord_ij } }
+                        let input = Input { params, type_i, cos_ijk, tcoord_ij };
+                        let BrennerG { value: _, d_cos_ijk, d_tcoord_ij } = input.compute();
+                        assert_close!(
+                            rel=tol, abs=tol,
+                            d_cos_ijk,
+                            numerical::slope(
+                                1e-7, None,
+                                cos_ijk,
+                                |cos_ijk| Input { params, type_i, cos_ijk, tcoord_ij }.compute().value,
+                            ),
+                        );
+                        assert_close!(
+                            rel=tol, abs=tol,
+                            d_tcoord_ij,
+                            numerical::slope(
+                                1e-7, None,
+                                tcoord_ij,
+                                |tcoord_ij| Input { params, type_i, cos_ijk, tcoord_ij }.compute().value,
+                            ),
+                        );
                     }
                 }
             }
@@ -2700,6 +2709,7 @@ pub mod tricubic_grid {
         pub fn evaluate(&self, point: V3) -> (f64, V3) { self._evaluate(point).1 }
 
         fn _evaluate(&self, point: V3) -> (EvalKind, (f64, V3)) {
+            panic!("lol");
             // We assume the splines are flat with constant value outside the fitted regions.
             let point = clip_point(point);
 
@@ -2750,29 +2760,51 @@ pub mod tricubic_grid {
         point
     }
 
-    // To make clipping always valid, we envision that the spline is flat outside of
-    // the fitted region.  For C1 continuity, this means the derivatives at these
-    // boundaries must be zero.
-    pub fn ensure_clipping_is_valid(input: &Input) -> FailResult<()> {
-        let Input { value: _, di, dj, dk } = input;
+    impl Input {
 
-        macro_rules! check {
-            ($iter:expr) => {
-                ensure!(
-                    $iter.into_iter().all(|&x| x == 0.0),
-                    "derivatives must be zero at the endpoints of the spline"
-                )
-            };
+        // To make clipping always valid, we envision that the spline is flat outside of
+        // the fitted region.  For C1 continuity, this means the derivatives at these
+        // boundaries must be zero.
+        pub fn verify_clipping_is_valid(&self) -> FailResult<()> {
+            let Input { value: _, di, dj, dk } = self;
+
+            macro_rules! check {
+                ($iter:expr) => {
+                    ensure!(
+                        $iter.into_iter().all(|&x| x == 0.0),
+                        "derivatives must be zero at the endpoints of the spline"
+                    )
+                };
+            }
+
+            check!(di[0].flat());
+            check!(di.last().unwrap().flat());
+            check!(dj.iter().flat_map(|plane| &plane[0]));
+            check!(dj.iter().flat_map(|plane| plane.last().unwrap()));
+            check!(dk.iter().flat_map(|plane| plane.iter().map(|row| &row[0])));
+            check!(dk.iter().flat_map(|plane| plane.iter().map(|row| row.last().unwrap())));
+            Ok(())
         }
 
-        check!(di[0].flat());
-        check!(di.last().unwrap().flat());
-        check!(dj.iter().flat_map(|plane| &plane[0]));
-        check!(dj.iter().flat_map(|plane| plane.last().unwrap()));
-        check!(dk.iter().flat_map(|plane| plane.iter().map(|row| &row[0])));
-        check!(dk.iter().flat_map(|plane| plane.iter().map(|row| row.last().unwrap())));
-        Ok(())
+        // useful for tests
+        fn ensure_clipping_is_valid(mut self) -> Self {
+            { // FIXME block is unnecessary once NLL lands
+                let Input { value: _, di, dj, dk } = &mut self;
+                fn zero<'a>(xs: impl IntoIterator<Item=&'a mut f64>) {
+                    for x in xs { *x = 0.0; }
+                }
+
+                zero(di[0].flat_mut());
+                zero(di.last_mut().unwrap().flat_mut());
+                zero(dj.iter_mut().flat_map(|plane| &mut plane[0]));
+                zero(dj.iter_mut().flat_map(|plane| plane.last_mut().unwrap()));
+                zero(dk.iter_mut().flat_map(|plane| plane.iter_mut().map(|row| &mut row[0])));
+                zero(dk.iter_mut().flat_map(|plane| plane.iter_mut().map(|row| row.last_mut().unwrap())));
+            }
+            self
+        }
     }
+
 
     impl<A> _Input<A> {
         fn map_grids<B>(&self, mut func: impl FnMut(&A) -> B) -> _Input<B> {
@@ -2788,7 +2820,7 @@ pub mod tricubic_grid {
     impl Input {
         pub fn solve(&self) -> FailResult<TricubicGrid> {
             use ::rsp2_array_utils::{arr_from_fn, map_arr};
-            ensure_clipping_is_valid(self)?;
+            self.verify_clipping_is_valid()?;
 
             let polys = Box::new({
                 arr_from_fn(|i| {
@@ -2825,7 +2857,7 @@ pub mod tricubic_grid {
     #[derive(Clone)]
     pub struct TriPoly3 {
         /// coeffs along each index are listed in order of increasing power
-        coeff: nd![f64; 4; 4; 4],
+        coeff: Box<nd![f64; 4; 4; 4]>,
     }
 
     pub type TriPoly3Input = _Input<nd![f64; 2; 2; 2]>;
@@ -2839,19 +2871,22 @@ pub mod tricubic_grid {
     }
 
     impl TriPoly3 {
+        pub fn zero() -> Self {
+            TriPoly3 { coeff: Box::new(<nd![f64; 4; 4; 4]>::default()) }
+        }
         pub fn evaluate(&self, point: V3) -> f64 {
             let V3([i, j, k]) = point;
 
-            let powers = |x| [x, x*x, x*x*x, x*x*x*x];
+            let powers = |x| [1.0, x, x*x, x*x*x];
             let i_pows = powers(i);
             let j_pows = powers(j);
             let k_pows = powers(k);
 
             let mut acc = 0.0;
-            for (coeff_plane, &i_pow) in self.coeff.iter().zip(&i_pows) {
-                for (coeff_row, &j_pow) in coeff_plane.iter().zip(&j_pows) {
-                    let row_sum = coeff_row.iter().zip(&k_pows).map(|(&a, &b)| a * b).sum::<f64>();
-                    acc *= i_pow * j_pow * row_sum;
+            for (coeff_plane, &i_pow) in zip_eq!(&self.coeff[..], &i_pows) {
+                for (coeff_row, &j_pow) in zip_eq!(coeff_plane, &j_pows) {
+                    let row_sum = zip_eq!(coeff_row, &k_pows).map(|(&a, &b)| a * b).sum::<f64>();
+                    acc += i_pow * j_pow * row_sum;
                 }
             }
             acc
@@ -2863,7 +2898,7 @@ pub mod tricubic_grid {
         fn coeff_mut(&mut self, (i, j, k): (usize, usize, usize)) -> &mut f64 { &mut self.coeff[i][j][k] }
 
         pub fn axis_derivative(&self, axis: usize) -> Self {
-            let mut out = self.clone();
+            let mut out = Self::zero();
             for scan_idx_1 in 0..4 {
                 for scan_idx_2 in 0..4 {
                     let get_pos = |i| match axis {
@@ -2888,7 +2923,7 @@ pub mod tricubic_grid {
             di: ::rand::random(),
             dj: ::rand::random(),
             dk: ::rand::random(),
-        };
+        }.ensure_clipping_is_valid();
 
         let spline = fit_params.solve()?;
 
@@ -2933,33 +2968,35 @@ pub mod tricubic_grid {
 
     #[test]
     fn test_spline_fit_accuracy() -> FailResult<()> {
-        let fit_params = Input {
-            value: ::rand::random(),
-            di: ::rand::random(),
-            dj: ::rand::random(),
-            dk: ::rand::random(),
-        };
+        for _ in 0..3 {
+            let fit_params = Input {
+                value: ::rand::random(),
+                di: ::rand::random(),
+                dj: ::rand::random(),
+                dk: ::rand::random(),
+            }.ensure_clipping_is_valid();;
 
-        let spline = fit_params.solve()?;
+            let spline = fit_params.solve()?;
 
-        // index of a polynomial
-        for i in 0..MAX_I {
-            for j in 0..MAX_J {
-                for k in 0..MAX_K {
-                    // index of a corner of the polynomial
-                    for ni in 0..2 {
-                        for nj in 0..2 {
-                            for nk in 0..2 {
-                                // index of the point of evaluation
-                                let V3([pi, pj, pk]) = V3([i + ni, j + nj, k + nk]);
-                                let point = V3([pi, pj, pk]).map(|x| x as f64);
+            // index of a polynomial
+            for i in 0..MAX_I {
+                for j in 0..MAX_J {
+                    for k in 0..MAX_K {
+                        // index of a corner of the polynomial
+                        for ni in 0..2 {
+                            for nj in 0..2 {
+                                for nk in 0..2 {
+                                    // index of the point of evaluation
+                                    let V3([pi, pj, pk]) = V3([i + ni, j + nj, k + nk]);
+                                    let point = V3([pi, pj, pk]).map(|x| x as f64);
 
-                                let (value_poly, diff_polys) = &spline.polys[i][j][k];
-                                let V3([di_poly, dj_poly, dk_poly]) = diff_polys;
-                                assert_close!(value_poly.evaluate(point), fit_params.value[pi][pj][pk]);
-                                assert_close!(di_poly.evaluate(point), fit_params.di[pi][pj][pk]);
-                                assert_close!(dj_poly.evaluate(point), fit_params.dj[pi][pj][pk]);
-                                assert_close!(dk_poly.evaluate(point), fit_params.dk[pi][pj][pk]);
+                                    let (value_poly, diff_polys) = &spline.polys[i][j][k];
+                                    let V3([di_poly, dj_poly, dk_poly]) = diff_polys;
+                                    assert_close!(value_poly.evaluate(point), fit_params.value[pi][pj][pk]);
+                                    assert_close!(di_poly.evaluate(point), fit_params.di[pi][pj][pk]);
+                                    assert_close!(dj_poly.evaluate(point), fit_params.dj[pi][pj][pk]);
+                                    assert_close!(dk_poly.evaluate(point), fit_params.dk[pi][pj][pk]);
+                                }
                             }
                         }
                     }
@@ -2971,46 +3008,53 @@ pub mod tricubic_grid {
 
     #[test]
     fn test_poly3_evaluate() {
-        let point = V3::from_fn(|_| uniform(-1.0, 1.0));
-        let poly = TriPoly3 {
-            coeff: {
-                ::std::iter::repeat_with(|| uniform(-5.0, 5.0)).take(64).collect::<Vec<_>>()
-                    .nest().nest().to_array()
-            },
-        };
+        for _ in 0..1 {
+            let point = V3::from_fn(|_| uniform(-1.0, 1.0));
+            let poly = TriPoly3 {
+                coeff: Box::new({
+                    ::std::iter::repeat_with(|| uniform(-5.0, 5.0)).take(64).collect::<Vec<_>>()
+                        .nest().nest().to_array()
+                }),
+            };
 
-        let expected = {
-            // brute force
-            let mut acc = 0.0;
-            for i in 0..4 {
-                for j in 0..4 {
-                    for k in 0..4 {
-                        acc += {
-                            poly.coeff[i][j][k]
-                                * point[0].powi(i as i32)
-                                * point[1].powi(j as i32)
-                                * point[2].powi(k as i32)
-                        };
+            let expected = {
+                // brute force
+                let mut acc = 0.0;
+                for i in 0..4 {
+                    for j in 0..4 {
+                        for k in 0..4 {
+                            acc += {
+                                poly.coeff[i][j][k]
+                                    * point[0].powi(i as i32)
+                                    * point[1].powi(j as i32)
+                                    * point[2].powi(k as i32)
+                            };
+                        }
                     }
                 }
-            }
-            acc
-        };
-        assert_close!(poly.evaluate(point), expected);
+                acc
+            };
+            assert_close!(poly.evaluate(point), expected);
+        }
     }
 
     #[test]
     fn test_poly3_numerical_deriv() -> () {
-        let value_poly = TriPoly3 {
-            coeff: ::rand::random(),
-        };
-        let grad_polys = V3::from_fn(|axis| value_poly.axis_derivative(axis));
+        for _ in 0..20 {
+            let value_poly = TriPoly3 {
+                coeff: Box::new(::rand::random()),
+            };
+            let grad_polys = V3::from_fn(|axis| value_poly.axis_derivative(axis));
 
-        let point = V3::from_fn(|_| uniform(-6.0, 6.0));
+            let point = V3::from_fn(|_| uniform(-6.0, 6.0));
 
-        let computed_grad = grad_polys.map(|poly| poly.evaluate(point));
-        let numerical_grad = num_grad_v3(1e-6, point, |p| value_poly.evaluate(p));
-        assert_close!(computed_grad.0, numerical_grad.0)
+            let computed_grad = grad_polys.map(|poly| poly.evaluate(point));
+            let numerical_grad = num_grad_v3(1e-6, point, |p| value_poly.evaluate(p));
+
+            // This can fail pretty bad if the polynomial produces lots of cancellation
+            // in one of the derivatives.  We must accept either abs or rel tolerance.
+            assert_close!(rel=1e-5, abs=1e-5, computed_grad.0, numerical_grad.0)
+        }
     }
 }
 
