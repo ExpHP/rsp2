@@ -673,7 +673,7 @@ fn compute_rebo_bonds(
         let mut site_V_d_other_deltas = SiteBondVec::<(SiteI, SiteBondVec<V3>)>::new();
         // some things also depend on tcoords of distant atoms.
         // This is too much of a pain to handle immediately.
-        let mut site_V_d_other_tcoords = SiteBondVec::<(SiteI, SiteBondVec<f64>)>::new();
+        let mut site_V_d_other_tcoords = ArrayVec::<[(SiteI, SiteBondVec<f64>); SITE_MAX_BONDS * 2]>::new();
 
         //-----------------------------------------------
         // The repulsive terms
@@ -720,7 +720,6 @@ fn compute_rebo_bonds(
 
         // Eq 3':  b_ij = boole(i < j) * b_ij^{pi}
         for (index_ij, __bond) in interactions.bonds(site_i).enumerate() {
-            assert_eq!(index_ij, site_V_d_other_deltas.len());
             if !__bond.is_canonical {
                 continue;
             }
@@ -762,6 +761,7 @@ fn compute_rebo_bonds(
                     *bpi_d_delta_jl += bpi_d_weight_jl * weight_ik_d_delta_jl;
                 }
             }
+            println!("rs-bpi: {}", bpi);
 
             let VA_ij = bond_VA[index_ij];
             let VA_ij_d_delta_ij = bond_VA_d_delta[index_ij];
@@ -1207,7 +1207,7 @@ mod bondorder_pi {
         let types_l: SiteBondVec<_> = interactions.bonds(site_j).map(|bond| interactions.site(bond.target).atom_type).collect();
 
         let index_ij = bond_ij.0 - interactions.bond_range(site_i).start;
-        let index_ji = bond_ji.0 - interactions.bond_range(site_i).start;
+        let index_ji = bond_ji.0 - interactions.bond_range(site_j).start;
 
         let YCoord {
             value: ycoord_ij,
@@ -2167,7 +2167,6 @@ for (name, heading, terms) in pieces:
             (1e-9, Params::new_lammps()), // these coeffs are rounded pretty badly
         ];
         for (tol, ref params) in iter {
-            println!("set");
             for spline in params.G.all_splines() {
                 for i in 1..spline.coeffs.len() {
                     // Should be continuous up to 2nd derivative
