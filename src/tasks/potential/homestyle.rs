@@ -22,6 +22,7 @@ use ::rsp2_tasks_config as cfg;
 use ::rsp2_array_types::{V3};
 use ::math::bonds::{FracBonds, CartBond, FracBond};
 use ::math::bond_graph::PeriodicGraph;
+use ::math::rebo_nonreactive as rebo_imp;
 
 /// Rust implementation of Kolmogorov-Crespi Z.
 ///
@@ -142,8 +143,8 @@ impl PotentialBuilder<CommonMeta> for Rebo {
         fn fn_body(me: &Rebo, _: &Coords, meta: CommonMeta) -> FailResult<Box<DiffFn<CommonMeta>>> {
             let cfg::PotentialReboNew { params } = me.0;
             let params = match params {
-                cfg::PotentialReboNewParams::Lammps => ::math::rebo::Params::new_lammps(),
-                cfg::PotentialReboNewParams::Brenner => ::math::rebo::Params::new_brenner(),
+                cfg::PotentialReboNewParams::Lammps => rebo_imp::Params::new_lammps(),
+                cfg::PotentialReboNewParams::Brenner => rebo_imp::Params::new_brenner(),
             };
             let bonds: meta::FracBonds = match meta.pick() {
                 Some(bonds) => bonds,
@@ -155,14 +156,14 @@ impl PotentialBuilder<CommonMeta> for Rebo {
         }
 
         struct Diff {
-            params: ::math::rebo::Params,
+            params: rebo_imp::Params,
             bonds: PeriodicGraph,
         }
 
         impl DiffFn<CommonMeta> for Diff {
             fn compute(&mut self, coords: &Coords, meta: CommonMeta) -> FailResult<(f64, Vec<V3>)> {
                 let elements: meta::SiteElements = meta.pick();
-                ::math::rebo::compute(&self.params, coords, &elements, &self.bonds)
+                rebo_imp::compute(&self.params, coords, &elements, &self.bonds)
             }
         }
 

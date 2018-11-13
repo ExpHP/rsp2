@@ -8,4 +8,5 @@ pub(crate) mod crespi;
 pub(crate) mod sparse;
 pub(crate) mod stars;
 pub(crate) mod displacements;
-pub(crate) mod rebo;
+pub(crate) mod rebo_reactive;
+pub(crate) mod rebo_nonreactive;
