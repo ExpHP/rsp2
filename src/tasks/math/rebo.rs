@@ -15,12 +15,27 @@
 #![allow(dead_code)] // FIXME REMOVE
 #![allow(unreachable_code)] // FIXME REMOVE
 
-//! Implementation of the REBO reactive potential. (currently without any of the reactive bits)
+//! Implementation of the second-generation REBO reactive potential.
+//!
+//! The second-generation REBO paper contains many errors; this implementation was written
+//! with the help of the AIREBO paper, and by reviewing the implementation in LAMMPS.
+//!
+//! # Caution
+//!
+//! The reactive bits of the potential (i.e. fractional weights) are implemented,
+//! but not at all well-tested because RSP2 does not need them.
+//! Considering that they constitute the bulk of the implementation effort, they almost
+//! very certainly contain bugs that will need to be ironed out once they are needed.
+//!
+//! Use with extreme caution.
 //!
 //! # Citations
 //!
-//! * Donald W Brenner et al 2002 J. Phys.: Condens. Matter 14 783
+//! * **2nd gen REBO:** Donald W Brenner et al 2002 J. Phys.: Condens. Matter 14 783
+//! * **AIREBO:** Steven J Stuart et al J. Chem. Phys. 112, 6472 (2000)
+//! * **LAMMPS:** S. Plimpton, J Comp Phys, 117, 1-19 (1995)
 
+use ::FailResult;
 use ::math::bond_graph::PeriodicGraph;
 use ::math::bonds::FracBond;
 use ::meta;
@@ -131,9 +146,6 @@ use ::rsp2_minimize::numerical::{self, DerivativeKind::*};
 //
 //-------------------------------------------------------
 
-// FIXME remove
-pub type FailResult<T> = Result<T, ::failure::Error>;
-
 /// A stack-allocated vector of data whose indices correspond to the elements
 /// returned by `interactions.bonds(site)` for some particular `site`, in order.
 pub type SiteBondVec<T> = ArrayVec<[T; SITE_MAX_BONDS]>;
@@ -169,8 +181,6 @@ type TypeMap<T> = EnumMap<AtomType, T>;
 
 newtype_index!{SiteI}
 newtype_index!{BondI}
-//newtype_index!{TripletI}
-//newtype_index!{DihedralI}
 
 pub use self::params::Params;
 mod params {
@@ -180,10 +190,10 @@ mod params {
     #[derive(Debug, Clone)]
     pub struct Params {
         pub by_type: TypeMap<TypeMap<TypeParams>>,
-        pub G: Cow<'static, spline_G::SplineSet>,
-        pub T: Cow<'static, spline_T::SplineSet>,
-        pub F: Cow<'static, spline_F::SplineSet>,
-        pub P: Cow<'static, spline_P::SplineSet>,
+        pub G: Cow<'static, g_spline::SplineSet>,
+        pub T: Cow<'static, t_spline::SplineSet>,
+        pub F: Cow<'static, f_spline::SplineSet>,
+        pub P: Cow<'static, p_spline::SplineSet>,
         pub use_airebo_lambda: bool,
     }
 
@@ -254,10 +264,10 @@ mod params {
             };
             Params {
                 use_airebo_lambda: false,
-                G: Cow::Owned(spline_G::BRENNER_SPLINES),
-                P: Cow::Borrowed(&spline_P::BRENNER_SPLINES),
-                T: Cow::Borrowed(&spline_T::BRENNER_SPLINES),
-                F: Cow::Borrowed(&spline_F::BRENNER_SPLINES),
+                G: Cow::Owned(g_spline::BRENNER_SPLINES),
+                P: Cow::Borrowed(&p_spline::BRENNER_SPLINES),
+                T: Cow::Borrowed(&t_spline::BRENNER_SPLINES),
+                F: Cow::Borrowed(&f_spline::BRENNER_SPLINES),
                 by_type,
             }
         }
@@ -323,10 +333,10 @@ mod params {
             };
             Params {
                 use_airebo_lambda: true,
-                G: Cow::Owned(spline_G::LAMMPS_SPLINES),
-                P: Cow::Borrowed(&spline_P::FAVATA_SPLINES),
-                F: Cow::Borrowed(&spline_F::BRENNER_SPLINES),
-                T: Cow::Borrowed(&spline_T::STUART_SPLINES),
+                G: Cow::Owned(g_spline::LAMMPS_SPLINES),
+                P: Cow::Borrowed(&p_spline::FAVATA_SPLINES),
+                F: Cow::Borrowed(&f_spline::BRENNER_SPLINES),
+                T: Cow::Borrowed(&t_spline::STUART_SPLINES),
                 by_type,
             }
         }
@@ -367,8 +377,6 @@ mod interactions {
             let mut bond_source = IndexVec::<BondI, SiteI>::new();
             let mut bond_target = IndexVec::<BondI, SiteI>::new();
             let mut bond_image_diff = IndexVec::<BondI, V3<i32>>::new();
-//            let mut triplet_bond = IndexVec::<TripletI, BondI>::new();
-//            let mut dihedral_bond = IndexVec::<DihedralI, BondI>::new();
             let site_type = IndexVec::<SiteI, _>::from_raw(types.to_vec());
 
             let cart_cache = coords.with_carts(coords.to_carts());
@@ -414,53 +422,6 @@ mod interactions {
                 } // for bond_ij
             } // for node
 
-//            { // FIXME: block will be unnecessary after NLL lands
-//                // now that all bond_divs are prepped, we can get the BondI indices
-//                // of any arbitrary site
-//                let bonds_enumerated_from = |site: SiteI| {
-//                    let first_bond = bond_div[site];
-//                    idx::iota(first_bond).zip(bond_graph.frac_bonds_from(site.index()))
-//                };
-//
-//                // Deeper pass for triples and dihedrals.
-//                // Apologies for the horrendously nested loop...
-//                for node in bond_graph.node_indices() {
-//                    let site_i = SiteI(node.index());
-//                    let bonds_i_enumerated = || bonds_enumerated_from(site_i);
-//                    for (bond_ij, frac_bond_ij) in bonds_i_enumerated() {
-//                        let site_j = SiteI(frac_bond_ij.to);
-//
-//                        if frac_bond_ij.is_canonical() {
-//                            // Iterate over the other bonds attached to site i for triplets
-//                            for (bond_ik, frac_bond_ik) in bonds_i_enumerated() {
-//                                if bond_ij == bond_ik {
-//                                    continue;
-//                                }
-//                                let type_i = site_type[site_i];
-//                                let type_j = site_type[site_j];
-//
-//                                // Get another bond attached to j for dihedrals
-//                                if (type_i, type_j) == (AtomType::Carbon, AtomType::Carbon) {
-//                                    let bonds_j_enumerated = || bonds_enumerated_from(site_j);
-//                                    for (bond_jl, frac_bond_jl) in bonds_j_enumerated() {
-//                                        // Figure out if k and l are the same image of the same site
-//                                        let frac_bond_il = frac_bond_ij.join(frac_bond_jl).unwrap();
-//                                        if frac_bond_ik == frac_bond_il {
-//                                            // I think I can see my house from here!
-//                                            continue;
-//                                        }
-//                                        dihedral_bond.push(bond_jl);
-//                                    }
-//                                }
-//                                triplet_bond.push(bond_ik);
-//                                dihedral_div.push(DihedralI(dihedral_bond.len()));
-//                            } // for bond_ik
-//                        } // if is_canonical
-//                        triplet_div.push(TripletI(triplet_bond.len()));
-//                    } // for bond_ij
-//                } // for node
-//            } // NLL workaround
-
             Ok(Interactions {
                 bond_div, site_type, bond_cart_vector, bond_is_canonical,
                 bond_target, bond_image_diff, bond_reverse_index, bond_source,
@@ -482,15 +443,6 @@ mod interactions {
         pub image_diff: V3<i32>,
         pub reverse_index: BondI,
     }
-
-//    pub struct Triplet {
-//        pub index: TripletI,
-//        pub bond_ik: BondI,
-//    }
-//
-//    pub struct Dihedral {
-//        pub bond_jl: BondI,
-//    }
 
     impl Interactions {
         pub fn num_sites(&self) -> usize { self.site_type.len() }
@@ -537,21 +489,6 @@ mod interactions {
         pub fn bond_range(&self, site: SiteI) -> ::std::ops::Range<usize> {
             self.bond_div[site].0..self.bond_div[site.next()].0
         }
-
-//        pub fn triplets(&self, bond: BondI) -> impl ExactSizeIterator<Item=Triplet> + '_ {
-//            idx::range(self.triplet_div[bond]..self.triplet_div[bond.next()]).map(move |index| {
-//                let bond_ik = self.triplet_bond[index];
-//                Triplet { index, bond_ik }
-//            })
-//        }
-//
-//        pub fn dihedrals(&self, triplet: TripletI) -> impl ExactSizeIterator<Item=Dihedral> + '_ {
-//            idx::range(self.dihedral_div[triplet]..self.dihedral_div[triplet.next()])
-//                .map(move |index| {
-//                    let bond_jl = self.dihedral_bond[index];
-//                    Dihedral { bond_jl }
-//                })
-//        }
     }
 }
 
@@ -977,7 +914,7 @@ mod site_sigma_pi_term {
             //
             //       Given that integer weights already take a fast path in BrennerP,
             //       it's not worth optimizing this; we'll just compute it for every bond.
-            let P_ij = spline_P::Input { params, type_i, type_j, ccoord_ij, hcoord_ij }.compute();
+            let P_ij = p_spline::Input { params, type_i, type_j, ccoord_ij, hcoord_ij }.compute();
 
             // Gather all cosines between bond i->j and other bonds i->k.
             let coses_ijk;
@@ -1104,7 +1041,7 @@ mod bondorder_sigma_pi {
         pub ccoord_ij: f64,
         pub hcoord_ij: f64,
         // precomputed spline that depends on the coordination at i and the atom type at j
-        pub P_ij: SplineP,
+        pub P_ij: PSpline,
         // cosines of this bond with every other bond at i, and their weights
         pub types_k: &'a [AtomType],
         pub weights_ik: &'a [f64],
@@ -1159,7 +1096,7 @@ mod bondorder_sigma_pi {
             //   + sum_{k /= i, j} e^{\lambda_{ijk}} f^c(r_{ik}) G(cos(t_{ijk})
             tmp_value += 1.0;
 
-            let SplineP {
+            let PSpline {
                 value: P,
                 d_ccoord_ij: P_d_ccoord_ij,
                 d_hcoord_ij: P_d_hcoord_ij,
@@ -1181,11 +1118,11 @@ mod bondorder_sigma_pi {
                     println!("rs-explambda: {}", exp_lambda);
                     println!("rs-tcoord: {}", tcoord_ij);
 
-                    let SplineG {
+                    let GSpline {
                         value: G,
                         d_cos_ijk: G_d_cos_ijk,
                         d_tcoord_ij: G_d_tcoord_ij,
-                    } = spline_G::Input { params, type_i, cos_ijk, tcoord_ij }.compute();
+                    } = g_spline::Input { params, type_i, cos_ijk, tcoord_ij }.compute();
                     println!("rs-g gc dN {} {} {}", G, G_d_cos_ijk, G_d_tcoord_ij);
 
                     let G_d_ccoord_ij = G_d_tcoord_ij * tcoord_ij_d_ccoord_ij;
@@ -1260,7 +1197,6 @@ mod bondorder_pi {
             params, interactions, site_i, bond_ij, weights_ik, weights_jl,
             tcoords_k, tcoords_l,
         } = input;
-
 
         let site_j = interactions.bond(bond_ij).target;
         let type_i = interactions.site(site_i).atom_type;
@@ -1419,12 +1355,12 @@ mod bondorder_pi {
                 sum_d_weights_jl = tmp_sum_d_weights_jl;
             } // scope temporaries
 
-            let SplineT {
+            let TSpline {
                 value: T,
                 d_tcoord_ij: T_d_tcoord_ij,
                 d_tcoord_ji: T_d_tcoord_ji,
                 d_xcoord_ij: T_d_xcoord_ij,
-            } = spline_T::Input { params, type_i, type_j, tcoord_ij, tcoord_ji, xcoord_ij }.compute();
+            } = t_spline::Input { params, type_i, type_j, tcoord_ij, tcoord_ji, xcoord_ij }.compute();
 
             tmp_value += T * sum;
             tmp_d_tcoord_ij += T_d_tcoord_ij * sum;
@@ -1437,17 +1373,21 @@ mod bondorder_pi {
         }
 
         // Second term: Just F.
-        let SplineF {
-            value: F,
-            d_tcoord_ij: F_d_tcoord_ij,
-            d_tcoord_ji: F_d_tcoord_ji,
-            d_xcoord_ij: F_d_xcoord_ij,
-        } = spline_F::Input { params, type_i, type_j, tcoord_ij, tcoord_ji, xcoord_ij }.compute();
+        let f_input = f_spline::Input { params, type_i, type_j, tcoord_ij, tcoord_ji, xcoord_ij };
+        if !f_input.can_assume_zero() {
+            warn!("untested codepath: 2dc43f8b-12a2-46ca-8654-82f447664c04");
+            let FSpline {
+                value: F,
+                d_tcoord_ij: F_d_tcoord_ij,
+                d_tcoord_ji: F_d_tcoord_ji,
+                d_xcoord_ij: F_d_xcoord_ij,
+            } = f_input.compute();
 
-        tmp_value += F;
-        tmp_d_tcoord_ij += F_d_tcoord_ij;
-        tmp_d_tcoord_ji += F_d_tcoord_ji;
-        tmp_d_xcoord_ij += F_d_xcoord_ij;
+            tmp_value += F;
+            tmp_d_tcoord_ij += F_d_tcoord_ij;
+            tmp_d_tcoord_ji += F_d_tcoord_ji;
+            tmp_d_xcoord_ij += F_d_xcoord_ij;
+        }
 
         // Now reformulate the value in terms of a different set of variables.
         //
@@ -1457,27 +1397,34 @@ mod bondorder_pi {
         //     change to: {weights_ik}, {weights_jl}, {deltas_ik}, {deltas_jl},
         //                ycoord_ij, ycoord_ji, tcoord_i,  tcoord_j,
         //
-        //       then to: {weights_ik}, {weights_jl}, {deltas_ik}, {deltas_jl},
-        //                {tcoords_k}, {tcoords_l}
-        //
-        // first change
         let value = tmp_value;
         let d_deltas_ik = tmp_d_deltas_ik;
         let d_deltas_jl = tmp_d_deltas_jl;
         let mut d_weights_ik = tmp_d_weights_ik;
         let mut d_weights_jl = tmp_d_weights_jl;
+
+        // xcoord_ij = xcoord_ij(ycoord_ij, ycoord_ji)
         let d_ycoord_ij = tmp_d_xcoord_ij * xcoord_ij_d_ycoord_ij;
         let d_ycoord_ji = tmp_d_xcoord_ij * xcoord_ij_d_ycoord_ji;
+
+        // tcoord_ij = tcoord_ij(tcoord_i, weight_ij)
         let d_tcoord_i = tmp_d_tcoord_ij * tcoord_ij_d_tcoord_i;
         let d_tcoord_j = tmp_d_tcoord_ji * tcoord_ji_d_tcoord_j;
         d_weights_ik[index_ij] += tmp_d_tcoord_ij * tcoord_ij_d_weight_ij;
         d_weights_jl[index_ji] += tmp_d_tcoord_ji * tcoord_ji_d_weight_ji;
 
-        // second change
+        //  and now from: {weights_ik}, {weights_jl}, {deltas_ik}, {deltas_jl},
+        //                ycoord_ij, ycoord_ji, tcoord_i,  tcoord_j,
+        //
+        //            to: {weights_ik}, {weights_jl}, {deltas_ik}, {deltas_jl},
+        //                {tcoords_k}, {tcoords_l}
+
+        // ycoord_ij = ycoord_ij({tcoords_k}, {weights_ik})
         axpy_mut(&mut d_weights_ik, d_ycoord_ij, &ycoord_ij_d_weights_ik);
         axpy_mut(&mut d_weights_jl, d_ycoord_ji, &ycoord_ji_d_weights_jl);
         let mut d_tcoords_k = sbvec_scaled(d_ycoord_ij, ycoord_ij_d_tcoords_k);
         let mut d_tcoords_l = sbvec_scaled(d_ycoord_ji, ycoord_ji_d_tcoords_l);
+
         // reminder: because tcoords_k describes sites bonded to site i, it contains
         //           tcoord_j rather than tcoord_i
         d_tcoords_k[index_ij] += d_tcoord_j;
@@ -1705,9 +1652,9 @@ mod dihedral_sine_sq {
             let numerical_d_delta_ik = num_grad_v3(1e-5, delta_ik, |delta_ik| Input { delta_ij, delta_ik, delta_jl }.compute().value);
             let numerical_d_delta_jl = num_grad_v3(1e-5, delta_jl, |delta_jl| Input { delta_ij, delta_ik, delta_jl }.compute().value);
 
-            assert_close!(rel=1e-5, output_d_delta_ij.0, numerical_d_delta_ij.0);
-            assert_close!(rel=1e-5, output_d_delta_ik.0, numerical_d_delta_ik.0);
-            assert_close!(rel=1e-5, output_d_delta_jl.0, numerical_d_delta_jl.0);
+            assert_close!(abs=1e-9, output_d_delta_ij.0, numerical_d_delta_ij.0);
+            assert_close!(abs=1e-9, output_d_delta_ik.0, numerical_d_delta_ik.0);
+            assert_close!(abs=1e-9, output_d_delta_jl.0, numerical_d_delta_jl.0);
         }
     }
 }
@@ -1774,14 +1721,11 @@ mod bond_cosine {
                 d_delta_ik: output_d_delta_ik,
             } = Input { delta_ij, delta_ik }.compute();
 
-            let numerical_d_delta_ij = num_grad_v3(1e-5, delta_ij, |delta_ij| Input { delta_ij, delta_ik }.compute().value);
-            let numerical_d_delta_ik = num_grad_v3(1e-5, delta_ik, |delta_ik| Input { delta_ij, delta_ik }.compute().value);
+            let numerical_d_delta_ij = num_grad_v3(1e-4, delta_ij, |delta_ij| Input { delta_ij, delta_ik }.compute().value);
+            let numerical_d_delta_ik = num_grad_v3(1e-4, delta_ik, |delta_ik| Input { delta_ij, delta_ik }.compute().value);
 
-            // FIXME these required tolerances are ridiculous;
-            //       why are we still using 1st order central difference for
-            //       numerical differentiation?
-            assert_close!(rel=1e-5, output_d_delta_ij.0, numerical_d_delta_ij.0);
-            assert_close!(rel=1e-5, output_d_delta_ik.0, numerical_d_delta_ik.0);
+            assert_close!(abs=1e-8, output_d_delta_ij.0, numerical_d_delta_ij.0);
+            assert_close!(abs=1e-8, output_d_delta_ik.0, numerical_d_delta_ik.0);
         }
     }
 }
@@ -1789,11 +1733,11 @@ mod bond_cosine {
 //-----------------------------------------------------------------------------
 // Splines
 
-use self::spline_G::SplineG;
-mod spline_G {
+use self::g_spline::GSpline;
+mod g_spline {
     use super::*;
 
-    pub type Output = SplineG;
+    pub type Output = GSpline;
     pub struct Input<'a> {
         pub params: &'a Params,
         pub type_i: AtomType,
@@ -1801,7 +1745,7 @@ mod spline_G {
         pub cos_ijk: f64,
     }
 
-    pub struct SplineG {
+    pub struct GSpline {
         pub value: f64,
         pub d_tcoord_ij: f64,
         pub d_cos_ijk: f64,
@@ -2121,7 +2065,7 @@ for (name, heading, terms) in pieces:
         ];
         for (tol, ref params) in all_params {
             // graphite
-            let SplineG { value, d_cos_ijk, d_tcoord_ij } = Input {
+            let GSpline { value, d_cos_ijk, d_tcoord_ij } = Input {
                 params,
                 type_i: AtomType::Carbon,
                 cos_ijk: f64::cos(120.0 * PI / 180.0) + 1e-12,
@@ -2132,7 +2076,7 @@ for (name, heading, terms) in pieces:
             assert_close!(rel=tol, d_cos_ijk, 0.17000);
             assert_eq!(d_tcoord_ij, 0.0);
 
-            let SplineG { value, d_cos_ijk, d_tcoord_ij } = Input {
+            let GSpline { value, d_cos_ijk, d_tcoord_ij } = Input {
                 params,
                 type_i: AtomType::Carbon,
                 cos_ijk: f64::cos(120.0 * PI / 180.0) - 1e-12,
@@ -2143,7 +2087,7 @@ for (name, heading, terms) in pieces:
             assert_eq!(d_tcoord_ij, 0.0);
 
             // diamond
-            let SplineG { value, d_cos_ijk, d_tcoord_ij } = Input {
+            let GSpline { value, d_cos_ijk, d_tcoord_ij } = Input {
                 params,
                 type_i: AtomType::Carbon,
                 cos_ijk: -1.0/3.0 + 1e-12,
@@ -2153,7 +2097,7 @@ for (name, heading, terms) in pieces:
             assert_close!(rel=tol, d_cos_ijk, 0.40000);
             assert_eq!(d_tcoord_ij, 0.0);
 
-            let SplineG { value, d_cos_ijk, d_tcoord_ij } = Input {
+            let GSpline { value, d_cos_ijk, d_tcoord_ij } = Input {
                 params,
                 type_i: AtomType::Carbon,
                 cos_ijk: -1.0/3.0 - 1e-12,
@@ -2191,7 +2135,7 @@ for (name, heading, terms) in pieces:
                 for &cos_ijk in &coses {
                     for &tcoord_ij in &tcoords {
                         let input = Input { params, type_i, cos_ijk, tcoord_ij };
-                        let SplineG { value: _, d_cos_ijk, d_tcoord_ij } = input.compute();
+                        let GSpline { value: _, d_cos_ijk, d_tcoord_ij } = input.compute();
                         assert_close!(
                             rel=tol, abs=tol,
                             d_cos_ijk,
@@ -2243,13 +2187,13 @@ for (name, heading, terms) in pieces:
     }
 }
 
-use self::spline_P::SplineP;
-mod spline_P {
+use self::p_spline::PSpline;
+mod p_spline {
     use super::*;
 
     use self::spline_grid::bicubic;
 
-    pub type Output = SplineP;
+    pub type Output = PSpline;
     pub struct Input<'a> {
         pub params: &'a Params,
         pub type_i: AtomType,
@@ -2258,7 +2202,7 @@ mod spline_P {
         pub hcoord_ij: f64,
     }
 
-    pub struct SplineP {
+    pub struct PSpline {
         pub value: f64,
         pub d_ccoord_ij: f64,
         pub d_hcoord_ij: f64,
@@ -2384,8 +2328,8 @@ mod spline_P {
     }
 }
 
-use self::spline_F::SplineF;
-mod spline_F {
+use self::f_spline::FSpline;
+mod f_spline {
     use super::*;
 
     use self::spline_grid::tricubic::{self, ArrayAssignExt};
@@ -2398,7 +2342,7 @@ mod spline_F {
     //
     // For that reason, we don't actually currently use the tricubic splines, and instead just
     // check for a few special cases.
-    pub type Output = SplineF;
+    pub type Output = FSpline;
     pub struct Input<'a> {
         pub params: &'a Params,
         pub type_i: AtomType,
@@ -2421,16 +2365,16 @@ mod spline_F {
         }
     }
 
-    pub struct SplineF {
+    pub struct FSpline {
         pub value: f64,
         pub d_tcoord_ij: f64,
         pub d_tcoord_ji: f64,
         pub d_xcoord_ij: f64,
     }
 
-    impl SplineF {
+    impl FSpline {
         fn zero() -> Self {
-            SplineF {
+            FSpline {
                 value: 0.0,
                 d_tcoord_ij: 0.0,
                 d_tcoord_ji: 0.0,
@@ -2439,7 +2383,7 @@ mod spline_F {
         }
 
         fn flip(self) -> Self {
-            SplineF {
+            FSpline {
                 value: self.value,
                 d_tcoord_ij: self.d_tcoord_ji,
                 d_tcoord_ji: self.d_tcoord_ij,
@@ -2666,8 +2610,8 @@ mod spline_F {
     }
 }
 
-use self::spline_T::SplineT;
-mod spline_T {
+use self::t_spline::TSpline;
+mod t_spline {
     //! T spline
     //!
     //! * Brenner, Table 5
@@ -2675,7 +2619,7 @@ mod spline_T {
 
     use super::*;
 
-    pub type Output = SplineT;
+    pub type Output = TSpline;
     pub struct Input<'a> {
         pub params: &'a Params,
         pub type_i: AtomType,
@@ -2685,7 +2629,7 @@ mod spline_T {
         pub xcoord_ij: f64,
     }
 
-    pub struct SplineT {
+    pub struct TSpline {
         pub value: f64,
         pub d_tcoord_ij: f64,
         pub d_tcoord_ji: f64,
