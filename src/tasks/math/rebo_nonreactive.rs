@@ -52,35 +52,9 @@ use ::rsp2_minimize::numerical::{self, DerivativeKind::*};
 //-------------------------------------------------------
 // # A note on stylistic conventions
 //
-// This code needs to compute some extremely ugly-looking derivatives
-// of an almost-as-ugly-looking potential. As usual, this leads to a
-// *catastrophic explosion* of things that are temporarily needed as
-// part of the computation, and it only gets worse when you try to
-// factor stuff out.
-//
-// Like some other places in rsp2, this code makes heavy use of ad-hoc
-// structs to simulate keyword arguments and to name the output variables.
-// This makes it impossible to accidentally switch the order of similarly-
-// typed arguments.
-//
-// (unfortunately, it also produces an insane amount of boilerplate around
-//  each function. Them's the brakes.)
-//
-// ## Dealing with derivatives
-//
-// All code dealing with derivatives is written in a manner that maximizes
-// the utility of the unused binding and unused assignment lints.
-//
-// This is done because the set of derivatives that something must account for
-// can vary depending on how you define its independent variables. Sometimes it
-// is convenient to treat two normally related things (like bond weight and the
-// displacement vectors) as independent variables up until a higher point in the
-// call stack.  We want to ensure that all necessary changes can be easily found
-// when refactoring something to add or remove explicit dependence on some derivative.
-//
-// Systematic rules are also followed to make sure that the mathematical parts of
-// the code are as boring as possible (i.e. the process of writing this code is
-// extremely mechanical):
+// Although removing the reactive parts of the potential has drastically simplified
+// the computation of derivatives to the point where most of the code can be written
+// with a fairly relaxed attitude, this file still rigidly adheres to a couple of rules:
 //
 // 1. The derivative of `foo` with respect to `bar` is systematically named
 //    `foo_d_bar`. It does not matter if `bar` is a vector (in which case the
@@ -93,47 +67,11 @@ use ::rsp2_minimize::numerical::{self, DerivativeKind::*};
 //    Generally speaking, `foo_d_bar * bar_d_baz = foo_d_baz`, assuming the
 //    multiplication operation is supported by those types.
 //
-// 2. Fully destructure the output of any function that computes pieces of the potential,
+// 2. When inputs and outputs of a function can be ambiguous, wrap in a module
+//    to define input/output types with named members.
+//
+// 3. Fully destructure the output of any function that computes pieces of the potential,
 //    so that the compiler complains about missing fields when one is added.
-//
-// 3. Please ensure that derivatives can be reasoned about locally as much as possible.
-//
-//    Generally speaking, one should be able to verify the correctness of a derivative
-//    from nearby statements and comments, without knowing the definitions of expressions
-//    that appear in the value. Even make trivial bindings for dumb and obvious
-//    derivatives if a temporary is defined far away from where some of its derivatives
-//    are used. E.g.
-//
-//    ```rust
-//    let tcoord = ccoord_i + hcoord_i;
-//    let tcoord_d_ccoord_i = 1.0;
-//    let tcoord_d_hcoord_i = 1.0;
-//    ```
-//
-// 4. Use the following pattern when building vectors over a loop that may contain
-//    values and derivatives.
-//
-//    ```rust
-//    let name;
-//    let name_d_x1;
-//    let name_d_x2;
-//    {
-//        let mut tmp_name = vec![];
-//        let mut tmp_name_d_x1 = vec![];
-//        let mut tmp_name_d_x2 = vec![];
-//
-//        for item in iter {
-//            ...
-//        }
-//
-//        name = tmp_name;
-//        name_d_x1 = tmp_name_d_x1;
-//        name_d_x2 = tmp_name_d_x2;
-//    }
-//    ```
-//
-//    This guarantees that you will get a warning *somewhere* if you forget to use
-//    one of the derivatives later.
 //
 //-------------------------------------------------------
 
@@ -857,36 +795,27 @@ mod site_sigma_pi_term {
             let P_ij = p_spline::Input { params, type_i, type_j, ccoord_ij, hcoord_ij }.compute();
 
             // Gather all cosines between bond i->j and other bonds i->k.
-            let coses_ijk;
-            let coses_ijk_d_delta_ij;
-            let coses_ijk_d_delta_ik;
-            {
-                let mut tmp_coses_ijk = SiteBondVec::new();
-                let mut tmp_coses_ijk_d_delta_ij = SiteBondVec::new();
-                let mut tmp_coses_ijk_d_delta_ik = SiteBondVec::new();
-
-                for (index_ik, __bond) in interactions.bonds(site_i).enumerate() {
-                    let delta_ik = __bond.cart_vector;
-                    if index_ij == index_ik {
-                        // set up bombs in case of possible misuse
-                        tmp_coses_ijk.push(NAN);
-                        tmp_coses_ijk_d_delta_ij.push(V3::from_fn(|_| NAN));
-                        tmp_coses_ijk_d_delta_ik.push(V3::from_fn(|_| NAN));
-                    } else {
-                        let out = bond_cosine::Input { delta_ij, delta_ik }.compute();
-                        let BondCosine {
-                            value: cos,
-                            d_delta_ij: cos_d_delta_ij,
-                            d_delta_ik: cos_d_delta_ik,
-                        } = out;
-                        tmp_coses_ijk.push(cos);
-                        tmp_coses_ijk_d_delta_ij.push(cos_d_delta_ij);
-                        tmp_coses_ijk_d_delta_ik.push(cos_d_delta_ik);
-                    }
+            let mut coses_ijk = SiteBondVec::new();
+            let mut coses_ijk_d_delta_ij = SiteBondVec::new();
+            let mut coses_ijk_d_delta_ik = SiteBondVec::new();
+            for (index_ik, __bond) in interactions.bonds(site_i).enumerate() {
+                let delta_ik = __bond.cart_vector;
+                if index_ij == index_ik {
+                    // set up bombs in case of possible misuse
+                    coses_ijk.push(NAN);
+                    coses_ijk_d_delta_ij.push(V3::from_fn(|_| NAN));
+                    coses_ijk_d_delta_ik.push(V3::from_fn(|_| NAN));
+                } else {
+                    let out = bond_cosine::Input { delta_ij, delta_ik }.compute();
+                    let BondCosine {
+                        value: cos,
+                        d_delta_ij: cos_d_delta_ij,
+                        d_delta_ik: cos_d_delta_ik,
+                    } = out;
+                    coses_ijk.push(cos);
+                    coses_ijk_d_delta_ij.push(cos_d_delta_ij);
+                    coses_ijk_d_delta_ik.push(cos_d_delta_ik);
                 }
-                coses_ijk = tmp_coses_ijk;
-                coses_ijk_d_delta_ij = tmp_coses_ijk_d_delta_ij;
-                coses_ijk_d_delta_ik = tmp_coses_ijk_d_delta_ik;
             }
 
             // We're finally ready to compute the bond order.
@@ -908,7 +837,7 @@ mod site_sigma_pi_term {
                     d_coses_ijk: bsp_ij_d_coses_ijk,
                 } = out;
 
-                // ...and now reformulate it as a function solely of the deltas and weights.
+                // ...and now reformulate it as a function solely of the deltas.
                 let mut tmp_d_deltas: SiteBondVec<V3> = sbvec_filled(V3::zero(), bond_weights.len());
 
                 // Some derivatives also come from the ik bonds.
@@ -954,7 +883,7 @@ mod bondorder_sigma_pi {
         pub ccoord_ij: u32,
         pub hcoord_ij: u32,
         // precomputed spline that depends on the coordination at i and the atom type at j
-        pub P_ij: PSpline,
+        pub P_ij: f64,
         // cosines of this bond with every other bond at i, and their weights
         pub types_k: &'a [AtomType],
         pub weights_ik: &'a [u32],
@@ -985,52 +914,41 @@ mod bondorder_sigma_pi {
         let tcoord_ij = ccoord_ij + hcoord_ij;
 
         // properties of the stuff in the square root
-        let inner_value;
-        let inner_d_coses_ijk;
-        {
-            let mut tmp_value = 0.0;
-            let mut tmp_d_coses_ijk = SiteBondVec::new();
+        let mut inner_value = 0.0;
+        let mut inner_d_coses_ijk = SiteBondVec::new();
 
-            // 1 + P_{ij}(N_i^C, N_i^H)
-            //   + sum_{k /= i, j} e^{\lambda_{ijk}} f^c(r_{ik}) G(cos(t_{ijk})
-            tmp_value += 1.0;
+        // 1 + P_{ij}(N_i^C, N_i^H)
+        //   + sum_{k /= i, j} e^{\lambda_{ijk}} f^c(r_{ik}) G(cos(t_{ijk})
+        inner_value += 1.0;
+        inner_value += P_ij;
 
-            let PSpline {
-                value: P,
-            } = P_ij;
-            tmp_value += P;
-
-            let iter = zip_eq!(coses_ijk, types_k).enumerate();
-            for (index_ik, (&cos_ijk, &type_k)) in iter {
-                let weight_ik = weights_ik[index_ik] as f64;
-                if weight_ik == 0.0 {
-                    tmp_d_coses_ijk.push(0.0);
-                    continue;
-                }
-                if index_ik == skip_index {
-                    tmp_d_coses_ijk.push(NAN);
-                    continue;
-                }
-
-                let exp_lambda = match params.use_airebo_lambda {
-                    true => airebo_exp_lambda(type_i, (type_j, type_k)),
-                    false => brenner_exp_lambda(type_i, (type_j, type_k)),
-                };
-                println!("rs-explambda: {}", exp_lambda);
-                println!("rs-tcoord: {}", tcoord_ij);
-
-                let GSpline {
-                    value: G,
-                    d_cos_ijk: G_d_cos_ijk,
-                } = g_spline::Input { params, type_i, cos_ijk, tcoord_ij }.compute();
-                println!("rs-g gc {} {}", G, G_d_cos_ijk);
-
-                tmp_value += exp_lambda * weight_ik * G;
-                tmp_d_coses_ijk.push(exp_lambda * weight_ik * G_d_cos_ijk);
+        let iter = zip_eq!(coses_ijk, types_k).enumerate();
+        for (index_ik, (&cos_ijk, &type_k)) in iter {
+            let weight_ik = weights_ik[index_ik] as f64;
+            if weight_ik == 0.0 {
+                inner_d_coses_ijk.push(0.0);
+                continue;
+            }
+            if index_ik == skip_index {
+                inner_d_coses_ijk.push(NAN);
+                continue;
             }
 
-            inner_value = tmp_value;
-            inner_d_coses_ijk = tmp_d_coses_ijk;
+            let exp_lambda = match params.use_airebo_lambda {
+                true => airebo_exp_lambda(type_i, (type_j, type_k)),
+                false => brenner_exp_lambda(type_i, (type_j, type_k)),
+            };
+            println!("rs-explambda: {}", exp_lambda);
+            println!("rs-tcoord: {}", tcoord_ij);
+
+            let GSpline {
+                value: G,
+                d_cos_ijk: G_d_cos_ijk,
+            } = g_spline::Input { params, type_i, cos_ijk, tcoord_ij }.compute();
+            println!("rs-g gc {} {}", G, G_d_cos_ijk);
+
+            inner_value += exp_lambda * weight_ik * G;
+            inner_d_coses_ijk.push(exp_lambda * weight_ik * G_d_cos_ijk);
         }
 
         // Now take the square root.
@@ -1126,122 +1044,103 @@ mod bondorder_pi {
 
         // Accumulators for the output value,
         // initially formulated in terms of a larger set of variables.
-        let mut tmp_value = 0.0;
-        let mut tmp_d_deltas_ik = sbvec_filled(V3::zero(), types_k.len());
-        let mut tmp_d_deltas_jl = sbvec_filled(V3::zero(), types_l.len());
+        let mut value = 0.0;
+        let mut d_deltas_ik = sbvec_filled(V3::zero(), types_k.len());
+        let mut d_deltas_jl = sbvec_filled(V3::zero(), types_l.len());
 
         // First term has a T_ij prefactor, which is zero for non-CC bonds.
         if (type_i, type_j) == (AtomType::Carbon, AtomType::Carbon) {
             // sum = ∑_{k,l} sin^2(Θ_{ijkl}) f_{ik} f_{jl}
-            let sum;
-            let sum_d_deltas_ik; // w.r.t. bonds around site i
-            let sum_d_deltas_jl; // w.r.t. bonds around site j
-            { // scope temporaries
-                let mut tmp_sum = 0.0;
-                let mut tmp_sum_d_deltas_ik = sbvec_filled(V3::zero(), weights_ik.len());
-                let mut tmp_sum_d_deltas_jl = sbvec_filled(V3::zero(), weights_jl.len());
+            let mut sum = 0.0;
+            let mut sum_d_deltas_ik = sbvec_filled(V3::zero(), weights_ik.len()); // w.r.t. bonds around site i
+            let mut sum_d_deltas_jl = sbvec_filled(V3::zero(), weights_jl.len()); // w.r.t. bonds around site j
+            // We must iterate over groups of four DIFFERENT atoms ijkl,
+            // with bonds between ij, ik, and jl.
+            for __bond in interactions.bonds(site_i) {
+                let bond_ik = __bond.index;
 
-                // We must iterate over groups of four DIFFERENT atoms ijkl,
-                // with bonds between ij, ik, and jl.
-                for __bond in interactions.bonds(site_i) {
-                    let bond_ik = __bond.index;
+                // Recall that because a site may have multiple images involved in the interaction,
+                // simply comparing site indices is not good enough.
+                //
+                // Thankfully, verifying i != l and j != k is easily done because we can
+                // compare bond indices.
+                if bond_ik == bond_ij {
+                    continue; // site k is site j
+                }
 
-                    // Recall that because a site may have multiple images involved in the interaction,
-                    // simply comparing site indices is not good enough.
-                    //
-                    // Thankfully, verifying i != l and j != k is easily done because we can
-                    // compare bond indices.
-                    if bond_ik == bond_ij {
-                        continue; // site k is site j
+                for __bond in interactions.bonds(site_j) {
+                    let bond_jl = __bond.index;
+
+                    if bond_jl == bond_ji {
+                        continue; // site l is site i
                     }
 
-                    for __bond in interactions.bonds(site_j) {
-                        let bond_jl = __bond.index;
+                    // Use FracBonds here to correctly account for images
+                    let frac_bond_ij = interactions.frac_bond(bond_ij);
+                    let frac_bond_ik = interactions.frac_bond(bond_ik);
+                    let frac_bond_jl = interactions.frac_bond(bond_jl);
+                    let frac_bond_il = frac_bond_ij.join(frac_bond_jl).unwrap();
+                    if frac_bond_il == frac_bond_ik {
+                        continue; // site k is site l
+                    }
 
-                        if bond_jl == bond_ji {
-                            continue; // site l is site i
-                        }
+                    let delta_ij = interactions.bond(bond_ij).cart_vector;
+                    let delta_ik = interactions.bond(bond_ik).cart_vector;
+                    let delta_jl = interactions.bond(bond_jl).cart_vector;
+                    let DihedralSineSq {
+                        value: sinsq,
+                        d_delta_ij: sinsq_d_delta_ij,
+                        d_delta_ik: sinsq_d_delta_ik,
+                        d_delta_jl: sinsq_d_delta_jl,
+                    } = dihedral_sine_sq::Input { delta_ij, delta_ik, delta_jl }.compute();
 
-                        // Use FracBonds here to correctly account for images
-                        let frac_bond_ij = interactions.frac_bond(bond_ij);
-                        let frac_bond_ik = interactions.frac_bond(bond_ik);
-                        let frac_bond_jl = interactions.frac_bond(bond_jl);
-                        let frac_bond_il = frac_bond_ij.join(frac_bond_jl).unwrap();
-                        if frac_bond_il == frac_bond_ik {
-                            continue; // site k is site l
-                        }
+                    let index_ik = bond_ik.0 - interactions.bond_range(site_i).start;
+                    let index_jl = bond_ji.0 - interactions.bond_range(site_j).start;
 
-                        let delta_ij = interactions.bond(bond_ij).cart_vector;
-                        let delta_ik = interactions.bond(bond_ik).cart_vector;
-                        let delta_jl = interactions.bond(bond_jl).cart_vector;
-                        let DihedralSineSq {
-                            value: sinsq,
-                            d_delta_ij: sinsq_d_delta_ij,
-                            d_delta_ik: sinsq_d_delta_ik,
-                            d_delta_jl: sinsq_d_delta_jl,
-                        } = dihedral_sine_sq::Input { delta_ij, delta_ik, delta_jl }.compute();
+                    //-----------
+                    // NOTE: for reasons I cannot determine, the (otherwise extremely sensible)
+                    //       AIREBO paper also uses Heaviside step functions here:
+                    //
+                    //   sinsq_ijkl * weight_ik * weight_jl * H(sin_ijk - s_min)
+                    //                                      * H(sin_jil - s_min)   (s_min = 0.1)
+                    //
+                    // These appear designed to cut the term off for very small angles (i.e.
+                    // neighbors that are very closely packed).  But this destroys the C1
+                    // continuity of the function and I couldn't find any justification for it.
+                    //-----------
 
-                        let index_ik = bond_ik.0 - interactions.bond_range(site_i).start;
-                        let index_jl = bond_ji.0 - interactions.bond_range(site_j).start;
+                    // term to add to sum is  sinsq * weight_ik * weight_jl
+                    //
+                    // independent variables are chosen for now as the deltas that define sinsq,
+                    // and the weights that appear directly
+                    let weight_ik = weights_ik[index_ik] as f64;
+                    let weight_jl = weights_jl[index_jl] as f64;
 
-                        //-----------
-                        // NOTE: for reasons I cannot determine, the (otherwise extremely sensible)
-                        //       AIREBO paper also uses Heaviside step functions here:
-                        //
-                        //   sinsq_ijkl * weight_ik * weight_jl * H(sin_ijk - s_min)
-                        //                                      * H(sin_jil - s_min)   (s_min = 0.1)
-                        //
-                        // These appear designed to cut the term off for very small angles (i.e.
-                        // neighbors that are very closely packed).  But this destroys the C1
-                        // continuity of the function and I couldn't find any justification for it.
-                        //-----------
+                    sum += sinsq * weight_ik * weight_jl;
 
-                        // term to add to sum is  sinsq * weight_ik * weight_jl
-                        //
-                        // independent variables are chosen for now as the deltas that define sinsq,
-                        // and the weights that appear directly
-                        let weight_ik = weights_ik[index_ik] as f64;
-                        let weight_jl = weights_jl[index_jl] as f64;
+                    sum_d_deltas_ik[index_ij] += sinsq_d_delta_ij * weight_ik * weight_jl;
+                    sum_d_deltas_ik[index_ik] += sinsq_d_delta_ik * weight_ik * weight_jl;
+                    sum_d_deltas_jl[index_jl] += sinsq_d_delta_jl * weight_ik * weight_jl;
+                } // for bond_jl
+            } // for bond_ik
 
-                        tmp_sum += sinsq * weight_ik * weight_jl;
+            let T = t_spline::Input { params, type_i, type_j, tcoord_ij, tcoord_ji, xcoord_ij }.compute();
 
-                        tmp_sum_d_deltas_ik[index_ij] += sinsq_d_delta_ij * weight_ik * weight_jl;
-                        tmp_sum_d_deltas_ik[index_ik] += sinsq_d_delta_ik * weight_ik * weight_jl;
-                        tmp_sum_d_deltas_jl[index_jl] += sinsq_d_delta_jl * weight_ik * weight_jl;
-                    } // for bond_jl
-                } // for bond_ik
-                sum = tmp_sum;
-                sum_d_deltas_ik = tmp_sum_d_deltas_ik;
-                sum_d_deltas_jl = tmp_sum_d_deltas_jl;
-            } // scope temporaries
-
-            let TSpline {
-                value: T,
-            } = t_spline::Input { params, type_i, type_j, tcoord_ij, tcoord_ji, xcoord_ij }.compute();
-
-            tmp_value += T * sum;
-            axpy_mut(&mut tmp_d_deltas_ik, T, &sum_d_deltas_ik);
-            axpy_mut(&mut tmp_d_deltas_jl, T, &sum_d_deltas_jl);
+            value += T * sum;
+            axpy_mut(&mut d_deltas_ik, T, &sum_d_deltas_ik);
+            axpy_mut(&mut d_deltas_jl, T, &sum_d_deltas_jl);
         }
 
         // Second term: Just F.
         let f_input = f_spline::Input { params, type_i, type_j, tcoord_ij, tcoord_ji, xcoord_ij };
         if !f_input.can_assume_zero() {
             warn!("untested codepath: 2dc43f8b-12a2-46ca-8654-82f447664c04");
-            let FSpline {
-                value: F,
-            } = f_input.compute();
+            let F = f_input.compute();
 
-            tmp_value += F;
+            value += F;
         }
 
-        let value = tmp_value;
-        let d_deltas_ik = tmp_d_deltas_ik;
-        let d_deltas_jl = tmp_d_deltas_jl;
-
-        Output {
-            value, d_deltas_ik, d_deltas_jl,
-        }
+        Output { value, d_deltas_ik, d_deltas_jl }
     }
 }
 
@@ -1954,29 +1853,18 @@ for (name, heading, terms) in pieces:
     }
 }
 
-use self::p_spline::PSpline;
 mod p_spline {
     use super::*;
 
     use self::spline_grid::bicubic;
 
-    pub type Output = PSpline;
+    type Output = f64;
     pub struct Input<'a> {
         pub params: &'a Params,
         pub type_i: AtomType,
         pub type_j: AtomType,
         pub ccoord_ij: u32,
         pub hcoord_ij: u32,
-    }
-
-    pub struct PSpline {
-        pub value: f64,
-    }
-
-    impl Output {
-        fn zero() -> Output {
-            Output { value: 0.0 }
-        }
     }
 
     #[derive(Debug, Clone)]
@@ -1990,7 +1878,7 @@ mod p_spline {
             let Input { ref params, type_i, type_j, ccoord_ij, hcoord_ij } = *self;
 
             let poly = match (type_i, type_j) {
-                (AtomType::Hydrogen, _) => return Output::zero(),
+                (AtomType::Hydrogen, _) => return 0.0,
                 (AtomType::Carbon, AtomType::Carbon) => &params.P.CC,
                 (AtomType::Carbon, AtomType::Hydrogen) => &params.P.CH,
             };
@@ -1998,7 +1886,7 @@ mod p_spline {
             // the non-reactive case.
             let (value, _grad) = poly.evaluate(V2([ccoord_ij, hcoord_ij]));
 
-            Output { value }
+            value
         }
     }
 
@@ -2094,7 +1982,6 @@ mod p_spline {
     }
 }
 
-use self::f_spline::FSpline;
 mod f_spline {
     use super::*;
 
@@ -2108,7 +1995,7 @@ mod f_spline {
     //
     // For that reason, we don't actually currently use the tricubic splines, and instead just
     // check for a few special cases.
-    pub type Output = FSpline;
+    pub type Output = f64;
     pub struct Input<'a> {
         pub params: &'a Params,
         pub type_i: AtomType,
@@ -2127,24 +2014,6 @@ mod f_spline {
                 tcoord_ij: self.tcoord_ji,
                 tcoord_ji: self.tcoord_ij,
                 xcoord_ij: self.xcoord_ij,
-            }
-        }
-    }
-
-    pub struct FSpline {
-        pub value: f64,
-    }
-
-    impl FSpline {
-        fn zero() -> Self {
-            FSpline {
-                value: 0.0,
-            }
-        }
-
-        fn flip(self) -> Self {
-            FSpline {
-                value: self.value,
             }
         }
     }
@@ -2171,7 +2040,12 @@ mod f_spline {
         ))();
 
         let poly = match (type_i, type_j) {
-            (AtomType::Hydrogen, AtomType::Carbon) => return input.flip().compute().flip(),
+            (AtomType::Hydrogen, AtomType::Carbon) => {
+                // (written to break if the output changes to another type that needs
+                //  to be flipped back)
+                let value: f64 = input.flip().compute();
+                return value;
+            },
             (AtomType::Carbon, AtomType::Carbon) => &params.F.CC,
             (AtomType::Carbon, AtomType::Hydrogen) => &params.F.CH,
             (AtomType::Hydrogen, AtomType::Hydrogen) => &params.F.HH,
@@ -2180,7 +2054,7 @@ mod f_spline {
         // the non-reactive case.
         let (value, _grad) = poly.evaluate(V3([tcoord_ij, tcoord_ji, xcoord_ij]));
 
-        Output { value }
+        value
     }
 
     // check if the value and all derivatives can be assumed to be zero,
@@ -2363,7 +2237,6 @@ mod f_spline {
     }
 }
 
-use self::t_spline::TSpline;
 mod t_spline {
     //! T spline
     //!
@@ -2372,7 +2245,7 @@ mod t_spline {
 
     use super::*;
 
-    pub type Output = TSpline;
+    pub type Output = f64;
     pub struct Input<'a> {
         pub params: &'a Params,
         pub type_i: AtomType,
@@ -2380,18 +2253,6 @@ mod t_spline {
         pub tcoord_ij: u32,
         pub tcoord_ji: u32,
         pub xcoord_ij: u32,
-    }
-
-    pub struct TSpline {
-        pub value: f64,
-    }
-
-    impl Output {
-        fn zero() -> Output {
-            Output {
-                value: 0.0,
-            }
-        }
     }
 
     #[derive(Debug, Clone)]
@@ -2410,13 +2271,13 @@ mod t_spline {
         let poly = match (type_i, type_j) {
             (AtomType::Carbon, AtomType::Carbon) => &params.T.CC,
             (AtomType::Hydrogen, _) |
-            (_, AtomType::Hydrogen) => return Output::zero(),
+            (_, AtomType::Hydrogen) => return 0.0,
         };
         // Ignore grad because total derivative of each variable is locally zero in
         // the non-reactive case.
         let (value, _grad) = poly.evaluate(V3([tcoord_ij, tcoord_ji, xcoord_ij]));
 
-        Output { value }
+        value
     }
 
     lazy_static!{
