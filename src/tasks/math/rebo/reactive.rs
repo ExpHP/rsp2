@@ -195,9 +195,9 @@ mod params {
     pub struct Params {
         pub by_type: TypeMap<TypeMap<TypeParams>>,
         pub G: Cow<'static, g_spline::SplineSet>,
-        pub T: Cow<'static, t_spline::SplineSet>,
-        pub F: Cow<'static, f_spline::SplineSet>,
-        pub P: Cow<'static, p_spline::SplineSet>,
+        pub T: Cow<'static, splines::T::SplineSet>,
+        pub F: Cow<'static, splines::F::SplineSet>,
+        pub P: Cow<'static, splines::P::SplineSet>,
         pub use_airebo_lambda: bool,
     }
 
@@ -269,9 +269,9 @@ mod params {
             Params {
                 use_airebo_lambda: false,
                 G: Cow::Owned(g_spline::BRENNER_SPLINES),
-                P: Cow::Borrowed(&p_spline::BRENNER_SPLINES),
-                T: Cow::Borrowed(&t_spline::BRENNER_SPLINES),
-                F: Cow::Borrowed(&f_spline::BRENNER_SPLINES),
+                P: Cow::Borrowed(&splines::P::BRENNER),
+                T: Cow::Borrowed(&splines::T::BRENNER),
+                F: Cow::Borrowed(&splines::F::BRENNER),
                 by_type,
             }
         }
@@ -338,9 +338,9 @@ mod params {
             Params {
                 use_airebo_lambda: true,
                 G: Cow::Owned(g_spline::LAMMPS_SPLINES),
-                P: Cow::Borrowed(&p_spline::FAVATA_SPLINES),
-                F: Cow::Borrowed(&f_spline::BRENNER_SPLINES),
-                T: Cow::Borrowed(&t_spline::STUART_SPLINES),
+                P: Cow::Borrowed(&splines::P::FAVATA),
+                F: Cow::Borrowed(&splines::F::BRENNER),
+                T: Cow::Borrowed(&splines::T::STUART),
                 by_type,
             }
         }
@@ -2214,12 +2214,6 @@ mod p_spline {
         }
     }
 
-    #[derive(Debug, Clone)]
-    pub struct SplineSet {
-        CC: BicubicGrid,
-        CH: BicubicGrid, // P_CH only. (P_HC is zero)
-    }
-
     impl<'a> Input<'a> {
         pub fn compute(&self) -> Output {
             let Input { ref params, type_i, type_j, ccoord_ij, hcoord_ij } = *self;
@@ -2235,104 +2229,11 @@ mod p_spline {
             Output { value, d_ccoord_ij, d_hcoord_ij }
         }
     }
-
-    lazy_static!{
-        /// The only fully correct choice for PCC in second-generation REBO.
-        ///
-        /// Brenner (2002), Table 8.
-        pub static ref BRENNER_SPLINES: SplineSet = SplineSet {
-            CC: brenner_CC_input().solve().unwrap(),
-            CH: brenner_CH(),
-        };
-
-        /// Suitable for AIREBO. (with the torsion term enabled)
-        ///
-        /// * Stuart (2000) Table VIII
-        /// * LAMMPS, `pair_style airebo`.
-        /// * LAMMPS, `pair_style rebo` prior ot 05Oct2016.
-        ///
-        /// Modifies a few of the terms to counteract AIREBO's torsional
-        /// forces in unsaturated systems. (e.g. graphene)
-        ///
-        /// The rounding of values is chosen to match Brenner where
-        /// available, and Stuart otherwise.
-        pub static ref STUART_SPLINES: SplineSet = SplineSet {
-            CC: stuart_CC(),
-            CH: brenner_CH(),
-        };
-
-        /// Used by LAMMPS 05Oct2016–current (09Nov2018) in `pair_style rebo`.
-        ///
-        /// In 2016, Favata et. al reported that `pair_style rebo` erroneously
-        /// used a parameter from AIREBO. LAMMPS was updated accordingly.
-        ///
-        /// However, there are actually three parameters that change, and
-        /// this update only corrected one of them. Hence, this spline is not
-        /// fully correct for neither REBO nor AIREBO.
-        pub static ref FAVATA_SPLINES: SplineSet = SplineSet {
-            CC: favata_CC(),
-            CH: brenner_CH(),
-        };
-    }
-
-    // * Brenner Table 8
-    fn brenner_CC_input() -> bicubic::Input {
-        let mut input = bicubic::Input::default();
-
-        // NOTE: In the paper, Table 8 has the columns for i and j flipped.
-        input.value[1][1] = 0.003_026_697_473_481; // (CH3)HC=CH(CH3)
-        input.value[0][2] = 0.007_860_700_254_745; // C2H4
-        input.value[0][3] = 0.016_125_364_564_267; // C2H6
-        input.value[2][1] = 0.003_179_530_830_731; // i-C4H10
-        input.value[1][2] = 0.006_326_248_241_119; // c-c6H12
-        input
-    }
-
-    // * Brenner (Table 8)
-    // * Stuart (Table VIII)  (at much lower precision)
-    // * LAMMPS REBO/AIREBO  (rounded only sightly differently)
-    fn brenner_CH() -> BicubicGrid {
-        let mut input =  bicubic::Input::default();
-        input.value[0][1] = 0.209_336_732_825_0380;  // CH2
-        input.value[0][2] = -0.064_449_615_432_525;  // CH3
-        input.value[0][3] = -0.303_927_546_346_162;  // CH4
-        input.value[1][0] = 0.01;                    // C2H2
-        input.value[2][0] = -0.122_042_146_278_2555; // (CH3)HC=CH(CH3)
-        input.value[1][1] = -0.125_123_400_628_7090; // C2H4
-        input.value[1][2] = -0.298_905_245_783;      // C2H6
-        input.value[3][0] = -0.307_584_705_066;      // i-C4H10
-        input.value[2][1] = -0.300_529_172_406_7579; // c-C6H12
-        input.solve().unwrap()
-    }
-
-    fn stuart_CC() -> BicubicGrid {
-        let mut input = brenner_CC_input();
-
-        // Terms modified to counteract AIREBO's torsion.
-        input.value[1][1] = -0.010_960;
-        input.value[0][2] = -0.000_500;
-        input.value[2][0] = -0.027_603;
-        input.solve().unwrap()
-    }
-
-    fn favata_CC() -> BicubicGrid {
-        let mut input = brenner_CC_input();
-
-        // Beginning from the AIREBO params, Favata fixes one of the terms to match REBO
-        // while leaving the other two. (because we're starting from REBO, we change the other two)
-        input.value[1][1] = -0.010_960;
-        input.value[0][2] = -0.000_500;
-        // [2][0] is the one that was fixed.
-
-        input.solve().unwrap()
-    }
 }
 
 use self::f_spline::FSpline;
 mod f_spline {
     use super::*;
-
-    use self::splines::tricubic::{self, ArrayAssignExt};
 
     // FIXME:
     //
@@ -2392,13 +2293,6 @@ mod f_spline {
         }
     }
 
-    #[derive(Debug, Clone)]
-    pub struct SplineSet {
-        CC: TricubicGrid,
-        CH: TricubicGrid, // F_CH and F_HC.
-        HH: TricubicGrid,
-    }
-
     impl<'a> Input<'a> {
         pub fn compute(self) -> Output { compute(self) }
     }
@@ -2451,163 +2345,6 @@ mod f_spline {
             }
         }
     }
-
-    lazy_static! {
-        /// Brenner (2002), Tables 4, 6, and 9.
-        ///
-        /// This has NOT been thoroughly checked against Stuart and LAMMPS, although
-        /// all of what I have checked so far against Stuart matches.  (LAMMPS takes
-        /// some creative freedom with the values of the splines near some of the
-        /// boundaries, and I haven't yet figured out precisely what it does)
-        ///
-        /// **Caution:** This very likely contains errors, and using it is currently
-        /// inadvisable.
-        pub static ref BRENNER_SPLINES: SplineSet = SplineSet {
-            CC: brenner_CC(),
-            HH: brenner_HH(),
-            CH: brenner_CH(),
-        };
-    }
-
-    // Brenner, Table 4
-    fn brenner_CC() -> TricubicGrid {
-        let mut input = tricubic::Input::default();
-
-        // NOTE: LAMMPS flattens out some values at high coordinates rather than having them
-        //       go to zero. This might be a good idea for an alternate parameterization.
-
-        input.value.assign((1, 1, 1), 0.105_000); // Acetylene
-        input.value.assign((1, 1, 2), -0.004_177_5); // H2C=C=CH
-        input.value.assign((1, 1, 3..=9), -0.016_085_6); // C4
-        input.value.assign((2, 2, 1), 0.094_449_57); // (CH3)2C=C(CH3)2
-        input.value.assign((2, 2, 2), 0.022_000_00); // Benzene
-
-        // !!!!!!!!!!!!
-        // FIXME: Are these correct?
-        //
-        // These are the exact values written in the paper, but it describes them as
-        // "Average from difference F(2, 2, 2) to difference F(2, 2, 9)".
-        //
-        // They do have a constant difference, but if we were really starting from
-        // the value of F[2][2][2], then that difference should be around 0.00314, not 0.00662.
-        // (notice how F[2][2][3] > F[2][2][2])
-        //
-        // NOTE: The corresponding derivative is written as dF[2, 2, 4..=8]/dk, which is
-        //       consistent with the values. Perhaps simply the comment in the paper is wrong.
-        //
-        // NOTE: Stuart and LAMMPS both also use these values.
-        // !!!!!!!!!!!!
-        input.value.assign((2, 2, 3), 0.039_705_87);
-        input.value.assign((2, 2, 4), 0.033_088_22);
-        input.value.assign((2, 2, 5), 0.026_470_58);
-        input.value.assign((2, 2, 6), 0.019_852_93);
-        input.value.assign((2, 2, 7), 0.013_235_29);
-        input.value.assign((2, 2, 8), 0.006_617_64);
-        input.value.assign((2, 2, 9), 0.0);
-
-        input.value.assign((0, 1, 1), 0.043_386_99); // C2H
-
-        input.value.assign((0, 1, 2), 0.009_917_2158); // C3
-        input.value.assign((0, 2, 1), 0.049_397_6637); // CCH2
-        input.value.assign((0, 2, 2), -0.011_942_669); // CCH(CH2)
-        input.value.assign((0, 3, 1..=9), -0.119_798_935); // H3CC
-
-        input.value.assign((1, 2, 1), 0.009_649_5698); // H2CCH
-        input.value.assign((1, 2, 2), 0.030); // H2C=C=CH2
-        input.value.assign((1, 2, 3), -0.0200); // C6H5
-
-        // "Average from F(1,2,3) to F(1,2,6)".
-        // At least this time, the description checks out.
-        input.value.assign((1, 2, 4), -0.023_377_8774);
-        input.value.assign((1, 2, 5), -0.026_755_7548);
-
-        input.value.assign((1, 2, 6..=9), -0.030_133_632); // Graphite vacancy
-        input.value.assign((1, 3, 2..=9), -0.124_836_752); // H3C–CCH
-        input.value.assign((2, 3, 1..=9), -0.044_709_383); // Diamond vacancy
-
-        // --------------------------
-        // Derivatives
-
-        input.di.assign((2, 1, 1), -0.052_500);
-        input.di.assign((2, 1, 5..=9), -0.054_376);
-        input.di.assign((2, 3, 1), 0.000_00);
-
-        // NOTE: another oddity. These two ranges are written separately
-        //       in the paper even though they could be a single range 2..=9.
-        //       Does one contain an error?
-        input.di.assign((2, 3, 2..=6), 0.062_418);
-        input.di.assign((2, 3, 7..=9), 0.062_418);
-
-        // !!!!!!!!!!!!!!!!!!
-        // NOTE
-        //
-        // This derivative is related to the seemingly problematic values
-        // in F[2][2][3..=8]
-        // !!!!!!!!!!!!!!!!!!
-        input.dk.assign((2, 2, 4..=8), -0.006_618);
-
-        input.dk.assign((1, 1, 2), -0.060_543);
-
-        // !!!!!!!!!!!!!!!!!!
-        // FIXME
-        //
-        // This is highly suspicious; it seems this is intended to be the slope
-        // from the linear equation describing F[1][2][3..=6], but it is at least
-        // an order of magnitude off!
-        //
-        // This apparent error is unfortunately replicated in Stuart (2000) as
-        // well as LAMMPS.
-        // !!!!!!!!!!!!!!!!!!
-        input.dk.assign((1, 2, 4), -0.020_044);
-        input.dk.assign((1, 2, 5), -0.020_044);
-
-        // symmetrize
-        let n = input.value.len();
-        for upper in 0..n {
-            for lower in 0..upper {
-                for k in 0..input.value[0][0].len() {
-                    assert_eq!(input.value[upper][lower][k], 0.0);
-                    input.value[upper][lower][k] = input.value[lower][upper][k];
-                    input.dk[upper][lower][k] = input.dk[lower][upper][k];
-                }
-            }
-        }
-        for i in 0..n {
-            for j in 0..n {
-                input.dj[i][j].copy_from_slice(&input.di[j][i]);
-            }
-        }
-
-        // The values in Brenner (2002) are actually 2 * F.
-        let input = input.scale(0.5);
-        input.solve().unwrap()
-    }
-
-    // Brenner, Table 6
-    // TODO: Check against Stuart and LAMMPS
-    fn brenner_HH() -> TricubicGrid {
-        let mut input = tricubic::Input::default();
-        input.value.assign((1, 1, 1), 0.249_831_916);
-
-        // The values in Brenner (2002) are actually 2 * F.
-        let input = input.scale(0.5);
-        input.solve().unwrap()
-    }
-
-    // Brenner, Table 9
-    // TODO: Check against Stuart and LAMMPS
-    fn brenner_CH() -> TricubicGrid {
-        let mut input = tricubic::Input::default();
-
-        input.value.assign((0, 2, 5..=9), -0.009_047_787_516_128_8110); // C6H6
-        input.value.assign((1, 2, 1..=9), -0.25);  // Equations (23)–(25)
-        input.value.assign((1, 3, 1..=9), -0.213); // Equations (23)–(25)
-        input.value.assign((1, 1, 1..=9), -0.5);   // Equations (23)–(25)
-
-        // The values in Brenner (2002) are actually 2 * F.
-        let input = input.scale(0.5);
-        input.solve().unwrap()
-    }
 }
 
 use self::t_spline::TSpline;
@@ -2647,11 +2384,6 @@ mod t_spline {
         }
     }
 
-    #[derive(Debug, Clone)]
-    pub struct SplineSet {
-        CC: TricubicGrid,
-    }
-
     impl<'a> Input<'a> {
         pub fn compute(self) -> Output { compute(self) }
     }
@@ -2669,54 +2401,6 @@ mod t_spline {
         let V3([d_tcoord_ij, d_tcoord_ji, d_xcoord_ij]) = grad;
 
         Output { value, d_tcoord_ij, d_tcoord_ji, d_xcoord_ij }
-    }
-
-    lazy_static!{
-        /// The TCC spline found in:
-        ///
-        /// * The 2nd-gen REBO paper (Brenner, 2002)
-        ///
-        /// This differs from Stuart's in a manner which *seems* that it could
-        /// possibly be a typo. (I have not yet looked further into this.)
-        ///
-        /// (namely, a value defined by Brenner at only `Tij(2,2,9)` is defined
-        ///  by Stuart on `Tij(2,2,2..=9)` without any ceremony).
-        pub static ref BRENNER_SPLINES: SplineSet = SplineSet {
-            CC: brenner_CC(),
-        };
-
-        /// The TCC spline found in:
-        ///
-        /// * The AIREBO paper (Stuart, 2000)
-        /// * The LAMMPS implementation of REBO and AIREBO
-        ///
-        /// It seems plausible that this is a "bugfix" of Brenner's table.
-        pub static ref STUART_SPLINES: SplineSet = SplineSet {
-            CC: stuart_CC(),
-        };
-    }
-
-    /// Brenner, Table 5\
-    fn brenner_CC() -> TricubicGrid {
-        use self::splines::tricubic::{self, ArrayAssignExt};
-
-        let mut input = tricubic::Input::default();
-        input.value.assign((2, 2, 1), -0.070_280_085); // Ethane
-        input.value.assign((2, 2, 9), -0.008_096_75);  // "Solid state carbon." (Graphene/graphite)
-
-        let input = input.scale(0.5); // The values in Brenner's table are doubled
-        input.solve().unwrap()
-    }
-
-    /// Stuart, Table X
-    fn stuart_CC() -> TricubicGrid {
-        use self::splines::tricubic::{self, ArrayAssignExt};
-
-        let mut input = tricubic::Input::default();
-        input.value.assign((2, 2, 1), -0.035_140);
-        input.value.assign((2, 2, 2..=9), -0.004_048); // NOTE: different from Brenner
-
-        input.solve().unwrap()
     }
 }
 
