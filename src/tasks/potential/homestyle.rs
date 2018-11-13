@@ -22,7 +22,7 @@ use ::rsp2_tasks_config as cfg;
 use ::rsp2_array_types::{V3};
 use ::math::bonds::{FracBonds, CartBond, FracBond};
 use ::math::bond_graph::PeriodicGraph;
-use ::math::rebo_nonreactive as rebo_imp;
+use ::math::rebo::nonreactive as rebo_imp;
 
 /// Rust implementation of Kolmogorov-Crespi Z.
 ///

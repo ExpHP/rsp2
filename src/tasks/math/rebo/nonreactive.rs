@@ -26,6 +26,8 @@
 //! * **AIREBO:** Steven J Stuart et al J. Chem. Phys. 112, 6472 (2000)
 //! * **LAMMPS:** S. Plimpton, J Comp Phys, 117, 1-19 (1995)
 
+use super::splines::{self, TricubicGrid, BicubicGrid};
+
 use ::FailResult;
 use ::math::bond_graph::PeriodicGraph;
 use ::math::bonds::FracBond;
@@ -1856,7 +1858,7 @@ for (name, heading, terms) in pieces:
 mod p_spline {
     use super::*;
 
-    use self::spline_grid::bicubic;
+    use self::splines::bicubic;
 
     type Output = f64;
     pub struct Input<'a> {
@@ -1884,7 +1886,7 @@ mod p_spline {
             };
             // Ignore grad because total derivative of each variable is locally zero in
             // the non-reactive case.
-            let (value, _grad) = poly.evaluate(V2([ccoord_ij, hcoord_ij]));
+            let (value, _grad) = poly.evaluate(V2([ccoord_ij, hcoord_ij]).map(|x| x as f64));
 
             value
         }
@@ -1985,7 +1987,7 @@ mod p_spline {
 mod f_spline {
     use super::*;
 
-    use self::spline_grid::tricubic::{self, ArrayAssignExt};
+    use self::splines::tricubic::{self, ArrayAssignExt};
 
     // FIXME:
     //
@@ -2052,7 +2054,7 @@ mod f_spline {
         };
         // Ignore grad because total derivative of each variable is locally zero in
         // the non-reactive case.
-        let (value, _grad) = poly.evaluate(V3([tcoord_ij, tcoord_ji, xcoord_ij]));
+        let (value, _grad) = poly.evaluate(V3([tcoord_ij, tcoord_ji, xcoord_ij]).map(|x| x as f64));
 
         value
     }
@@ -2275,7 +2277,7 @@ mod t_spline {
         };
         // Ignore grad because total derivative of each variable is locally zero in
         // the non-reactive case.
-        let (value, _grad) = poly.evaluate(V3([tcoord_ij, tcoord_ji, xcoord_ij]));
+        let (value, _grad) = poly.evaluate(V3([tcoord_ij, tcoord_ji, xcoord_ij]).map(|x| x as f64));
 
         value
     }
@@ -2307,7 +2309,7 @@ mod t_spline {
 
     /// Brenner, Table 5\
     fn brenner_CC() -> TricubicGrid {
-        use self::spline_grid::tricubic::{self, ArrayAssignExt};
+        use self::splines::tricubic::{self, ArrayAssignExt};
 
         let mut input = tricubic::Input::default();
         input.value.assign((2, 2, 1), -0.070_280_085); // Ethane
@@ -2319,7 +2321,7 @@ mod t_spline {
 
     /// Stuart, Table X
     fn stuart_CC() -> TricubicGrid {
-        use self::spline_grid::tricubic::{self, ArrayAssignExt};
+        use self::splines::tricubic::{self, ArrayAssignExt};
 
         let mut input = tricubic::Input::default();
         input.value.assign((2, 2, 1), -0.035_140);
@@ -2542,358 +2544,6 @@ fn cleared<T>(mut vec: Vec<T>) -> Vec<T> {
     vec.clear();
     vec
 }
-
-//-----------------------------------------------------------------------------
-
-/// A tricubic or bicubic spline with constraints defined on an integer grid.
-pub use self::spline_grid::{TricubicGrid, BicubicGrid};
-pub mod spline_grid {
-    use super::*;
-
-    // Until we get const generics, it's too much trouble to be generic over lengths,
-    // so we'll just use one fixed dimension.
-    pub const MAX_I: usize = 4;
-    pub const MAX_J: usize = 4;
-    pub const MAX_K: usize = 9;
-
-    #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-    enum EvalKind { Fast, Slow }
-
-    pub use self::tricubic::TricubicGrid;
-    pub mod tricubic {
-        use super::*;
-        use ::std::ops::RangeInclusive;
-
-        /// A grid of "fencepost" values.
-        pub type EndpointGrid<T> = nd![T; MAX_I+1; MAX_J+1; MAX_K+1];
-        /// A grid of "fence segment" values.
-        pub type Grid<T> = nd![T; MAX_I; MAX_J; MAX_K];
-        pub type Input = _Input<EndpointGrid<f64>>;
-
-        /// The values and derivatives that are fitted to produce a tricubic spline.
-        ///
-        /// NOTE: not all constraints are explicitly listed;
-        /// We also place implicit constraints that `d^2/didj`, `d^2/didk`,
-        /// `d^2/djdk`, and `d^3/didjdk` are zero at all integer points.
-        ///
-        /// (why these particular derivatives?  It turns out that these are the
-        ///  ones that produce linearly independent equations. See Lekien.)
-        ///
-        /// # References
-        ///
-        /// F. Lekien and J. Marsden, Tricubic interpolation in three dimensions,
-        /// Int. J. Numer. Meth. Engng 2005; 63:455–471
-        #[derive(Debug, Clone, Default)]
-        pub struct _Input<G> {
-            pub value: G,
-            pub di: G,
-            pub dj: G,
-            pub dk: G,
-        }
-
-        //------------------------------------
-
-        // uniform interface for assigning a single element or a range
-        pub trait ArrayAssignExt<I> {
-            fn assign(&mut self, i: I, fill: f64);
-        }
-
-        impl ArrayAssignExt<(usize, usize, usize)> for EndpointGrid<f64> {
-            fn assign(&mut self, (i, j, k): (usize, usize, usize), fill: f64) {
-                self[i][j][k] = fill;
-            }
-        }
-
-        impl ArrayAssignExt<(usize, usize, RangeInclusive<usize>)> for EndpointGrid<f64> {
-            fn assign(&mut self, (i, j, k): (usize, usize, RangeInclusive<usize>), fill: f64) {
-                for x in &mut self[i][j][k] {
-                    *x = fill;
-                }
-            }
-        }
-
-        //------------------------------------
-
-        // FIXME: Remove
-        //        (leftover from version of code that actually did the splines)
-        #[derive(Debug, Clone)]
-        pub struct TricubicGrid {
-            pub(super) fit_params: Box<Input>,
-        }
-
-        impl TricubicGrid {
-            pub fn evaluate(&self, point: V3<u32>) -> (f64, V3) {
-                // We assume the splines are flat with constant value outside the fitted regions.
-                let point = clip_point(point);
-
-                let V3([i, j, k]): V3<usize> = point.map(|x: u32| x as usize);
-
-                let value = self.fit_params.value[i][j][k];
-                let di = self.fit_params.di[i][j][k];
-                let dj = self.fit_params.dj[i][j][k];
-                let dk = self.fit_params.dk[i][j][k];
-                (value, V3([di, dj, dk]))
-            }
-        }
-
-        impl<A> _Input<A> {
-            fn map_grids<B>(&self, mut func: impl FnMut(&A) -> B) -> _Input<B> {
-                _Input {
-                    value: func(&self.value),
-                    di: func(&self.di),
-                    dj: func(&self.dj),
-                    dk: func(&self.dk),
-                }
-            }
-        }
-
-        impl Input {
-            // HACK: This is just here temporarily to keep the interface resembling what
-            //       it looked like back when this module actually solved the splines.
-            pub fn solve(&self) -> FailResult<TricubicGrid> {
-                use ::rsp2_array_utils::{try_arr_from_fn, arr_from_fn, map_arr};
-                self.verify_clipping_is_valid()?;
-
-                let fit_params = Box::new(self.clone());
-                Ok(TricubicGrid { fit_params })
-            }
-
-            pub fn scale(mut self, factor: f64) -> Self {
-                { // FIXME: block will be unnecessary once NLL lands
-                    let Input { value, di, dj, dk } = &mut self;
-                    for &mut &mut ref mut array in &mut[value, di, dj, dk] {
-                        for plane in array {
-                            for row in plane {
-                                for x in row {
-                                    *x *= factor;
-                                }
-                            }
-                        }
-                    }
-                }
-                self
-            }
-
-            #[cfg(test)]
-            pub fn random(scale: f64) -> Self {
-                Input {
-                    value: ::rand::random(),
-                    di: ::rand::random(),
-                    dj: ::rand::random(),
-                    dk: ::rand::random(),
-                }.scale(scale).ensure_clipping_is_valid()
-            }
-        }
-
-        impl Input {
-            // To make clipping always valid, we envision that the spline is flat outside of
-            // the fitted region.  For C1 continuity, this means the derivatives at these
-            // boundaries must be zero.
-            pub fn verify_clipping_is_valid(&self) -> FailResult<()> {
-                let Input { value: _, di, dj, dk } = self;
-
-                macro_rules! check {
-                    ($iter:expr) => {
-                        ensure!(
-                            $iter.into_iter().all(|&x| x == 0.0),
-                            "derivatives must be zero at the endpoints of the spline"
-                        )
-                    };
-                }
-
-                check!(di[0].flat());
-                check!(di.last().unwrap().flat());
-                check!(dj.iter().flat_map(|plane| &plane[0]));
-                check!(dj.iter().flat_map(|plane| plane.last().unwrap()));
-                check!(dk.iter().flat_map(|plane| plane.iter().map(|row| &row[0])));
-                check!(dk.iter().flat_map(|plane| plane.iter().map(|row| row.last().unwrap())));
-                Ok(())
-            }
-
-            // useful for tests
-            pub(super) fn ensure_clipping_is_valid(mut self) -> Self {
-                { // FIXME block is unnecessary once NLL lands
-                    let Input { value: _, di, dj, dk } = &mut self;
-                    fn zero<'a>(xs: impl IntoIterator<Item=&'a mut f64>) {
-                        for x in xs { *x = 0.0; }
-                    }
-
-                    zero(di[0].flat_mut());
-                    zero(di.last_mut().unwrap().flat_mut());
-                    zero(dj.iter_mut().flat_map(|plane| &mut plane[0]));
-                    zero(dj.iter_mut().flat_map(|plane| plane.last_mut().unwrap()));
-                    zero(dk.iter_mut().flat_map(|plane| plane.iter_mut().map(|row| &mut row[0])));
-                    zero(dk.iter_mut().flat_map(|plane| plane.iter_mut().map(|row| row.last_mut().unwrap())));
-                }
-                self
-            }
-        }
-
-        pub fn clip_point(mut point: V3<u32>) -> V3<u32> {
-            point[0] = point[0].min(MAX_I as u32);
-            point[1] = point[1].min(MAX_J as u32);
-            point[2] = point[2].min(MAX_K as u32);
-            point
-        }
-
-        //------------------------------------
-        // tests
-
-        #[test]
-        fn test_spline_fit_accuracy() -> FailResult<()> {
-            let fit_params = Input::random(1.0);
-            let spline = fit_params.solve()?;
-
-            for i in 0..=MAX_I {
-                for j in 0..=MAX_J {
-                    for k in 0..=MAX_K {
-                        let output = spline.evaluate(V3([i, j, k]).map(|x| x as u32));
-                        let (value, V3([di, dj, dk])) = output;
-                        assert_eq!(value, fit_params.value[i][j][k]);
-                        assert_eq!(di, fit_params.di[i][j][k]);
-                        assert_eq!(dj, fit_params.dj[i][j][k]);
-                        assert_eq!(dk, fit_params.dk[i][j][k]);
-                    }
-                }
-            }
-
-            // points outside the boundaries assume a flat curve
-            let base_point = V3([2, 2, 2]);
-            let base_index = V3([2, 2, 2]);
-            for axis in 0..3 {
-                let mut input_point = base_point;
-                let mut expected_index = base_index;
-                input_point[axis] = [MAX_I, MAX_J, MAX_K][axis] as u32 + 3;
-                expected_index[axis] = [MAX_I, MAX_J, MAX_K][axis];
-
-                let (value, V3([di, dj, dk])) = spline.evaluate(input_point);
-
-                let V3([i, j, k]) = expected_index;
-                assert_eq!(value, fit_params.value[i][j][k]);
-                assert_eq!(di, fit_params.di[i][j][k]);
-                assert_eq!(dj, fit_params.dj[i][j][k]);
-                assert_eq!(dk, fit_params.dk[i][j][k]);
-            }
-            Ok(())
-        }
-    } // mod tricubic
-
-    //------------------------------------
-    // bicubic
-
-    pub use self::bicubic::BicubicGrid;
-    pub mod bicubic {
-        use super::*;
-
-        /// A grid of "fencepost" values.
-        pub type EndpointGrid<T> = nd![T; MAX_I+1; MAX_J+1];
-        /// A grid of "fence segment" values.
-        pub type Grid<T> = nd![T; MAX_I; MAX_J];
-
-        /// Input for a bicubic spline.
-        ///
-        /// Not included is an implicit constraint that `d^2/didj = 0` at all integer points.
-        #[derive(Default)]
-        pub struct Input {
-            pub value: EndpointGrid<f64>,
-            pub di: EndpointGrid<f64>,
-            pub dj: EndpointGrid<f64>,
-        }
-
-        #[derive(Debug, Clone)]
-        pub struct BicubicGrid {
-            // "Do the simplest thing that will work."
-            tricubic: TricubicGrid,
-        }
-
-        impl BicubicGrid {
-            pub fn evaluate(&self, V2([i, j]): V2<u32>) -> (f64, V2) {
-                let (value, V3([di, dj, _dk])) = self.tricubic.evaluate(V3([i, j, 0]));
-                (value, V2([di, dj]))
-            }
-        }
-
-        impl Input {
-            pub fn solve(&self) -> FailResult<BicubicGrid> {
-                let tricubic = self.to_tricubic_input().solve()?;
-                Ok(BicubicGrid { tricubic })
-            }
-
-            fn to_tricubic_input(&self) -> tricubic::Input {
-                use ::rsp2_array_utils::{map_arr};
-                let Input { value, di, dj } = *self;
-
-                // make everything constant along the k axis
-                let extend = |arr| map_arr(arr, |row| map_arr(row, |x| [x; MAX_K+1]));
-                tricubic::Input {
-                    value: extend(value),
-                    di: extend(di),
-                    dj: extend(dj),
-                    dk: Default::default(),
-                }
-            }
-
-            #[cfg(test)]
-            fn from_tricubic_input(input: &tricubic::Input) -> Self {
-                use ::rsp2_array_utils::{map_arr};
-
-                let tricubic::Input { value, di, dj, dk } = *input;
-
-                let unextend = |arr| map_arr(arr, |plane| map_arr(plane, |row: [_; MAX_K+1]| row[0]));
-
-                assert_eq!(unextend(dk), unextend(<tricubic::EndpointGrid<f64>>::default()));
-                Input {
-                    value: unextend(value),
-                    di: unextend(di),
-                    dj: unextend(dj),
-                }
-            }
-
-            #[cfg(test)]
-            pub fn random(scale: f64) -> Self {
-                Self::from_tricubic_input(&tricubic::Input::random(scale))
-            }
-        }
-
-        //------------------------------------
-        // tests
-
-        #[test]
-        fn test_spline_fit_accuracy() -> FailResult<()> {
-            let fit_params = Input::random(1.0);
-            let spline = fit_params.solve()?;
-
-            for i in 0..=MAX_I {
-                for j in 0..=MAX_J {
-                    let output = spline.evaluate(V2([i, j]).map(|x| x as u32));
-                    let (value, V2([di, dj])) = output;
-                    assert_eq!(value, fit_params.value[i][j]);
-                    assert_eq!(di, fit_params.di[i][j]);
-                    assert_eq!(dj, fit_params.dj[i][j]);
-                }
-            }
-
-            // points outside the boundaries assume a flat curve
-            let base_point = V2([2, 2]);
-            let base_index = V2([2, 2]);
-            for axis in 0..2 {
-                let mut input_point = base_point;
-                let mut expected_index = base_index;
-                input_point[axis] = [MAX_I, MAX_J][axis] as u32 + 3;
-                expected_index[axis] = [MAX_I, MAX_J][axis];
-
-                let (value, V2([di, dj])) = spline.evaluate(input_point);
-
-                let V2([i, j]) = expected_index;
-                assert_eq!(value, fit_params.value[i][j]);
-                assert_eq!(di, fit_params.di[i][j]);
-                assert_eq!(dj, fit_params.dj[i][j]);
-            }
-            Ok(())
-        }
-    }
-}
-
 
 //-----------------------------------------------------------------------------
 
