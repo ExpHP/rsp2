@@ -22,6 +22,7 @@
 //! * Donald W Brenner et al 2002 J. Phys.: Condens. Matter 14 783
 
 use ::math::bond_graph::PeriodicGraph;
+use ::math::bonds::FracBond;
 use ::meta;
 
 use ::stack::{ArrayVec, Vector as StackVector};
@@ -345,7 +346,10 @@ mod interactions {
 
         site_type: IndexVec<SiteI, AtomType>,
         bond_cart_vector: IndexVec<BondI, V3>,
+        bond_image_diff: IndexVec<BondI, V3<i32>>,
+        bond_reverse_index: IndexVec<BondI, BondI>,
         bond_is_canonical: IndexVec<BondI, bool>,
+        bond_source: IndexVec<BondI, SiteI>,
         bond_target: IndexVec<BondI, SiteI>,
     }
 
@@ -360,7 +364,9 @@ mod interactions {
 //            let mut dihedral_div = IndexVec::<TripletI, _>::from_raw(vec![DihedralI(0)]);
             let mut bond_cart_vector = IndexVec::<BondI, _>::new();
             let mut bond_is_canonical = IndexVec::<BondI, _>::new();
+            let mut bond_source = IndexVec::<BondI, SiteI>::new();
             let mut bond_target = IndexVec::<BondI, SiteI>::new();
+            let mut bond_image_diff = IndexVec::<BondI, V3<i32>>::new();
 //            let mut triplet_bond = IndexVec::<TripletI, BondI>::new();
 //            let mut dihedral_bond = IndexVec::<DihedralI, BondI>::new();
             let site_type = IndexVec::<SiteI, _>::from_raw(types.to_vec());
@@ -374,9 +380,11 @@ mod interactions {
                 for frac_bond_ij in bond_graph.frac_bonds_from(site_i.index()) {
                     let site_j = SiteI(frac_bond_ij.to);
                     let cart_vector = frac_bond_ij.cart_vector_using_cache(&cart_cache).unwrap();
+                    bond_source.push(site_i);
                     bond_target.push(site_j);
                     bond_is_canonical.push(frac_bond_ij.is_canonical());
                     bond_cart_vector.push(cart_vector);
+                    bond_image_diff.push(frac_bond_ij.image_diff);
                 } // for bond_ij
 
                 let num_bonds = bond_target.len() - bond_div.raw.last().unwrap().index();
@@ -384,6 +392,26 @@ mod interactions {
                     bail!("An atom has too many bonds! ({}, max: {})", num_bonds, SITE_MAX_BONDS);
                 }
                 bond_div.push(BondI(bond_target.len()));
+            } // for node
+
+            // Get the index of each bond's reverse.
+            let mut bond_reverse_index = IndexVec::<BondI, _>::new();
+            for node in bond_graph.node_indices() {
+                let site_i = SiteI(node.index());
+
+                for frac_bond_ij in bond_graph.frac_bonds_from(site_i.index()) {
+                    let site_j = SiteI(frac_bond_ij.to);
+                    let index_ji = {
+                        bond_graph.frac_bonds_from(site_j.index())
+                            .position(|bond| frac_bond_ij == bond.flip())
+                    };
+                    let index_ji = match index_ji {
+                        Some(x) => x,
+                        None => bail!("A bond has no counterpart in the reverse direction!"),
+                    };
+                    let bond_ji = BondI(bond_div[site_j].0 + index_ji);
+                    bond_reverse_index.push(bond_ji);
+                } // for bond_ij
             } // for node
 
 //            { // FIXME: block will be unnecessary after NLL lands
@@ -434,8 +462,8 @@ mod interactions {
 //            } // NLL workaround
 
             Ok(Interactions {
-                bond_div, site_type, bond_cart_vector,
-                bond_is_canonical, bond_target,
+                bond_div, site_type, bond_cart_vector, bond_is_canonical,
+                bond_target, bond_image_diff, bond_reverse_index, bond_source,
             })
         }
     }
@@ -448,8 +476,11 @@ mod interactions {
     pub struct Bond {
         pub index: BondI,
         pub is_canonical: bool,
+        pub source: SiteI,
         pub target: SiteI,
         pub cart_vector: V3,
+        pub image_diff: V3<i32>,
+        pub reverse_index: BondI,
     }
 
 //    pub struct Triplet {
@@ -475,8 +506,11 @@ mod interactions {
         pub fn bond(&self, index: BondI) -> Bond {
             let is_canonical = self.bond_is_canonical[index];
             let cart_vector = self.bond_cart_vector[index];
+            let source = self.bond_source[index];
             let target = self.bond_target[index];
-            Bond { index, is_canonical, cart_vector, target }
+            let image_diff = self.bond_image_diff[index];
+            let reverse_index = self.bond_reverse_index[index];
+            Bond { index, is_canonical, cart_vector, target, reverse_index, image_diff, source }
         }
 
         pub fn sites(&self) -> impl ExactSizeIterator<Item=Site> + '_ {
@@ -485,6 +519,15 @@ mod interactions {
 
         pub fn site_range(&self) -> ::std::ops::Range<usize> {
             0..self.site_type.len()
+        }
+
+        pub fn frac_bond(&self, bond: BondI) -> FracBond {
+            let bond = self.bond(bond);
+            FracBond {
+                from: bond.source.0,
+                to: bond.target.0,
+                image_diff: bond.image_diff,
+            }
         }
 
         pub fn bonds(&self, site: SiteI) -> impl ExactSizeIterator<Item=Bond> + '_ {
@@ -674,60 +717,38 @@ fn compute_rebo_bonds(
 
     let out = interactions.site_range().into_par_iter().map(SiteI::new).map(|site_i| {
         let __site = interactions.site(site_i);
-        let type_i = __site.atom_type;
         let FirstPassSiteData {
-            tcoord: tcoord_i,
+            tcoord: _,
             ref bond_weight, ref bond_weight_d_delta,
             ref bond_VR, ref bond_VR_d_delta,
             ref bond_VA, ref bond_VA_d_delta,
         } = site_data[site_i];
 
-        // FIXME simplification: Assume the pi bondorder is zero.
-        //
-        //       This means that there's only a sigma-pi term for each bond,
-        //       whose derivatives are entirely of data local to the originating site
-        //       (i.e. we can fit them in a SiteBondVec).
-        //
-        //       This considerably simplifies the evaluation strategy for the rest of the
-        //       function, because we can simply visit each site in order and concatenate
-        //       the derivatives.
-
-        // Eq 3':  b_ij = 0.5 * b_ij^{sigma-pi} + boole(i < j) * b_ij^{pi}
-        for (index_ij, __bond) in interactions.bonds(site_i).enumerate() {
-            let site_j = __bond.target;
-            let tcoord_j = site_data[site_j].tcoord;
-            let type_j = interactions.site(site_j).atom_type;
-            let weight_ij = bond_weight[index_ij];
-
-            let weight_ji = weight_ij;
-
-            // This is what Ni almost always *actually* means in Brenner.
-            // (he really should have called it Nij, with two indices; Stuart's AIREBO
-            //  paper does it better)
-            let tcoord_ij = tcoord_i - weight_ij;
-            let tcoord_ji = tcoord_j - weight_ji;
-
-            let xcoord_ij = (|| unimplemented!())();
-
-            // boole(i < j) * b_ij^{pi}
-            if __bond.is_canonical {
-                if !(spline_T::Input { params, type_i, type_j, tcoord_ij, tcoord_ji, xcoord_ij }.can_assume_zero()) {
-                    panic!("brenner T spline may be nonzero; this is not yet implemented");
-                }
-                if !(spline_F::Input { params, type_i, type_j, tcoord_ij, tcoord_ji, xcoord_ij }.can_assume_zero()) {
-                    panic!("brenner F spline may be nonzero; this is not yet implemented");
-                }
-            }
-        }
-
         // Eq 2':  V_ij = 0.5 * V^R_ij - b_ij * V^A_ij
-        //
-        // As stated, with the above assumption that b^pi = 0, each site's terms
-        // can only depend on the derivatives of that site's bonds, so they fit
-        // in a SiteBondVec.
-
         let mut site_V = 0.0;
+
+        // derivatives with respect to the deltas for site i
         let mut site_V_d_delta = sbvec_filled(V3::zero(), bond_weight.len());
+
+        // derivatives with respect to the deltas for each site j.
+        // parallel code can't accumulate these into any large sort of vector, so we build
+        // a list of terms to be added in a short serial segment at the end.
+        let mut site_V_d_other_deltas = SiteBondVec::<(SiteI, SiteBondVec<V3>)>::new();
+        // some things also depend on tcoords of distant atoms.
+        // This is too much of a pain to handle immediately.
+        let mut site_V_d_other_tcoords = SiteBondVec::<(SiteI, SiteBondVec<f64>)>::new();
+
+        //-----------------------------------------------
+        // The repulsive terms
+        //-----------------------------------------------
+
+        // Add in the repulsive terms, which each only depend on one bond delta.
+        site_V += 0.5 * bond_VR.iter().sum::<f64>();
+        axpy_mut(&mut site_V_d_delta, 0.5, &bond_VR_d_delta);
+
+        //-----------------------------------------------
+        // The sigma-pi terms
+        //-----------------------------------------------
 
         // sigma-pi terms are present for all bonds, regardless of direction.
         //
@@ -746,12 +767,6 @@ fn compute_rebo_bonds(
             d_weights: Vsp_i_d_weights,
         } = out;
 
-        // Add in the repulsive terms, which each only depend on one bond delta.
-        // (written tersely here for vectorization...)
-        site_V += 0.5 * bond_VR.iter().sum::<f64>();
-        axpy_mut(&mut site_V_d_delta, 0.5, &bond_VR_d_delta);
-
-        // Attractive terms are fully encompassed in Vsp
         site_V -= Vsp_i;
         axpy_mut(&mut site_V_d_delta, -1.0, &Vsp_i_d_deltas);
         for (index_ij, _) in interactions.bonds(site_i).enumerate() {
@@ -760,29 +775,123 @@ fn compute_rebo_bonds(
             site_V_d_delta[index_ij] += -1.0 * Vsp_i_d_weight_ij * weight_ij_d_delta_ij;
         }
 
-        (site_V, site_V_d_delta)
+        //-----------------------------------------------
+        // The pi terms
+        //-----------------------------------------------
+
+        // These are the only parts that depend on other sites' bond deltas.
+
+        // Eq 3':  b_ij = boole(i < j) * b_ij^{pi}
+        for (index_ij, __bond) in interactions.bonds(site_i).enumerate() {
+            assert_eq!(index_ij, site_V_d_other_deltas.len());
+            if !__bond.is_canonical {
+                continue;
+            }
+            let bond_ij = __bond.index;
+            let site_j = __bond.target;
+
+            let ref weights_ik = bond_weight;
+            let ref weights_jl = site_data[site_j].bond_weight;
+
+            let ref tcoords_k: SiteBondVec<_> = interactions.bonds(site_i).map(|bond| site_data[bond.target].tcoord).collect();
+            let ref tcoords_l: SiteBondVec<_> = interactions.bonds(site_j).map(|bond| site_data[bond.target].tcoord).collect();
+
+            let out = bondorder_pi::Input {
+                params, interactions, site_i, bond_ij,
+                tcoords_k, tcoords_l, weights_ik, weights_jl,
+            }.compute();
+            let BondOrderPi {
+                value: bpi,
+                d_deltas_ik: mut bpi_d_deltas_ik,
+                d_deltas_jl: mut bpi_d_deltas_jl,
+                d_tcoords_k: bpi_d_tcoords_k,
+                d_tcoords_l: bpi_d_tcoords_l,
+                d_weights_ik: bpi_d_weights_ik,
+                d_weights_jl: bpi_d_weights_jl,
+            } = out;
+
+            // remove the explicit dependence of bpi on {weights_ik}, {weights_jl}
+            { // FIXME Block unnecessary after NLL lands
+                let iter = zip_eq!(&mut bpi_d_deltas_ik, bpi_d_weights_ik, bond_weight_d_delta);
+                for (bpi_d_delta_ik, bpi_d_weight_ik, &weight_ik_d_delta_ik) in iter {
+                    *bpi_d_delta_ik += bpi_d_weight_ik * weight_ik_d_delta_ik;
+                }
+            }
+
+            let ref site_j_weights_d_delta = site_data[site_j].bond_weight_d_delta;
+            { // FIXME Block unnecessary after NLL lands
+                let iter = zip_eq!(&mut bpi_d_deltas_jl, bpi_d_weights_jl, site_j_weights_d_delta);
+                for (bpi_d_delta_jl, bpi_d_weight_jl, &weight_ik_d_delta_jl) in iter {
+                    *bpi_d_delta_jl += bpi_d_weight_jl * weight_ik_d_delta_jl;
+                }
+            }
+
+            let VA_ij = bond_VA[index_ij];
+            let VA_ij_d_delta_ij = bond_VA_d_delta[index_ij];
+
+            site_V += bpi * VA_ij;
+            site_V_d_delta[index_ij] += bpi * VA_ij_d_delta_ij;
+
+            axpy_mut(&mut site_V_d_delta, VA_ij, &bpi_d_deltas_ik);
+            site_V_d_other_deltas.push((site_j, sbvec_scaled(VA_ij, bpi_d_deltas_jl)));
+            site_V_d_other_tcoords.push((site_i, sbvec_scaled(VA_ij, bpi_d_tcoords_k)));
+            site_V_d_other_tcoords.push((site_j, sbvec_scaled(VA_ij, bpi_d_tcoords_l)));
+        }
+
+        (site_V, site_V_d_delta, site_V_d_other_deltas, site_V_d_other_tcoords)
 
     // well this is awkward
     }).fold(
-        || (0.0, IndexVec::new()),
-        |(mut value, mut d_deltas), (site_V, site_V_d_delta)| {
-            // because of our b_ij^pi = 0 assumption,
-            // we can just concatenate the derivatives from each site.
+        || (0.0, IndexVec::new(), vec![], vec![]),
+        |
+            (mut value, mut d_deltas, mut d_other_deltas, mut d_other_tcoords),
+            (site_V, site_V_d_delta, site_V_d_other_deltas, site_V_d_other_tcoords),
+        | {
             value += site_V;
             d_deltas.extend(site_V_d_delta);
-            (value, d_deltas)
+            d_other_deltas.extend(site_V_d_other_deltas);
+            d_other_tcoords.extend(site_V_d_other_tcoords);
+            (value, d_deltas, d_other_deltas, d_other_tcoords)
         },
     ).reduce(
-        // (despite all appearances, the second closure here is different from the one above
-        //  due to the types of the arguments; above, site_V is BondSiteVec; here it is IndexVec)
-        || (0.0, IndexVec::new()),
-        |(mut value, mut d_deltas), (value_part, d_delta_part)| {
+        || (0.0, IndexVec::new(), vec![], vec![]),
+        |
+            (mut value, mut d_deltas, d_other_deltas, d_other_tcoords),
+            (value_part, d_delta_part, d_other_deltas_part, d_other_tcoords_part),
+        | {
             value += value_part;
-            d_deltas.extend(d_delta_part);
-            (value, d_deltas)
+            d_deltas.extend(d_delta_part); // must be concatenated in order
+            let d_other_deltas = concat_any_order(d_other_deltas, d_other_deltas_part);
+            let d_other_tcoords = concat_any_order(d_other_tcoords, d_other_tcoords_part);
+            (value, d_deltas, d_other_deltas, d_other_tcoords)
         },
     );
-    let (value, d_deltas) = out;
+    let (value, mut d_deltas, d_other_deltas, d_other_tcoords) = out;
+
+    assert_eq!(d_deltas.len(), interactions.num_bonds());
+
+    // absorb the other terms we couldn't take care of into d_deltas
+    // and end this miserable function for good
+    for (site_i, d_deltas_ij) in d_other_deltas {
+        let _: SiteBondVec<V3> = d_deltas_ij;
+        axpy_mut(&mut d_deltas.raw[interactions.bond_range(site_i)], 1.0, &d_deltas_ij);
+    }
+
+    for (site_i, d_tcoords_j) in d_other_tcoords {
+        for (__bond, d_tcoord_j) in zip_eq!(interactions.bonds(site_i), d_tcoords_j) {
+            let site_j = __bond.target;
+
+            // tcoord_j = sum_l weight_jl
+            for (index_jl, __bond) in interactions.bonds(site_j).enumerate() {
+                let bond_jl = __bond.index;
+
+                let tcoord_j_d_weight_jl = 1.0;
+                let weight_jl_d_delta_jl = site_data[site_j].bond_weight_d_delta[index_jl];
+                d_deltas[bond_jl] += d_tcoord_j * tcoord_j_d_weight_jl * weight_jl_d_delta_jl;
+            }
+        }
+    }
+
     assert_eq!(d_deltas.len(), interactions.num_bonds());
     (value, d_deltas)
 }
@@ -1112,224 +1221,345 @@ mod bondorder_sigma_pi {
     }
 }
 
-//// b_{ij}^{DH} in Brenner (equation 18)
-//use self::bond_order_dihedral::BondOrderDihedral;
-//mod bond_order_dihedral {
-//    use super::*;
+// b_{ij}^{pi} in Brenner
+use self::bondorder_pi::BondOrderPi;
+mod bondorder_pi {
+    use super::*;
+
+    pub type Output = BondOrderPi;
+    pub struct Input<'a> {
+        pub params: &'a Params,
+        pub interactions: &'a Interactions,
+        pub site_i: SiteI,
+        pub bond_ij: BondI,
+        // info about all bonds ik connected to site i
+        // and all bonds jl connected to site j
+        pub tcoords_k: &'a [f64],
+        pub tcoords_l: &'a [f64],
+        pub weights_ik: &'a [f64],
+        pub weights_jl: &'a [f64],
+    }
+    pub struct BondOrderPi {
+        pub value: f64,
+        pub d_tcoords_k: SiteBondVec<f64>,
+        pub d_tcoords_l: SiteBondVec<f64>,
+        pub d_weights_ik: SiteBondVec<f64>,
+        pub d_weights_jl: SiteBondVec<f64>,
+        // These come exclusively from the sine-squareds
+        pub d_deltas_ik: SiteBondVec<V3>,
+        pub d_deltas_jl: SiteBondVec<V3>,
+    }
+
+    impl<'a> Input<'a> {
+        pub fn compute(self) -> Output { compute(self) }
+    }
+
+    // free function for smaller indent
+    fn compute(input: Input<'_>) -> Output {
+        let Input {
+            params, interactions, site_i, bond_ij, weights_ik, weights_jl,
+            tcoords_k, tcoords_l,
+        } = input;
+
+
+        let site_j = interactions.bond(bond_ij).target;
+        let type_i = interactions.site(site_i).atom_type;
+        let type_j = interactions.site(site_j).atom_type;
+        let bond_ji = interactions.bond(bond_ij).reverse_index;
+
+        let types_k: SiteBondVec<_> = interactions.bonds(site_i).map(|bond| interactions.site(bond.target).atom_type).collect();
+        let types_l: SiteBondVec<_> = interactions.bonds(site_j).map(|bond| interactions.site(bond.target).atom_type).collect();
+
+        let index_ij = bond_ij.0 - interactions.bond_range(site_i).start;
+        let index_ji = bond_ji.0 - interactions.bond_range(site_i).start;
+
+        let YCoord {
+            value: ycoord_ij,
+            d_weights_ik: ycoord_ij_d_weights_ik,
+            d_tcoords_k: ycoord_ij_d_tcoords_k,
+        } = ycoord::Input {
+            skip_index: index_ij,
+            weights_ik: weights_ik,
+            tcoords_k: tcoords_k,
+            types_k: &types_k,
+        }.compute();
+
+        let YCoord {
+            value: ycoord_ji,
+            d_weights_ik: ycoord_ji_d_weights_jl,
+            d_tcoords_k: ycoord_ji_d_tcoords_l,
+        } = ycoord::Input {
+            skip_index: index_ji,
+            weights_ik: weights_jl,
+            tcoords_k: tcoords_l,
+            types_k: &types_l,
+        }.compute();
+
+        // NConj = 1 + (square sum over bonds ik) + (square sum over bonds jl)
+        let xcoord_ij = 1.0 + ycoord_ij + ycoord_ji;
+        let xcoord_ij_d_ycoord_ij = 1.0;
+        let xcoord_ij_d_ycoord_ji = 1.0;
+
+        let weight_ij = weights_ik[index_ij];
+        let weight_ji = weights_jl[index_ji];
+
+        // (these are not flipped; tcoords_k and tcoords_l describe the tcoords of
+        //  the *target* atoms, so tcoord_i is in tcoords_l and etc.)
+        let tcoord_i = tcoords_l[index_ji];
+        let tcoord_j = tcoords_k[index_ij];
+
+        let tcoord_ij = tcoord_i - weight_ij;
+        let tcoord_ij_d_tcoord_i = 1.0;
+        let tcoord_ij_d_weight_ij = -1.0;
+
+        let tcoord_ji = tcoord_j - weight_ji;
+        let tcoord_ji_d_tcoord_j = 1.0;
+        let tcoord_ji_d_weight_ji = -1.0;
+
+        // Accumulators for the output value,
+        // initially formulated in terms of a larger set of variables.
+        let mut tmp_value = 0.0;
+        let mut tmp_d_weights_ik = sbvec_filled(0.0, types_k.len());
+        let mut tmp_d_weights_jl = sbvec_filled(0.0, types_l.len());
+        let mut tmp_d_deltas_ik = sbvec_filled(V3::zero(), types_k.len());
+        let mut tmp_d_deltas_jl = sbvec_filled(V3::zero(), types_l.len());
+        let mut tmp_d_tcoord_ij = 0.0;
+        let mut tmp_d_tcoord_ji = 0.0;
+        let mut tmp_d_xcoord_ij = 0.0;
+
+        // First term has a T_ij prefactor, which is zero for non-CC bonds.
+        if (type_i, type_j) == (AtomType::Carbon, AtomType::Carbon) {
+            // sum = ∑_{k,l} sin^2(Θ_{ijkl}) f_{ik} f_{jl}
+            let sum;
+            let (sum_d_weights_ik, sum_d_deltas_ik); // w.r.t. bonds around site i
+            let (sum_d_weights_jl, sum_d_deltas_jl); // w.r.t. bonds around site j
+            { // scope temporaries
+                let mut tmp_sum = 0.0;
+                let mut tmp_sum_d_weights_ik = sbvec_filled(0.0, weights_ik.len());
+                let mut tmp_sum_d_weights_jl = sbvec_filled(0.0, weights_jl.len());
+                let mut tmp_sum_d_deltas_ik = sbvec_filled(V3::zero(), weights_ik.len());
+                let mut tmp_sum_d_deltas_jl = sbvec_filled(V3::zero(), weights_jl.len());
+
+                // We must iterate over groups of four DIFFERENT atoms ijkl,
+                // with bonds between ij, ik, and jl.
+                for __bond in interactions.bonds(site_i) {
+                    let bond_ik = __bond.index;
+
+                    // Recall that because a site may have multiple images involved in the interaction,
+                    // simply comparing site indices is not good enough.
+                    //
+                    // Thankfully, verifying i != l and j != k is easily done because we can
+                    // compare bond indices.
+                    if bond_ik == bond_ij {
+                        continue; // site k is site j
+                    }
+
+                    for __bond in interactions.bonds(site_j) {
+                        let bond_jl = __bond.index;
+
+                        if bond_jl == bond_ji {
+                            continue; // site l is site i
+                        }
+
+                        // Use FracBonds here to correctly account for images
+                        let frac_bond_ij = interactions.frac_bond(bond_ij);
+                        let frac_bond_ik = interactions.frac_bond(bond_ik);
+                        let frac_bond_jl = interactions.frac_bond(bond_jl);
+                        let frac_bond_il = frac_bond_ij.join(frac_bond_jl).unwrap();
+                        if frac_bond_il == frac_bond_ik {
+                            continue; // site k is site l
+                        }
+
+                        let delta_ij = interactions.bond(bond_ij).cart_vector;
+                        let delta_ik = interactions.bond(bond_ik).cart_vector;
+                        let delta_jl = interactions.bond(bond_jl).cart_vector;
+                        let DihedralSineSq {
+                            value: sinsq,
+                            d_delta_ij: sinsq_d_delta_ij,
+                            d_delta_ik: sinsq_d_delta_ik,
+                            d_delta_jl: sinsq_d_delta_jl,
+                        } = dihedral_sine_sq::Input { delta_ij, delta_ik, delta_jl }.compute();
+
+                        let index_ik = bond_ik.0 - interactions.bond_range(site_i).start;
+                        let index_jl = bond_ji.0 - interactions.bond_range(site_j).start;
+
+                        //-----------
+                        // NOTE: for reasons I cannot determine, the (otherwise extremely sensible)
+                        //       AIREBO paper also uses Heaviside step functions here:
+                        //
+                        //   sinsq_ijkl * weight_ik * weight_jl * H(sin_ijk - s_min)
+                        //                                      * H(sin_jil - s_min)   (s_min = 0.1)
+                        //
+                        // These appear designed to cut the term off for very small angles (i.e.
+                        // neighbors that are very closely packed).  But this destroys the C1
+                        // continuity of the function and I couldn't find any justification for it.
+                        //-----------
+
+                        // term to add to sum is  sinsq * weight_ik * weight_jl
+                        //
+                        // independent variables are chosen for now as the deltas that define sinsq,
+                        // and the weights that appear directly
+                        let weight_ik = weights_ik[index_ik];
+                        let weight_jl = weights_jl[index_jl];
+
+                        tmp_sum += sinsq * weight_ik * weight_jl;
+
+                        tmp_sum_d_deltas_ik[index_ij] += sinsq_d_delta_ij * weight_ik * weight_jl;
+                        tmp_sum_d_deltas_ik[index_ik] += sinsq_d_delta_ik * weight_ik * weight_jl;
+                        tmp_sum_d_deltas_jl[index_jl] += sinsq_d_delta_jl * weight_ik * weight_jl;
+
+                        tmp_sum_d_weights_ik[index_ik] += sinsq * 1.0 * weight_jl;
+                        tmp_sum_d_weights_jl[index_jl] += sinsq * weight_ik * 1.0;
+                    } // for bond_jl
+                } // for bond_ik
+                sum = tmp_sum;
+                sum_d_deltas_ik = tmp_sum_d_deltas_ik;
+                sum_d_deltas_jl = tmp_sum_d_deltas_jl;
+                sum_d_weights_ik = tmp_sum_d_weights_ik;
+                sum_d_weights_jl = tmp_sum_d_weights_jl;
+            } // scope temporaries
+
+            let SplineT {
+                value: T,
+                d_tcoord_ij: T_d_tcoord_ij,
+                d_tcoord_ji: T_d_tcoord_ji,
+                d_xcoord_ij: T_d_xcoord_ij,
+            } = spline_T::Input { params, type_i, type_j, tcoord_ij, tcoord_ji, xcoord_ij }.compute();
+
+            tmp_value += T * sum;
+            tmp_d_tcoord_ij += T_d_tcoord_ij * sum;
+            tmp_d_tcoord_ji += T_d_tcoord_ji * sum;
+            tmp_d_xcoord_ij += T_d_xcoord_ij * sum;
+            axpy_mut(&mut tmp_d_weights_ik, T, &sum_d_weights_ik);
+            axpy_mut(&mut tmp_d_weights_jl, T, &sum_d_weights_jl);
+            axpy_mut(&mut tmp_d_deltas_ik, T, &sum_d_deltas_ik);
+            axpy_mut(&mut tmp_d_deltas_jl, T, &sum_d_deltas_jl);
+        }
+
+        // Second term: Just F.
+        let SplineF {
+            value: F,
+            d_tcoord_ij: F_d_tcoord_ij,
+            d_tcoord_ji: F_d_tcoord_ji,
+            d_xcoord_ij: F_d_xcoord_ij,
+        } = spline_F::Input { params, type_i, type_j, tcoord_ij, tcoord_ji, xcoord_ij }.compute();
+
+        tmp_value += F;
+        tmp_d_tcoord_ij += F_d_tcoord_ij;
+        tmp_d_tcoord_ji += F_d_tcoord_ji;
+        tmp_d_xcoord_ij += F_d_xcoord_ij;
+
+        // Now reformulate the value in terms of a different set of variables.
+        //
+        // starting with: {weights_ik}, {weights_jl}, {deltas_ik}, {deltas_jl},
+        //                tcoord_ij, tcoord_ji, xcoord_ij
+        //
+        //     change to: {weights_ik}, {weights_jl}, {deltas_ik}, {deltas_jl},
+        //                ycoord_ij, ycoord_ji, tcoord_i,  tcoord_j,
+        //
+        //       then to: {weights_ik}, {weights_jl}, {deltas_ik}, {deltas_jl},
+        //                {tcoords_k}, {tcoords_l}
+        //
+        // first change
+        let value = tmp_value;
+        let d_deltas_ik = tmp_d_deltas_ik;
+        let d_deltas_jl = tmp_d_deltas_jl;
+        let mut d_weights_ik = tmp_d_weights_ik;
+        let mut d_weights_jl = tmp_d_weights_jl;
+        let d_ycoord_ij = tmp_d_xcoord_ij * xcoord_ij_d_ycoord_ij;
+        let d_ycoord_ji = tmp_d_xcoord_ij * xcoord_ij_d_ycoord_ji;
+        let d_tcoord_i = tmp_d_tcoord_ij * tcoord_ij_d_tcoord_i;
+        let d_tcoord_j = tmp_d_tcoord_ji * tcoord_ji_d_tcoord_j;
+        d_weights_ik[index_ij] += tmp_d_tcoord_ij * tcoord_ij_d_weight_ij;
+        d_weights_jl[index_ji] += tmp_d_tcoord_ji * tcoord_ji_d_weight_ji;
+
+        // second change
+        axpy_mut(&mut d_weights_ik, d_ycoord_ij, &ycoord_ij_d_weights_ik);
+        axpy_mut(&mut d_weights_jl, d_ycoord_ji, &ycoord_ji_d_weights_jl);
+        let mut d_tcoords_k = sbvec_scaled(d_ycoord_ij, ycoord_ij_d_tcoords_k);
+        let mut d_tcoords_l = sbvec_scaled(d_ycoord_ji, ycoord_ji_d_tcoords_l);
+        // reminder: because tcoords_k describes sites bonded to site i, it contains
+        //           tcoord_j rather than tcoord_i
+        d_tcoords_k[index_ij] += d_tcoord_j;
+        d_tcoords_l[index_ji] += d_tcoord_i;
+
+        Output {
+            value, d_tcoords_k, d_tcoords_l, d_weights_ik,
+            d_weights_jl, d_deltas_ik, d_deltas_jl,
+        }
+    }
+}
+
+// One of the square sum terms that appear in the definition of N^{conj}.  (Brenner, eq. 15)
 //
-//    pub type Output = BondOrderDihedral;
-//    pub struct Input<I: IntoIterator<Item=DihedralItem>> {
-//        pub type_i: AtomType,
-//        pub type_j: AtomType,
-//        pub tcoord_ij: f64,
-//        pub tcoord_ji: f64,
-//        pub xcoord_ij: f64,
-//        pub dihedrals_ijkl: I,
-//    }
-//    pub struct DihedralItem {
-//        pub sinsq_ijkl: f64,
-//        pub weight_ik: f64,
-//        pub weight_jl: f64,
-//    }
-//    pub struct BondOrderDihedral {
-//        pub value: f64,
-//        pub d_tcoord_ij: f64,
-//        pub d_tcoord_ji: f64,
-//        pub d_xcoord_ij: f64,
-//        pub d_sinsqs_ijkl: Vec<f64>,
-//        pub d_weights_ik: Vec<f64>,
-//        pub d_weights_jl: Vec<f64>,
-//    }
+// We call this `ycoord` due to its close relation with N^{conj}, which we call `xcoord`.
+// Basically:
 //
-//    impl<I: IntoIterator<Item=DihedralItem>> Input<I> {
-//        pub fn compute(self, preallocated: Option<Output>) -> Output {
-//            compute(self, preallocated.unwrap_or_default())
-//        }
-//    }
+//     xcoord_ij = 1 + ycoord_ij + ycoord_ji
 //
-//    // free function for smaller indent
-//    fn compute(
-//        input: Input<impl IntoIterator<Item=DihedralItem>>,
-//        preallocated: Output,
-//    ) -> Output {
-//        // value = T * sum
-//
-//        // T = a tricubic spline
-//        let Input { type_i, type_j, tcoord_ij, tcoord_ji, xcoord_ij, dihedrals_ijkl } = input;
-//        let BrennerT {
-//            value: T,
-//            d_tcoord_ij: T_d_tcoord_ij,
-//            d_tcoord_ji: T_d_tcoord_ji,
-//            d_xcoord_ij: T_d_xcoord_ij,
-//        } = brenner_T::Input { type_i, type_j, tcoord_ij, tcoord_ji, xcoord_ij }.compute();
-//
-//        // sum = ∑_{k,l} ((1 - cos(Θ_{ijkl})^2) f_{ik} f_{jl})
-//        let mut sum = 0.0;
-//        let mut sum_d_sinsqs_ijkl = cleared(preallocated.d_sinsqs_ijkl);
-//        let mut sum_d_weights_ik = cleared(preallocated.d_weights_ik);
-//        let mut sum_d_weights_jl = cleared(preallocated.d_weights_jl);
-//        for item in dihedrals_ijkl {
-//            let DihedralItem { sinsq_ijkl, weight_ik, weight_jl } = item;
-//            sum += sinsq_ijkl * weight_ik * weight_jl;
-//            sum_d_sinsqs_ijkl.push(1.0 * weight_ik * weight_jl);
-//            sum_d_weights_ik.push(sinsq_ijkl * 1.0 * weight_jl);
-//            sum_d_weights_jl.push(sinsq_ijkl * weight_ik * 1.0);
-//        }
-//
-//        // output is product
-//        Output {
-//            value: T * sum,
-//            d_tcoord_ij: T_d_tcoord_ij * sum,
-//            d_tcoord_ji: T_d_tcoord_ji * sum,
-//            d_xcoord_ij: T_d_xcoord_ij * sum,
-//            d_sinsqs_ijkl: scaled(T, sum_d_sinsqs_ijkl),
-//            d_weights_ik: scaled(T, sum_d_weights_ik),
-//            d_weights_jl: scaled(T, sum_d_weights_jl),
-//        }
-//    }
-//}
-//
-//// The coordination value describing local conjugacy (N^{conj} in Brenner)
-////
-//// FIXME: Terrible signal to noise ratio. This is almost all boilerplate.
-////        Probably better to just inline the computation wherever it ultimately gets used.
-////
-////        I keep wanting to just precompute all of the XCoordSumsqs, but the trouble is that
-////        they depend on the coordinations of neighboring sites. This in turn means it depends
-////        on the weights of many bonds that don't even involve site i.
-////
-////        Not only are these derivatives exhausting to keep track of, but dealing with them
-////        poorly will also probably lead to poor memory access patterns.
-//mod xcoord {
-//    use super::*;
-//
-//    pub type Output = XCoord;
-//    pub struct Input<'a> {
-//        pub skip_index_k: usize, // index of ij bond in i bond arrays
-//        pub skip_index_l: usize, // index of ji bond in j bond arrays
-//        pub weights_ik: &'a [f64],
-//        pub weights_jl: &'a [f64],
-//        pub tcoords_k: &'a [f64],
-//        pub tcoords_l: &'a [f64],
-//    }
-//
-//    pub struct XCoord {
-//        pub value: f64,
-//        pub d_weights_ik: SiteBondVec<f64>,
-//        pub d_weights_jl: SiteBondVec<f64>,
-//        pub d_tcoords_k: SiteBondVec<f64>,
-//        pub d_tcoords_l: SiteBondVec<f64>,
-//    }
-//
-//    impl<'a> Input<'a> {
-//        pub fn compute(self) -> Output {
-//            let Input {
-//                skip_index_k, skip_index_l,
-//                weights_ik, weights_jl,
-//                tcoords_k, tcoords_l,
-//                types_k, types_l,
-//            } = self;
-//            assert!(skip_index_k < tcoords_k.len());
-//            assert!(skip_index_l < tcoords_l.len());
-//            assert_eq!(weights_ik.len(), tcoords_k.len());
-//            assert_eq!(weights_jl.len(), tcoords_l.len());
-//
-//            let out = xcoord_sumsq::Input {
-//                skip_index: skip_index_k,
-//                weights_ik: weights_ik,
-//                tcoords_k: tcoords_k,
-//                types_k: types_k,
-//            }.compute();
-//            let XCoordSumsq {
-//                value: sumsq_ik,
-//                d_weights_ik: d_weights_ik,
-//                d_tcoords_k: d_tcoords_k,
-//            } = out;
-//
-//            let out = xcoord_sumsq::Input {
-//                skip_index: skip_index_j,
-//                weights_ik: weights_jl,
-//                tcoords_k: tcoords_j,
-//                types_k: types_l,
-//            }.compute();
-//            let XCoordSumsq {
-//                value: sumsq_jl,
-//                d_weights_ik: d_weights_jl,
-//                d_tcoords_k: d_tcoords_l,
-//            } = out;
-//
-//            // Hmmm. That was 60 lines of boilerplate just for a simple sum. :/
-//            let value = 1.0 + sumsq_ik + sumsq_jl;
-//            Output { value, d_weights_ik, d_weights_jl, d_tcoords_k, d_tcoords_l }
-//        }
-//    }
-//}
-//
-//// One of the square sum terms that appear in the definition of N^{conj}.  (Brenner, eq. 15)
-//use self::xcoord_sumsq::XCoordSumsq;
-//mod xcoord_sumsq {
-//    use super::*;
-//
-//    pub type Output = XCoordSumsq;
-//    pub struct Input<'a> {
-//        pub skip_index: usize,
-//        pub weights_ik: &'a [f64],
-//        pub tcoords_k: &'a [f64],
-//        pub types_k: &'a [AtomType],
-//    }
-//
-//    pub struct XCoordSumsq {
-//        pub value: f64,
-//        pub d_weights_ik: SiteBondVec<f64>,
-//        pub d_tcoords_k: SiteBondVec<f64>,
-//    }
-//
-//    impl<'a> Input<'a> {
-//        pub fn compute(self) -> Output { compute(self) }
-//    }
-//
-//    // free function for smaller indent
-//    fn compute(input: Input<'_>) -> Output {
-//        let Input { skip_index, weights_ik, tcoords_k, types_k } = input;
-//
-//        // Compute the sum without the square
-//        let mut inner_value = 0.0;
-//        let mut inner_d_weights_ik = SiteBondVec::new();
-//        let mut inner_d_tcoords_k = SiteBondVec::new();
-//        let iter = zip_eq!(&tcoords_k, &weights_ik, &types_k).enumerate();
-//        for (index_ik, (&tcoord_k, &weight_ik, &type_k)) in iter {
-//            if index_ik == skip_index || type_k == AtomType::Hydrogen {
-//                inner_d_weights_ik.push(0.0);
-//                inner_d_tcoords_k.push(0.0);
-//                continue;
-//            }
-//            let xik = tcoord_k - weight_ik;
-//            let xik_d_tcoord_k = 1.0;
-//            let xik_d_weight_ik = -1.0;
-//
-//            let (F, F_d_xik) = switch((3.0, 2.0), xik);
-//            let mut inner_d_weight_ik = 0.0;
-//            let mut inner_d_tcoord_k = 0.0;
-//            inner_value += weight_ik * F;
-//            inner_d_tcoord_k += weight_ik * F_d_xik * xik_d_tcoord_k;
-//            inner_d_weight_ik += F;
-//            inner_d_weight_ik += weight_ik * F_d_xik * xik_d_weight_ik;
-//            inner_d_weights_ik.push(inner_d_weight_ik);
-//            inner_d_tcoords_k.push(inner_d_tcoord_k);
-//        }
-//
-//        let scaled = |f, mut arr| { scale_mut(f, &mut arr); arr };
-//
-//        // Now square it
-//        let value = inner_value * inner_value;
-//        let prefactor = 2.0 * value;
-//        Output {
-//            value: value,
-//            d_tcoords_k: scaled(prefactor, inner_d_tcoords_k),
-//            d_weights_ik: scaled(prefactor, inner_d_weights_ik),
-//        }
-//    }
-//}
+// ...but `xcoord` is not a useful thing to wrap a function around because it has a ton of
+// derivatives and amounts to little more than two computations of `ycoord`.
+use self::ycoord::YCoord;
+mod ycoord {
+    use super::*;
+
+    pub type Output = YCoord;
+    pub struct Input<'a> {
+        pub skip_index: usize,
+        pub weights_ik: &'a [f64],
+        pub tcoords_k: &'a [f64],
+        pub types_k: &'a [AtomType],
+    }
+
+    pub struct YCoord {
+        pub value: f64,
+        pub d_weights_ik: SiteBondVec<f64>,
+        pub d_tcoords_k: SiteBondVec<f64>,
+    }
+
+    impl<'a> Input<'a> {
+        pub fn compute(self) -> Output { compute(self) }
+    }
+
+    // free function for smaller indent
+    fn compute(input: Input<'_>) -> Output {
+        let Input { skip_index, weights_ik, tcoords_k, types_k } = input;
+
+        // Compute the sum without the square
+        let mut inner_value = 0.0;
+        let mut inner_d_weights_ik = SiteBondVec::new();
+        let mut inner_d_tcoords_k = SiteBondVec::new();
+        let iter = zip_eq!(tcoords_k, weights_ik, types_k).enumerate();
+        for (index_ik, (&tcoord_k, &weight_ik, &type_k)) in iter {
+            if index_ik == skip_index || type_k == AtomType::Hydrogen {
+                inner_d_weights_ik.push(0.0);
+                inner_d_tcoords_k.push(0.0);
+                continue;
+            }
+            let xik = tcoord_k - weight_ik;
+            let xik_d_tcoord_k = 1.0;
+            let xik_d_weight_ik = -1.0;
+
+            let (F, F_d_xik) = switch((3.0, 2.0), xik);
+            let mut inner_d_weight_ik = 0.0;
+            let mut inner_d_tcoord_k = 0.0;
+            inner_value += weight_ik * F;
+            inner_d_tcoord_k += weight_ik * F_d_xik * xik_d_tcoord_k;
+            inner_d_weight_ik += F;
+            inner_d_weight_ik += weight_ik * F_d_xik * xik_d_weight_ik;
+            inner_d_weights_ik.push(inner_d_weight_ik);
+            inner_d_tcoords_k.push(inner_d_tcoord_k);
+        }
+
+        // Now square it
+        let value = inner_value * inner_value;
+        Output {
+            value: value,
+            d_tcoords_k: sbvec_scaled(2.0 * value, inner_d_tcoords_k),
+            d_weights_ik: sbvec_scaled(2.0 * value, inner_d_weights_ik),
+        }
+    }
+}
 
 // some parameter `exp(\lambda_{ijk})`
 //
@@ -2473,7 +2703,6 @@ mod spline_T {
         }
     }
 
-
     #[derive(Debug, Clone)]
     pub struct SplineSet {
         CC: TricubicGrid,
@@ -2481,11 +2710,6 @@ mod spline_T {
 
     impl<'a> Input<'a> {
         pub fn compute(self) -> Output { compute(self) }
-
-        // FIXME remove
-        pub fn can_assume_zero(&self) -> bool {
-            false
-        }
     }
 
     // Tables 4, 6, and 9
@@ -2750,6 +2974,15 @@ fn scale_mut<T: ::std::ops::MulAssign<f64>>(factor: f64, xs: &mut [T]) {
     for x in xs {
         *x *= factor;
     }
+}
+
+fn concat_any_order<T>(a: Vec<T>, b: Vec<T>) -> Vec<T> {
+    let (mut long, short) = match a.len() > b.len() {
+        true => (a, b),
+        false => (b, a),
+    };
+    long.extend(short);
+    long
 }
 
 fn cleared<T>(mut vec: Vec<T>) -> Vec<T> {
@@ -3508,8 +3741,10 @@ mod derivative_tests {
             let (_, diff) = f(x);
 
             // linear function so central difference is exact
+            //
+            // sometimes the diff is small, so also allow abs tolerance
             let num_diff = numerical::slope(1e-1, Some(CentralDifference), x, |x| f(x).0);
-            assert_close!{rel=1e-12, diff, num_diff};
+            assert_close!{rel=1e-11, abs=1e-11, diff, num_diff};
         }
     }
 
