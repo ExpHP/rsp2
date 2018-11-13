@@ -181,7 +181,7 @@ impl_dyn_clone_detail!{
 #[test]
 fn test_rebo_diff() -> FailResult<()> {
     use ::rsp2_structure::{Lattice, CoordsKind, consts as elem};
-    use ::rsp2_array_types::{Envee, Unvee};
+    use ::rsp2_array_types::{Envee};
     use ::rsp2_minimize::numerical;
     use ::slice_of_array::prelude::*;
     use ::meta::{self, prelude::*};
@@ -227,7 +227,7 @@ fn test_rebo_diff() -> FailResult<()> {
     })?;
 
     assert_close!(diff_rsp2.1.flat(), &num_grad[..]);
-    panic!();
+    (|| panic!())();
     Ok(())
 }
 
@@ -276,6 +276,6 @@ fn test_rebo_value() -> FailResult<()> {
     println!("{:?}", diff_rsp2);
     assert_close!(diff_lmp.0, diff_rsp2.0);
     assert_close!(diff_lmp.1.unvee(), diff_rsp2.1.unvee());
-    panic!();
+    (|| panic!())();
     Ok(())
 }

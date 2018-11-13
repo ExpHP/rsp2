@@ -15,6 +15,8 @@ use ::FailResult;
 #[allow(unused)] // https://github.com/rust-lang/rust/issues/45268
 use ::slice_of_array::prelude::*;
 use ::std::ops::RangeInclusive;
+#[allow(unused)] // https://github.com/rust-lang/rust/issues/45268
+use ::std::borrow::Borrow;
 use ::rsp2_array_types::{V2, V3};
 
 // Until we get const generics, it's too much trouble to be generic over lengths,
@@ -346,6 +348,278 @@ pub mod F {
         // The values in Brenner (2002) are actually 2 * F.
         let input = input.scale(0.5);
         input.solve().unwrap()
+    }
+}
+
+//-----------------------------------------------
+
+
+pub mod G {
+    use super::*;
+
+    // Spline coeffs were precomputed with:
+    //
+    // (FIXME: would be better to do this in Rust so they can be configured)
+    /*
+import numpy as np
+from math import radians
+
+# Construct a bunch of terms representing the boundary conditions.
+# (the nth derivative of G at x0 equals some y0)
+
+# produces a row in the matrix to be multiplied against
+# the column vector [c0, c1, ..., c5] of polynomial coeffs
+def matrix_row(term):
+    x, order, _value = term
+    coeffs = np.polyder([1]*6, order).tolist() + [0] * order
+    powers = np.arange(6).tolist()[:6-order][::-1] + [0] * order
+    return np.array(x) ** powers * coeffs
+
+def solve_spline(terms):
+    matrix = np.array(list(map(matrix_row, terms)))
+    b = [[value] for (_, _, value) in terms]
+
+    coeffs, = np.linalg.solve(matrix, b).T
+    for (x, order, value) in terms:
+        assert abs(np.polyval(np.polyder(coeffs, order), x) - value) < 1e-13
+    return coeffs
+
+# Data from Donald W Brenner et al 2002 J. Phys.: Condens. Matter 14 783
+# Table 3 (C) and Table 6 (H)
+
+# Terms for G(x) = y, G'(x) = yp, G''(x) = ypp
+def terms_at(x, ys):
+    y, yp, ypp = ys
+    return [(x, 0, y), (x, 1, yp), (x, 2, ypp)]
+
+cterms_1 = terms_at(  -1, (-0.00100, 0.10400, 0.00000)) # x = cos(pi)
+cterms_2 = terms_at(-1/2, ( 0.05280, 0.17000, 0.37000)) # x = cos(2/3 pi)
+cterms_3 = terms_at(-1/3, ( 0.09733, 0.40000, 1.98000)) # x = cos(0.6081 pi)
+cterms_4_G = [
+    (0.0, 0, 0.37545), # x = cos(pi/2)
+    (0.5, 0, 2.0014),  # x = cos(pi/3)
+    (1.0, 0, 8.0),     # x = cos(0)
+]
+cterms_4_gamma = [
+    (0.0, 0, 0.271856), # x = cos(pi/2)
+    (0.5, 0, 0.416335), # x = cos(pi/3)
+    (1.0, 0, 1.0),      # x = cos(0)
+]
+hterms = [
+    (np.cos(radians(  0)), 0, 19.991787),
+    (np.cos(radians( 60)), 0, 19.704059),
+    (np.cos(radians( 90)), 0, 19.065124),
+    (np.cos(radians(120)), 0, 16.811574),
+    (np.cos(radians(150)), 0, 12.164186),
+    (np.cos(radians(180)), 0, 11.235870),
+]
+pieces = [
+    ("C_COEFFS_1", "Segment 1: -1 to -1/2  (pi to 2pi/3)", cterms_1 + cterms_2),
+    ("C_COEFFS_2", "Segment 2: -1/2 to -1/3  (2pi/3 to 109.47°)", cterms_2 + cterms_3),
+    ("C_COEFFS_3_HIGH_COORDINATION", "Segment 3 (G): -1/3 to +1  (109.47° to 0°)", cterms_3 + cterms_4_G),
+    ("C_COEFFS_3_LOW_COORDINATION", "Segment 3 (gamma): -1/3 to +1  (109.47° to 0°)", cterms_3 + cterms_4_gamma),
+    ("H_COEFFS", "Full curve for hydrogen", hterms),
+]
+
+print("/*")
+print(open(__file__).read(), end='')
+print("*/")
+print("// Coeffs listed from x**5 to x**0")
+for (i, xval) in enumerate(["-1.0", "-0.5", "-1.0/3.0", "1.0"]):
+    print(f"const C_X_{i}: f64 = {xval};")
+
+for (name, heading, terms) in pieces:
+    print()
+    print(f"// {heading}")
+    print(f"const {name}: &'static [f64] = &[")
+    for x in solve_spline(terms):
+        print(f"{x},")
+    print(f"];")
+*/
+
+    /// A piecewise polynomial, optimized for the use case of only having a few segments.
+    ///
+    /// Between each two elements of x_div, it uses a polynomial from `coeffs`.
+    #[derive(Debug, Clone)]
+    pub struct SmallSpline1d<Array: Borrow<[f64]> + 'static> {
+        pub x_div: &'static [f64],
+        /// Polynomials between each two points in `x_div`, with coefficients in
+        /// descending order.
+        pub poly: &'static [Polynomial1d<Array>],
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct SplineSet {
+        pub low_coord: f64,
+        pub high_coord: f64,
+        pub carbon_high_coord: SmallSpline1d<[f64; 6]>,
+        pub carbon_low_coord: SmallSpline1d<[f64; 6]>,
+        pub hydrogen: SmallSpline1d<[f64; 6]>,
+    }
+
+    impl SplineSet {
+        #[cfg(test)]
+        pub fn all_splines(&self) -> Vec<SmallSpline1d<[f64; 6]>> {
+            vec![
+                self.carbon_high_coord.clone(),
+                self.carbon_low_coord.clone(),
+                self.hydrogen.clone(),
+            ]
+        }
+    }
+
+    /// Splines produced by fitting the data in Brenner Table 3.
+    pub const BRENNER: SplineSet = SplineSet {
+        low_coord: 3.2,
+        high_coord: 3.7,
+        carbon_high_coord: SmallSpline1d {
+            x_div: &[-1.0, -0.5, -1.0/3.0, 1.0],
+            poly: &[Polynomial1d([
+                // Segment 1: -1 to -1/2  (pi to 2pi/3)
+                -1.342399999999925, -4.927999999999722, -6.829999999999602,
+                -4.3459999999997265, -1.0979999999999095, 0.002600000000011547,
+            ]), Polynomial1d([
+                // Segment 2: -1/2 to -1/3  (2pi/3 to 109.47°)
+                35.3116800000094, 69.87600000001967, 55.94760000001625,
+                23.43200000000662, 5.544400000001327, 0.6966900000001047,
+            ]), Polynomial1d([
+                // Segment 3 (G): -1/3 to +1  (109.47° to 0°)
+                0.5064259725000047, 1.4271989062499966, 2.028821591249997,
+                2.254920828750001, 1.4071827012500007, 0.37545,
+            ])],
+        },
+        carbon_low_coord: SmallSpline1d {
+            x_div: &[-1.0, -0.5, -1.0/3.0, 1.0],
+            poly: &[Polynomial1d([
+                // Segment 1: -1 to -1/2  (pi to 2pi/3)
+                -1.342399999999925, -4.927999999999722, -6.829999999999602,
+                -4.3459999999997265, -1.0979999999999095, 0.002600000000011547,
+            ]), Polynomial1d([
+                // Segment 2: -1/2 to -1/3  (2pi/3 to 109.47°)
+                35.3116800000094, 69.87600000001967, 55.94760000001625,
+                23.43200000000662, 5.544400000001327, 0.6966900000001047,
+            ]), Polynomial1d([
+                // Segment 3 (G): -1/3 to +1  (109.47° to 0°)
+                -0.03793074749999925, 1.2711119062499994, -0.5613989287500004,
+                -0.4328552912499998, 0.4892170612500001, 0.271856,
+            ])],
+        },
+        hydrogen: SmallSpline1d {
+            x_div: &[-1.0, 1.0],
+            poly: &[Polynomial1d([
+                -9.287290931116942, -0.29608733333332005, 13.589744997229507,
+                -3.1552081666666805, 0.0755044338874331, 19.065124,
+            ])],
+        },
+    };
+
+    /// From CH.airebo.
+    ///
+    /// These appear to have been produced by fitting the data in the AIREBO paper. (Stuart 2000)
+    ///
+    /// My current understanding is that it is okay to use these for REBO, and that they are
+    /// simply an improvement upon the curves provided in Brenner (2002) that goes hand-in-hand
+    /// with the modifications to `lambda_ijk`.
+    ///
+    /// ...however, the coefficients here are rounded to dangerously low precision, which
+    /// might introduce discontinuities at the switch points (most troublingly so at 120°)
+    /// that could ruin optimization algorithms.
+    ///
+    /// TODO: Build our own splines without such insane rounding errors
+    pub const LAMMPS: SplineSet = SplineSet {
+        low_coord: 3.2,
+        high_coord: 3.7,
+        carbon_high_coord: SmallSpline1d {
+            x_div: &[-1.0, -0.6666666667, -0.5, -0.3333333333, 1.0],
+            poly: &[Polynomial1d([
+                0.3862485000, 1.5544035000, 2.5334145000,
+                2.1363075000, 1.0627430000, 0.2816950000,
+            ]), Polynomial1d([
+                0.4025160000, 1.6019100000, 2.5885710000,
+                2.1681365000, 1.0718770000, 0.2827390000,
+            ]), Polynomial1d([
+                34.7051520000, 68.6124000000, 54.9086400000,
+                23.0108000000, 5.4601600000, 0.6900250000,
+            ]), Polynomial1d([
+                0.5063519355, 1.4269207324, 2.0288747461,
+                2.2551320117, 1.4072691309, 0.3754514434,
+            ])],
+        },
+        carbon_low_coord: SmallSpline1d {
+            x_div: &[-1.0, -0.6666666667, -0.5, -0.3333333333, 1.0],
+            poly: &[Polynomial1d([
+                0.3862485000, 1.5544035000, 2.5334145000,
+                2.1363075000, 1.0627430000, 0.2816950000,
+            ]), Polynomial1d([
+                0.4025160000, 1.6019100000, 2.5885710000,
+                2.1681365000, 1.0718770000, 0.2827390000,
+            ]), Polynomial1d([
+                34.7051520000, 68.6124000000, 54.9086400000,
+                23.0108000000, 5.4601600000, 0.6900250000,
+            ]), Polynomial1d([
+                -0.0375008379, 1.2708702246, -0.5616817383,
+                -0.4328177539, 0.4892740137, 0.2718560918,
+            ])],
+        },
+        hydrogen: SmallSpline1d {
+            x_div: &[-1.0, -0.8333333333, -0.5, 1.0],
+            poly: &[Polynomial1d([
+                630.6336000042, 2721.4308000191, 4582.1544000348,
+                3781.7719000316, 1549.6358000143, 270.4568000026,
+            ]), Polynomial1d([
+                -94.9946400000, -229.8471299999, -210.6432299999,
+                -102.4683000000, -21.0823875000, 16.9534406250,
+            ]), Polynomial1d([
+                0.8376699753, -2.6535615062, 3.2913322346,
+                -2.5664219198, 2.0177562840, 19.0650249321,
+            ])],
+        },
+    };
+
+    impl<Array: Borrow<[f64]> + 'static> SmallSpline1d<Array> {
+        pub fn evaluate(&self, x: f64) -> (f64, f64) {
+            // NOTE: This linear search will *almost always* stop at one of the first two
+            //       elements.  Large cosine means small angles, which are rare.
+            for (i, &div) in self.x_div.iter().skip(1).enumerate() {
+                if x <= div {
+                    return self.poly[i].evaluate(x);
+                }
+            }
+
+            // tolerate fuzz
+            let high = *self.x_div.last().unwrap();
+            let width = high - self.x_div[0];
+            assert!(x < high + width * 1e-8);
+
+            self.poly.last().unwrap().evaluate(x)
+        }
+    }
+
+    /// A polynomial with coefficients listed in decreasing order
+    #[derive(Debug, Clone)]
+    pub struct Polynomial1d<Array>(pub Array);
+
+    impl<Array: Borrow<[f64]>> Polynomial1d<Array> {
+        pub fn evaluate(&self, x: f64) -> (f64, f64) {
+            let poly_coeffs = self.0.borrow().iter().cloned();
+            let deriv_coeffs = polyder_dec(self.0.borrow().iter().cloned());
+            (_polyval_dec(poly_coeffs, x), _polyval_dec(deriv_coeffs, x))
+        }
+
+        #[cfg(test)]
+        pub fn derivative(&self) -> Polynomial1d<Vec<f64>> {
+            Polynomial1d(polyder_dec(self.0.borrow().iter().cloned()).collect())
+        }
+    }
+
+    fn polyder_dec(
+        coeffs: impl DoubleEndedIterator<Item=f64> + ExactSizeIterator + Clone,
+    ) -> impl DoubleEndedIterator<Item=f64> + ExactSizeIterator + Clone
+    { coeffs.rev().skip(1).enumerate().map(|(n, x)| (n + 1) as f64 * x).rev() }
+
+    #[inline(always)]
+    fn _polyval_dec(coeffs: impl Iterator<Item=f64>, x: f64) -> f64 {
+        coeffs.fold(0.0, |acc, c| acc * x + c)
     }
 }
 
