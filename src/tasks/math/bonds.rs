@@ -281,10 +281,12 @@ impl FracBonds {
 
         // The supercell is large enough that we can disregard its periodicity, and consider
         // interactions between its centermost cell and any other atom.
+        let mut num_visited = 0;
         for (&latt_from, &site_from, &cart_from) in izip!(&sc_latts, &sc_sites, &sc_carts) {
             if latt_from != sc_centermost_latt {
                 continue;
             }
+            num_visited += 1;
 
             for (&latt_to, &site_to, &cart_to) in izip!(&sc_latts, &sc_sites, &sc_carts) {
                 let sqnorm = (cart_to - cart_from).sqnorm();
@@ -300,15 +302,20 @@ impl FracBonds {
                     // `latt_to - latt_from` would give us the image diff between the images in our
                     // supercell, but that's computed from the reduced positions. We actually want
                     // the image diffs for the original positions.
-                    let adjusted_latt_to = original_latts[site_to] + latt_to;
-                    let adjusted_latt_from = original_latts[site_from] + latt_from;
+                    let adjusted_latt_to = latt_to - original_latts[site_to];
+                    let adjusted_latt_from = latt_from - original_latts[site_from];
                     image_diff.push(adjusted_latt_to - adjusted_latt_from);
                 }
             }
         }
-        assert_ne!(from.len(), 0, "(BUG) nothing in center cell?");
         let num_atoms = original_coords.num_atoms();
-        Ok(FracBonds { num_atoms, from, to, image_diff })
+        assert_eq!(num_visited, num_atoms, "(BUG) wrong # atoms in center cell?");
+
+        let out = FracBonds { num_atoms, from, to, image_diff };
+        if cfg!(debug_assertions) {
+            out.sanity_check(original_coords, range);
+        }
+        Ok(out)
     }
 
     #[inline]
@@ -325,6 +332,22 @@ impl FracBonds {
             self.into_iter().map(|v| v.cart_vector_using_cache(&coords).unwrap()).collect()
         };
         CartBonds { num_atoms, from, to, cart_vector }
+    }
+
+    #[allow(unused)]
+    pub(crate) fn sanity_check(&self, coords: &Coords, range: impl BondRange) {
+        let square = |x| x*x;
+        let sqmin = square(range.minimum()) * (1.0 - 1e-9);
+        let sqmax = square(range.maximum()) * (1.0 + 1e-9);
+        let cart_bonds = self.to_cart_bonds(coords);
+        for CartBond { cart_vector, .. } in &cart_bonds {
+            let sqnorm = cart_vector.sqnorm();
+            assert!(
+                sqmin <= sqnorm && sqnorm <= sqmax,
+                "(BUG) bad bond length: {} vs ({}, {})",
+                cart_vector.norm(), range.minimum(), range.maximum(),
+            );
+        }
     }
 
     pub fn num_atoms_per_cell(&self) -> usize
@@ -688,9 +711,31 @@ mod tests {
             vec![
                 // Two crucial things:
                 // * one bond should be found
-                // * `image_diff` should be `image_to` - `image_from`
-                FracBond { from: 0, to: 1, image_diff: V3([ 2, 0, -10]) },
-                FracBond { from: 1, to: 0, image_diff: V3([-2, 0,  10]) },
+                // * `image_diff` should be `-(image_to - image_from)`
+                FracBond { from: 0, to: 1, image_diff: V3([-2, 0,  10]) },
+                FracBond { from: 1, to: 0, image_diff: V3([ 2, 0, -10]) },
+            ].into_iter().collect::<BTreeSet<_>>(),
+        }
+    }
+
+    #[test]
+    fn regression_nanotube() {
+        let coords = Coords::new(
+            Lattice::orthorhombic(100.0, 100.0, 22.510051727295),
+            CoordsKind::Carts(vec![
+                V3([4.125935,  0.464881, 8.843235]),
+                V3([4.125935, -0.464881, 9.915142]),
+            ]),
+        );
+        let range = 1.01 * 2.0;
+
+        let bonds = FracBonds::from_brute_force_very_dumb(&coords, range).unwrap();
+        let actual = bonds.into_iter().collect::<BTreeSet<_>>();
+        assert_eq!{
+            actual,
+            vec![
+                FracBond { from: 0, to: 1, image_diff: V3([0, 0, 0]) },
+                FracBond { from: 1, to: 0, image_diff: V3([0, 0, 0]) },
             ].into_iter().collect::<BTreeSet<_>>(),
         }
     }
