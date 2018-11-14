@@ -526,9 +526,9 @@ fn compute_rebo_bonds(
 ) -> (f64, IndexVec<BondI, V3>) {
     use self::interactions::{Site, Bond};
     // Brenner:
-    // Eq  1:  V = sum_{i < j} V^R(r_ij) - b_{ij} V^A(r_ij)
+    // Eq  1:  V = sum_{i < j} V^R(r_ij) + b_{ij} V^A(r_ij)
     // Eq  5:  V^R(r) = f(r) (1 + Q/r) A e^{-alpha r}
-    // Eq  6:  V^A(r) = f(r) sum_{n in 1..=3} B_n e^{-beta_n r}
+    // Eq  6:  V^A(r) = - f(r) sum_{n in 1..=3} B_n e^{-beta_n r}
     // Eq  3:  b_{ij} = 0.5 * (b_{ij}^{sigma-pi} + b_{ji}^{sigma-pi}) + b_ij^pi
     // Eq  4:  b_{ij}^{pi} = PI_{ij}^{RC} + b_{ij}^{DH}
     // Eq 14:  PI_{ij}^{RC} = F spline
@@ -550,7 +550,7 @@ fn compute_rebo_bonds(
     // We also redefine the sums in the potential to be over all i,j pairs, not just i < j.
     //
     // Eq 1':     V = sum_{i != j} V_ij
-    // Eq 2':  V_ij = 0.5 * V^R_ij - b_ij * V^A_ij
+    // Eq 2':  V_ij = 0.5 * V^R_ij + b_ij * V^A_ij
     // Eq 3':  b_ij = 0.5 * b_ij^{sigma-pi} + boole(i < j) * b_ij^{pi}
 
     // On large systems, our performance is expected to be bounded by cache misses.
@@ -626,11 +626,11 @@ fn compute_rebo_bonds(
                 let VA;
                 let VA_d_length;
                 {
-                    // UA_ij = sum_{n in 1..=3} B_n e^{-beta_n r_ij}
+                    // UA_ij = - sum_{n in 1..=3} B_n e^{-beta_n r_ij}
                     let mut UA = 0.0;
                     let mut UA_d_length = 0.0;
                     for (&B, &beta) in zip_eq!(&params_ij.B, &params_ij.beta) {
-                        let term = B * f64::exp(-beta * length);
+                        let term = -B * f64::exp(-beta * length);
                         let term_d_length = -beta * term;
                         UA += term;
                         UA_d_length += term_d_length;
@@ -663,7 +663,7 @@ fn compute_rebo_bonds(
             ref bond_VA, ref bond_VA_d_delta,
         } = site_data[site_i];
 
-        // Eq 2':  V_ij = 0.5 * V^R_ij - b_ij * V^A_ij
+        // Eq 2':  V_ij = 0.5 * V^R_ij + b_ij * V^A_ij
         let mut site_V = 0.0;
 
         // derivatives with respect to the deltas for site i
@@ -706,12 +706,12 @@ fn compute_rebo_bonds(
             d_weights: Vsp_i_d_weights,
         } = out;
 
-        site_V -= Vsp_i;
-        axpy_mut(&mut site_V_d_delta, -1.0, &Vsp_i_d_deltas);
+        site_V += Vsp_i;
+        axpy_mut(&mut site_V_d_delta, 1.0, &Vsp_i_d_deltas);
         for (index_ij, _) in interactions.bonds(site_i).enumerate() {
             let Vsp_i_d_weight_ij = Vsp_i_d_weights[index_ij];
             let weight_ij_d_delta_ij = bond_weight_d_delta[index_ij];
-            site_V_d_delta[index_ij] += -1.0 * Vsp_i_d_weight_ij * weight_ij_d_delta_ij;
+            site_V_d_delta[index_ij] += Vsp_i_d_weight_ij * weight_ij_d_delta_ij;
         }
 
         //-----------------------------------------------
@@ -1017,7 +1017,7 @@ mod site_sigma_pi_term {
                 println!("rs-bsp: {}", bsp_ij);
             } // dedicated scope for accumulating bsp
 
-            // True term to add to sum is 0.5 * VR_ij * bsp_ij
+            // True term to add to sum is 0.5 * VA_ij * bsp_ij
             let VA_ij = bond_VAs[index_ij];
             let VA_ij_d_delta_ij = bond_VAs_d_delta[index_ij];
 
@@ -1145,11 +1145,11 @@ mod bondorder_sigma_pi {
             inner_d_weights_ik = tmp_d_weights_ik;
         }
 
-        // Now take the square root.
+        // Now take the reciprocal square root.
         //
-        // (d/dx) sqrt(f(x))  =  (1/2) (df/dx) / sqrt(f(x))
-        let value = f64::sqrt(inner_value);
-        let prefactor = 0.5 / value;
+        // (d/dx) 1 / sqrt(f(x))  =  (-1/2) (df/dx) (1/sqrt(f(x)))^3
+        let value = f64::sqrt(inner_value).recip();
+        let prefactor = -0.5 * value * value * value;
         Output {
             value: value,
             d_ccoord_ij: prefactor * inner_d_ccoord_ij,

@@ -199,11 +199,11 @@ fn test_rebo_diff() -> FailResult<()> {
     );
     coords.carts_mut()[1][0] += 0.1;
     coords.carts_mut()[1][2] += 0.1;
-    let cfg_lmp: cfg::PotentialKind = from_json!{{
-        "rebo": {
-            "omp": false,
-        },
-    }};
+//    let cfg_lmp: cfg::PotentialKind = from_json!{{
+//        "rebo": {
+//            "omp": false,
+//        },
+//    }};
     let cfg_rsp2: cfg::PotentialKind = from_json!{{
         "rebo-new": {
             "params": "lammps",
@@ -214,10 +214,10 @@ fn test_rebo_diff() -> FailResult<()> {
     let bonds: meta::FracBonds = ::std::rc::Rc::new(FracBonds::from_brute_force_very_dumb(&coords, 2.0)?);
     let meta = hlist![elements, masses, Some(bonds)];
 
-    let pot_lmp = PotentialBuilder::from_config_parts(None, None, &cfg::Threading::Serial, &cfg::LammpsUpdateStyle::Safe, &[true; 3], &cfg_lmp);
+//    let pot_lmp = PotentialBuilder::from_config_parts(None, None, &cfg::Threading::Serial, &cfg::LammpsUpdateStyle::Safe, &[true; 3], &cfg_lmp);
     let pot_rsp2 = PotentialBuilder::from_config_parts(None, None, &cfg::Threading::Serial, &cfg::LammpsUpdateStyle::Safe, &[true; 3], &cfg_rsp2);
 
-    let diff_lmp = pot_lmp.initialize_diff_fn(&coords, meta.sift())?.compute(&coords, meta.sift())?;
+    //let diff_lmp = pot_lmp.initialize_diff_fn(&coords, meta.sift())?.compute(&coords, meta.sift())?;
     let diff_rsp2 = pot_rsp2.initialize_diff_fn(&coords, meta.sift())?.compute(&coords, meta.sift())?;
 
     let num_grad = numerical::try_gradient(1e-4, None, &coords.to_carts().flat(), |carts| {
@@ -227,7 +227,6 @@ fn test_rebo_diff() -> FailResult<()> {
     })?;
 
     assert_close!(diff_rsp2.1.flat(), &num_grad[..]);
-    (|| panic!())();
     Ok(())
 }
 

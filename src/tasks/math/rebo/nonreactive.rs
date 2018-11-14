@@ -453,9 +453,9 @@ fn compute_rebo_bonds(
 ) -> FailResult<(f64, IndexVec<BondI, V3>)> {
     use self::interactions::{Site, Bond};
     // Brenner:
-    // Eq  1:  V = sum_{i < j} V^R(r_ij) - b_{ij} V^A(r_ij)
+    // Eq  1:  V = sum_{i < j} V^R(r_ij) + b_{ij} V^A(r_ij)
     // Eq  5:  V^R(r) = f(r) (1 + Q/r) A e^{-alpha r}
-    // Eq  6:  V^A(r) = f(r) sum_{n in 1..=3} B_n e^{-beta_n r}
+    // Eq  6:  V^A(r) = - f(r) sum_{n in 1..=3} B_n e^{-beta_n r}
     // Eq  3:  b_{ij} = 0.5 * (b_{ij}^{sigma-pi} + b_{ji}^{sigma-pi}) + b_ij^pi
     // Eq  4:  b_{ij}^{pi} = PI_{ij}^{RC} + b_{ij}^{DH}
     // Eq 14:  PI_{ij}^{RC} = F spline
@@ -472,12 +472,12 @@ fn compute_rebo_bonds(
     // f_ij scale factor.
     //
     // Eq  5':  U^R(r) = (1 + Q/r) A e^{-alpha r}
-    // Eq  6':  U^A(r) = sum_{n in 1..=3} B_n e^{-beta_n r}
+    // Eq  6':  U^A(r) = - sum_{n in 1..=3} B_n e^{-beta_n r}
     //
     // We also redefine the sums in the potential to be over all i,j pairs, not just i < j.
     //
     // Eq 1':     V = sum_{i != j} V_ij
-    // Eq 2':  V_ij = 0.5 * V^R_ij - b_ij * V^A_ij
+    // Eq 2':  V_ij = 0.5 * V^R_ij + b_ij * V^A_ij
     // Eq 3':  b_ij = 0.5 * b_ij^{sigma-pi} + boole(i < j) * b_ij^{pi}
 
     // On large systems, our performance is expected to be bounded by cache misses.
@@ -551,18 +551,18 @@ fn compute_rebo_bonds(
                     VR = weight * UR;
                     VR_d_length = weight_d_length * UR + weight * UR_d_length;
                 }
-                println!("rs-VR: {}", VR);
+//                println!("VR-rs: {}", VR);
                 bond_VR.push(VR);
                 bond_VR_d_delta.push(VR_d_length * length_d_delta);
 
                 let VA;
                 let VA_d_length;
                 {
-                    // UA_ij = sum_{n in 1..=3} B_n e^{-beta_n r_ij}
+                    // UA_ij = - sum_{n in 1..=3} B_n e^{-beta_n r_ij}
                     let mut UA = 0.0;
                     let mut UA_d_length = 0.0;
                     for (&B, &beta) in zip_eq!(&params_ij.B, &params_ij.beta) {
-                        let term = B * f64::exp(-beta * length);
+                        let term = -B * f64::exp(-beta * length);
                         let term_d_length = -beta * term;
                         UA += term;
                         UA_d_length += term_d_length;
@@ -572,7 +572,7 @@ fn compute_rebo_bonds(
                     VA = weight * UA;
                     VA_d_length = weight_d_length * UA + weight * UA_d_length;
                 }
-                println!("rs-VA: {}", VA);
+//                println!("VA-rs: {}", VA);
                 bond_VA.push(VA);
                 bond_VA_d_delta.push(VA_d_length * length_d_delta);
             } // for _ in interactions.bonds(site)
@@ -598,7 +598,7 @@ fn compute_rebo_bonds(
             ref bond_VA, ref bond_VA_d_delta,
         } = site_data[site_i];
 
-        // Eq 2':  V_ij = 0.5 * V^R_ij - b_ij * V^A_ij
+        // Eq 2':  V_ij = 0.5 * V^R_ij + b_ij * V^A_ij
         let mut site_V = 0.0;
 
         // derivatives with respect to the deltas for site i
@@ -637,8 +637,8 @@ fn compute_rebo_bonds(
             d_deltas: Vsp_i_d_deltas,
         } = out;
 
-        site_V -= Vsp_i;
-        axpy_mut(&mut site_V_d_delta, -1.0, &Vsp_i_d_deltas);
+        site_V += Vsp_i;
+        axpy_mut(&mut site_V_d_delta, 1.0, &Vsp_i_d_deltas);
 
         //-----------------------------------------------
         // The pi terms
@@ -669,7 +669,7 @@ fn compute_rebo_bonds(
                 d_deltas_ik: mut bpi_d_deltas_ik,
                 d_deltas_jl: mut bpi_d_deltas_jl,
             } = out;
-            println!("rs-bpi: {}", bpi);
+//            println!("bpi-rs: {}", bpi);
 
             let VA_ij = bond_VA[index_ij];
             let VA_ij_d_delta_ij = bond_VA_d_delta[index_ij];
@@ -857,10 +857,10 @@ mod site_sigma_pi_term {
 
                 bsp_ij = tmp_value;
                 bsp_ij_d_deltas = tmp_d_deltas;
-                println!("rs-bsp: {}", bsp_ij);
+//                println!("bsp-rs: {}", bsp_ij);
             }
 
-            // True term to add to sum is 0.5 * VR_ij * bsp_ij
+            // True term to add to sum is 0.5 * VA_ij * bsp_ij
             let VA_ij = bond_VAs[index_ij];
             let VA_ij_d_delta_ij = bond_VAs_d_delta[index_ij];
 
@@ -905,10 +905,10 @@ mod bondorder_sigma_pi {
 
     // free function for smaller indent
     fn compute<'a>(input: Input<'a>) -> Output {
-        // Eq 8:  b_{ij}^{sigma-pi} = sqrt(
+        // Eq 8:  b_{ij}^{sigma-pi} = recip(sqrt(
         //                     1 + sum_{k /= i, j} f^c(r_{ik}) G(cos(t_{ijk}) e^{lambda_{ijk}
         //                       + P_{ij}(N_i^C, N_i^H)
-        //        )
+        //        ))
         let Input {
             params, type_i, type_j, ccoord_ij, hcoord_ij, P_ij,
             types_k, weights_ik, coses_ijk, skip_index,
@@ -940,24 +940,27 @@ mod bondorder_sigma_pi {
                 true => airebo_exp_lambda(type_i, (type_j, type_k)),
                 false => brenner_exp_lambda(type_i, (type_j, type_k)),
             };
-            println!("rs-explambda: {}", exp_lambda);
-            println!("rs-tcoord: {}", tcoord_ij);
+//            println!("explambda-rs: {}", exp_lambda);
+//            println!("Nt-rs: {}", tcoord_ij);
 
             let GSpline {
                 value: G,
                 d_cos_ijk: G_d_cos_ijk,
             } = g_spline::Input { params, type_i, cos_ijk, tcoord_ij }.compute();
-            println!("rs-g gc {} {}", G, G_d_cos_ijk);
+//            println!("g-rs: {} {}", G, G_d_cos_ijk);
 
+//            println!("bspterm-rs: {}", exp_lambda * weight_ik * G);
             inner_value += exp_lambda * weight_ik * G;
             inner_d_coses_ijk.push(exp_lambda * weight_ik * G_d_cos_ijk);
         }
 
-        // Now take the square root.
+//        println!("bspsum-rs: {}", inner_value);
+
+        // Now take the reciprocal square root.
         //
-        // (d/dx) sqrt(f(x))  =  (1/2) (df/dx) / sqrt(f(x))
-        let value = f64::sqrt(inner_value);
-        let prefactor = 0.5 / value;
+        // (d/dx) 1 / sqrt(f(x))  =  (-1/2) (df/dx) (1/sqrt(f(x)))^3
+        let value = f64::sqrt(inner_value).recip();
+        let prefactor = -0.5 * value * value * value;
         Output {
             value: value,
             d_coses_ijk: sbvec_scaled(prefactor, inner_d_coses_ijk),
@@ -1109,6 +1112,9 @@ mod bondorder_pi {
                     // These appear designed to cut the term off for very small angles (i.e.
                     // neighbors that are very closely packed).  But this destroys the C1
                     // continuity of the function and I couldn't find any justification for it.
+                    //
+                    // LAMMPS appears to handle this better with a smooth cutoff
+                    // from thmin to thmax (TODO: look these values up).
                     //-----------
 
                     // term to add to sum is  sinsq * weight_ik * weight_jl
@@ -1127,6 +1133,7 @@ mod bondorder_pi {
             } // for bond_ik
 
             let T = t_spline::Input { params, type_i, type_j, tcoord_ij, tcoord_ji, xcoord_ij }.compute();
+//            println!("T-rs: {}", T);
 
             value += T * sum;
             axpy_mut(&mut d_deltas_ik, T, &sum_d_deltas_ik);
