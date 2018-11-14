@@ -93,6 +93,13 @@ pub trait PotentialBuilder<Meta = CommonMeta>
     fn parallel(&self, _parallel: bool) -> Box<PotentialBuilder<Meta>>
     { self.box_clone() }
 
+    /// May be used to provide a hint that blocking indefinitely for a resource
+    /// is acceptible. Intended for use in unit tests, which cargo tries to run
+    /// in parallel.
+    #[must_use = "this is not an in-place mutation!"]
+    fn allow_blocking(&self, _allow: bool) -> Box<PotentialBuilder<Meta>>
+    { self.box_clone() }
+
     /// Create the DiffFn.  This does potentially expensive initialization, maybe calling out
     /// to external C APIs and etc.
     ///
@@ -233,6 +240,9 @@ where Meta: Clone + 'static,
 {
     fn parallel(&self, parallel: bool) -> Box<PotentialBuilder<Meta>>
     { (**self).parallel(parallel) }
+
+    fn allow_blocking(&self, allow: bool) -> Box<PotentialBuilder<Meta>>
+    { (**self).allow_blocking(allow) }
 
     fn initialize_diff_fn(&self, coords: &Coords, meta: Meta) -> FailResult<Box<DiffFn<Meta>>>
     { (**self).initialize_diff_fn(coords, meta) }

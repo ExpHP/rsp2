@@ -57,6 +57,7 @@ const DEFAULT_REBO_OMP: bool = true;
 pub(crate) struct Builder<P> {
     inner: InnerBuilder,
     pub potential: P,
+    allow_blocking: bool,
     processor_axis_mask: [bool; 3],
 }
 
@@ -114,9 +115,10 @@ impl<P: Clone> Builder<P>
             }
         }
 
+        let allow_blocking = false;
         let processor_axis_mask = *processor_axis_mask;
 
-        Builder { inner, potential, processor_axis_mask }
+        Builder { inner, allow_blocking, potential, processor_axis_mask }
             .parallel(*threading == cfg::Threading::Lammps)
     }
 
@@ -158,7 +160,13 @@ impl<M: Clone + 'static, P: LammpsPotential<Meta=M> + Clone + Send + Sync + 'sta
         }
 
         // (panic on lock already acquired; blocking could easily deadlock)
-        let lock = INSTANCE_LOCK.try_lock().expect("Tried to construct multiple Lammps instances in parallel");
+        let lock = if self.allow_blocking {
+            INSTANCE_LOCK.lock()
+                .expect("LAMMPS lock was poisoned!")
+        } else {
+            INSTANCE_LOCK.try_lock()
+                .expect("Tried to construct multiple Lammps instances in parallel")
+        };
 
         let lammps_pot = Box::new(self.potential.clone()) as Box<LammpsPotential<Meta=P::Meta>>;
         let lmp = self.inner.build(lock, lammps_pot, coords.clone(), meta)?;
@@ -191,6 +199,13 @@ impl<M: Clone + 'static, P: Clone + LammpsPotential<Meta=M> + Send + Sync + 'sta
 {
     fn parallel(&self, parallel: bool) -> Box<PotentialBuilder<M>>
     { Box::new(<Builder<_>>::parallel(self, parallel)) }
+
+    fn allow_blocking(&self, allow: bool) -> Box<PotentialBuilder<M>>
+    { Box::new({
+        let mut me = self.clone();
+        me.allow_blocking = allow;
+        me
+    })}
 
     fn initialize_diff_fn(&self, coords: &Coords, meta: M) -> FailResult<Box<DiffFn<M>>>
     { self.lammps_diff_fn(coords, meta) }

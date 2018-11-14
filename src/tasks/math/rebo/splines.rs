@@ -11,6 +11,11 @@
 
 //! Implementations of splines used by REBO.
 
+// FIXME: The current implementation of REBO never has fractional weights
+//        and thus the bicubic/tricubic spline implementations are unnecessary.
+//
+//        They should be removed if these circumstances persist.
+
 use ::FailResult;
 #[allow(unused)] // https://github.com/rust-lang/rust/issues/45268
 use ::slice_of_array::prelude::*;
@@ -37,6 +42,7 @@ pub mod P {
         pub CH: BicubicGrid, // P_CH only. (P_HC is zero)
     }
 
+    #[allow(unused)]
     lazy_static!{
         /// The only fully correct choice for PCC in second-generation REBO.
         ///
@@ -136,7 +142,6 @@ pub mod T {
     pub struct SplineSet {
         pub CC: TricubicGrid,
     }
-
 
     lazy_static!{
         /// The TCC spline found in:
@@ -352,7 +357,6 @@ pub mod F {
 }
 
 //-----------------------------------------------
-
 
 pub mod G {
     use super::*;

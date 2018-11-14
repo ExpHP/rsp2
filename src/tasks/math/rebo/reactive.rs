@@ -1485,17 +1485,17 @@ mod ycoord {
                 inner_d_tcoords_k.push(0.0);
                 continue;
             }
-            let xik = tcoord_k - weight_ik;
-            let xik_d_tcoord_k = 1.0;
-            let xik_d_weight_ik = -1.0;
+            let tcoord_ki = tcoord_k - weight_ik;
+            let tcoord_ki_d_tcoord_k = 1.0;
+            let tcoord_ki_d_weight_ik = -1.0;
 
-            let (F, F_d_xik) = switch((3.0, 2.0), xik);
+            let (alpha, alpha_d_tcoord_ki) = switch((3.0, 2.0), tcoord_ki);
             let mut inner_d_weight_ik = 0.0;
             let mut inner_d_tcoord_k = 0.0;
-            inner_value += weight_ik * F;
-            inner_d_tcoord_k += weight_ik * F_d_xik * xik_d_tcoord_k;
-            inner_d_weight_ik += F;
-            inner_d_weight_ik += weight_ik * F_d_xik * xik_d_weight_ik;
+            inner_value += weight_ik * alpha;
+            inner_d_tcoord_k += weight_ik * alpha_d_tcoord_ki * tcoord_ki_d_tcoord_k;
+            inner_d_weight_ik += alpha;
+            inner_d_weight_ik += weight_ik * alpha_d_tcoord_ki * tcoord_ki_d_weight_ik;
             inner_d_weights_ik.push(inner_d_weight_ik);
             inner_d_tcoords_k.push(inner_d_tcoord_k);
         }
@@ -1504,8 +1504,8 @@ mod ycoord {
         let value = inner_value * inner_value;
         Output {
             value: value,
-            d_tcoords_k: sbvec_scaled(2.0 * value, inner_d_tcoords_k),
-            d_weights_ik: sbvec_scaled(2.0 * value, inner_d_weights_ik),
+            d_tcoords_k: sbvec_scaled(2.0 * inner_value, inner_d_tcoords_k),
+            d_weights_ik: sbvec_scaled(2.0 * inner_value, inner_d_weights_ik),
         }
     }
 }
@@ -2247,20 +2247,24 @@ enum IntervalSide { Left, Inside, Right }
 impl IntervalSide {
     /// Determine if a value is before the beginning or after the end of a directed interval
     /// (directed as in, `interval.1 < interval.0` is ok and flips the classifications of ±∞)
+    ///
+    /// Neither endpoint is considered to lie in the interval.
+    ///
+    /// Output is unspecified if `interval.0 == x == interval.1`.
     #[inline(always)] // elide direction check hopefully since intervals should be constant
     fn classify(interval: (f64, f64), x: f64) -> Self {
         if interval.0 < interval.1 {
             // interval is (min, max)
             match x {
-                x if x < interval.0 => IntervalSide::Left,
-                x if interval.1 < x => IntervalSide::Right,
+                x if x <= interval.0 => IntervalSide::Left,
+                x if interval.1 <= x => IntervalSide::Right,
                 _ => IntervalSide::Inside,
             }
         } else {
             // interval is (max, min)
             match x {
-                x if interval.0 < x => IntervalSide::Left,
-                x if x < interval.1 => IntervalSide::Right,
+                x if interval.0 <= x => IntervalSide::Left,
+                x if x <= interval.1 => IntervalSide::Right,
                 _ => IntervalSide::Inside,
             }
         }
@@ -2279,6 +2283,16 @@ fn switch_direction() {
 fn switch_middle() {
     assert_close!(switch((1.5, 2.0), 1.75).0, 0.5);
     assert_close!(switch((2.0, 1.5), 1.75).0, 0.5);
+}
+
+#[test]
+fn switch_endpoint() {
+    for _ in 0..10 {
+        let a = uniform(-10.0, 10.0);
+        let b = uniform(-10.0, 10.0);
+        assert_eq!(switch((a, b), a).0, 0.0);
+        assert_eq!(switch((a, b), b).0, 1.0);
+    }
 }
 
 // Solution to:  y[x0] = 0;  y'[x0] = 0;  y''[x0] = 0;

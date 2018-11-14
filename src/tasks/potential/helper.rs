@@ -33,6 +33,9 @@ where
     fn parallel(&self, parallel: bool) -> Box<PotentialBuilder<M>>
     { Box::new(Sum(self.0.parallel(parallel), self.1.parallel(parallel))) }
 
+    fn allow_blocking(&self, allow: bool) -> Box<PotentialBuilder<M>>
+    { Box::new(Sum(self.0.allow_blocking(allow), self.1.allow_blocking(allow))) }
+
     fn initialize_diff_fn(&self, coords: &Coords, meta: M) -> FailResult<Box<DiffFn<M>>>
     {
         let a_diff_fn = self.0.initialize_diff_fn(coords, meta.clone())?;

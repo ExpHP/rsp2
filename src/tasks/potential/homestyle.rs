@@ -214,8 +214,8 @@ fn test_rebo_diff() -> FailResult<()> {
     let bonds: meta::FracBonds = ::std::rc::Rc::new(FracBonds::from_brute_force_very_dumb(&coords, 2.0)?);
     let meta = hlist![elements, masses, Some(bonds)];
 
-//    let pot_lmp = PotentialBuilder::from_config_parts(None, None, &cfg::Threading::Serial, &cfg::LammpsUpdateStyle::Safe, &[true; 3], &cfg_lmp);
-    let pot_rsp2 = PotentialBuilder::from_config_parts(None, None, &cfg::Threading::Serial, &cfg::LammpsUpdateStyle::Safe, &[true; 3], &cfg_rsp2);
+//    let pot_lmp = PotentialBuilder::from_config_parts(None, None, &cfg::Threading::Serial, &cfg::LammpsUpdateStyle::Safe, &[true; 3], &cfg_lmp).allow_blocking(true);
+    let pot_rsp2 = PotentialBuilder::from_config_parts(None, None, &cfg::Threading::Serial, &cfg::LammpsUpdateStyle::Safe, &[true; 3], &cfg_rsp2).allow_blocking(true);
 
     //let diff_lmp = pot_lmp.initialize_diff_fn(&coords, meta.sift())?.compute(&coords, meta.sift())?;
     let diff_rsp2 = pot_rsp2.initialize_diff_fn(&coords, meta.sift())?.compute(&coords, meta.sift())?;
@@ -249,6 +249,7 @@ fn test_rebo_value() -> FailResult<()> {
     );
     coords.carts_mut()[1][0] += 0.1;
     coords.carts_mut()[1][2] += 0.1;
+
     let cfg_lmp: cfg::PotentialKind = from_json!{{
         "rebo": {
             "omp": false,
@@ -259,14 +260,15 @@ fn test_rebo_value() -> FailResult<()> {
             "params": "lammps",
         },
     }};
+
     let elements: meta::SiteElements = vec![elem::CARBON; 2].into();
     let masses: meta::SiteMasses = vec![meta::Mass(12.0107); 2].into();
     let bonds: meta::FracBonds = ::std::rc::Rc::new(FracBonds::from_brute_force_very_dumb(&coords, 2.0)?);
     println!("{:?}", bonds);
     let meta = hlist![elements, masses, Some(bonds)];
 
-    let pot_lmp = PotentialBuilder::from_config_parts(None, None, &cfg::Threading::Serial, &cfg::LammpsUpdateStyle::Safe, &[true; 3], &cfg_lmp);
-    let pot_rsp2 = PotentialBuilder::from_config_parts(None, None, &cfg::Threading::Serial, &cfg::LammpsUpdateStyle::Safe, &[true; 3], &cfg_rsp2);
+    let pot_lmp = PotentialBuilder::from_config_parts(None, None, &cfg::Threading::Serial, &cfg::LammpsUpdateStyle::Safe, &[true; 3], &cfg_lmp).allow_blocking(true);
+    let pot_rsp2 = PotentialBuilder::from_config_parts(None, None, &cfg::Threading::Serial, &cfg::LammpsUpdateStyle::Safe, &[true; 3], &cfg_rsp2).allow_blocking(true);
 
     let diff_lmp = pot_lmp.initialize_diff_fn(&coords, meta.sift())?.compute(&coords, meta.sift())?;
     let diff_rsp2 = pot_rsp2.initialize_diff_fn(&coords, meta.sift())?.compute(&coords, meta.sift())?;
@@ -275,6 +277,5 @@ fn test_rebo_value() -> FailResult<()> {
     println!("{:?}", diff_rsp2);
     assert_close!(diff_lmp.0, diff_rsp2.0);
     assert_close!(diff_lmp.1.unvee(), diff_rsp2.1.unvee());
-    (|| panic!())();
     Ok(())
 }

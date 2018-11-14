@@ -15,10 +15,25 @@
 #![allow(dead_code)] // FIXME REMOVE
 #![allow(unreachable_code)] // FIXME REMOVE
 
-//! Implementation of the second-generation REBO reactive potential.
+//! Implementation of the second-generation REBO potential, without the reactive bits
 //!
-//! The second-generation REBO paper contains many errors; this implementation was written
-//! with the help of the AIREBO paper, and by reviewing the implementation in LAMMPS.
+//! This implementation was written with the help of the AIREBO paper,
+//! and by reviewing the implementation in LAMMPS.
+//!
+//! # Reactive parts
+//!
+//! The code was originally written to support fractional weights, but this was dropped
+//! for ease of maintenance, since `rsp2` does not currently actually require a reactive
+//! potential.  If bond lengths in the transition radius are found, `rsp2` will bail out.
+//!
+//! Dropping support for fractional weights *significantly* simplifies the computation
+//! of forces.
+//!
+//! The original, almost certainly VERY buggy reactive code still exists in the git history
+//! (see `9d16b8eb31dc9e35ff208415fcc9de971e8ecfbb` and diff `reactive.rs` and `nonreactive.rs`),
+//! and many parts of the current code are still written in a manner that will make it less
+//! difficult to add them back by carrying them around and multiplying them in even though
+//! they are all `1.0` or `0.0`.
 //!
 //! # Citations
 //!
@@ -195,7 +210,7 @@ mod params {
             };
             Params {
                 use_airebo_lambda: false,
-                G: Cow::Owned(splines::G::LAMMPS),
+                G: Cow::Owned(splines::G::BRENNER),
                 P: Cow::Borrowed(&splines::P::BRENNER),
                 T: Cow::Borrowed(&splines::T::BRENNER),
                 F: Cow::Borrowed(&splines::F::BRENNER),
@@ -485,14 +500,14 @@ fn compute_rebo_bonds(
     // leaving vectorization as only a secondary concern.
     struct FirstPassSiteData {
         // Brenner's N_i
-        tcoord: u32,
+        tcoord: f64,
         // Brenner's f_ij.
         //
         // We keep these around because they may be zero. (even for nonreactive REBO,
         // we use a bond search radius that is large enough to include the point of
         // zero weight so that we can detect if a fractional weight ever appears and
         // bail out)
-        bond_weight: SiteBondVec<u32>,
+        bond_weight: SiteBondVec<f64>,
         // Brenner's V^R(r_ij)
         bond_VR: SiteBondVec<f64>,
         bond_VR_d_delta: SiteBondVec<V3>,
@@ -506,7 +521,7 @@ fn compute_rebo_bonds(
             let __site = interactions.site(site_i);
             let type_i = __site.atom_type;
 
-            let mut tcoord = 0;
+            let mut tcoord = 0.0;
             let mut bond_VR = SiteBondVec::new();
             let mut bond_VR_d_delta = SiteBondVec::new();
             let mut bond_VA = SiteBondVec::new();
@@ -526,8 +541,8 @@ fn compute_rebo_bonds(
                     weight_d_length == 0.0 && (weight == 1.0 || weight == 0.0),
                     "detected reaction in non-reactive REBO potential"
                 );
-                tcoord += weight as u32;
-                bond_weight.push(weight as u32);
+                tcoord += weight;
+                bond_weight.push(weight);
 
                 // these also depend only on bond length
                 // (and also conveniently don't depend on anything else)
@@ -738,7 +753,7 @@ mod site_sigma_pi_term {
         pub params: &'a Params,
         pub interactions: &'a Interactions,
         pub site: SiteI,
-        pub bond_weights: &'a [u32],
+        pub bond_weights: &'a [f64],
         // The VA_ij terms for each bond at site i.
         pub bond_VAs: &'a SiteBondVec<f64>,
         pub bond_VAs_d_delta: &'a SiteBondVec<V3>,
@@ -768,8 +783,8 @@ mod site_sigma_pi_term {
 
         // Tally up data about the bonds
         let mut type_present = enum_map!{_ => false};
-        let mut ccoord_i = 0;
-        let mut hcoord_i = 0;
+        let mut ccoord_i = 0.0;
+        let mut hcoord_i = 0.0;
         let mut bond_target_types = SiteBondVec::<AtomType>::new();
         for (bond, &weight) in zip_eq!(interactions.bonds(site_i), bond_weights) {
             let target_type = interactions.site(bond.target).atom_type;
@@ -791,8 +806,8 @@ mod site_sigma_pi_term {
             let weight_ij = bond_weights[index_ij];
 
             // These are what Brenner's Ni REALLY are.
-            let ccoord_ij = ccoord_i - boole(type_j == AtomType::Carbon) as u32 * weight_ij;
-            let hcoord_ij = hcoord_i - boole(type_j == AtomType::Hydrogen) as u32 * weight_ij;
+            let ccoord_ij = ccoord_i - boole(type_j == AtomType::Carbon) * weight_ij;
+            let hcoord_ij = hcoord_i - boole(type_j == AtomType::Hydrogen) * weight_ij;
 
             let P_ij = p_spline::Input { params, type_i, type_j, ccoord_ij, hcoord_ij }.compute();
 
@@ -882,13 +897,13 @@ mod bondorder_sigma_pi {
         // bond from atom i to another atom j
         pub type_i: AtomType,
         pub type_j: AtomType,
-        pub ccoord_ij: u32,
-        pub hcoord_ij: u32,
+        pub ccoord_ij: f64,
+        pub hcoord_ij: f64,
         // precomputed spline that depends on the coordination at i and the atom type at j
         pub P_ij: f64,
         // cosines of this bond with every other bond at i, and their weights
         pub types_k: &'a [AtomType],
-        pub weights_ik: &'a [u32],
+        pub weights_ik: &'a [f64],
         pub coses_ijk: &'a [f64], // cosine between i->j and i->k
         // one of the items in the arrays is the ij bond (we must ignore it)
         pub skip_index: usize,
@@ -926,7 +941,7 @@ mod bondorder_sigma_pi {
 
         let iter = zip_eq!(coses_ijk, types_k).enumerate();
         for (index_ik, (&cos_ijk, &type_k)) in iter {
-            let weight_ik = weights_ik[index_ik] as f64;
+            let weight_ik = weights_ik[index_ik];
             if weight_ik == 0.0 {
                 inner_d_coses_ijk.push(0.0);
                 continue;
@@ -981,14 +996,13 @@ mod bondorder_pi {
         pub bond_ij: BondI,
         // info about all bonds ik connected to site i
         // and all bonds jl connected to site j
-        pub tcoords_k: &'a [u32],
-        pub tcoords_l: &'a [u32],
-        pub weights_ik: &'a [u32],
-        pub weights_jl: &'a [u32],
+        pub tcoords_k: &'a [f64],
+        pub tcoords_l: &'a [f64],
+        pub weights_ik: &'a [f64],
+        pub weights_jl: &'a [f64],
     }
     pub struct BondOrderPi {
         pub value: f64,
-        // These come exclusively from the sine-squareds
         pub d_deltas_ik: SiteBondVec<V3>,
         pub d_deltas_jl: SiteBondVec<V3>,
     }
@@ -1015,18 +1029,14 @@ mod bondorder_pi {
         let index_ij = bond_ij.0 - interactions.bond_range(site_i).start;
         let index_ji = bond_ji.0 - interactions.bond_range(site_j).start;
 
-        let YCoord {
-            value: ycoord_ij,
-        } = ycoord::Input {
+        let ycoord_ij = ycoord::Input {
             skip_index: index_ij,
             weights_ik: weights_ik,
             tcoords_k: tcoords_k,
             types_k: &types_k,
         }.compute();
 
-        let YCoord {
-            value: ycoord_ji,
-        } = ycoord::Input {
+        let ycoord_ji = ycoord::Input {
             skip_index: index_ji,
             weights_ik: weights_jl,
             tcoords_k: tcoords_l,
@@ -1034,7 +1044,7 @@ mod bondorder_pi {
         }.compute();
 
         // NConj = 1 + (square sum over bonds ik) + (square sum over bonds jl)
-        let xcoord_ij = 1 + ycoord_ij + ycoord_ji;
+        let xcoord_ij = 1.0 + ycoord_ij + ycoord_ji;
 
         let weight_ij = weights_ik[index_ij];
         let weight_ji = weights_jl[index_ji];
@@ -1121,8 +1131,8 @@ mod bondorder_pi {
                     //
                     // independent variables are chosen for now as the deltas that define sinsq,
                     // and the weights that appear directly
-                    let weight_ik = weights_ik[index_ik] as f64;
-                    let weight_jl = weights_jl[index_jl] as f64;
+                    let weight_ik = weights_ik[index_ik];
+                    let weight_jl = weights_jl[index_jl];
 
                     sum += sinsq * weight_ik * weight_jl;
 
@@ -1162,20 +1172,15 @@ mod bondorder_pi {
 //
 // ...but `xcoord` is not a useful thing to wrap a function around because it has a ton of
 // derivatives and amounts to little more than two computations of `ycoord`.
-use self::ycoord::YCoord;
 mod ycoord {
     use super::*;
 
-    pub type Output = YCoord;
+    pub type Output = f64;
     pub struct Input<'a> {
         pub skip_index: usize,
-        pub weights_ik: &'a [u32],
-        pub tcoords_k: &'a [u32],
+        pub weights_ik: &'a [f64],
+        pub tcoords_k: &'a [f64],
         pub types_k: &'a [AtomType],
-    }
-
-    pub struct YCoord {
-        pub value: u32,
     }
 
     impl<'a> Input<'a> {
@@ -1187,25 +1192,21 @@ mod ycoord {
         let Input { skip_index, weights_ik, tcoords_k, types_k } = input;
 
         // Compute the sum without the square
-        let mut inner_value = 0;
+        let mut inner_value = 0.0;
         let iter = zip_eq!(tcoords_k, weights_ik, types_k).enumerate();
         for (index_ik, (&tcoord_k, &weight_ik, &type_k)) in iter {
             if index_ik == skip_index || type_k == AtomType::Hydrogen {
                 continue;
             }
-            let xik = tcoord_k - weight_ik;
+            let tcoord_ki = tcoord_k - weight_ik;
 
-            let (F, F_d_xik) = switch((3.0, 2.0), xik as f64);
-            assert_eq!(F.fract(), 0.0);
-            assert_eq!(F_d_xik, 0.0);
-            inner_value += weight_ik * F as u32;
+            let (alpha, alpha_d_tcoord_ki) = switch((3.0, 2.0), tcoord_ki);
+            assert_eq!(alpha.fract(), 0.0);
+            assert_eq!(alpha_d_tcoord_ki, 0.0);
+            inner_value += weight_ik * alpha;
         }
 
-        // Now square it
-        let value = inner_value * inner_value;
-        Output {
-            value: value,
-        }
+        inner_value * inner_value
     }
 }
 
@@ -1233,24 +1234,8 @@ fn brenner_exp_lambda(i: AtomType, jk: (AtomType, AtomType)) -> f64 {
 }
 
 fn airebo_exp_lambda(i: AtomType, jk: (AtomType, AtomType)) -> f64 {
-    match (i, jk) {
-        (AtomType::Carbon, _) |
-        (AtomType::Hydrogen, (AtomType::Carbon, AtomType::Carbon)) => 1.0, // exp(0)
-
-        (AtomType::Hydrogen, (AtomType::Hydrogen, AtomType::Hydrogen)) => f64::exp(4.0),
-
-        (AtomType::Hydrogen, (AtomType::Carbon, AtomType::Hydrogen)) |
-        (AtomType::Hydrogen, (AtomType::Hydrogen, AtomType::Carbon)) => {
-            // FIXME: The brenner paper says they fit this, but I can't find the value anywhere.
-            //
-            // (lammps does something weird here involving the bond lengths and a parameter
-            //  they call rho... did I miss something?)
-            panic!{"\
-                Bond-bond interactions of type HHC (an H and a C both bonded to an H) are \
-                currently missing an interaction parameter\
-            "}
-        },
-    }
+    // FIXME
+    brenner_exp_lambda(i, jk)
 }
 
 // `1 - \cos(\Theta_{ijkl})^2` in Brenner (equation 19)
@@ -1442,7 +1427,7 @@ mod g_spline {
     pub struct Input<'a> {
         pub params: &'a Params,
         pub type_i: AtomType,
-        pub tcoord_ij: u32,
+        pub tcoord_ij: f64,
         pub cos_ijk: f64,
     }
 
@@ -1475,18 +1460,23 @@ mod g_spline {
 
         match type_i {
             AtomType::Carbon => {
-                if (tcoord_ij as f64) < params.G.low_coord {
+                let switch_interval = (params.G.low_coord, params.G.high_coord);
+                let (alpha, alpha_d_tcoord_ij) = switch(switch_interval, tcoord_ij);
+
+                if alpha == 0.0 && alpha_d_tcoord_ij == 0.0 {
                     use_single_poly!(&params.G.carbon_low_coord)
-                } else if (tcoord_ij as f64) > params.G.high_coord {
+                } else if alpha == 1.0 && alpha_d_tcoord_ij == 0.0 {
                     warn!("untested codepath: 37236e5f-9810-4ee5-a8c3-0a5150d9bd26");
                     use_single_poly!(&params.G.carbon_high_coord)
                 } else {
+                    warn!("untested codepath: fd6eff7e-b4b2-4bbf-ad89-3227a6099d59");
                     // The one case where use_single_poly! cannot be used.
 
                     // d(linterp(α, A, B)) = d(α A + (1 - α) B)
                     //                     = (A - B) dα + α dA + (1 - α) dB
                     //                     = ...let's not do this right now
                     unreachable!("impossible condition found for non-reactive REBO");
+                    unimplemented!()
                 }
             },
             AtomType::Hydrogen => {
@@ -1509,7 +1499,7 @@ mod g_spline {
                 params,
                 type_i: AtomType::Carbon,
                 cos_ijk: f64::cos(120.0 * PI / 180.0) + 1e-12,
-                tcoord_ij: 3,
+                tcoord_ij: 3.0,
             }.compute();
             // Brenner Table 3
             assert_close!(rel=tol, value, 0.05280);
@@ -1519,7 +1509,7 @@ mod g_spline {
                 params,
                 type_i: AtomType::Carbon,
                 cos_ijk: f64::cos(120.0 * PI / 180.0) - 1e-12,
-                tcoord_ij: 3,
+                tcoord_ij: 3.0,
             }.compute();
             assert_close!(rel=tol, value, 0.05280);
             assert_close!(rel=tol, d_cos_ijk, 0.17000);
@@ -1529,7 +1519,7 @@ mod g_spline {
                 params,
                 type_i: AtomType::Carbon,
                 cos_ijk: -1.0/3.0 + 1e-12,
-                tcoord_ij: 4,
+                tcoord_ij: 4.0,
             }.compute();
             assert_close!(rel=tol, value, 0.09733);
             assert_close!(rel=tol, d_cos_ijk, 0.40000);
@@ -1538,7 +1528,7 @@ mod g_spline {
                 params,
                 type_i: AtomType::Carbon,
                 cos_ijk: -1.0/3.0 - 1e-12,
-                tcoord_ij: 4,
+                tcoord_ij: 4.0,
             }.compute();
             assert_close!(rel=tol, value, 0.09733);
             assert_close!(rel=tol, d_cos_ijk, 0.40000);
@@ -1549,7 +1539,7 @@ mod g_spline {
     fn numerical_derivatives() {
         let all_params = vec![
             (1e-7, Params::new_brenner()),
-            (1e-4, Params::new_lammps()),
+            (2e-3, Params::new_lammps()),
         ];
         for (tol, ref params) in all_params {
             for type_i in AtomType::iter_all() {
@@ -1564,7 +1554,11 @@ mod g_spline {
                 // points straddling two regions
                 coses.extend(x_divs[1..x_divs.len()-1].iter().cloned());
 
-                let mut tcoords = vec![3, 4];
+                let mut tcoords = vec![
+                    3.0,
+                    4.0,
+                    // FIXME: points around 3.2 and 3.7 once the interpolation is implemented
+                ];
                 for &cos_ijk in &coses {
                     for &tcoord_ij in &tcoords {
                         let input = Input { params, type_i, cos_ijk, tcoord_ij };
@@ -1620,8 +1614,8 @@ mod p_spline {
         pub params: &'a Params,
         pub type_i: AtomType,
         pub type_j: AtomType,
-        pub ccoord_ij: u32,
-        pub hcoord_ij: u32,
+        pub ccoord_ij: f64,
+        pub hcoord_ij: f64,
     }
 
     impl<'a> Input<'a> {
@@ -1635,7 +1629,7 @@ mod p_spline {
             };
             // Ignore grad because total derivative of each variable is locally zero in
             // the non-reactive case.
-            let (value, _grad) = poly.evaluate(V2([ccoord_ij, hcoord_ij]).map(|x| x as f64));
+            let (value, _grad) = poly.evaluate(V2([ccoord_ij, hcoord_ij]));
 
             value
         }
@@ -1658,9 +1652,9 @@ mod f_spline {
         pub params: &'a Params,
         pub type_i: AtomType,
         pub type_j: AtomType,
-        pub tcoord_ij: u32,
-        pub tcoord_ji: u32,
-        pub xcoord_ij: u32,
+        pub tcoord_ij: f64,
+        pub tcoord_ji: f64,
+        pub xcoord_ij: f64,
     }
 
     impl<'a> Input<'a> {
@@ -1703,7 +1697,7 @@ mod f_spline {
         };
         // Ignore grad because total derivative of each variable is locally zero in
         // the non-reactive case.
-        let (value, _grad) = poly.evaluate(V3([tcoord_ij, tcoord_ji, xcoord_ij]).map(|x| x as f64));
+        let (value, _grad) = poly.evaluate(V3([tcoord_ij, tcoord_ji, xcoord_ij]));
 
         value
     }
@@ -1716,7 +1710,12 @@ mod f_spline {
         pub fn can_assume_zero(&self) -> bool {
             let Input { params: _, type_i, type_j, tcoord_ij, tcoord_ji, xcoord_ij } = *self;
 
-            let int_point = V3([tcoord_ij, tcoord_ji, xcoord_ij]);
+            let point = V3([tcoord_ij, tcoord_ji, xcoord_ij]);
+            let int_point = V3([tcoord_ij, tcoord_ji, xcoord_ij]).map(|x| x as i32);
+            if point != int_point.map(|x| x as f64) {
+                return false; // fractional weight
+            }
+
             match (type_i, type_j) {
                 (AtomType::Carbon, AtomType::Carbon) => match int_point.0 {
                     [2, 2, 9] => true, // graphene/graphite
@@ -1744,9 +1743,9 @@ mod t_spline {
         pub params: &'a Params,
         pub type_i: AtomType,
         pub type_j: AtomType,
-        pub tcoord_ij: u32,
-        pub tcoord_ji: u32,
-        pub xcoord_ij: u32,
+        pub tcoord_ij: f64,
+        pub tcoord_ji: f64,
+        pub xcoord_ij: f64,
     }
 
     impl<'a> Input<'a> {
@@ -1764,7 +1763,7 @@ mod t_spline {
         };
         // Ignore grad because total derivative of each variable is locally zero in
         // the non-reactive case.
-        let (value, _grad) = poly.evaluate(V3([tcoord_ij, tcoord_ji, xcoord_ij]).map(|x| x as f64));
+        let (value, _grad) = poly.evaluate(V3([tcoord_ij, tcoord_ji, xcoord_ij]));
 
         value
     }
@@ -1867,20 +1866,24 @@ enum IntervalSide { Left, Inside, Right }
 impl IntervalSide {
     /// Determine if a value is before the beginning or after the end of a directed interval
     /// (directed as in, `interval.1 < interval.0` is ok and flips the classifications of ±∞)
+    ///
+    /// Neither endpoint is considered to lie in the interval.
+    ///
+    /// Output is unspecified if `interval.0 == x == interval.1`.
     #[inline(always)] // elide direction check hopefully since intervals should be constant
     fn classify(interval: (f64, f64), x: f64) -> Self {
         if interval.0 < interval.1 {
             // interval is (min, max)
             match x {
-                x if x < interval.0 => IntervalSide::Left,
-                x if interval.1 < x => IntervalSide::Right,
+                x if x <= interval.0 => IntervalSide::Left,
+                x if interval.1 <= x => IntervalSide::Right,
                 _ => IntervalSide::Inside,
             }
         } else {
             // interval is (max, min)
             match x {
-                x if interval.0 < x => IntervalSide::Left,
-                x if x < interval.1 => IntervalSide::Right,
+                x if interval.0 <= x => IntervalSide::Left,
+                x if x <= interval.1 => IntervalSide::Right,
                 _ => IntervalSide::Inside,
             }
         }
@@ -1899,6 +1902,16 @@ fn switch_direction() {
 fn switch_middle() {
     assert_close!(switch((1.5, 2.0), 1.75).0, 0.5);
     assert_close!(switch((2.0, 1.5), 1.75).0, 0.5);
+}
+
+#[test]
+fn switch_endpoint() {
+    for _ in 0..10 {
+        let a = uniform(-10.0, 10.0);
+        let b = uniform(-10.0, 10.0);
+        assert_eq!(switch((a, b), a).0, 0.0);
+        assert_eq!(switch((a, b), b).0, 1.0);
+    }
 }
 
 // Solution to:  y[x0] = 0;  y'[x0] = 0;  y''[x0] = 0;
