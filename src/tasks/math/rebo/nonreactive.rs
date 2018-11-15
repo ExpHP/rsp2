@@ -53,6 +53,7 @@ use ::stack::{ArrayVec, Vector as StackVector};
 #[cfg(test)]
 use ::std::f64::{consts::PI};
 use ::std::f64::NAN;
+use ::std::ops;
 use ::std::borrow::Cow;
 use ::rsp2_array_types::{V2, V3, M33, M3};
 use ::rsp2_structure::Coords;
@@ -72,7 +73,7 @@ use ::rsp2_minimize::numerical::DerivativeKind::*;
 
 macro_rules! dbg {
     ($($t:tt)*) => {
-        println!($($t)*);
+//        println!($($t)*);
     };
 }
 
@@ -99,6 +100,10 @@ macro_rules! dbg {
 //
 // 3. Fully destructure the output of any function that computes pieces of the potential,
 //    so that the compiler complains about missing fields when one is added.
+//
+// 4. A function should not accept derivatives as arguments, because such a function
+//    cannot be tested with numerical differentiation. It should instead return
+//    derivatives with respect to its immediate inputs and let the caller handle them.
 //
 //-------------------------------------------------------
 
@@ -160,8 +165,13 @@ mod params {
         pub Q: f64, // Å
         pub A: f64, // eV
         pub alpha: f64, // Å-1
-        pub Dmin: f64, // Å
-        pub Dmax: f64, // Å
+        /// The would-be smooth cutoff region with respect to bond length in reactive potential.
+        ///
+        /// We don't model the smooth cutoff, but this is useful to keep around for reference,
+        /// and could be used to generate warnings.
+        pub cutoff_region: (f64, f64), // Å
+        /// We outright refuse to continue if a bond is found in this interval.
+        pub forbidden_region: (f64, f64), // Å
     }
 
     impl Params {
@@ -182,8 +192,8 @@ mod params {
                 Q: 0.313_460_296_0833, // Å
                 A: 10953.544_162_170, // eV
                 alpha: 4.746_539_060_6595, // Å-1
-                Dmin: 1.7, // Å
-                Dmax: 2.0, // Å
+                cutoff_region: (1.7, 2.0), // Å
+                forbidden_region: (1.8, 1.9), // Å
             };
 
             // Brenner Table 6
@@ -193,8 +203,8 @@ mod params {
                 Q: 0.370_471_487_045, // Å
                 A: 32.817_355_747, // Å
                 alpha: 3.536_298_648, // Å-1
-                Dmin: 1.1, // Å
-                Dmax: 1.7, // Å
+                cutoff_region: (1.1, 1.7), // Å
+                forbidden_region: (1.3, 1.5), // Å
             };
 
             // Brenner Table 7
@@ -204,8 +214,8 @@ mod params {
                 Q: 0.340_775_728, // Å
                 A: 149.940_987_23, // eV
                 alpha: 4.102_549_83, // Å-1
-                Dmin: 1.3, // Å
-                Dmax: 1.8, // Å
+                cutoff_region: (1.3, 1.8), // Å
+                forbidden_region: (1.45, 1.65), // Å
             };
 
             let by_type = enum_map! {
@@ -251,8 +261,8 @@ mod params {
                 Q: 0.313_460_296_083_2605, // Å
                 A: 10953.544_162_169_92, // eV
                 alpha: 4.746_539_060_659_529, // Å-1
-                Dmin: 1.7, // Å
-                Dmax: 2.0, // Å
+                cutoff_region: (1.7, 2.0), // Å
+                forbidden_region: (1.8, 1.9), // Å
             };
 
             // Brenner Table 6
@@ -262,8 +272,8 @@ mod params {
                 Q: 0.370, // Å
                 A: 31.6731, // Å
                 alpha: 3.536, // Å-1
-                Dmin: 1.1, // Å
-                Dmax: 1.7, // Å
+                cutoff_region: (1.1, 1.7), // Å
+                forbidden_region: (1.3, 1.5), // Å
             };
 
             // Brenner Table 7
@@ -273,8 +283,8 @@ mod params {
                 Q: 0.340_775_728_225_7080, // Å
                 A: 149.940_987_228_812, // eV
                 alpha: 4.102_549_828_548_784, // Å-1
-                Dmin: 1.3, // Å
-                Dmax: 1.8, // Å
+                cutoff_region: (1.3, 1.8), // Å
+                forbidden_region: (1.45, 1.65), // Å
             };
 
             let by_type = enum_map! {
@@ -561,65 +571,21 @@ fn compute_rebo_bonds(
 
             for __bond in interactions.bonds(site_i) {
                 let site_j = __bond.target;
-                let delta_ij = __bond.cart_vector;
+                let delta = __bond.cart_vector;
                 let type_j = interactions.site(site_j).atom_type;
-                let params_ij = params.by_type[type_i][type_j];
 
-                let (length, length_d_delta) = norm(delta_ij);
-                let (weight, weight_d_length) = switch((params_ij.Dmax, params_ij.Dmin), length);
+                let (length, length_d_delta) = norm(delta);
+                let EasyParts {
+                    weight, VA, VA_d_length, VR, VR_d_length,
+                } = easy_parts::Input { params, type_i, type_j, length }.compute_paranoid(1e-3)?;
 
-//                dbg!("length: {:.9}", length);
-//                dbg!("weight: {:.9}", weight);
-                ensure!(
-                    weight_d_length == 0.0 && (weight == 1.0 || weight == 0.0),
-                    "detected reaction in non-reactive REBO potential"
-                );
                 tcoord += weight;
                 bond_weight.push(weight);
 
-                // these also depend only on bond length
-                // (and also conveniently don't depend on anything else)
-
-                let VR;
-                let VR_d_length;
-                {
-                    // UR_ij = (1 + Q/r_ij) A e^{-alpha r_ij}
-                    // write as a product of two subexpressions
-
-                    let sub1 = 1.0 + params_ij.Q / length;
-                    let sub1_d_length = - params_ij.Q / (length * length);
-
-                    let sub2 = params_ij.A * f64::exp(-params_ij.alpha * length);
-                    let sub2_d_length = -params_ij.alpha * sub2;
-
-                    let UR = sub1 * sub2;
-                    let UR_d_length = sub1_d_length * sub2 + sub1 * sub2_d_length;
-
-                    // VR_ij = f_ij UR_ij
-                    VR = weight * UR;
-                    VR_d_length = weight_d_length * UR + weight * UR_d_length;
-                }
                 dbg!("VR: {:.9}", VR);
                 bond_VR.push(VR);
                 bond_VR_d_delta.push(VR_d_length * length_d_delta);
 
-                let VA;
-                let VA_d_length;
-                {
-                    // UA_ij = - sum_{n in 1..=3} B_n e^{-beta_n r_ij}
-                    let mut UA = 0.0;
-                    let mut UA_d_length = 0.0;
-                    for (&B, &beta) in zip_eq!(&params_ij.B, &params_ij.beta) {
-                        let term = -B * f64::exp(-beta * length);
-                        let term_d_length = -beta * term;
-                        UA += term;
-                        UA_d_length += term_d_length;
-                    }
-
-                    // VA_ij = f_ij UA_ij
-                    VA = weight * UA;
-                    VA_d_length = weight_d_length * UA + weight * UA_d_length;
-                }
                 dbg!("VA: {:.9}", VA);
                 bond_VA.push(VA);
                 bond_VA_d_delta.push(VA_d_length * length_d_delta);
@@ -663,8 +629,8 @@ fn compute_rebo_bonds(
         //-----------------------------------------------
 
         // Add in the repulsive terms, which each only depend on one bond delta.
-        for bond_VR_ij in bond_VR {
-            dbg!("Vterm(R): {:.9}", 0.5 * bond_VR_ij);
+        for _bond_VR_ij in bond_VR {
+            dbg!("Vterm(R): {:.9}", 0.5 * _bond_VR_ij);
         }
         site_V += 0.5 * bond_VR.iter().sum::<f64>();
         axpy_mut(&mut site_V_d_delta, 0.5, &bond_VR_d_delta);
@@ -682,15 +648,20 @@ fn compute_rebo_bonds(
             site: site_i,
             bond_weights: bond_weight,
             bond_VAs: bond_VA,
-            bond_VAs_d_delta: bond_VA_d_delta,
         }.compute_paranoid(1e-3);
         let SiteSigmaPiTerm {
             value: Vsp_i,
-            d_deltas: Vsp_i_d_deltas,
+            d_deltas: Vsp_i_d_delta,
+            d_VAs: Vsp_i_d_VA,
         } = out;
 
         site_V += Vsp_i;
-        axpy_mut(&mut site_V_d_delta, 1.0, &Vsp_i_d_deltas);
+        axpy_mut(&mut site_V_d_delta, 1.0, &Vsp_i_d_delta);
+        for index_ij in 0..bond_VA.len() {
+            let Vsp_i_d_VA_ij = Vsp_i_d_VA[index_ij];
+            let VA_ij_d_delta_ij = bond_VA_d_delta[index_ij];
+            site_V_d_delta[index_ij] +=  Vsp_i_d_VA_ij * VA_ij_d_delta_ij;
+        }
 
         //-----------------------------------------------
         // The pi terms
@@ -715,7 +686,7 @@ fn compute_rebo_bonds(
             let out = bondorder_pi::Input {
                 params, interactions, site_i, bond_ij,
                 tcoords_k, tcoords_l, weights_ik, weights_jl,
-            }.compute_paranoid(1e-3);
+            }.compute();
             let BondOrderPi {
                 value: bpi,
                 d_deltas_ik: mut bpi_d_deltas_ik,
@@ -775,6 +746,117 @@ fn compute_rebo_bonds(
     Ok((value, d_deltas))
 }
 
+use self::easy_parts::EasyParts;
+mod easy_parts {
+    use super::*;
+
+    pub type Output = EasyParts;
+
+    #[derive(Debug, Clone)]
+    pub struct Input<'a> {
+        pub params: &'a Params,
+        pub type_i: AtomType,
+        pub type_j: AtomType,
+        pub length: f64,
+    }
+
+    pub struct EasyParts {
+        pub weight: f64,
+        pub VA: f64,
+        pub VA_d_length: f64,
+        pub VR: f64,
+        pub VR_d_length: f64,
+    }
+
+    impl<'a> Input<'a> {
+        pub fn compute(self) -> FailResult<Output> { compute(self) }
+    }
+
+    // free function for smaller indent
+    fn compute(input: Input<'_>) -> FailResult<Output> {
+        let Input { params, type_i, type_j, length } = input;
+        let params_ij = params.by_type[type_i][type_j];
+
+        let weight = match IntervalSide::classify(params_ij.forbidden_region, length) {
+            IntervalSide::Left => 1.0,
+            IntervalSide::Right => 0.0,
+            IntervalSide::Inside => bail!{
+                "detected reaction in non-reactive REBO potential (r = {})", length
+            },
+        };
+
+        let VA;
+        let VA_d_length;
+        {
+            // UA_ij = - sum_{n in 1..=3} B_n e^{-beta_n r_ij}
+            let mut UA = 0.0;
+            let mut UA_d_length = 0.0;
+            for (&B, &beta) in zip_eq!(&params_ij.B, &params_ij.beta) {
+                let term = -B * f64::exp(-beta * length);
+                let term_d_length = -beta * term;
+                UA += term;
+                UA_d_length += term_d_length;
+            }
+
+            // VA_ij = f_ij UA_ij
+            VA = weight * UA;
+            VA_d_length = weight * UA_d_length;
+        }
+
+        let VR;
+        let VR_d_length;
+        {
+            // UR_ij = (1 + Q/r_ij) A e^{-alpha r_ij}
+            // write as a product of two subexpressions
+
+            let sub1 = 1.0 + params_ij.Q / length;
+            let sub1_d_length = - params_ij.Q / (length * length);
+
+            let sub2 = params_ij.A * f64::exp(-params_ij.alpha * length);
+            let sub2_d_length = -params_ij.alpha * sub2;
+
+            let UR = sub1 * sub2;
+            let UR_d_length = sub1_d_length * sub2 + sub1 * sub2_d_length;
+
+            // VR_ij = f_ij UR_ij
+            VR = weight * UR;
+            VR_d_length = weight * UR_d_length;
+        }
+
+        Ok(Output {
+            weight, VA, VA_d_length, VR, VR_d_length,
+        })
+    }
+
+
+    impl<'a> Input<'a> {
+        // For debugging; feel free to swap out the `compute` call with this.
+        #[allow(unused)]
+        pub fn compute_paranoid(self, tol: f64) -> FailResult<Output> {
+            let output = self.clone().compute()?;
+            let Output { weight, VA, VA_d_length, VR, VR_d_length } = output;
+
+            assert_close!(
+                rel=tol, abs=tol,
+                VA_d_length,
+                numerical::try_slope(
+                    1e-4, None, self.length,
+                    |length| Input { length, ..self }.compute().map(|x| x.VA),
+                )?,
+            );
+            assert_close!(
+                rel=tol, abs=tol,
+                VR_d_length,
+                numerical::try_slope(
+                    1e-4, None, self.length,
+                    |length| Input { length, ..self }.compute().map(|x| x.VR),
+                )?,
+            );
+            Ok(output)
+        }
+    }
+}
+
 use self::site_sigma_pi_term::SiteSigmaPiTerm;
 mod site_sigma_pi_term {
     //! Represents the sum of `0.5 * b_{ij}^{sigma-pi} * VR` over all `j` for a given `i`.
@@ -794,13 +876,13 @@ mod site_sigma_pi_term {
         pub site: SiteI,
         pub bond_weights: &'a [f64],
         // The VA_ij terms for each bond at site i.
-        pub bond_VAs: &'a SiteBondVec<f64>,
-        pub bond_VAs_d_delta: &'a SiteBondVec<V3>,
+        pub bond_VAs: &'a [f64],
     }
     pub struct SiteSigmaPiTerm {
         pub value: f64,
         /// Derivatives with respect to the bonds listed in order of `interactions.bonds(site_i)`.
         pub d_deltas: SiteBondVec<V3>,
+        pub d_VAs: SiteBondVec<f64>,
     }
 
     impl<'a> Input<'a> {
@@ -814,8 +896,7 @@ mod site_sigma_pi_term {
         //                       + P_{ij}(N_ij^C, N_ij^H)
         //        )
         let Input {
-            params, interactions, bond_weights,
-            bond_VAs, bond_VAs_d_delta,
+            params, interactions, bond_weights, bond_VAs,
             site: site_i,
         } = input;
         let type_i = interactions.site(site_i).atom_type;
@@ -837,7 +918,8 @@ mod site_sigma_pi_term {
 
         // Handle all terms
         let mut value = 0.0;
-        let mut d_deltas: SiteBondVec<V3> = sbvec_filled(V3::zero(), bond_weights.len());
+        let mut d_deltas = sbvec_filled(V3::zero(), bond_weights.len());
+        let mut d_VAs = sbvec_filled(0.0, bond_weights.len());
 
         for (index_ij, __bond) in interactions.bonds(site_i).enumerate() {
             let type_j = bond_target_types[index_ij];
@@ -876,7 +958,6 @@ mod site_sigma_pi_term {
             }
 
             // We're finally ready to compute the bond order.
-
             let bsp_ij;
             let bsp_ij_d_deltas;
             {
@@ -920,20 +1001,13 @@ mod site_sigma_pi_term {
 
             // True term to add to sum is 0.5 * VA_ij * bsp_ij
             let VA_ij = bond_VAs[index_ij];
-            let VA_ij_d_delta_ij = bond_VAs_d_delta[index_ij];
 
             dbg!("Vterm(sp): {:.9}", 0.5 * VA_ij * bsp_ij);
             value += 0.5 * VA_ij * bsp_ij;
-            d_deltas[index_ij] += 0.5 * VA_ij_d_delta_ij * bsp_ij;
+            d_VAs[index_ij] += 0.5 * bsp_ij;
             axpy_mut(&mut d_deltas, 0.5 * VA_ij, &bsp_ij_d_deltas);
-
-//            value += 0.5 * bsp_ij;
-//            axpy_mut(&mut d_deltas, 0.5, &bsp_ij_d_deltas);
-
-//            value += 0.5 * VA_ij;
-//            d_deltas[index_ij] += 0.5 * VA_ij_d_delta_ij;
         }
-        Output { value, d_deltas }
+        Output { value, d_deltas, d_VAs }
     }
 
 
@@ -945,20 +1019,28 @@ mod site_sigma_pi_term {
 
             let output = self.clone().compute();
             { // FIXME block unnecessary after NLL lands
-                let Output { value, ref d_deltas } = output;
+                let Output { value, ref d_deltas, ref d_VAs } = output;
 
                 for index_ij in 0..d_deltas.len() {
                     let bond_ij = interactions.bonds(self.site).nth(index_ij).unwrap().index;
                     assert_close!(
                         rel=tol, abs=tol,
                         d_deltas[index_ij].0,
-                        num_grad_v3(1e-4, interactions.bond(bond_ij).cart_vector, |p| {
-                            interactions.with_modified_delta(bond_ij, p, |interactions| {
+                        num_grad_v3(1e-4, interactions.bond(bond_ij).cart_vector, |x| {
+                            interactions.with_modified_delta(bond_ij, x, |interactions| {
                                 Input { interactions: interactions, ..self }.compute().value
                             })
                         }).0,
                     );
                 }
+
+                assert_close!(
+                    rel=tol, abs=tol,
+                    &d_VAs[..],
+                    &numerical::gradient(1e-4, None, self.bond_VAs, |bond_VAs| {
+                        Input { bond_VAs, ..self }.compute().value
+                    })[..],
+                );
             }
             output
         }
@@ -1214,7 +1296,7 @@ mod bondorder_pi {
                     } = dihedral_sine_sq::Input { delta_ij, delta_ik, delta_jl }.compute();
 
                     let index_ik = interactions.sbvec_index(bond_ik);
-                    let index_jl = interactions.sbvec_index(bond_ji);
+                    let index_jl = interactions.sbvec_index(bond_jl);
 
                     //-----------
                     // NOTE: for reasons I cannot determine, the (otherwise extremely sensible)
@@ -1243,6 +1325,11 @@ mod bondorder_pi {
                     sum_d_deltas_ik[index_ij] += sinsq_d_delta_ij * weight_ik * weight_jl;
                     sum_d_deltas_ik[index_ik] += sinsq_d_delta_ik * weight_ik * weight_jl;
                     sum_d_deltas_jl[index_jl] += sinsq_d_delta_jl * weight_ik * weight_jl;
+
+                    // FIXME: This doesn't make sense... this shouldn't be necessary and in fact
+                    //        it should constitute "double-counting"... but it makes
+                    //        `compute_paranoid` succeed.
+//                    sum_d_deltas_jl[index_ji] -= sinsq_d_delta_ij * weight_ik * weight_jl;
                 } // for bond_jl
             } // for bond_ik
 
@@ -1276,17 +1363,24 @@ mod bondorder_pi {
         #[allow(unused)]
         pub fn compute_paranoid(self, tol: f64) -> Output {
             let mut interactions = self.interactions.clone(); // FIXME oof
+            let bond_ij = self.bond_ij;
+            let bond_ji = interactions.bond(bond_ij).reverse_index;
+            let index_ij = interactions.sbvec_index(bond_ij);
+            let index_ji = interactions.sbvec_index(bond_ji);
 
             let output = self.clone().compute();
             { // FIXME block unnecessary after NLL lands
                 let Output { value, ref d_deltas_ik, ref d_deltas_jl } = output;
 
-                for (d_deltas_ik, site_i) in vec![
-                    (d_deltas_ik, self.site_i),
-                    (d_deltas_jl, interactions.bond(self.bond_ij).target),
+                for (err_hint, d_deltas_ik, skip_index, site_i) in vec![
+                    ("d_deltas_ik", d_deltas_ik, index_ij, self.site_i),
+                    ("d_deltas_jl", d_deltas_jl, index_ji, interactions.bond(self.bond_ij).target),
                 ] {
                     for index_ik in 0..d_deltas_ik.len() {
                         let bond_ik = interactions.bonds(site_i).nth(index_ik).unwrap().index;
+                        if index_ik == skip_index {
+                            continue; // this one is trickier; see below
+                        }
                         assert_close!(
                             rel=tol, abs=tol,
                             d_deltas_ik[index_ik].0,
@@ -1295,9 +1389,27 @@ mod bondorder_pi {
                                     Input { interactions: interactions, ..self }.compute().value
                                 })
                             }).0,
+                            "in {}", err_hint,
                         );
                     }
                 }
+
+                // HACK
+                //
+                // bond ij is in both arrays, and `interactions.with_modified_delta` modifies both
+                // the ij and ji deltas.  Therefore, for this bond alone, we must consider two
+                // of the output derivatives to be reflected in the numerical derivative.
+                //
+                // (in practice, the output ji delta is zero, so `with_modified_delta(bond_ij, ...)`
+                //  and `with_modified_delta(bond_ji, ...)` both simply produce similar changes in
+                //  the output ij delta.)
+                let expected = d_deltas_ik[index_ij] - d_deltas_jl[index_ji];
+                let num_grad = num_grad_v3(1e-4, interactions.bond(bond_ij).cart_vector, |p| {
+                    interactions.with_modified_delta(bond_ij, p, |interactions| {
+                        Input { interactions: interactions, ..self }.compute().value
+                    })
+                });
+                assert_close!(rel=tol, abs=tol, expected.0, num_grad.0, "in delta_ij");
             }
             output
         }
@@ -1860,21 +1972,31 @@ mod f_spline {
             let Input { params: _, type_i, type_j, tcoord_ij, tcoord_ji, xcoord_ij } = *self;
 
             let point = V3([tcoord_ij, tcoord_ji, xcoord_ij]);
-            let int_point = V3([tcoord_ij, tcoord_ji, xcoord_ij]).map(|x| x as i32);
+            let mut int_point = V3([tcoord_ij, tcoord_ji, xcoord_ij]).map(|x| x as i32);
             if point != int_point.map(|x| x as f64) {
                 return false; // fractional weight
             }
+            int_point[0] = int_point[0].min(splines::MAX_I as i32);
+            int_point[1] = int_point[1].min(splines::MAX_J as i32);
+            int_point[2] = int_point[2].min(splines::MAX_K as i32);
 
             match (type_i, type_j) {
                 (AtomType::Carbon, AtomType::Carbon) => {
                     let V3([i, j, k]) = int_point;
                     let (i, j) = (i32::min(i, j), i32::max(i, j));
                     match [i, j, k] {
-                        [2, 2, 9] => true, // graphene/graphite
-                        [3, 3, 1] => true, // diamond
+                        // graphene/graphite
+                        [2, 2, 9] => true,
+
+                        // diamond is [3, 3, 1],
+                        // and gyroids can reach an impressive [3, 3, 19]!
+                        // The whole [3, 3] row is zero in the table.
+                        [3, 3, _] => true,
+
+                        // nanotubes
                         [1, 1, 3] |
                         [1, 2, 6] |
-                        [0, 2, 5] => true, // nanotubes
+                        [0, 2, 5] => true,
                         _ => false,
                     }
                 },
@@ -2113,7 +2235,7 @@ fn boole(cond: bool) -> f64 {
 //-----------------------------------------------------------------------------
 
 #[inline(always)] // elide large stack-to-stack copies
-fn sbvec_scaled<T: ::std::ops::MulAssign<f64>>(f: f64, mut xs: SiteBondVec<T>) -> SiteBondVec<T>
+fn sbvec_scaled<T: ops::MulAssign<f64>>(f: f64, mut xs: SiteBondVec<T>) -> SiteBondVec<T>
 { scale_mut(f, &mut xs); xs }
 
 #[inline(always)] // elide large stack-to-stack copies
@@ -2122,16 +2244,17 @@ fn sbvec_filled<T: Clone>(fill: T, len: usize) -> SiteBondVec<T>
 
 #[inline(always)] // elide large stack-to-stack copies
 fn axpy_mut<T: Copy>(a: &mut [T], alpha: f64, b: &[T])
-where f64: ::std::ops::Mul<T, Output=T>, T: ::std::ops::AddAssign<T>,
+where
+    f64: ops::Mul<T, Output=T>,
+    T: ops::AddAssign<T>,
 {
     for (a, b) in zip_eq!(a, b) {
         *a += alpha * *b;
     }
 }
 
-fn scaled<T: ::std::ops::MulAssign<f64>>(f: f64, mut xs: Vec<T>) -> Vec<T>
+fn scaled<T: ops::MulAssign<f64>>(f: f64, mut xs: Vec<T>) -> Vec<T>
 { scale_mut(f, &mut xs); xs }
-
 
 fn scale_mut<T: ::std::ops::MulAssign<f64>>(factor: f64, xs: &mut [T]) {
     for x in xs {
@@ -2223,7 +2346,7 @@ mod input_tests {
         assert!(!matches.is_empty());
 
         for name in matches {
-            dbg!("Testing {}", name);
+            println!("Testing {}", name);
             single(&name)?;
         }
         Ok(())
@@ -2251,15 +2374,15 @@ mod input_tests {
         let expected: ForceFile = ::serde_json::from_reader(File::open(&out_path)?)?;
         let Poscar { coords, elements, .. } = Poscar::from_reader(File::open(in_path)?)?;
         let bond_graph = {
-            let range = params.by_type[AtomType::Carbon][AtomType::Carbon].Dmax * 1.01;
+            let range = params.by_type[AtomType::Carbon][AtomType::Carbon].cutoff_region.1 * 1.01;
             ::math::bonds::FracBonds::from_brute_force_very_dumb(&coords, range)?
                 .to_periodic_graph()
         };
 
         let (value, grad) = compute(&params, &coords, &elements, &bond_graph, use_rayon)?;
 
-        assert_close!(rel=1e-12, value, expected.value, "in file: {}", name);
-        assert_close!(rel=1e-12, grad.unvee(), expected.grad.unvee(), "in file: {}", name);
+        assert_close!(abs=1e-11, rel=1e-10, value, expected.value, "in file: {}", name);
+        assert_close!(abs=1e-11, rel=1e-10, grad.unvee(), expected.grad.unvee(), "in file: {}", name);
         Ok(())
     }
 
