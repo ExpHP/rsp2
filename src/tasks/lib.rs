@@ -43,6 +43,7 @@ extern crate rsp2_linalg;
 #[macro_use] extern crate enum_map;
 #[macro_use] extern crate frunk;
 extern crate rayon;
+extern crate either;
 extern crate rand;
 extern crate slice_of_array;
 extern crate serde;

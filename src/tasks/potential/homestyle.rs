@@ -135,13 +135,22 @@ impl KolmogorovCrespiZ {
 /// NOTE: This has the limitation that the set of pairs within interaction range
 ///       must not change after the construction of the DiffFn.
 #[derive(Debug, Clone)]
-pub struct Rebo(pub(super) cfg::PotentialReboNew);
+pub struct Rebo {
+    pub(super) cfg: cfg::PotentialReboNew,
+    pub(super) parallel: bool,
+}
 
 impl PotentialBuilder<CommonMeta> for Rebo {
+    fn parallel(&self, parallel: bool) -> Box<dyn PotentialBuilder<CommonMeta>> {
+        let mut me = self.clone();
+        me.parallel = parallel;
+        Box::new(me)
+    }
+
     fn initialize_diff_fn(&self, coords: &Coords, meta: CommonMeta) -> FailResult<Box<DiffFn<CommonMeta>>>
     {
         fn fn_body(me: &Rebo, _: &Coords, meta: CommonMeta) -> FailResult<Box<DiffFn<CommonMeta>>> {
-            let cfg::PotentialReboNew { params } = me.0;
+            let cfg::PotentialReboNew { params } = me.cfg;
             let params = match params {
                 cfg::PotentialReboNewParams::Lammps => rebo_imp::Params::new_lammps(),
                 cfg::PotentialReboNewParams::Brenner => rebo_imp::Params::new_brenner(),
@@ -152,18 +161,20 @@ impl PotentialBuilder<CommonMeta> for Rebo {
             };
 
             let bonds = bonds.to_periodic_graph();
-            Ok(Box::new(Diff { params, bonds }))
+            let parallel = me.parallel;
+            Ok(Box::new(Diff { params, bonds, parallel }))
         }
 
         struct Diff {
             params: rebo_imp::Params,
             bonds: PeriodicGraph,
+            parallel: bool,
         }
 
         impl DiffFn<CommonMeta> for Diff {
             fn compute(&mut self, coords: &Coords, meta: CommonMeta) -> FailResult<(f64, Vec<V3>)> {
                 let elements: meta::SiteElements = meta.pick();
-                rebo_imp::compute(&self.params, coords, &elements, &self.bonds)
+                rebo_imp::compute(&self.params, coords, &elements, &self.bonds, self.parallel)
             }
         }
 

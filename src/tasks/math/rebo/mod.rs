@@ -12,5 +12,4 @@
 #![allow(non_snake_case)]
 
 pub(crate) mod nonreactive;
-pub(crate) mod reactive;
 pub(crate) mod splines;

@@ -42,3 +42,10 @@ pub fn resource(path: &str) -> PathBuf {
     let file = ::path_abs::PathFile::new(dir.join(path)).unwrap_or_else(|e| panic!(e));
     file.into()
 }
+
+// used to make queries into tests/resources dryer, with quicker error messages on nonexistent paths
+pub fn resource_dir(path: &str) -> PathBuf {
+    let dir = ::path_abs::PathDir::new("tests/resources").unwrap_or_else(|e| panic!(e));
+    let dir = ::path_abs::PathDir::new(dir.join(path)).unwrap_or_else(|e| panic!(e));
+    dir.into()
+}

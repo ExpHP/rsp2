@@ -441,7 +441,11 @@ impl PotentialBuilder {
                 let pot = self::helper::Sum(rebo, kc_z);
                 Box::new(pot)
             },
-            cfg::PotentialKind::ReboNew(cfg) => Box::new(self::homestyle::Rebo(cfg.clone())),
+            cfg::PotentialKind::ReboNew(cfg) => {
+                let cfg = cfg.clone();
+                let parallel = threading == &cfg::Threading::Rayon;
+                Box::new(self::homestyle::Rebo { cfg, parallel })
+            },
             cfg::PotentialKind::TestZero => Box::new(self::test_functions::Zero),
             cfg::PotentialKind::TestChainify => Box::new(self::test_functions::Chainify),
         }

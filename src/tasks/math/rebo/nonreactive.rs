@@ -30,7 +30,7 @@
 //! of forces.
 //!
 //! The original, almost certainly VERY buggy reactive code still exists in the git history
-//! (see `9d16b8eb31dc9e35ff208415fcc9de971e8ecfbb` and diff `reactive.rs` and `nonreactive.rs`),
+//! (see `557b47c570517b8d604ce9767937fdf225084c14` and diff `reactive.rs` and `nonreactive.rs`),
 //! and many parts of the current code are still written in a manner that will make it less
 //! difficult to add them back by carrying them around and multiplying them in even though
 //! they are all `1.0` or `0.0`.
@@ -47,6 +47,7 @@ use ::FailResult;
 use ::math::bond_graph::PeriodicGraph;
 use ::math::bonds::FracBond;
 use ::meta;
+use ::util::CondIterator;
 
 use ::stack::{ArrayVec, Vector as StackVector};
 #[cfg(test)]
@@ -63,8 +64,17 @@ use ::enum_map::EnumMap;
 use ::rayon::prelude::*;
 use ::slice_of_array::prelude::*;
 
+use ::rsp2_minimize::numerical;
 #[cfg(test)]
-use ::rsp2_minimize::numerical::{self, DerivativeKind::*};
+use ::rsp2_minimize::numerical::DerivativeKind::*;
+
+//-------------------------------------------------------
+
+macro_rules! dbg {
+    ($($t:tt)*) => {
+        println!($($t)*);
+    };
+}
 
 //-------------------------------------------------------
 // # A note on stylistic conventions
@@ -294,8 +304,7 @@ mod interactions {
     use super::*;
 
     // collects all the terms we need to compute
-    //
-    // TODO: Use me!
+    #[derive(Debug, Clone)]
     pub struct Interactions {
         /// CSR-style divider indices for bonds at each site.
         bond_div: IndexVec<SiteI, BondI>,
@@ -373,11 +382,13 @@ mod interactions {
         }
     }
 
+    #[derive(Debug)]
     pub struct Site {
         pub index: SiteI,
         pub atom_type: AtomType,
     }
 
+    #[derive(Debug)]
     pub struct Bond {
         pub index: BondI,
         pub is_canonical: bool,
@@ -417,21 +428,36 @@ mod interactions {
             0..self.site_type.len()
         }
 
-        pub fn frac_bond(&self, bond: BondI) -> FracBond {
-            let bond = self.bond(bond);
-            FracBond {
-                from: bond.source.0,
-                to: bond.target.0,
-                image_diff: bond.image_diff,
-            }
-        }
-
         pub fn bonds(&self, site: SiteI) -> impl ExactSizeIterator<Item=Bond> + '_ {
             self.bond_range(site).map(move |i| self.bond(BondI(i)))
         }
 
         pub fn bond_range(&self, site: SiteI) -> ::std::ops::Range<usize> {
             self.bond_div[site].0..self.bond_div[site.next()].0
+        }
+
+        // index of a bond into a SiteBondVec for its source Site
+        pub fn sbvec_index(&self, bond: BondI) -> usize {
+            bond.0 - self.bond_range(self.bond_source[bond]).start
+        }
+
+        // For test purposes only (and it would be much better if this didn't need to exist)
+        pub fn with_modified_delta<B>(
+            &mut self,
+            bond_ij: BondI,
+            new_delta_ij: V3<f64>,
+            cont: impl FnOnce(&Self) -> B,
+        ) -> B {
+            let bond_ji = self.bond_reverse_index[bond_ij];
+            let orig_delta_ij = self.bond_cart_vector[bond_ij];
+            let orig_delta_ji = self.bond_cart_vector[bond_ji];
+
+            self.bond_cart_vector[bond_ij] = new_delta_ij;
+            self.bond_cart_vector[bond_ji] = -new_delta_ij;
+            let out = cont(&self);
+            self.bond_cart_vector[bond_ij] = orig_delta_ij;
+            self.bond_cart_vector[bond_ji] = orig_delta_ji;
+            out
         }
     }
 }
@@ -441,10 +467,11 @@ pub fn compute(
     coords: &Coords,
     elements: &[meta::Element],
     bonds: &PeriodicGraph,
+    use_rayon: bool,
 ) -> FailResult<(f64, Vec<V3>)> {
     let types = elements.iter().cloned().map(AtomType::from_element).collect::<FailResult<Vec<_>>>()?;
     let interactions = Interactions::compute(coords, &types, bonds)?;
-    let (value, d_deltas) = compute_rebo_bonds(params, &interactions)?;
+    let (value, d_deltas) = compute_rebo_bonds(params, &interactions, use_rayon)?;
 
     let mut d_positions = IndexVec::from_elem_n(V3::zero(), interactions.num_sites());
     for __site in interactions.sites() {
@@ -465,6 +492,7 @@ pub fn compute(
 fn compute_rebo_bonds(
     params: &Params,
     interactions: &Interactions,
+    use_rayon: bool,
 ) -> FailResult<(f64, IndexVec<BondI, V3>)> {
     use self::interactions::{Site, Bond};
     // Brenner:
@@ -517,7 +545,8 @@ fn compute_rebo_bonds(
     }
 
     let site_data = IndexVec::<SiteI, _>::from_raw({
-        interactions.site_range().into_par_iter().map(SiteI::new).map(|site_i| {
+        let iter = CondIterator::new(interactions.site_range(), use_rayon);
+        iter.map(SiteI::new).map(|site_i| {
             let __site = interactions.site(site_i);
             let type_i = __site.atom_type;
 
@@ -528,6 +557,8 @@ fn compute_rebo_bonds(
             let mut bond_VA_d_delta = SiteBondVec::new();
             let mut bond_weight = SiteBondVec::new();
 
+//            dbg!("{:#?}", interactions.bonds(site_i).collect::<Vec<_>>());
+
             for __bond in interactions.bonds(site_i) {
                 let site_j = __bond.target;
                 let delta_ij = __bond.cart_vector;
@@ -537,6 +568,8 @@ fn compute_rebo_bonds(
                 let (length, length_d_delta) = norm(delta_ij);
                 let (weight, weight_d_length) = switch((params_ij.Dmax, params_ij.Dmin), length);
 
+//                dbg!("length: {:.9}", length);
+//                dbg!("weight: {:.9}", weight);
                 ensure!(
                     weight_d_length == 0.0 && (weight == 1.0 || weight == 0.0),
                     "detected reaction in non-reactive REBO potential"
@@ -566,7 +599,7 @@ fn compute_rebo_bonds(
                     VR = weight * UR;
                     VR_d_length = weight_d_length * UR + weight * UR_d_length;
                 }
-//                println!("VR-rs: {}", VR);
+                dbg!("VR: {:.9}", VR);
                 bond_VR.push(VR);
                 bond_VR_d_delta.push(VR_d_length * length_d_delta);
 
@@ -587,7 +620,7 @@ fn compute_rebo_bonds(
                     VA = weight * UA;
                     VA_d_length = weight_d_length * UA + weight * UA_d_length;
                 }
-//                println!("VA-rs: {}", VA);
+                dbg!("VA: {:.9}", VA);
                 bond_VA.push(VA);
                 bond_VA_d_delta.push(VA_d_length * length_d_delta);
             } // for _ in interactions.bonds(site)
@@ -604,7 +637,8 @@ fn compute_rebo_bonds(
         }).collect::<FailResult<_>>()?
     });
 
-    let out = interactions.site_range().into_par_iter().map(SiteI::new).map(|site_i| {
+    let iter = CondIterator::new(interactions.site_range(), use_rayon);
+    let out = iter.map(SiteI::new).map(|site_i| {
         let __site = interactions.site(site_i);
         let FirstPassSiteData {
             tcoord: _,
@@ -629,6 +663,9 @@ fn compute_rebo_bonds(
         //-----------------------------------------------
 
         // Add in the repulsive terms, which each only depend on one bond delta.
+        for bond_VR_ij in bond_VR {
+            dbg!("Vterm(R): {:.9}", 0.5 * bond_VR_ij);
+        }
         site_V += 0.5 * bond_VR.iter().sum::<f64>();
         axpy_mut(&mut site_V_d_delta, 0.5, &bond_VR_d_delta);
 
@@ -646,7 +683,7 @@ fn compute_rebo_bonds(
             bond_weights: bond_weight,
             bond_VAs: bond_VA,
             bond_VAs_d_delta: bond_VA_d_delta,
-        }.compute();
+        }.compute_paranoid(1e-3);
         let SiteSigmaPiTerm {
             value: Vsp_i,
             d_deltas: Vsp_i_d_deltas,
@@ -678,17 +715,18 @@ fn compute_rebo_bonds(
             let out = bondorder_pi::Input {
                 params, interactions, site_i, bond_ij,
                 tcoords_k, tcoords_l, weights_ik, weights_jl,
-            }.compute();
+            }.compute_paranoid(1e-3);
             let BondOrderPi {
                 value: bpi,
                 d_deltas_ik: mut bpi_d_deltas_ik,
                 d_deltas_jl: mut bpi_d_deltas_jl,
             } = out;
-//            println!("bpi-rs: {}", bpi);
+            dbg!("bpi: {:.9}", bpi);
 
             let VA_ij = bond_VA[index_ij];
             let VA_ij_d_delta_ij = bond_VA_d_delta[index_ij];
 
+            dbg!("Vterm(pi): {:.9}", bpi * VA_ij);
             site_V += bpi * VA_ij;
             site_V_d_delta[index_ij] += bpi * VA_ij_d_delta_ij;
 
@@ -742,13 +780,14 @@ mod site_sigma_pi_term {
     //! Represents the sum of `0.5 * b_{ij}^{sigma-pi} * VR` over all `j` for a given `i`.
     //!
     //! This quantity is useful to consider in its own right because it encapsulates
-    //! the need for the P spline values (only two of which are needed per site),
-    //! and it only has derivatives with respect to the bond vectors of site `i`;
-    //! these properties give it a fairly simple signature.
+    //! the need for the P spline values, and it only has derivatives with respect
+    //! to the bond vectors of site `i`; these properties give it a fairly simple signature.
 
     use super::*;
 
     pub type Output = SiteSigmaPiTerm;
+
+    #[derive(Debug, Clone)]
     pub struct Input<'a> {
         pub params: &'a Params,
         pub interactions: &'a Interactions,
@@ -810,6 +849,7 @@ mod site_sigma_pi_term {
             let hcoord_ij = hcoord_i - boole(type_j == AtomType::Hydrogen) * weight_ij;
 
             let P_ij = p_spline::Input { params, type_i, type_j, ccoord_ij, hcoord_ij }.compute();
+            dbg!("P: {:.9}", P_ij);
 
             // Gather all cosines between bond i->j and other bonds i->k.
             let mut coses_ijk = SiteBondVec::new();
@@ -842,13 +882,12 @@ mod site_sigma_pi_term {
             {
                 // Compute bsp as a function of many things...
                 let out = bondorder_sigma_pi::Input {
-                    params,
-                    type_i, type_j, ccoord_ij, hcoord_ij, P_ij,
+                    params, type_i, type_j, ccoord_ij, hcoord_ij, P_ij,
                     coses_ijk: &coses_ijk,
                     types_k: &bond_target_types,
                     weights_ik: bond_weights,
                     skip_index: index_ij, // used to exclude the ijj angle
-                }.compute();
+                }.compute_paranoid(1e-3);
                 let BondOrderSigmaPi {
                     value: tmp_value,
                     d_coses_ijk: bsp_ij_d_coses_ijk,
@@ -863,27 +902,66 @@ mod site_sigma_pi_term {
                     if index_ij == index_ik {
                         continue;
                     }
+
+                    // cos_ijk = cos_ijk(delta_ij, delta_ik)
+                    // These are both index_ik because we are indexing the cosines.
                     let cos_ijk_d_delta_ij = coses_ijk_d_delta_ij[index_ik];
                     let cos_ijk_d_delta_ik = coses_ijk_d_delta_ik[index_ik];
 
+                    // These are index_ij and index_ik because we are indexing the deltas.
                     tmp_d_deltas[index_ij] += bsp_ij_d_cos_ijk * cos_ijk_d_delta_ij;
                     tmp_d_deltas[index_ik] += bsp_ij_d_cos_ijk * cos_ijk_d_delta_ik;
                 }
 
                 bsp_ij = tmp_value;
                 bsp_ij_d_deltas = tmp_d_deltas;
-//                println!("bsp-rs: {}", bsp_ij);
+                dbg!("bsp: {:.9}", bsp_ij);
             }
 
             // True term to add to sum is 0.5 * VA_ij * bsp_ij
             let VA_ij = bond_VAs[index_ij];
             let VA_ij_d_delta_ij = bond_VAs_d_delta[index_ij];
 
+            dbg!("Vterm(sp): {:.9}", 0.5 * VA_ij * bsp_ij);
             value += 0.5 * VA_ij * bsp_ij;
             d_deltas[index_ij] += 0.5 * VA_ij_d_delta_ij * bsp_ij;
             axpy_mut(&mut d_deltas, 0.5 * VA_ij, &bsp_ij_d_deltas);
+
+//            value += 0.5 * bsp_ij;
+//            axpy_mut(&mut d_deltas, 0.5, &bsp_ij_d_deltas);
+
+//            value += 0.5 * VA_ij;
+//            d_deltas[index_ij] += 0.5 * VA_ij_d_delta_ij;
         }
         Output { value, d_deltas }
+    }
+
+
+    impl<'a> Input<'a> {
+        // For debugging; feel free to swap out the `compute` call with this.
+        #[allow(unused)]
+        pub fn compute_paranoid(self, tol: f64) -> Output {
+            let mut interactions = self.interactions.clone(); // FIXME oof
+
+            let output = self.clone().compute();
+            { // FIXME block unnecessary after NLL lands
+                let Output { value, ref d_deltas } = output;
+
+                for index_ij in 0..d_deltas.len() {
+                    let bond_ij = interactions.bonds(self.site).nth(index_ij).unwrap().index;
+                    assert_close!(
+                        rel=tol, abs=tol,
+                        d_deltas[index_ij].0,
+                        num_grad_v3(1e-4, interactions.bond(bond_ij).cart_vector, |p| {
+                            interactions.with_modified_delta(bond_ij, p, |interactions| {
+                                Input { interactions: interactions, ..self }.compute().value
+                            })
+                        }).0,
+                    );
+                }
+            }
+            output
+        }
     }
 }
 
@@ -892,6 +970,8 @@ mod bondorder_sigma_pi {
     use super::*;
 
     pub type Output = BondOrderSigmaPi;
+
+    #[derive(Debug, Clone)]
     pub struct Input<'a> {
         pub params: &'a Params,
         // bond from atom i to another atom j
@@ -929,6 +1009,7 @@ mod bondorder_sigma_pi {
             types_k, weights_ik, coses_ijk, skip_index,
         } = input;
         let tcoord_ij = ccoord_ij + hcoord_ij;
+        dbg!("Nt: {:.9}", tcoord_ij);
 
         // properties of the stuff in the square root
         let mut inner_value = 0.0;
@@ -955,21 +1036,20 @@ mod bondorder_sigma_pi {
                 true => airebo_exp_lambda(type_i, (type_j, type_k)),
                 false => brenner_exp_lambda(type_i, (type_j, type_k)),
             };
-//            println!("explambda-rs: {}", exp_lambda);
-//            println!("Nt-rs: {}", tcoord_ij);
+            dbg!("explambda: {:.9}", exp_lambda);
 
             let GSpline {
                 value: G,
                 d_cos_ijk: G_d_cos_ijk,
             } = g_spline::Input { params, type_i, cos_ijk, tcoord_ij }.compute();
-//            println!("g-rs: {} {}", G, G_d_cos_ijk);
+            dbg!("g: {:.9} {:.9}", G, G_d_cos_ijk);
 
-//            println!("bspterm-rs: {}", exp_lambda * weight_ik * G);
+//            dbg!("bspterm: {:.9}", exp_lambda * weight_ik * G);
             inner_value += exp_lambda * weight_ik * G;
             inner_d_coses_ijk.push(exp_lambda * weight_ik * G_d_cos_ijk);
         }
 
-//        println!("bspsum-rs: {}", inner_value);
+//        dbg!("bspsum: {:.9}", inner_value);
 
         // Now take the reciprocal square root.
         //
@@ -981,6 +1061,37 @@ mod bondorder_sigma_pi {
             d_coses_ijk: sbvec_scaled(prefactor, inner_d_coses_ijk),
         }
     }
+
+    impl<'a> Input<'a> {
+        // For debugging; feel free to swap out the `compute` call with this.
+        #[allow(unused)]
+        pub fn compute_paranoid(self, tol: f64) -> Output {
+            let output = self.clone().compute();
+            { // FIXME block unnecessary after NLL lands
+                let Output { value, ref d_coses_ijk } = output;
+
+                let mut coses_ijk = self.coses_ijk.to_vec();
+                for index_ik in 0..self.coses_ijk.len() {
+                    if index_ik == self.skip_index {
+                        continue;
+                    }
+                    assert_close!(
+                        rel=tol, abs=tol,
+                        d_coses_ijk[index_ik],
+                        numerical::slope(1e-4, None, self.coses_ijk[index_ik], |cos_ijk| {
+                            // FIXME so dumb
+                            let old = self.coses_ijk[index_ik];
+                            coses_ijk[index_ik] = cos_ijk;
+                            let out = Input { coses_ijk: &coses_ijk, ..self }.compute().value;
+                            coses_ijk[index_ik] = old;
+                            out
+                        }),
+                    );
+                }
+            }
+            output
+        }
+    }
 }
 
 // b_{ij}^{pi} in Brenner
@@ -989,6 +1100,8 @@ mod bondorder_pi {
     use super::*;
 
     pub type Output = BondOrderPi;
+
+    #[derive(Debug, Clone)]
     pub struct Input<'a> {
         pub params: &'a Params,
         pub interactions: &'a Interactions,
@@ -1026,8 +1139,8 @@ mod bondorder_pi {
         let types_k: SiteBondVec<_> = interactions.bonds(site_i).map(|bond| interactions.site(bond.target).atom_type).collect();
         let types_l: SiteBondVec<_> = interactions.bonds(site_j).map(|bond| interactions.site(bond.target).atom_type).collect();
 
-        let index_ij = bond_ij.0 - interactions.bond_range(site_i).start;
-        let index_ji = bond_ji.0 - interactions.bond_range(site_j).start;
+        let index_ij = interactions.sbvec_index(bond_ij);
+        let index_ji = interactions.sbvec_index(bond_ji);
 
         let ycoord_ij = ycoord::Input {
             skip_index: index_ij,
@@ -1069,8 +1182,8 @@ mod bondorder_pi {
             let mut sum = 0.0;
             let mut sum_d_deltas_ik = sbvec_filled(V3::zero(), weights_ik.len()); // w.r.t. bonds around site i
             let mut sum_d_deltas_jl = sbvec_filled(V3::zero(), weights_jl.len()); // w.r.t. bonds around site j
-            // We must iterate over groups of four DIFFERENT atoms ijkl,
-            // with bonds between ij, ik, and jl.
+            // We must iterate over groups of four atoms ijkl,
+            // where k and l are not equal to i or j.
             for __bond in interactions.bonds(site_i) {
                 let bond_ik = __bond.index;
 
@@ -1090,15 +1203,6 @@ mod bondorder_pi {
                         continue; // site l is site i
                     }
 
-                    // Use FracBonds here to correctly account for images
-                    let frac_bond_ij = interactions.frac_bond(bond_ij);
-                    let frac_bond_ik = interactions.frac_bond(bond_ik);
-                    let frac_bond_jl = interactions.frac_bond(bond_jl);
-                    let frac_bond_il = frac_bond_ij.join(frac_bond_jl).unwrap();
-                    if frac_bond_il == frac_bond_ik {
-                        continue; // site k is site l
-                    }
-
                     let delta_ij = interactions.bond(bond_ij).cart_vector;
                     let delta_ik = interactions.bond(bond_ik).cart_vector;
                     let delta_jl = interactions.bond(bond_jl).cart_vector;
@@ -1109,8 +1213,8 @@ mod bondorder_pi {
                         d_delta_jl: sinsq_d_delta_jl,
                     } = dihedral_sine_sq::Input { delta_ij, delta_ik, delta_jl }.compute();
 
-                    let index_ik = bond_ik.0 - interactions.bond_range(site_i).start;
-                    let index_jl = bond_ji.0 - interactions.bond_range(site_j).start;
+                    let index_ik = interactions.sbvec_index(bond_ik);
+                    let index_jl = interactions.sbvec_index(bond_ji);
 
                     //-----------
                     // NOTE: for reasons I cannot determine, the (otherwise extremely sensible)
@@ -1143,7 +1247,7 @@ mod bondorder_pi {
             } // for bond_ik
 
             let T = t_spline::Input { params, type_i, type_j, tcoord_ij, tcoord_ji, xcoord_ij }.compute();
-//            println!("T-rs: {}", T);
+            dbg!("T: {:.9}", T);
 
             value += T * sum;
             axpy_mut(&mut d_deltas_ik, T, &sum_d_deltas_ik);
@@ -1152,14 +1256,51 @@ mod bondorder_pi {
 
         // Second term: Just F.
         let f_input = f_spline::Input { params, type_i, type_j, tcoord_ij, tcoord_ji, xcoord_ij };
-        if !f_input.can_assume_zero() {
-            warn!("untested codepath: 2dc43f8b-12a2-46ca-8654-82f447664c04");
-            let F = f_input.compute();
-
-            value += F;
+        if !f_input.is_tested() {
+            // NOTE: We're bailing out because I currently don't trust this spline.
+            panic!(
+                "Not yet tested for Brenner F: {}{} bond, Nij = {}, Nji = {}, Nconj = {}",
+                type_i.char(), type_j.char(), tcoord_ij, tcoord_ji, xcoord_ij,
+            );
         }
+        let F = f_input.compute();
+        value += F;
+
+        dbg!("F: {:.9}", F);
 
         Output { value, d_deltas_ik, d_deltas_jl }
+    }
+
+    impl<'a> Input<'a> {
+        // For debugging; feel free to swap out the `compute` call with this.
+        #[allow(unused)]
+        pub fn compute_paranoid(self, tol: f64) -> Output {
+            let mut interactions = self.interactions.clone(); // FIXME oof
+
+            let output = self.clone().compute();
+            { // FIXME block unnecessary after NLL lands
+                let Output { value, ref d_deltas_ik, ref d_deltas_jl } = output;
+
+                for (d_deltas_ik, site_i) in vec![
+                    (d_deltas_ik, self.site_i),
+                    (d_deltas_jl, interactions.bond(self.bond_ij).target),
+                ] {
+                    for index_ik in 0..d_deltas_ik.len() {
+                        let bond_ik = interactions.bonds(site_i).nth(index_ik).unwrap().index;
+                        assert_close!(
+                            rel=tol, abs=tol,
+                            d_deltas_ik[index_ik].0,
+                            num_grad_v3(1e-4, interactions.bond(bond_ik).cart_vector, |p| {
+                                interactions.with_modified_delta(bond_ik, p, |interactions| {
+                                    Input { interactions: interactions, ..self }.compute().value
+                                })
+                            }).0,
+                        );
+                    }
+                }
+            }
+            output
+        }
     }
 }
 
@@ -1320,6 +1461,29 @@ mod dihedral_sine_sq {
         //        (but what is the correct value?)
     }
 
+    // shows there is no need to check l != k because it is well-defined in that case
+    #[test]
+    fn l_equal_k() {
+        for _ in 0..10 {
+            let a = V3::from_fn(|_| uniform(-10.0, 10.0));
+            let b = V3::from_fn(|_| uniform(-10.0, 10.0));
+
+            let tests = vec![
+                (a, a + b, b),
+                (a - b, a, b),
+            ];
+            for (delta_ij, delta_ik, delta_jl) in tests {
+                let Output {
+                    value, d_delta_ij, d_delta_ik, d_delta_jl,
+                } = Input { delta_ij, delta_ik, delta_jl }.compute();
+                assert_close!(abs=1e-9, 0.0, value);
+                assert_close!(abs=1e-9, V3::zero().0, d_delta_ij.0);
+                assert_close!(abs=1e-9, V3::zero().0, d_delta_ik.0);
+                assert_close!(abs=1e-9, V3::zero().0, d_delta_jl.0);
+            }
+        }
+    }
+
     #[test]
     fn derivatives() {
         for _ in 0..10 {
@@ -1469,14 +1633,7 @@ mod g_spline {
                     warn!("untested codepath: 37236e5f-9810-4ee5-a8c3-0a5150d9bd26");
                     use_single_poly!(&params.G.carbon_high_coord)
                 } else {
-                    warn!("untested codepath: fd6eff7e-b4b2-4bbf-ad89-3227a6099d59");
-                    // The one case where use_single_poly! cannot be used.
-
-                    // d(linterp(α, A, B)) = d(α A + (1 - α) B)
-                    //                     = (A - B) dα + α dA + (1 - α) dB
-                    //                     = ...let's not do this right now
                     unreachable!("impossible condition found for non-reactive REBO");
-                    unimplemented!()
                 }
             },
             AtomType::Hydrogen => {
@@ -1678,12 +1835,6 @@ mod f_spline {
     fn compute(input: Input<'_>) -> Output {
         let Input { params, type_i, type_j, tcoord_ij, tcoord_ji, xcoord_ij } = input;
 
-        // NOTE: We're bailing out because I currently don't trust this spline.
-        (|| panic!(
-            "Not yet implemented for Brenner F: {}{} bond, Nij = {}, Nji = {}, Nconj = {}",
-            type_i.char(), type_j.char(), tcoord_ij, tcoord_ji, xcoord_ij,
-        ))();
-
         let poly = match (type_i, type_j) {
             (AtomType::Hydrogen, AtomType::Carbon) => {
                 // (written to break if the output changes to another type that needs
@@ -1702,12 +1853,10 @@ mod f_spline {
         value
     }
 
-    // check if the value and all derivatives can be assumed to be zero,
-    // without needing to compute N^{conj}, because I currently have
-    // very little confidence in the spline for this one and would rather
-    // bail out than use it (until it is better tested).
+    // indicates whether RSP2 has been tested with structures that have these
+    // particular coordinations
     impl<'a> Input<'a> {
-        pub fn can_assume_zero(&self) -> bool {
+        pub fn is_tested(&self) -> bool {
             let Input { params: _, type_i, type_j, tcoord_ij, tcoord_ji, xcoord_ij } = *self;
 
             let point = V3([tcoord_ij, tcoord_ji, xcoord_ij]);
@@ -1717,10 +1866,17 @@ mod f_spline {
             }
 
             match (type_i, type_j) {
-                (AtomType::Carbon, AtomType::Carbon) => match int_point.0 {
-                    [2, 2, 9] => true, // graphene/graphite
-                    [3, 3, _] => true, // diamond
-                    _ => false,
+                (AtomType::Carbon, AtomType::Carbon) => {
+                    let V3([i, j, k]) = int_point;
+                    let (i, j) = (i32::min(i, j), i32::max(i, j));
+                    match [i, j, k] {
+                        [2, 2, 9] => true, // graphene/graphite
+                        [3, 3, 1] => true, // diamond
+                        [1, 1, 3] |
+                        [1, 2, 6] |
+                        [0, 2, 5] => true, // nanotubes
+                        _ => false,
+                    }
                 },
 
                 // Tables 6 and 9
@@ -2029,11 +2185,89 @@ mod derivative_tests {
 #[cfg(test)]
 fn uniform(a: f64, b: f64) -> f64 { ::rand::random::<f64>() * (b - a) + a }
 
-#[cfg(test)]
 fn num_grad_v3(
     interval: f64,
     point: V3,
     mut value_fn: impl FnMut(V3) -> f64,
 ) -> V3 {
     numerical::gradient(interval, None, &point.0, |v| value_fn(v.to_array())).to_array()
+}
+
+//-----------------------------------------------------------------------------
+
+#[cfg(test)]
+#[derive(Deserialize)]
+struct ForceFile {
+    value: f64,
+    grad: Vec<V3>,
+}
+
+#[cfg(test)]
+mod input_tests {
+    use super::*;
+    use ::std::{path::Path, fs::File};
+    use ::rsp2_structure_io::Poscar;
+    use ::rsp2_array_types::Unvee;
+
+    const RESOURCE_DIR: &'static str = "tests/resources/potential/rebo";
+
+    #[test]
+    fn all() -> FailResult<()> {
+        let mut matches = vec![];
+        for entry in Path::new(RESOURCE_DIR).read_dir()? {
+            let entry: String = entry?.path().display().to_string();
+            if let Some(base) = strip_suffix(".rebo.lmp.json", &entry) {
+                matches.push(Path::new(&base).file_name().unwrap().to_string_lossy().into_owned());
+            }
+        }
+        assert!(!matches.is_empty());
+
+        for name in matches {
+            dbg!("Testing {}", name);
+            single(&name)?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn nanotubes() -> FailResult<()> {
+        single("nanotubes")
+    }
+
+    fn single(name: &str) -> FailResult<()> {
+        use ::std::{path, fs::File};
+        use ::rsp2_structure_io::Poscar;
+        use ::rsp2_array_types::Unvee;
+
+        ::ui::logging::init_test_logger();
+
+        // Set this to false to let tests capture stdout
+        let use_rayon = false; // FIXME: revert to true
+        let params = Params::new_lammps();
+
+        let in_path = Path::new(RESOURCE_DIR).join(name.to_string() + ".vasp");
+        let out_path = Path::new(RESOURCE_DIR).join(name.to_string() + ".rebo.lmp.json");
+
+        let expected: ForceFile = ::serde_json::from_reader(File::open(&out_path)?)?;
+        let Poscar { coords, elements, .. } = Poscar::from_reader(File::open(in_path)?)?;
+        let bond_graph = {
+            let range = params.by_type[AtomType::Carbon][AtomType::Carbon].Dmax * 1.01;
+            ::math::bonds::FracBonds::from_brute_force_very_dumb(&coords, range)?
+                .to_periodic_graph()
+        };
+
+        let (value, grad) = compute(&params, &coords, &elements, &bond_graph, use_rayon)?;
+
+        assert_close!(rel=1e-12, value, expected.value, "in file: {}", name);
+        assert_close!(rel=1e-12, grad.unvee(), expected.grad.unvee(), "in file: {}", name);
+        Ok(())
+    }
+
+    fn strip_suffix<'a>(suffix: &str, s: &str) -> Option<String> {
+        if s.ends_with(suffix) {
+            Some(s[..s.len()-suffix.len()].to_string())
+        } else {
+            None
+        }
+    }
 }
