@@ -73,7 +73,7 @@ use ::rsp2_minimize::numerical::DerivativeKind::*;
 
 macro_rules! dbg {
     ($($t:tt)*) => {
-//        println!($($t)*);
+        println!($($t)*);
     };
 }
 
@@ -140,6 +140,8 @@ impl AtomType {
 }
 type TypeMap<T> = EnumMap<AtomType, T>;
 
+//---------------------------------------------------------------------------------
+
 newtype_index!{SiteI}
 newtype_index!{BondI}
 
@@ -165,6 +167,10 @@ mod params {
         pub Q: f64, // Å
         pub A: f64, // eV
         pub alpha: f64, // Å-1
+        /// A parameter used by Stuart in the `exp(lambda)` for AIREBO.
+        ///
+        /// The CC value is never used.  Also not used unless `use_airebo_lambda = true`.
+        pub rho: f64, // Å
         /// The would-be smooth cutoff region with respect to bond length in reactive potential.
         ///
         /// We don't model the smooth cutoff, but this is useful to keep around for reference,
@@ -191,6 +197,7 @@ mod params {
                 ],
                 Q: 0.313_460_296_0833, // Å
                 A: 10953.544_162_170, // eV
+                rho: NAN, // unused for CC
                 alpha: 4.746_539_060_6595, // Å-1
                 cutoff_region: (1.7, 2.0), // Å
                 forbidden_region: (1.8, 1.9), // Å
@@ -202,6 +209,7 @@ mod params {
                 beta: [1.715_892_17, 0.0, 0.0], // Å-1
                 Q: 0.370_471_487_045, // Å
                 A: 32.817_355_747, // Å
+                rho: 0.7415887, // Å (LAMMPS value)
                 alpha: 3.536_298_648, // Å-1
                 cutoff_region: (1.1, 1.7), // Å
                 forbidden_region: (1.3, 1.5), // Å
@@ -213,6 +221,7 @@ mod params {
                 beta: [1.434_458_059_25, 0.0, 0.0], // Å-1
                 Q: 0.340_775_728, // Å
                 A: 149.940_987_23, // eV
+                rho: 1.09, // Å (LAMMPS value)
                 alpha: 4.102_549_83, // Å-1
                 cutoff_region: (1.3, 1.8), // Å
                 forbidden_region: (1.45, 1.65), // Å
@@ -246,7 +255,6 @@ mod params {
         /// The G splines (functions of bond angle) are also significantly different,
         /// and quite possibly less precise.
         pub fn new_lammps() -> Self {
-            // Brenner Table 2
             let type_params_cc = TypeParams {
                 B: [
                     12388.791_977_983_75, // eV
@@ -260,29 +268,30 @@ mod params {
                 ],
                 Q: 0.313_460_296_083_2605, // Å
                 A: 10953.544_162_169_92, // eV
+                rho: NAN, // unused for CC
                 alpha: 4.746_539_060_659_529, // Å-1
                 cutoff_region: (1.7, 2.0), // Å
                 forbidden_region: (1.8, 1.9), // Å
             };
 
-            // Brenner Table 6
             let type_params_hh = TypeParams {
                 B: [28.2297, 0.0, 0.0], // eV
                 beta: [1.708, 1.0, 1.0], // Å-1
                 Q: 0.370, // Å
                 A: 31.6731, // Å
                 alpha: 3.536, // Å-1
+                rho: 0.7415887, // Å
                 cutoff_region: (1.1, 1.7), // Å
                 forbidden_region: (1.3, 1.5), // Å
             };
 
-            // Brenner Table 7
             let type_params_ch = TypeParams {
                 B: [32.355_186_658_732_56, 0.0, 0.0], // eV
                 beta: [1.434_458_059_249_837, 0.0, 0.0], // Å-1
                 Q: 0.340_775_728_225_7080, // Å
                 A: 149.940_987_228_812, // eV
                 alpha: 4.102_549_828_548_784, // Å-1
+                rho: 1.09, // Å
                 cutoff_region: (1.3, 1.8), // Å
                 forbidden_region: (1.45, 1.65), // Å
             };
@@ -309,6 +318,8 @@ mod params {
     }
 }
 
+//---------------------------------------------------------------------------------
+
 use self::interactions::Interactions;
 mod interactions {
     use super::*;
@@ -330,6 +341,7 @@ mod interactions {
 
     impl Interactions {
         pub fn compute(
+            params: &Params,
             coords: &Coords,
             types: &[AtomType],
             bond_graph: &PeriodicGraph,
@@ -351,6 +363,23 @@ mod interactions {
                 for frac_bond_ij in bond_graph.frac_bonds_from(site_i.index()) {
                     let site_j = SiteI(frac_bond_ij.to);
                     let cart_vector = frac_bond_ij.cart_vector_using_cache(&cart_cache).unwrap();
+
+                    let params_ij = params.by_type[site_type[site_i]][site_type[site_j]];
+                    match cart_vector.norm() {
+                        r if r > params_ij.cutoff_region.1 => continue,
+                        r if r > params_ij.forbidden_region.1 => {
+                            reactive_warnings::log_nonbonded(params_ij.cutoff_region, r);
+                            continue
+                        },
+                        r if r >= params_ij.forbidden_region.0 => {
+                            bail!{"detected reaction in non-reactive REBO potential (r = {})", r};
+                        },
+                        r if r >= params_ij.cutoff_region.0 => {
+                            reactive_warnings::log_bonded(params_ij.cutoff_region, r);
+                        },
+                        _ => {},
+                    }
+
                     bond_source.push(site_i);
                     bond_target.push(site_j);
                     bond_is_canonical.push(frac_bond_ij.is_canonical());
@@ -382,6 +411,10 @@ mod interactions {
                     };
                     let bond_ji = BondI(bond_div[site_j].0 + index_ji);
                     bond_reverse_index.push(bond_ji);
+
+                    if (site_type[site_i], site_type[site_j]) == (AtomType::Hydrogen, AtomType::Hydrogen) {
+                        println!("HH bond: {} {}", site_i, site_j);
+                    }
                 } // for bond_ij
             } // for node
 
@@ -472,6 +505,28 @@ mod interactions {
     }
 }
 
+pub fn compute_bond_graph(
+    params: &Params,
+    coords: &Coords,
+    elements: &[meta::Element],
+) -> FailResult<PeriodicGraph> {
+    let types = elements.iter().cloned().map(AtomType::from_element).collect::<FailResult<Vec<_>>>()?;
+    let max_radius = {
+        params.by_type.values()
+            .flat_map(|x| x.values().map(|x| x.cutoff_region.1))
+            .fold(::std::f64::NEG_INFINITY, |a, b| f64::max(a, b))
+    };
+
+    Ok({
+        ::math::bonds::FracBonds::from_brute_force_with_meta(
+            &coords, max_radius, &types,
+            |&a, &b| params.by_type[a][b].cutoff_region.1,
+        )?.to_periodic_graph()
+    })
+}
+
+//---------------------------------------------------------------------------------
+
 pub fn compute(
     params: &Params,
     coords: &Coords,
@@ -480,7 +535,7 @@ pub fn compute(
     use_rayon: bool,
 ) -> FailResult<(f64, Vec<V3>)> {
     let types = elements.iter().cloned().map(AtomType::from_element).collect::<FailResult<Vec<_>>>()?;
-    let interactions = Interactions::compute(coords, &types, bonds)?;
+    let interactions = Interactions::compute(params, coords, &types, bonds)?;
     let (value, d_deltas) = compute_rebo_bonds(params, &interactions, use_rayon)?;
 
     let mut d_positions = IndexVec::from_elem_n(V3::zero(), interactions.num_sites());
@@ -518,6 +573,9 @@ fn compute_rebo_bonds(
     // Q, A, alpha, beta_n, B_n are parameters
     // b_{ij}^{pi}, b_{ij}^{sigma-pi}, b_{ij}^{DH} are complicated bond-order subexpressions
 
+    dbg!("nsites: {}", interactions.num_sites());
+    dbg!("nbonds: {}", interactions.num_bonds());
+
     //-------------------
     // NOTE:
     //
@@ -536,6 +594,8 @@ fn compute_rebo_bonds(
     // On large systems, our performance is expected to be bounded by cache misses.
     // For this reason, we should aim to make as few passes over the data as necessary,
     // leaving vectorization as only a secondary concern.
+    //
+    // TODO: Actual benchmarks >_>
     struct FirstPassSiteData {
         // Brenner's N_i
         tcoord: f64,
@@ -543,8 +603,7 @@ fn compute_rebo_bonds(
         //
         // We keep these around because they may be zero. (even for nonreactive REBO,
         // we use a bond search radius that is large enough to include the point of
-        // zero weight so that we can detect if a fractional weight ever appears and
-        // bail out)
+        // zero weight so that we can detect if a fractional weight ever appears)
         bond_weight: SiteBondVec<f64>,
         // Brenner's V^R(r_ij)
         bond_VR: SiteBondVec<f64>,
@@ -577,8 +636,9 @@ fn compute_rebo_bonds(
                 let (length, length_d_delta) = norm(delta);
                 let EasyParts {
                     weight, VA, VA_d_length, VR, VR_d_length,
-                } = easy_parts::Input { params, type_i, type_j, length }.compute_paranoid(1e-3)?;
+                } = easy_parts::Input { params, type_i, type_j, length }.compute()?;
 
+                dbg!("weight: {:.9}", weight);
                 tcoord += weight;
                 bond_weight.push(weight);
 
@@ -596,9 +656,6 @@ fn compute_rebo_bonds(
                 bond_weight,
                 bond_VR, bond_VR_d_delta,
                 bond_VA, bond_VA_d_delta,
-                // NOTE: weight_d_length is now dropped from consideration,
-                //       meaning the rest of the code only models a nonreactive
-                //       potential
             })
         }).collect::<FailResult<_>>()?
     });
@@ -648,7 +705,8 @@ fn compute_rebo_bonds(
             site: site_i,
             bond_weights: bond_weight,
             bond_VAs: bond_VA,
-        }.compute_paranoid(1e-3);
+//        }.compute_paranoid(1e-3);
+        }.compute();
         let SiteSigmaPiTerm {
             value: Vsp_i,
             d_deltas: Vsp_i_d_delta,
@@ -660,7 +718,7 @@ fn compute_rebo_bonds(
         for index_ij in 0..bond_VA.len() {
             let Vsp_i_d_VA_ij = Vsp_i_d_VA[index_ij];
             let VA_ij_d_delta_ij = bond_VA_d_delta[index_ij];
-            site_V_d_delta[index_ij] +=  Vsp_i_d_VA_ij * VA_ij_d_delta_ij;
+            site_V_d_delta[index_ij] += Vsp_i_d_VA_ij * VA_ij_d_delta_ij;
         }
 
         //-----------------------------------------------
@@ -777,13 +835,8 @@ mod easy_parts {
         let Input { params, type_i, type_j, length } = input;
         let params_ij = params.by_type[type_i][type_j];
 
-        let weight = match IntervalSide::classify(params_ij.forbidden_region, length) {
-            IntervalSide::Left => 1.0,
-            IntervalSide::Right => 0.0,
-            IntervalSide::Inside => bail!{
-                "detected reaction in non-reactive REBO potential (r = {})", length
-            },
-        };
+        // Bonds of zero weight were trimmed from the interactions, and we're doing nonreactive.
+        let weight = 1.0;
 
         let VA;
         let VA_d_length;
@@ -905,15 +958,22 @@ mod site_sigma_pi_term {
         let mut type_present = enum_map!{_ => false};
         let mut ccoord_i = 0.0;
         let mut hcoord_i = 0.0;
-        let mut bond_target_types = SiteBondVec::<AtomType>::new();
-        for (bond, &weight) in zip_eq!(interactions.bonds(site_i), bond_weights) {
-            let target_type = interactions.site(bond.target).atom_type;
+        let mut bond_target_types = SiteBondVec::new();
+        // (recompute these for a simpler signature and less data management)
+        let mut bond_lengths = SiteBondVec::new();
+        let mut bond_lengths_d_delta = SiteBondVec::new();
+        for (__bond, &weight) in zip_eq!(interactions.bonds(site_i), bond_weights) {
+            let target_type = interactions.site(__bond.target).atom_type;
             match target_type {
                 AtomType::Carbon => ccoord_i += weight,
                 AtomType::Hydrogen => hcoord_i += weight,
             }
             bond_target_types.push(target_type);
             type_present[target_type] = true;
+
+            let (length, length_d_delta) = norm(__bond.cart_vector);
+            bond_lengths.push(length);
+            bond_lengths_d_delta.push(length_d_delta);
         }
 
         // Handle all terms
@@ -963,21 +1023,24 @@ mod site_sigma_pi_term {
             {
                 // Compute bsp as a function of many things...
                 let out = bondorder_sigma_pi::Input {
-                    params, type_i, type_j, ccoord_ij, hcoord_ij, P_ij,
+                    params, type_i, type_j, ccoord_ij, hcoord_ij, P_ij, index_ij,
                     coses_ijk: &coses_ijk,
                     types_k: &bond_target_types,
                     weights_ik: bond_weights,
-                    skip_index: index_ij, // used to exclude the ijj angle
+                    lengths_ik: &bond_lengths,
                 }.compute_paranoid(1e-3);
+//                }.compute()?;
                 let BondOrderSigmaPi {
                     value: tmp_value,
+                    d_lengths_ik: bsp_ij_d_lengths_ik,
                     d_coses_ijk: bsp_ij_d_coses_ijk,
                 } = out;
 
-                // ...and now reformulate it as a function solely of the deltas.
+                // ...and now reformulate away the explicit dependence on the cosines,
+                // and lengths, knowing that they each are a function of the deltas.
                 let mut tmp_d_deltas: SiteBondVec<V3> = sbvec_filled(V3::zero(), bond_weights.len());
 
-                // Some derivatives also come from the ik bonds.
+                // Cosines at all indices except index_ij
                 for (index_ik, bsp_ij_d_cos_ijk) in bsp_ij_d_coses_ijk.into_iter().enumerate() {
                     // Mind the gap
                     if index_ij == index_ik {
@@ -992,6 +1055,12 @@ mod site_sigma_pi_term {
                     // These are index_ij and index_ik because we are indexing the deltas.
                     tmp_d_deltas[index_ij] += bsp_ij_d_cos_ijk * cos_ijk_d_delta_ij;
                     tmp_d_deltas[index_ik] += bsp_ij_d_cos_ijk * cos_ijk_d_delta_ik;
+                }
+
+                // Lengths at all indices
+                for (index_ik, bsp_ij_d_length_ik) in bsp_ij_d_lengths_ik.into_iter().enumerate() {
+                    let length_ik_d_delta_ik = bond_lengths_d_delta[index_ik];
+                    tmp_d_deltas[index_ik] += bsp_ij_d_length_ik * length_ik_d_delta_ik;
                 }
 
                 bsp_ij = tmp_value;
@@ -1059,21 +1128,22 @@ mod bondorder_sigma_pi {
         // bond from atom i to another atom j
         pub type_i: AtomType,
         pub type_j: AtomType,
+        pub index_ij: usize, // SiteBondVec index
         pub ccoord_ij: f64,
         pub hcoord_ij: f64,
         // precomputed spline that depends on the coordination at i and the atom type at j
         pub P_ij: f64,
         // cosines of this bond with every other bond at i, and their weights
         pub types_k: &'a [AtomType],
+        pub lengths_ik: &'a [f64],
         pub weights_ik: &'a [f64],
         pub coses_ijk: &'a [f64], // cosine between i->j and i->k
-        // one of the items in the arrays is the ij bond (we must ignore it)
-        pub skip_index: usize,
     }
+
     pub struct BondOrderSigmaPi {
         pub value: f64,
-        // values at skip_index are unspecified
-        pub d_coses_ijk: SiteBondVec<f64>,
+        pub d_coses_ijk: SiteBondVec<f64>, // value at index_ij is unspecified
+        pub d_lengths_ik: SiteBondVec<f64>, // this one has values at all indices
     }
 
     impl<'a> Input<'a> {
@@ -1088,7 +1158,7 @@ mod bondorder_sigma_pi {
         //        ))
         let Input {
             params, type_i, type_j, ccoord_ij, hcoord_ij, P_ij,
-            types_k, weights_ik, coses_ijk, skip_index,
+            types_k, lengths_ik, weights_ik, coses_ijk, index_ij,
         } = input;
         let tcoord_ij = ccoord_ij + hcoord_ij;
         dbg!("Nt: {:.9}", tcoord_ij);
@@ -1096,6 +1166,7 @@ mod bondorder_sigma_pi {
         // properties of the stuff in the square root
         let mut inner_value = 0.0;
         let mut inner_d_coses_ijk = SiteBondVec::new();
+        let mut inner_d_lengths_ik = sbvec_filled(0.0, lengths_ik.len());
 
         // 1 + P_{ij}(N_i^C, N_i^H)
         //   + sum_{k /= i, j} e^{\lambda_{ijk}} f^c(r_{ik}) G(cos(t_{ijk})
@@ -1109,16 +1180,22 @@ mod bondorder_sigma_pi {
                 inner_d_coses_ijk.push(0.0);
                 continue;
             }
-            if index_ik == skip_index {
+            if index_ik == index_ij {
                 inner_d_coses_ijk.push(NAN);
                 continue;
             }
 
-            let exp_lambda = match params.use_airebo_lambda {
-                true => airebo_exp_lambda(type_i, (type_j, type_k)),
-                false => brenner_exp_lambda(type_i, (type_j, type_k)),
-            };
-            dbg!("explambda: {:.9}", exp_lambda);
+            let length_ij = lengths_ik[index_ij];
+            let length_ik = lengths_ik[index_ik];
+
+            let ExpLambda {
+                value: exp,
+                d_length_ij: exp_d_length_ij,
+                d_length_ik: exp_d_length_ik,
+            } = exp_lambda::Input {
+                params, type_i, type_j, type_k, length_ij, length_ik,
+            }.compute();
+            dbg!("explambda: {:.9}", exp);
 
             let GSpline {
                 value: G,
@@ -1127,8 +1204,10 @@ mod bondorder_sigma_pi {
             dbg!("g: {:.9} {:.9}", G, G_d_cos_ijk);
 
 //            dbg!("bspterm: {:.9}", exp_lambda * weight_ik * G);
-            inner_value += exp_lambda * weight_ik * G;
-            inner_d_coses_ijk.push(exp_lambda * weight_ik * G_d_cos_ijk);
+            inner_value += exp * weight_ik * G;
+            inner_d_coses_ijk.push(exp * weight_ik * G_d_cos_ijk);
+            inner_d_lengths_ik[index_ik] += exp_d_length_ik * weight_ik * G;
+            inner_d_lengths_ik[index_ij] += exp_d_length_ij * weight_ik * G;
         }
 
 //        dbg!("bspsum: {:.9}", inner_value);
@@ -1141,6 +1220,7 @@ mod bondorder_sigma_pi {
         Output {
             value: value,
             d_coses_ijk: sbvec_scaled(prefactor, inner_d_coses_ijk),
+            d_lengths_ik: sbvec_scaled(prefactor, inner_d_lengths_ik),
         }
     }
 
@@ -1150,11 +1230,11 @@ mod bondorder_sigma_pi {
         pub fn compute_paranoid(self, tol: f64) -> Output {
             let output = self.clone().compute();
             { // FIXME block unnecessary after NLL lands
-                let Output { value, ref d_coses_ijk } = output;
+                let Output { value, ref d_coses_ijk, ref d_lengths_ik } = output;
 
                 let mut coses_ijk = self.coses_ijk.to_vec();
                 for index_ik in 0..self.coses_ijk.len() {
-                    if index_ik == self.skip_index {
+                    if index_ik == self.index_ij {
                         continue;
                     }
                     assert_close!(
@@ -1170,6 +1250,14 @@ mod bondorder_sigma_pi {
                         }),
                     );
                 }
+
+                assert_close!(
+                    rel=tol, abs=tol,
+                    &d_lengths_ik[..],
+                    &numerical::gradient(1e-4, None, self.lengths_ik, |lengths_ik| {
+                        Input { lengths_ik, ..self }.compute().value
+                    })[..],
+                );
             }
             output
         }
@@ -1325,11 +1413,6 @@ mod bondorder_pi {
                     sum_d_deltas_ik[index_ij] += sinsq_d_delta_ij * weight_ik * weight_jl;
                     sum_d_deltas_ik[index_ik] += sinsq_d_delta_ik * weight_ik * weight_jl;
                     sum_d_deltas_jl[index_jl] += sinsq_d_delta_jl * weight_ik * weight_jl;
-
-                    // FIXME: This doesn't make sense... this shouldn't be necessary and in fact
-                    //        it should constitute "double-counting"... but it makes
-                    //        `compute_paranoid` succeed.
-//                    sum_d_deltas_jl[index_ji] -= sinsq_d_delta_ij * weight_ik * weight_jl;
                 } // for bond_jl
             } // for bond_ik
 
@@ -1463,32 +1546,90 @@ mod ycoord {
     }
 }
 
-// some parameter `exp(\lambda_{ijk})`
-//
-fn brenner_exp_lambda(i: AtomType, jk: (AtomType, AtomType)) -> f64 {
-    match (i, jk) {
-        (AtomType::Carbon, _) |
-        (AtomType::Hydrogen, (AtomType::Carbon, AtomType::Carbon)) => 1.0, // exp(0)
+use self::exp_lambda::ExpLambda;
+mod exp_lambda {
+    use super::*;
 
-        (AtomType::Hydrogen, (AtomType::Hydrogen, AtomType::Hydrogen)) => f64::exp(4.0),
-
-        (AtomType::Hydrogen, (AtomType::Carbon, AtomType::Hydrogen)) |
-        (AtomType::Hydrogen, (AtomType::Hydrogen, AtomType::Carbon)) => {
-            // FIXME: The brenner paper says they fit this, but I can't find the value anywhere.
-            //
-            // (lammps does something weird here involving the bond lengths and a parameter
-            //  they call rho... did I miss something?)
-            panic!{"\
-                Bond-bond interactions of type HHC (an H and a C both bonded to an H) are \
-                currently missing an interaction parameter\
-            "}
-        },
+    pub type Output = ExpLambda;
+    pub struct Input<'a> {
+        pub params: &'a Params,
+        pub type_i: AtomType,
+        pub type_j: AtomType,
+        pub type_k: AtomType,
+        pub length_ij: f64,
+        pub length_ik: f64,
     }
-}
 
-fn airebo_exp_lambda(i: AtomType, jk: (AtomType, AtomType)) -> f64 {
-    // FIXME
-    brenner_exp_lambda(i, jk)
+    pub struct ExpLambda {
+        pub value: f64,
+        pub d_length_ij: f64,
+        pub d_length_ik: f64,
+    }
+
+    impl Output {
+        fn constant(value: f64) -> Self {
+            Output { value, d_length_ij: 0.0, d_length_ik: 0.0 }
+        }
+    }
+
+    impl<'a> Input<'a> {
+        pub fn compute(self) -> Output { compute(self) }
+    }
+
+    fn compute(input: Input<'_>) -> Output {
+        let Input { params, type_i, type_j, type_k, length_ij, length_ik } = input;
+        match params.use_airebo_lambda {
+            // `exp(lambda_ijk)` as defined in the 2nd-gen REBO paper.
+            false => {
+                match (type_i, (type_j, type_k)) {
+                    (AtomType::Carbon, _) |
+                    (AtomType::Hydrogen, (AtomType::Carbon, AtomType::Carbon)) => Output::constant(1.0),
+
+                    (AtomType::Hydrogen, (AtomType::Hydrogen, AtomType::Hydrogen)) => Output::constant(f64::exp(4.0)),
+
+                    (AtomType::Hydrogen, (AtomType::Carbon, AtomType::Hydrogen)) |
+                    (AtomType::Hydrogen, (AtomType::Hydrogen, AtomType::Carbon)) => {
+                        // FIXME: The brenner paper says they fit this, but I can't find the value anywhere.
+                        panic!{"\
+                            Bond-bond interactions of type HHC (an H and a C both bonded to an H) are \
+                            currently missing an interaction parameter\
+                        "}
+                    },
+                }
+            },
+
+            // The highly suspicious definition of lambda in the AIREBO paper.
+            //
+            // LAMMPS faithfully implements exactly this for both REBO and AIREBO.
+            //
+            // You may notice that the definition is not dimensionally sound;
+            // it computes the exponential of a quantity with units of length.
+            // Presumably this quantity must be in Angstroms.
+            //
+            // TODO: Figure out what on Earth the deal with this is...
+            true => {
+                // delta(i, H) * 4 * [ kronecker(k, C) * rho_CH + kronecker(k, H) * rho_HH
+                //                   - kronecker(j, C) * rho_CH - kronecker(j, H) * rho_HH
+                //                   + r_ij - r_ik
+                //                   ]
+                match type_i {
+                    AtomType::Carbon => Output::constant(1.0),
+                    AtomType::Hydrogen => {
+                        let mut arg = 0.0;
+                        arg += params.by_type[type_k][AtomType::Hydrogen].rho;
+                        arg -= params.by_type[type_j][AtomType::Hydrogen].rho;
+                        arg += length_ij;
+                        arg -= length_ik;
+
+                        let value = f64::exp(4.0 * arg);
+                        let d_length_ij = 4.0 * value;
+                        let d_length_ik = -4.0 * value;
+                        Output { value, d_length_ij, d_length_ik }
+                    },
+                }
+            },
+        }
+    }
 }
 
 // `1 - \cos(\Theta_{ijkl})^2` in Brenner (equation 19)
@@ -1927,19 +2068,6 @@ mod f_spline {
     }
 
     impl<'a> Input<'a> {
-        fn flip(self) -> Self {
-            Input {
-                params: self.params,
-                type_i: self.type_j,
-                type_j: self.type_i,
-                tcoord_ij: self.tcoord_ji,
-                tcoord_ji: self.tcoord_ij,
-                xcoord_ij: self.xcoord_ij,
-            }
-        }
-    }
-
-    impl<'a> Input<'a> {
         pub fn compute(self) -> Output { compute(self) }
     }
 
@@ -1948,15 +2076,13 @@ mod f_spline {
         let Input { params, type_i, type_j, tcoord_ij, tcoord_ji, xcoord_ij } = input;
 
         let poly = match (type_i, type_j) {
-            (AtomType::Hydrogen, AtomType::Carbon) => {
-                // (written to break if the output changes to another type that needs
-                //  to be flipped back)
-                let value: f64 = input.flip().compute();
-                return value;
-            },
             (AtomType::Carbon, AtomType::Carbon) => &params.F.CC,
-            (AtomType::Carbon, AtomType::Hydrogen) => &params.F.CH,
             (AtomType::Hydrogen, AtomType::Hydrogen) => &params.F.HH,
+
+            // NOTE: The fact that F_CH(j,i,k) = F_CH(i,j,k) (see note in `splines::F::brenner_CH`)
+            //       implies that F_HC(i,j,k) = F_CH(i,j,k).
+            (AtomType::Carbon, AtomType::Hydrogen) |
+            (AtomType::Hydrogen, AtomType::Carbon) => &params.F.CH,
         };
         // Ignore grad because total derivative of each variable is locally zero in
         // the non-reactive case.
@@ -1969,39 +2095,47 @@ mod f_spline {
     // particular coordinations
     impl<'a> Input<'a> {
         pub fn is_tested(&self) -> bool {
+            use self::splines::{MAX_I, MAX_J, MAX_K};
+
             let Input { params: _, type_i, type_j, tcoord_ij, tcoord_ji, xcoord_ij } = *self;
 
             let point = V3([tcoord_ij, tcoord_ji, xcoord_ij]);
-            let mut int_point = V3([tcoord_ij, tcoord_ji, xcoord_ij]).map(|x| x as i32);
+            let int_point = V3([tcoord_ij, tcoord_ji, xcoord_ij]).map(|x| x as i32);
             if point != int_point.map(|x| x as f64) {
                 return false; // fractional weight
             }
-            int_point[0] = int_point[0].min(splines::MAX_I as i32);
-            int_point[1] = int_point[1].min(splines::MAX_J as i32);
-            int_point[2] = int_point[2].min(splines::MAX_K as i32);
+            // we waited to do this because the semantics of negative floating points
+            // being cast to unsigned ints is still uncertain;
+            // we know the only possible negative values have extremely small magnitude,
+            // and could not pass the round-trip test.
+            let mut int_point = int_point.map(|x| x as usize);
+            int_point[0] = int_point[0].min(MAX_I);
+            int_point[1] = int_point[1].min(MAX_J);
+            int_point[2] = int_point[2].min(MAX_K);
+
+            // NOTE: F_CH(j,i,k) = F_CH(i,j,k) (see note in `splines::F::brenner_CH`),
+            //       so we can limit ourselves to `i` and `j` regardless of atom type.
+            let V3([i, j, k]) = int_point;
+            let (i, j) = (usize::min(i, j), usize::max(i, j));
 
             match (type_i, type_j) {
-                (AtomType::Carbon, AtomType::Carbon) => {
-                    let V3([i, j, k]) = int_point;
-                    let (i, j) = (i32::min(i, j), i32::max(i, j));
-                    match [i, j, k] {
-                        // graphene/graphite
-                        [2, 2, 9] => true,
-
-                        // diamond is [3, 3, 1],
-                        // and gyroids can reach an impressive [3, 3, 19]!
-                        // The whole [3, 3] row is zero in the table.
-                        [3, 3, _] => true,
-
-                        // nanotubes
-                        [1, 1, 3] |
-                        [1, 2, 6] |
-                        [0, 2, 5] => true,
-                        _ => false,
-                    }
+                (AtomType::Carbon, AtomType::Carbon) => match [i, j, k] {
+                    [2, 2, 9] => true, // graphene/graphite
+                    [3, 3, MAX_K] => true, // gyroids (can reach [3, 3, 19]!)
+                    [1, 1, 3] |
+                    [1, 2, 6] |
+                    [0, 2, 5] => true, // nanotubes
+                    [2, 2, 3] |
+                    [2, 2, 6] => true, // GNR
+                    _ => false,
                 },
 
-                // Tables 6 and 9
+                (AtomType::Carbon, AtomType::Hydrogen) |
+                (AtomType::Hydrogen, AtomType::Carbon) => match [i, j, k] {
+                    [0, 2, 5] => true, // GNR
+                    _ => false,
+                },
+
                 _ => false,
             }
         }
@@ -2234,6 +2368,68 @@ fn boole(cond: bool) -> f64 {
 
 //-----------------------------------------------------------------------------
 
+mod reactive_warnings {
+    use super::*;
+
+    use ::std::sync::RwLock;
+
+    struct Records {
+        worst_nonbonded_alpha: Option<f64>,
+        worst_bonded_alpha: Option<f64>,
+    }
+
+    lazy_static! {
+        static ref RECORDS: RwLock<Records> = {
+            RwLock::new(Records {
+                worst_nonbonded_alpha: None,
+                worst_bonded_alpha: None,
+            })
+        };
+    }
+
+    pub fn log_nonbonded(interval: (f64, f64), value: f64) {
+        let (alpha, _) = linterp_from(interval, (1.0, 0.0), value); // flipped so unbonded gets 0
+        if alpha > RECORDS.read().unwrap().worst_nonbonded_alpha.unwrap_or(0.0) {
+            let mut records = RECORDS.write().unwrap();
+
+            print_explanation_once(&records);
+            warn!(
+                "rebo: New record length for nearby atoms: {} ({:.02}% into reactive regime)",
+                value, alpha * 100.0,
+            );
+            records.worst_nonbonded_alpha = Some(alpha);
+        }
+    }
+
+    pub fn log_bonded(interval: (f64, f64), value: f64) {
+        let (alpha, _) = linterp_from(interval, (0.0, 1.0), value);
+        if alpha > RECORDS.read().unwrap().worst_bonded_alpha.unwrap_or(0.0) {
+            let mut records = RECORDS.write().unwrap();
+
+            print_explanation_once(&records);
+            warn!(
+                "rebo: New record length for distant atoms: {} ({:.02}% into reactive regime)",
+                value, alpha * 100.0,
+            );
+            records.worst_bonded_alpha = Some(alpha);
+        }
+    }
+
+    #[inline(always)]
+    fn print_explanation_once(Records { worst_bonded_alpha, worst_nonbonded_alpha }: &Records) {
+        match (worst_bonded_alpha, worst_nonbonded_alpha) {
+            (None, None) => warn!{"\
+                A pair of atoms were found in nonreactive REBO that would normally have a \
+                fractional weight associated with their interaction. The potential will thus \
+                produce slightly different results from the full, reactive implementation.\n\
+            "},
+            _ => {},
+        }
+    }
+}
+
+//-----------------------------------------------------------------------------
+
 #[inline(always)] // elide large stack-to-stack copies
 fn sbvec_scaled<T: ops::MulAssign<f64>>(f: f64, mut xs: SiteBondVec<T>) -> SiteBondVec<T>
 { scale_mut(f, &mut xs); xs }
@@ -2308,6 +2504,15 @@ mod derivative_tests {
 #[cfg(test)]
 fn uniform(a: f64, b: f64) -> f64 { ::rand::random::<f64>() * (b - a) + a }
 
+fn try_num_grad_v3<E>(
+    interval: f64,
+    point: V3,
+    mut value_fn: impl FnMut(V3) -> Result<f64, E>,
+) -> Result<V3, E> {
+    numerical::try_gradient(interval, None, &point.0, |v| value_fn(v.to_array()))
+        .map(|x| x.to_array())
+}
+
 fn num_grad_v3(
     interval: f64,
     point: V3,
@@ -2352,9 +2557,10 @@ mod input_tests {
         Ok(())
     }
 
+    // Can single out one of the tests for obtaining its debug output
     #[test]
-    fn nanotubes() -> FailResult<()> {
-        single("nanotubes")
+    fn singled_out() -> FailResult<()> {
+        single("7azz-gnr")
     }
 
     fn single(name: &str) -> FailResult<()> {
@@ -2373,11 +2579,7 @@ mod input_tests {
 
         let expected: ForceFile = ::serde_json::from_reader(File::open(&out_path)?)?;
         let Poscar { coords, elements, .. } = Poscar::from_reader(File::open(in_path)?)?;
-        let bond_graph = {
-            let range = params.by_type[AtomType::Carbon][AtomType::Carbon].cutoff_region.1 * 1.01;
-            ::math::bonds::FracBonds::from_brute_force_very_dumb(&coords, range)?
-                .to_periodic_graph()
-        };
+        let bond_graph = compute_bond_graph(&params, &coords, &elements)?;
 
         let (value, grad) = compute(&params, &coords, &elements, &bond_graph, use_rayon)?;
 

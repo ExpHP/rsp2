@@ -308,21 +308,7 @@ pub mod F {
         input.dk.assign((1, 2, 5), -0.020_044);
 
         // symmetrize
-        let n = input.value.len();
-        for upper in 0..n {
-            for lower in 0..upper {
-                for k in 0..input.value[0][0].len() {
-                    assert_eq!(input.value[upper][lower][k], 0.0);
-                    input.value[upper][lower][k] = input.value[lower][upper][k];
-                    input.dk[upper][lower][k] = input.dk[lower][upper][k];
-                }
-            }
-        }
-        for i in 0..n {
-            for j in 0..n {
-                input.dj[i][j].copy_from_slice(&input.di[j][i]);
-            }
-        }
+        let input = input.symmetrize();
 
         // The values in Brenner (2002) are actually 2 * F.
         let input = input.scale(0.5);
@@ -349,6 +335,22 @@ pub mod F {
         input.value.assign((1, 2, 1..=9), -0.25);  // Equations (23)–(25)
         input.value.assign((1, 3, 1..=9), -0.213); // Equations (23)–(25)
         input.value.assign((1, 1, 1..=9), -0.5);   // Equations (23)–(25)
+
+        // Brenner's paper says that "F is symmetric", and Table 9 explicitly says that
+        // "F(i, j, k) = F(j, i, k)", but it still seems open to interpretation whether
+        // he merely meant that `F_ij(i,j,k) = F_ji(j,i,k)`, or if he further meant
+        // that `F_ij(i,j,k) = F_ij(i,j,k)`. (in turn implying that `F_CH == F_HC`)
+        //
+        // We will assume he meant the latter, stronger condition, based on the following:
+        //
+        // * Stuart is more explicit and says `F_ij(i,j,k) = F_ij(j,i,k)`
+        // * The LAMMPS implementation does it this way.
+        // * All rows in Brenner's table suggestively have `i <= j`.
+        // * The table appears to imply that `F_CH(0, 2, 5-9)` was fitted to C6H6, when
+        //   the shape of the molecule implies that we should be fitting `F_CH(2, 0, 5-9)`.
+        //   (I would call this "killer evidence" were it not for the fact that he also
+        //    flipped the columns in the table right above this one ;P)
+        let input = input.symmetrize();
 
         // The values in Brenner (2002) are actually 2 * F.
         let input = input.scale(0.5);
@@ -787,6 +789,31 @@ pub mod tricubic {
                             }
                         }
                     }
+                }
+            }
+            self
+        }
+
+        /// Symmetrize a function so that `F(i, j, k) = F(j, i, k)`.
+        ///
+        /// The input function must be triangular. (`dj` must be uniformly zero,
+        /// and it must have `value[i][j] = dk[i][j] = 0` for `i > j`)
+        pub fn symmetrize(mut self) -> Self {
+            let n = self.value.len();
+            for upper in 0..n {
+                for lower in 0..upper {
+                    for k in 0..self.value[0][0].len() {
+                        assert_eq!(self.value[upper][lower][k], 0.0, "input was not triangular");
+                        assert_eq!(self.dk[upper][lower][k], 0.0, "input was not triangular");
+                        self.value[upper][lower][k] = self.value[lower][upper][k];
+                        self.dk[upper][lower][k] = self.dk[lower][upper][k];
+                    }
+                }
+            }
+            for i in 0..n {
+                for j in 0..n {
+                    assert!(self.dj[i][j].iter().all(|&x| x == 0.0), "input was not triangular");
+                    self.dj[i][j].copy_from_slice(&self.di[j][i]);
                 }
             }
             self

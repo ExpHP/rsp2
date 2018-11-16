@@ -252,15 +252,43 @@ impl CartBonds {
 }
 
 impl FracBonds {
-    pub fn from_brute_force_very_dumb(
+    /// Compute bonds using a really dumb brute force strategy.
+    ///
+    /// This function was originally even called `from_brute_force_very_dumb`, because when
+    /// I wrote it I was almost 100% certain it would have to be replaced with something
+    /// faster eventually.
+    ///
+    /// ...it has survived surprisingly well.
+    pub fn from_brute_force(
         original_coords: &Coords,
         range: impl BondRange,
     ) -> FailResult<Self> {
+        let fake_meta = vec![(); original_coords.len()];
+        Self::from_brute_force_with_meta(
+            original_coords,
+            (range.minimum(), range.maximum()),
+            &fake_meta,
+            |(), ()| range.maximum(),
+        )
+    }
 
+    /// Compute bonds, using different bond lengths for different types.
+    ///
+    /// `meta_range` must be symmetric, i.e. `meta_range(a, b) == meta_range(b, a)`;
+    /// this is not validated.
+    pub fn from_brute_force_with_meta<M>(
+        original_coords: &Coords,
+        // The largest possible range needed. This will affect the size of the
+        // supercell used to search for bonds.
+        full_range: impl BondRange,
+        meta: &[M],
+        // (note: returning impl BondRange is not yet supported by rust)
+        mut meta_range: impl FnMut(&M, &M) -> f64,
+    ) -> FailResult<Self> {
         // Construct a supercell large enough to contain all atoms that interact with an atom
         // in the centermost unit cell, assuming they're all reduced.
         let sc_builder = {
-            sufficiently_large_centered_supercell(original_coords.lattice(), range.maximum())?
+            sufficiently_large_centered_supercell(original_coords.lattice(), full_range.maximum())?
         };
 
         // ...like I said; they gotta be reduced.
@@ -289,9 +317,15 @@ impl FracBonds {
             num_visited += 1;
 
             for (&latt_to, &site_to, &cart_to) in izip!(&sc_latts, &sc_sites, &sc_carts) {
+                let range = (full_range.minimum(), meta_range(&meta[site_from], &meta[site_to]));
+
+                // FIXME: To ensure the result is symmetric, we rather precariously rely on the
+                //        assumption that `a - b == -(b - a)` for all floating point numbers where
+                //        the result is not NaN.  However, I do not believe this is true in all
+                //        possible rounding modes.
                 let sqnorm = (cart_to - cart_from).sqnorm();
                 let square = |x| x*x;
-                if square(range.minimum()) <= sqnorm && sqnorm <= square(range.maximum()) {
+                if square(range.0) <= sqnorm && sqnorm <= square(range.1) {
                     // No self interactions!
                     if (site_from, latt_from) == (site_to, latt_to) {
                         continue;
@@ -313,7 +347,7 @@ impl FracBonds {
 
         let out = FracBonds { num_atoms, from, to, image_diff };
         if cfg!(debug_assertions) {
-            out.sanity_check(original_coords, range);
+            out.sanity_check(original_coords, full_range, meta, meta_range);
         }
         Ok(out)
     }
@@ -335,17 +369,23 @@ impl FracBonds {
     }
 
     #[allow(unused)]
-    pub(crate) fn sanity_check(&self, coords: &Coords, range: impl BondRange) {
+    pub(crate) fn sanity_check<M>(
+        &self,
+        coords: &Coords,
+        full_range: impl BondRange,
+        meta: &[M],
+        mut meta_range: impl FnMut(&M, &M) -> f64,
+    ) {
         let square = |x| x*x;
-        let sqmin = square(range.minimum()) * (1.0 - 1e-9);
-        let sqmax = square(range.maximum()) * (1.0 + 1e-9);
         let cart_bonds = self.to_cart_bonds(coords);
-        for CartBond { cart_vector, .. } in &cart_bonds {
+        for CartBond { cart_vector, from, to } in &cart_bonds {
             let sqnorm = cart_vector.sqnorm();
+            let min = full_range.minimum();
+            let max = meta_range(&meta[from], &meta[to]).maximum();
             assert!(
-                sqmin <= sqnorm && sqnorm <= sqmax,
+                square(min) * (1.0 - 1e-9) <= sqnorm && sqnorm <= square(max) * (1.0 + 1e-9),
                 "(BUG) bad bond length: {} vs ({}, {})",
-                cart_vector.norm(), range.minimum(), range.maximum(),
+                cart_vector.norm(), min, max,
             );
         }
     }
@@ -589,7 +629,7 @@ mod tests {
         );
         let range = f64::sqrt(2.0) * 1.1;
 
-        let bonds = FracBonds::from_brute_force_very_dumb(&coords, range).unwrap();
+        let bonds = FracBonds::from_brute_force(&coords, range).unwrap();
         let actual = bonds.into_iter().collect::<BTreeSet<_>>();
         assert_eq!{
             actual,
@@ -620,7 +660,7 @@ mod tests {
         );
         let range = f64::sqrt(2.0) * 1.1;
 
-        let bonds = FracBonds::from_brute_force_very_dumb(&coords, range).unwrap();
+        let bonds = FracBonds::from_brute_force(&coords, range).unwrap();
         let actual = bonds.into_iter().collect::<BTreeSet<_>>();
         
         // For frac vector v and lattice L:
@@ -655,7 +695,7 @@ mod tests {
         ]);
         let coords = CoordsKind::Carts(vec![V3::zero()]);
         let coords = Coords::new(lattice, coords);
-        FracBonds::from_brute_force_very_dumb(&coords, 1.2).unwrap();
+        FracBonds::from_brute_force(&coords, 1.2).unwrap();
     }
 
     #[test]
@@ -674,7 +714,7 @@ mod tests {
         );
         let range = (1.5, 2.5);
 
-        let bonds = FracBonds::from_brute_force_very_dumb(&coords, range).unwrap();
+        let bonds = FracBonds::from_brute_force(&coords, range).unwrap();
         let actual = bonds.into_iter().collect::<BTreeSet<_>>();
         assert_eq!{
             actual,
@@ -704,7 +744,7 @@ mod tests {
         );
         let range = 0.1 * 1.1;
 
-        let bonds = FracBonds::from_brute_force_very_dumb(&coords, range).unwrap();
+        let bonds = FracBonds::from_brute_force(&coords, range).unwrap();
         let actual = bonds.into_iter().collect::<BTreeSet<_>>();
         assert_eq!{
             actual,
@@ -729,7 +769,7 @@ mod tests {
         );
         let range = 1.01 * 2.0;
 
-        let bonds = FracBonds::from_brute_force_very_dumb(&coords, range).unwrap();
+        let bonds = FracBonds::from_brute_force(&coords, range).unwrap();
         let actual = bonds.into_iter().collect::<BTreeSet<_>>();
         assert_eq!{
             actual,

@@ -49,7 +49,7 @@ impl PotentialBuilder<CommonMeta> for KolmogorovCrespiZ {
 
             // Collect VDW bonds
             // (with a much larger interaction radius than the bonds from CommonMeta)
-            let bonds = FracBonds::from_brute_force_very_dumb(&coords, params.cutoff_end() * 1.001)?;
+            let bonds = FracBonds::from_brute_force(&coords, params.cutoff_end() * 1.001)?;
             let bonds = FracBonds::from_iter(coords.len(),
                 (&bonds).into_iter()
                      // FIXME we should only enable interactions between adjacent layers
@@ -149,18 +149,22 @@ impl PotentialBuilder<CommonMeta> for Rebo {
 
     fn initialize_diff_fn(&self, coords: &Coords, meta: CommonMeta) -> FailResult<Box<DiffFn<CommonMeta>>>
     {
-        fn fn_body(me: &Rebo, _: &Coords, meta: CommonMeta) -> FailResult<Box<DiffFn<CommonMeta>>> {
+        fn fn_body(me: &Rebo, coords: &Coords, meta: CommonMeta) -> FailResult<Box<DiffFn<CommonMeta>>> {
             let cfg::PotentialReboNew { params } = me.cfg;
             let params = match params {
                 cfg::PotentialReboNewParams::Lammps => rebo_imp::Params::new_lammps(),
                 cfg::PotentialReboNewParams::Brenner => rebo_imp::Params::new_brenner(),
             };
-            let bonds: meta::FracBonds = match meta.pick() {
-                Some(bonds) => bonds,
-                None => bail!("REBO requires a bond graph."),
-            };
 
-            let bonds = bonds.to_periodic_graph();
+//            let bonds: meta::FracBonds = match meta.pick() {
+//                Some(bonds) => bonds,
+//                None => bail!("REBO requires a bond graph."),
+//            };
+
+            // FIXME: We can't currently use the bonds from meta because they might not have
+            //        the right bond distances for our params.
+            let elements: meta::SiteElements = meta.pick();
+            let bonds = rebo_imp::compute_bond_graph(&params, coords, &elements)?;
             let parallel = me.parallel;
             Ok(Box::new(Diff { params, bonds, parallel }))
         }
@@ -222,7 +226,7 @@ fn test_rebo_diff() -> FailResult<()> {
     }};
     let elements: meta::SiteElements = vec![elem::CARBON; 2].into();
     let masses: meta::SiteMasses = vec![meta::Mass(12.0107); 2].into();
-    let bonds: meta::FracBonds = ::std::rc::Rc::new(FracBonds::from_brute_force_very_dumb(&coords, 2.0)?);
+    let bonds: meta::FracBonds = ::std::rc::Rc::new(FracBonds::from_brute_force(&coords, 2.0)?);
     let meta = hlist![elements, masses, Some(bonds)];
 
 //    let pot_lmp = PotentialBuilder::from_config_parts(None, None, &cfg::Threading::Serial, &cfg::LammpsUpdateStyle::Safe, &[true; 3], &cfg_lmp).allow_blocking(true);
@@ -274,7 +278,7 @@ fn test_rebo_value() -> FailResult<()> {
 
     let elements: meta::SiteElements = vec![elem::CARBON; 2].into();
     let masses: meta::SiteMasses = vec![meta::Mass(12.0107); 2].into();
-    let bonds: meta::FracBonds = ::std::rc::Rc::new(FracBonds::from_brute_force_very_dumb(&coords, 2.0)?);
+    let bonds: meta::FracBonds = ::std::rc::Rc::new(FracBonds::from_brute_force(&coords, 2.0)?);
     println!("{:?}", bonds);
     let meta = hlist![elements, masses, Some(bonds)];
 
