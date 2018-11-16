@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
 
+# converts a POSCAR into a lammps data file that is suitable for use with ./lmp.in
+#
+# it is suggested that you not use this directly, but rather use
+# `./make-expected` to automate the process of running lammps.
+# (that script also outputs the json file for expected output)
+
 import sys
 from pymatgen.io.vasp import Poscar
 from pymatgen.core import Structure

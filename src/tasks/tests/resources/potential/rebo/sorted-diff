@@ -1,0 +1,101 @@
+#!/usr/bin/env python3
+
+# Multiset diffing, so that the output contains exactly those lines
+# that appear in one file but not the other. (appearing multiple
+# times if multiple copies are missing)
+#
+# You can *vaguely* approximate this with
+#      diff <(LC_ALL=C sort a.txt) <(LC_ALL=C sort b.txt)
+# but even that still sometimes gets confused.
+
+import sys
+
+try: from natsort import natsorted
+except ImportError: natsorted = None
+
+try: import colored
+except ImportError: colored = None
+
+def main():
+    import argparse
+    p = argparse.ArgumentParser(
+        description='diff two files as multisets of lines',
+    )
+    p.add_argument('FILE_A')
+    p.add_argument('FILE_B')
+    p.add_argument('-n', '--natural', help='give the results naturally sorted. (default is lexical)')
+    p.add_argument('--color', choices=['never', 'always', 'auto'], default = 'auto')
+    args = p.parse_args()
+
+    if args.natural:
+        if not natsorted:
+            die('please install the natsorted package')
+        get_sorted = natsorted
+    else:
+        get_sorted = sorted
+
+    if args.color == 'auto':
+        use_color = sys.stdout.isatty() and colored is not None
+    elif args.color == 'always':
+        if not colored:
+            die('please install the colored package')
+        use_color = True
+    elif args.color == 'never':
+        use_color = False
+    else:
+        assert False, 'complete switch'
+
+    lines_a = get_sorted(list(open(args.FILE_A)))
+    lines_b = get_sorted(list(open(args.FILE_B)))
+
+    diff = sorted_diff(lines_a, lines_b)
+
+    format_diff(diff, use_color, file=sys.stdout)
+
+def sorted_diff(a, b):
+
+    DONE = object()
+    def maybe_next(it):
+        try:
+            return next(it)
+        except StopIteration:
+            return DONE
+
+    a = iter(a)
+    b = iter(b)
+    next_a = maybe_next(a)
+    next_b = maybe_next(b)
+    while next_a is not DONE and next_b is not DONE:
+        if next_a < next_b:
+            yield ('<', next_a)
+            next_a = maybe_next(a)
+        elif next_a > next_b:
+            yield ('>', next_b)
+            next_b = maybe_next(b)
+        elif next_a == next_b:
+            next_a = maybe_next(a)
+            next_b = maybe_next(b)
+        else:
+            raise ValueError("input does not obey a total order")
+
+def format_diff(diff, use_color, file):
+    if use_color:
+        side_formatter = {
+            '<': (lambda s: colored.stylize('< ' + s, colored.fg('red'))),
+            '>': (lambda s: colored.stylize('> ' + s, colored.fg('green'))),
+        }
+    else:
+        side_formatter = {
+            '<': (lambda s: '< ' + s),
+            '>': (lambda s: '> ' + s),
+        }
+
+    for side, line in diff:
+        print(side_formatter[side](line), file=file, end='')
+
+def die(*args):
+    print(*args, file=sys.stderr)
+    sys.exit(1)
+
+if __name__ == '__main__':
+    main()

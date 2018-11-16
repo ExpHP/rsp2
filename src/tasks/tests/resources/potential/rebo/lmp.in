@@ -13,7 +13,7 @@ thermo_modify lost error
 #create_box 1 sim
 
 pair_style rebo
-pair_coeff * * CH.airebo C H
+pair_coeff * * CH.airebo-nonreactive C H
 
 # Not supported by rebo
 #compute B all property/local natom1 natom2

@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 
+# Runs lammps on a poscar and generates an expected output file
+
 from contextlib import contextmanager
 from os.path import join
+import os
 import numpy as np
 import json
 import tempfile
@@ -10,58 +13,108 @@ import shutil
 import subprocess
 
 def main():
+    import argparse
+    p = argparse.ArgumentParser()
+    p.add_argument('POSCAR')
+    p.add_argument(
+        '--tty-hack', action='store_true',
+        help=
+            'summon ancient demonic powers to tell lammps to write directly to the current tty device (your terminal), '
+            'bypassing all forms of STDOUT redirection. This may help you see error messages printed by lammps '
+            'in cases where lammps forgets to flush before aborting...')
+    args = p.parse_args()
+
     tempdir = tempfile.mkdtemp()
     try:
-        _main(tempdir)
+        _main(temp=tempdir, poscar=args.POSCAR, tty_hack=args.tty_hack)
     finally:
         shutil.rmtree(tempdir)
 
-def _main(temp):
-    shutil.copyfile('lmp.in', join(temp, 'lmp.in'))
-    data = subprocess.check_output(['python3', 'generate.py', sys.argv[1]])
-    with open(join(temp, 'data.data'), 'wb') as f:
-        f.write(data)
-    out = subprocess.check_output(['lmp', '-i', 'lmp.in', '-var', 'input', 'data.data'], cwd=temp)
-    out = out.decode('utf-8')
-    print(out, file=sys.stderr)
-    pe_line, = [line for line in out.splitlines() if 'PotEng' in line]
-    assert len(pe_line.split()) == 3
-    output_value = float(pe_line.split()[2])
+def _main(temp, poscar, tty_hack):
+    populate_tempdir(temp, poscar)
 
-    output_force = []
-    with open(join(temp, 'dump.force')) as f:
-        lines = iter(f)
-        for line in lines:
-            if 'ITEM: NUMBER OF ATOMS' in line:
-                break
-
-        parts = next(lines).split()
-        assert len(parts) == 1
-        n_atoms = int(parts[0])
-
-        for line in lines:
-            if 'ITEM: ATOMS id type fx fy fz' in line:
-                break
+    env = os.environ.copy()
+    env['LAMMPS_POTENTIALS'] = temp
+    try:
+        # LAMMPS unfortunately does not seem to flush either stdout or
+        # its logfile before calling MPI_Abort, causing a great deal of
+        # its stdout (including the error message!) to be lost.
+        args = ['lmp']
+        args += ['-i', 'lmp.in']
+        args += ['-var', 'input', 'structure.data']
+        if tty_hack:
+            tty = subprocess.check_output('tty').decode('utf-8').rstrip('\r\n')
+            args += ['-screen', tty]
+        out = subprocess.check_output(args, cwd=temp, env=env).decode('utf-8')
+    except subprocess.CalledProcessError as e:
+        print(e.output.decode('utf-8'), file=sys.stderr)
+        if tty_hack:
+            die("lammps failed!")
         else:
-            assert False, 'could not find beginning of data (did the dump format change?)'
+            die("lammps failed! (if you don't see the actual error message in the above output, try again with --tty-hack)")
 
-        for expected_n, line in enumerate(take(n_atoms, lines), start=1):
-            parts = line.split()
-            assert len(parts) == 5
-            assert expected_n == int(parts[0])
-            output_force.append(tuple(map(float, parts[2:2+3])))
+    print(out, file=sys.stderr)
 
-    output_grad = (-1.0 * np.array(output_force)).tolist()
+    value = parse_potential_from_lmp_stdout(out)
+    with open(join(temp, 'dump.force')) as f:
+        force = parse_force_dump(f)
+
     d = {
-        'value': output_value,
-        'grad': output_grad,
+        'value': value,
+        'grad': (-force).tolist(),
     }
     json.dump(d, sys.stdout)
     print()
 
+def populate_tempdir(temp, poscar):
+    import gzip
+    shutil.copyfile('lmp.in', join(temp, 'lmp.in'))
+    data = subprocess.check_output(['python3', 'generate.py', poscar])
+    with open(join(temp, 'structure.data'), 'wb') as f:
+        f.write(data)
+
+    with gzip.open('CH.airebo-nonreactive.gz', 'rt') as f:
+        s = f.read()
+    with open(join(temp, 'CH.airebo-nonreactive'), 'w') as f:
+        f.write(s)
+
+
+def parse_potential_from_lmp_stdout(stdout):
+    pe_line, = [line for line in stdout.splitlines() if 'PotEng' in line]
+    assert len(pe_line.split()) == 3
+    return float(pe_line.split()[2])
+
+def parse_force_dump(file):
+    output_force = []
+    lines = iter(file)
+    for line in lines:
+        if 'ITEM: NUMBER OF ATOMS' in line:
+            break
+
+    parts = next(lines).split()
+    assert len(parts) == 1
+    n_atoms = int(parts[0])
+
+    for line in lines:
+        if 'ITEM: ATOMS id type fx fy fz' in line:
+            break
+    else:
+        assert False, 'could not find beginning of data (did the dump format change?)'
+
+    for expected_n, line in enumerate(take(n_atoms, lines), start=1):
+        parts = line.split()
+        assert len(parts) == 5
+        assert expected_n == int(parts[0])
+        output_force.append(tuple(map(float, parts[2:2+3])))
+    return np.array(output_force)
+
 def take(n, it):
     for _ in range(n):
         yield next(it)
+
+def die(*args):
+    print(*args, file=sys.stderr)
+    sys.exit(0)
 
 if __name__ == '__main__':
     main()

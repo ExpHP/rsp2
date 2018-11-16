@@ -167,17 +167,36 @@ mod params {
         pub Q: f64, // Å
         pub A: f64, // eV
         pub alpha: f64, // Å-1
-        /// A parameter used by Stuart in the `exp(lambda)` for AIREBO.
-        ///
-        /// The CC value is never used.  Also not used unless `use_airebo_lambda = true`.
-        pub rho: f64, // Å
         /// The would-be smooth cutoff region with respect to bond length in reactive potential.
         ///
         /// We don't model the smooth cutoff, but this is useful to keep around for reference,
         /// and could be used to generate warnings.
         pub cutoff_region: (f64, f64), // Å
-        /// We outright refuse to continue if a bond is found in this interval.
+        /// This is the region that actually defines our weights.
+        ///
+        /// * Below the region: Weight is 1.
+        /// * Above the region: Weight is 0.
+        /// * Inside the region: The computation is aborted.
         pub forbidden_region: (f64, f64), // Å
+
+        /// A LAMMPS/Airebo thing.
+        ///
+        /// This parameter is used by Stuart in the `exp(lambda)` for AIREBO.
+        /// The CC value is never used. Also not used unless `use_airebo_lambda = true`.
+        pub airebo_rho: f64, // Å
+
+        /// A LAMMPS/Airebo thing.
+        ///
+        /// `r_max'` in the AIREBO paper, `rcmaxp` in LAMMPS.  In AIREBO, the weights that
+        /// appear in the dihedral sum are defined using a slightly shorter cutoff interval for
+        /// CH bonds than the weights that appear everywhere else.
+        ///
+        /// (It is not yet clear to me whether this change was made specifically to accomodate
+        ///  AIREBO, or if it is an improvement that can be transferred to REBO   -ML)
+        ///
+        /// This has no impact on our nonreactive potential at all; it's existence
+        /// is just to serve as a comment about something that's easy to miss.
+        pub airebo_cutoff_max_2: f64, // Å
     }
 
     impl Params {
@@ -197,10 +216,12 @@ mod params {
                 ],
                 Q: 0.313_460_296_0833, // Å
                 A: 10953.544_162_170, // eV
-                rho: NAN, // unused for CC
                 alpha: 4.746_539_060_6595, // Å-1
                 cutoff_region: (1.7, 2.0), // Å
                 forbidden_region: (1.8, 1.9), // Å
+
+                airebo_rho: NAN, // unused for CC
+                airebo_cutoff_max_2: 2.0, // Å (LAMMPS value)
             };
 
             // Brenner Table 6
@@ -209,10 +230,12 @@ mod params {
                 beta: [1.715_892_17, 0.0, 0.0], // Å-1
                 Q: 0.370_471_487_045, // Å
                 A: 32.817_355_747, // Å
-                rho: 0.7415887, // Å (LAMMPS value)
                 alpha: 3.536_298_648, // Å-1
                 cutoff_region: (1.1, 1.7), // Å
                 forbidden_region: (1.3, 1.5), // Å
+
+                airebo_rho: 0.7415887, // Å (LAMMPS value)
+                airebo_cutoff_max_2: 1.7, // Å (LAMMPS value)
             };
 
             // Brenner Table 7
@@ -221,10 +244,12 @@ mod params {
                 beta: [1.434_458_059_25, 0.0, 0.0], // Å-1
                 Q: 0.340_775_728, // Å
                 A: 149.940_987_23, // eV
-                rho: 1.09, // Å (LAMMPS value)
                 alpha: 4.102_549_83, // Å-1
                 cutoff_region: (1.3, 1.8), // Å
-                forbidden_region: (1.45, 1.65), // Å
+                forbidden_region: (1.5, 1.6), // Å
+
+                airebo_rho: 1.09, // Å (LAMMPS value)
+                airebo_cutoff_max_2: 1.6, // Å (LAMMPS value)
             };
 
             let by_type = enum_map! {
@@ -268,10 +293,12 @@ mod params {
                 ],
                 Q: 0.313_460_296_083_2605, // Å
                 A: 10953.544_162_169_92, // eV
-                rho: NAN, // unused for CC
                 alpha: 4.746_539_060_659_529, // Å-1
                 cutoff_region: (1.7, 2.0), // Å
                 forbidden_region: (1.8, 1.9), // Å
+
+                airebo_rho: NAN, // unused for CC
+                airebo_cutoff_max_2: 2.0, // Å
             };
 
             let type_params_hh = TypeParams {
@@ -280,9 +307,11 @@ mod params {
                 Q: 0.370, // Å
                 A: 31.6731, // Å
                 alpha: 3.536, // Å-1
-                rho: 0.7415887, // Å
                 cutoff_region: (1.1, 1.7), // Å
                 forbidden_region: (1.3, 1.5), // Å
+
+                airebo_rho: 0.7415887, // Å
+                airebo_cutoff_max_2: 1.7, // Å
             };
 
             let type_params_ch = TypeParams {
@@ -291,9 +320,11 @@ mod params {
                 Q: 0.340_775_728_225_7080, // Å
                 A: 149.940_987_228_812, // eV
                 alpha: 4.102_549_828_548_784, // Å-1
-                rho: 1.09, // Å
                 cutoff_region: (1.3, 1.8), // Å
-                forbidden_region: (1.45, 1.65), // Å
+                forbidden_region: (1.5, 1.6), // Å
+
+                airebo_rho: 1.09, // Å
+                airebo_cutoff_max_2: 1.6, // Å
             };
 
             let by_type = enum_map! {
@@ -738,12 +769,25 @@ fn compute_rebo_bonds(
             let ref weights_ik = bond_weight;
             let ref weights_jl = site_data[site_j].bond_weight;
 
+            // NOTE:
+            // * In the REBO paper, these weights are the same as all the others.
+            // * In the AIREBO paper, these weights use a slightly different (shorter) interval:
+            let _the_interval_airebo_would_use = |i, k| (
+                params.by_type[i][k].cutoff_region.0,
+                params.by_type[i][k].airebo_cutoff_max_2,
+            );
+            // For our purposes, with this being non-reactive REBO, the difference is irrelevant;
+            // both ranges produce the same weights.
+            let alt_weights_ik = weights_ik;
+            let alt_weights_jl = weights_jl;
+
             let ref tcoords_k: SiteBondVec<_> = interactions.bonds(site_i).map(|bond| site_data[bond.target].tcoord).collect();
             let ref tcoords_l: SiteBondVec<_> = interactions.bonds(site_j).map(|bond| site_data[bond.target].tcoord).collect();
 
             let out = bondorder_pi::Input {
                 params, interactions, site_i, bond_ij,
                 tcoords_k, tcoords_l, weights_ik, weights_jl,
+                alt_weights_ik, alt_weights_jl,
             }.compute();
             let BondOrderPi {
                 value: bpi,
@@ -1283,6 +1327,9 @@ mod bondorder_pi {
         pub tcoords_l: &'a [f64],
         pub weights_ik: &'a [f64],
         pub weights_jl: &'a [f64],
+        // weights that use an alternate interval in AIREBO (defined by `cutoff_max_2`)
+        pub alt_weights_ik: &'a [f64],
+        pub alt_weights_jl: &'a [f64],
     }
     pub struct BondOrderPi {
         pub value: f64,
@@ -1298,7 +1345,7 @@ mod bondorder_pi {
     fn compute(input: Input<'_>) -> Output {
         let Input {
             params, interactions, site_i, bond_ij, weights_ik, weights_jl,
-            tcoords_k, tcoords_l,
+            tcoords_k, tcoords_l, alt_weights_ik, alt_weights_jl,
         } = input;
 
         let site_j = interactions.bond(bond_ij).target;
@@ -1390,29 +1437,26 @@ mod bondorder_pi {
                     // NOTE: for reasons I cannot determine, the (otherwise extremely sensible)
                     //       AIREBO paper also uses Heaviside step functions here:
                     //
-                    //   sinsq_ijkl * weight_ik * weight_jl * H(sin_ijk - s_min)
-                    //                                      * H(sin_jil - s_min)   (s_min = 0.1)
+                    //        sinsq_ijkl * alt_weight_ik * alt_weight_jl
+                    //                   * H(sin_ijk - s_min)
+                    //                   * H(sin_jil - s_min)    (s_min = 0.1)
                     //
                     // These appear designed to cut the term off for very small angles (i.e.
                     // neighbors that are very closely packed).  But this destroys the C1
                     // continuity of the function and I couldn't find any justification for it.
                     //
-                    // LAMMPS appears to handle this better with a smooth cutoff
-                    // from thmin to thmax (TODO: look these values up).
+                    // LAMMPS appears to handle this better, using a smooth cutoff around angle 0
+                    // with a smaller interval.
                     //-----------
 
-                    // term to add to sum is  sinsq * weight_ik * weight_jl
-                    //
-                    // independent variables are chosen for now as the deltas that define sinsq,
-                    // and the weights that appear directly
-                    let weight_ik = weights_ik[index_ik];
-                    let weight_jl = weights_jl[index_jl];
+                    let alt_weight_ik = alt_weights_ik[index_ik];
+                    let alt_weight_jl = alt_weights_jl[index_jl];
 
-                    sum += sinsq * weight_ik * weight_jl;
+                    sum += sinsq * alt_weight_ik * alt_weight_jl;
 
-                    sum_d_deltas_ik[index_ij] += sinsq_d_delta_ij * weight_ik * weight_jl;
-                    sum_d_deltas_ik[index_ik] += sinsq_d_delta_ik * weight_ik * weight_jl;
-                    sum_d_deltas_jl[index_jl] += sinsq_d_delta_jl * weight_ik * weight_jl;
+                    sum_d_deltas_ik[index_ij] += sinsq_d_delta_ij * alt_weight_ik * alt_weight_jl;
+                    sum_d_deltas_ik[index_ik] += sinsq_d_delta_ik * alt_weight_ik * alt_weight_jl;
+                    sum_d_deltas_jl[index_jl] += sinsq_d_delta_jl * alt_weight_ik * alt_weight_jl;
                 } // for bond_jl
             } // for bond_ik
 
@@ -1616,8 +1660,8 @@ mod exp_lambda {
                     AtomType::Carbon => Output::constant(1.0),
                     AtomType::Hydrogen => {
                         let mut arg = 0.0;
-                        arg += params.by_type[type_k][AtomType::Hydrogen].rho;
-                        arg -= params.by_type[type_j][AtomType::Hydrogen].rho;
+                        arg += params.by_type[type_k][AtomType::Hydrogen].airebo_rho;
+                        arg -= params.by_type[type_j][AtomType::Hydrogen].airebo_rho;
                         arg += length_ij;
                         arg -= length_ik;
 

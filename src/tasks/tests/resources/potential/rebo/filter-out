@@ -1,0 +1,52 @@
+#!/usr/bin/env python3
+
+# extracts just the REBO debug print lines from
+# `cargo test --package rsp2-tasks -- test_name`'s STDOUT
+# or the output of lammps to assist in debugging
+#
+# (try './make-expected input.vasp 2> name.lmp.log' with a lammps
+#  that has been patched to produce debug output similar to
+#  the dbg!() statements in rsp2.)
+
+# compare using the 'diff-sorted' script:
+#
+# $ ./sorted-diff <(./filter-out <name.lmp.log) <(./filter-out <name.rsp2.log)
+# > F: 0.009926465
+# > F: 0.009926465
+# > F: 0.009926465
+# > F: 0.009926465
+# > F: 0.009926465
+# > F: 0.009926465
+# > F: 0.009926465
+# > F: 0.009926465
+# > F: 0.009926465
+# > F: 0.009926465
+# ...
+
+import sys
+import re
+
+# A word with no whitespace that is flush against the left margin,
+# ending in a colon with a space.
+RE = re.compile('^[^ \\t:]+: ')
+
+blacklist = [
+  # lammps
+  'Nlocal:',
+  'Histogram:',
+  'Nghost:',
+  'Histogram:',
+  'Neighs:',
+  'Histogram:',
+  'FullNghs:',
+  'Histogram:',
+  'WARNING:',
+  # rust
+  'note:',
+  'right:',
+  'failures:',
+]
+
+for line in sys.stdin:
+    if RE.match(line) and not any(line.startswith(p) for p in blacklist):
+        print(line, end='')
