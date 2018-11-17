@@ -64,6 +64,9 @@ path = "lib.rs"
 !!mpi { optional = true }
 !!stack
 
+[dev-dependencies]
+!!xz2
+
 [features]
 default = []
 

@@ -387,60 +387,89 @@ def solve_spline(terms):
 
     coeffs, = np.linalg.solve(matrix, b).T
     for (x, order, value) in terms:
-        assert abs(np.polyval(np.polyder(coeffs, order), x) - value) < 1e-13
+        assert abs(np.polyval(np.polyder(coeffs, order), x) - value) < 1e-10
     return coeffs
-
-# Data from Donald W Brenner et al 2002 J. Phys.: Condens. Matter 14 783
-# Table 3 (C) and Table 6 (H)
 
 # Terms for G(x) = y, G'(x) = yp, G''(x) = ypp
 def terms_at(x, ys):
     y, yp, ypp = ys
     return [(x, 0, y), (x, 1, yp), (x, 2, ypp)]
 
-cterms_1 = terms_at(  -1, (-0.00100, 0.10400, 0.00000)) # x = cos(pi)
-cterms_2 = terms_at(-1/2, ( 0.05280, 0.17000, 0.37000)) # x = cos(2/3 pi)
-cterms_3 = terms_at(-1/3, ( 0.09733, 0.40000, 1.98000)) # x = cos(0.6081 pi)
-cterms_4_G = [
-    (0.0, 0, 0.37545), # x = cos(pi/2)
-    (0.5, 0, 2.0014),  # x = cos(pi/3)
-    (1.0, 0, 8.0),     # x = cos(0)
-]
-cterms_4_gamma = [
-    (0.0, 0, 0.271856), # x = cos(pi/2)
-    (0.5, 0, 0.416335), # x = cos(pi/3)
-    (1.0, 0, 1.0),      # x = cos(0)
-]
-hterms = [
-    (np.cos(radians(  0)), 0, 19.991787),
-    (np.cos(radians( 60)), 0, 19.704059),
-    (np.cos(radians( 90)), 0, 19.065124),
-    (np.cos(radians(120)), 0, 16.811574),
-    (np.cos(radians(150)), 0, 12.164186),
-    (np.cos(radians(180)), 0, 11.235870),
-]
-pieces = [
-    ("C_COEFFS_1", "Segment 1: -1 to -1/2  (pi to 2pi/3)", cterms_1 + cterms_2),
-    ("C_COEFFS_2", "Segment 2: -1/2 to -1/3  (2pi/3 to 109.47°)", cterms_2 + cterms_3),
-    ("C_COEFFS_3_HIGH_COORDINATION", "Segment 3 (G): -1/3 to +1  (109.47° to 0°)", cterms_3 + cterms_4_G),
-    ("C_COEFFS_3_LOW_COORDINATION", "Segment 3 (gamma): -1/3 to +1  (109.47° to 0°)", cterms_3 + cterms_4_gamma),
-    ("H_COEFFS", "Full curve for hydrogen", hterms),
-]
+# Note: conditions like Brenner's terms for the small-angle portion of G
+# and gamma can't use 'terms_at', but can still be written explicitly like:
+#
+# # (all derivative orders are 0 since these are constraints on value)
+# cterms_4_G = [
+#     (0.0, 0, 0.37545), # x = cos(pi/2)
+#     (0.5, 0, 2.0014),  # x = cos(pi/3)
+#     (1.0, 0, 8.0),     # x = cos(0)
+# ]
 
-print("/*")
-print(open(__file__).read(), end='')
-print("*/")
-print("// Coeffs listed from x**5 to x**0")
-for (i, xval) in enumerate(["-1.0", "-0.5", "-1.0/3.0", "1.0"]):
-    print(f"const C_X_{i}: f64 = {xval};")
+# Data from Steven J Stuart et al, J. Chem. Phys. 112, 6472 (2000);
+cdiv = [-1, -2/3, -1/2, -1/3, 1]
+cterms_1 = terms_at(-1, (-0.010000, 0.104000, 0.000000))
+cterms_2 = terms_at(-2/3, (0.028207, 0.131443, 0.140229))
+cterms_3 = terms_at(-1/2, (0.052804, 0.170000, 0.370000))
+cterms_4 = terms_at(-1/3, (0.097321, 0.400000, 1.98000))
+cterms_5_gamma = terms_at(1, (1.00000, 2.83457, 10.2647))
+cterms_5_G = terms_at(1, (8.00000, 20.2436, 43.9336))
 
-for (name, heading, terms) in pieces:
-    print()
-    print(f"// {heading}")
-    print(f"const {name}: &'static [f64] = &[")
-    for x in solve_spline(terms):
-        print(f"{x},")
-    print(f"];")
+hdiv = [-1, -5/6, -1/2, 1]
+hterms_1 = terms_at(-1, (11.2357, 0.000000, 115.115))
+hterms_2 = terms_at(-5/6, (12.5953, 13.8543, 32.3618))
+hterms_3 = terms_at(-1/2, (16.8111, 8.64123, -25.0617))
+hterms_4 = terms_at(1, (19.9918, 0.333013, -0.474189))
+
+cpiece_1 = solve_spline(cterms_1 + cterms_2)
+cpiece_2 = solve_spline(cterms_2 + cterms_3)
+cpiece_3 = solve_spline(cterms_3 + cterms_4)
+cpiece_4_gamma = solve_spline(cterms_4 + cterms_5_gamma)
+cpiece_4_G = solve_spline(cterms_4 + cterms_5_G)
+hpiece_1 = solve_spline(hterms_1 + hterms_2)
+hpiece_2 = solve_spline(hterms_2 + hterms_3)
+hpiece_3 = solve_spline(hterms_3 + hterms_4)
+
+ccurve_gamma = np.array([cpiece_1, cpiece_2, cpiece_3, cpiece_4_gamma])
+ccurve_G = np.array([cpiece_1, cpiece_2, cpiece_3, cpiece_4_G])
+hcurve = np.array([hpiece_1, hpiece_2, hpiece_3])
+
+def format_rsp2(curve):
+    print('&[Polynomial1d([')
+    for region in curve.tolist():
+        print(f'    {region[0]}, {region[1]}, {region[2]},')
+        print(f'    {region[3]}, {region[4]}, {region[5]},')
+        # (an extra of these is generated but you can easily delete it)
+        print(']), Polynomial1d([')
+    print('])],')
+
+def format_lmp_div(xdiv):
+    print(len(xdiv))
+    for x in xdiv:
+        print(x)
+
+def format_lmp(curve):
+    for region in curve[:, ::-1].tolist():
+        for x in region:
+            print(x)
+
+format_rsp2(ccurve_G)
+format_rsp2(ccurve_gamma)
+format_rsp2(hcurve)
+
+print('')
+print('# gC1 and gC2')
+print('')
+format_lmp_div(cdiv)
+print('')
+format_lmp(ccurve_gamma)
+print('')
+format_lmp(ccurve_G)
+print('')
+print('# gH')
+print('')
+format_lmp_div(hdiv)
+print('')
+format_lmp(hcurve)
 */
 
     /// A piecewise polynomial, optimized for the use case of only having a few segments.
@@ -519,19 +548,14 @@ for (name, heading, terms) in pieces:
         },
     };
 
-    /// From CH.airebo.
+    #[allow(unused)]
+    /// Taken directly from CH.airebo.
     ///
     /// These appear to have been produced by fitting the data in the AIREBO paper. (Stuart 2000)
     ///
-    /// My current understanding is that it is okay to use these for REBO, and that they are
-    /// simply an improvement upon the curves provided in Brenner (2002) that goes hand-in-hand
-    /// with the modifications to `lambda_ijk`.
-    ///
     /// ...however, the coefficients here are rounded to dangerously low precision, which
     /// might introduce discontinuities at the switch points (most troublingly so at 120°)
-    /// that could ruin optimization algorithms.
-    ///
-    /// TODO: Build our own splines without such insane rounding errors
+    /// that could ruin optimization algorithms.  Use `STUART` instead.
     pub const LAMMPS: SplineSet = SplineSet {
         low_coord: 3.2,
         high_coord: 3.7,
@@ -578,6 +602,63 @@ for (name, heading, terms) in pieces:
             ]), Polynomial1d([
                 0.8376699753, -2.6535615062, 3.2913322346,
                 -2.5664219198, 2.0177562840, 19.0650249321,
+            ])],
+        },
+    };
+
+    /// Solved numerically from data in Stuart (2000), table VII.
+    ///
+    /// These are basically the same curves used by LAMMPS, but printed to
+    /// much higher precision to reduce minor discontinuities in the value
+    /// and derivatives.
+    ///
+    /// The file `CH.airebo-nonreactive` in the tests directory also uses these.
+    pub const STUART: SplineSet = SplineSet {
+        low_coord: 3.2,
+        high_coord: 3.7,
+        carbon_high_coord: SmallSpline1d {
+            x_div: &[-1.0, -2.0/3.0, -0.5, -1.0/3.0, 1.0],
+            poly: &[Polynomial1d([
+                0.3862485000000212, 1.5544035000000906, 2.533414500000153,
+                2.136307500000127, 1.0627430000000515, 0.281695000000008,
+            ]), Polynomial1d([
+                0.4025160000082415, 1.6019100000240347, 2.588571000027846,
+                2.168136500016019, 1.071877000004576, 0.28273900000051944,
+            ]), Polynomial1d([
+                34.7051520000092, 68.61240000001925, 54.9086400000159,
+                23.010800000006473, 5.460160000001298, 0.6900250000001024,
+            ]), Polynomial1d([
+                0.5063519355468739, 1.4269207324218764, 2.028874746093751,
+                2.2551320117187497, 1.4072691308593743, 0.37545144335937497,
+            ])],
+        },
+        carbon_low_coord: SmallSpline1d {
+            x_div: &[-1.0, -2.0/3.0, -0.5, -1.0/3.0, 1.0],
+            poly: &[Polynomial1d([
+                0.3862485000000212, 1.5544035000000906, 2.533414500000153,
+                2.136307500000127, 1.0627430000000515, 0.281695000000008,
+            ]), Polynomial1d([
+                0.4025160000082415, 1.6019100000240347, 2.588571000027846,
+                2.168136500016019, 1.071877000004576, 0.28273900000051944,
+            ]), Polynomial1d([
+                34.7051520000092, 68.61240000001925, 54.9086400000159,
+                23.010800000006473, 5.460160000001298, 0.6900250000001024,
+            ]), Polynomial1d([
+                -0.03750083789062506, 1.270870224609375, -0.5616817382812499,
+                -0.43281775390624994, 0.4892740136718749, 0.27185609179687503,
+            ])],
+        },
+        hydrogen: SmallSpline1d {
+            x_div: &[-1.0, -5.0/6.0, -0.5, 1.0],
+            poly: &[Polynomial1d([
+                630.6336000093625, 2721.430800042939, 4582.154400078555,
+                3781.7719000716565, 1549.6358000325922, 270.4568000059139,
+            ]), Polynomial1d([
+                -94.994639999977, -229.8471299999238, -210.6432299999012,
+                -102.46829999993732, -21.082387499980516, 16.953440625002376,
+            ]), Polynomial1d([
+                0.8376699753086418, -2.653561506172839, 3.291332234567901,
+                -2.566421919753087, 2.017756283950618, 19.065024932098765,
             ])],
         },
     };

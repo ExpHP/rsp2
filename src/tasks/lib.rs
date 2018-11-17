@@ -69,6 +69,8 @@ extern crate num_traits;
 #[cfg(feature = "mpi")]
 extern crate mpi;
 extern crate num_cpus;
+#[cfg(test)]
+extern crate xz2;
 
 extern crate lapacke;
 extern crate lapack_src;

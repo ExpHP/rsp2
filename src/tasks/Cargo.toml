@@ -69,6 +69,9 @@ num_cpus = "1.8"
 mpi = { version = "0.5.4", optional = true }
 stack = "0.3"
 
+[dev-dependencies]
+xz2 = "0.1.6"
+
 [features]
 default = []
 

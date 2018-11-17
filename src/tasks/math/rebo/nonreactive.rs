@@ -339,7 +339,7 @@ mod params {
             };
             Params {
                 use_airebo_lambda: true,
-                G: Cow::Owned(splines::G::LAMMPS),
+                G: Cow::Owned(splines::G::STUART),
                 P: Cow::Borrowed(&splines::P::FAVATA),
                 F: Cow::Borrowed(&splines::F::BRENNER),
                 T: Cow::Borrowed(&splines::T::STUART),
@@ -1885,6 +1885,7 @@ mod g_spline {
     use super::*;
 
     pub type Output = GSpline;
+    #[derive(Clone)]
     pub struct Input<'a> {
         pub params: &'a Params,
         pub type_i: AtomType,
@@ -1942,60 +1943,67 @@ mod g_spline {
 
     #[test]
     fn common_cases() {
-        let all_params = vec![
-            // The precision of lammps' precomputed splines is a joke
-            (1e-4, Params::new_lammps()),
-            (1e-10, Params::new_brenner()),
-        ];
-        for (tol, ref params) in all_params {
-            // graphite
-            let GSpline { value, d_cos_ijk } = Input {
-                params,
-                type_i: AtomType::Carbon,
-                cos_ijk: f64::cos(120.0 * PI / 180.0) + 1e-12,
-                tcoord_ij: 3.0,
-            }.compute();
+        let brenner = Params::new_brenner();
+        let lammps = Params::new_lammps();
+
+        fn try_above_and_below(input: Input) -> impl Iterator<Item=GSpline> {
+            let mut above = input.clone();
+            let mut below = input.clone();
+            above.cos_ijk += 1e-12;
+            below.cos_ijk -= 1e-12;
+            assert_ne!(above.cos_ijk, input.cos_ijk);
+            assert_ne!(below.cos_ijk, input.cos_ijk);
+            vec![above.compute(), below.compute()].into_iter()
+        }
+
+        // graphite
+        let mut input = Input {
+            params: &brenner,
+            type_i: AtomType::Carbon,
+            cos_ijk: f64::cos(120.0 * PI / 180.0),
+            tcoord_ij: 2.0,
+        };
+        for GSpline { value, d_cos_ijk } in try_above_and_below(input.clone()) {
             // Brenner Table 3
-            assert_close!(rel=tol, value, 0.05280);
-            assert_close!(rel=tol, d_cos_ijk, 0.17000);
+            assert_close!(rel=1e-10, value, 0.05280);
+            assert_close!(rel=1e-10, d_cos_ijk, 0.17000);
+        }
 
-            let GSpline { value, d_cos_ijk } = Input {
-                params,
-                type_i: AtomType::Carbon,
-                cos_ijk: f64::cos(120.0 * PI / 180.0) - 1e-12,
-                tcoord_ij: 3.0,
-            }.compute();
-            assert_close!(rel=tol, value, 0.05280);
-            assert_close!(rel=tol, d_cos_ijk, 0.17000);
+        input.params = &lammps;
+        for GSpline { value, d_cos_ijk } in try_above_and_below(input) {
+            // Stuart Table VII
+            assert_close!(rel=1e-10, value, 0.052_804);
+            assert_close!(rel=1e-10, d_cos_ijk, 0.170_000);
+        }
 
-            // diamond
-            let GSpline { value, d_cos_ijk } = Input {
-                params,
-                type_i: AtomType::Carbon,
-                cos_ijk: -1.0/3.0 + 1e-12,
-                tcoord_ij: 4.0,
-            }.compute();
-            assert_close!(rel=tol, value, 0.09733);
-            assert_close!(rel=tol, d_cos_ijk, 0.40000);
+        // diamond
+        let mut input = Input {
+            params: &brenner,
+            type_i: AtomType::Carbon,
+            cos_ijk: -1.0/3.0,
+            tcoord_ij: 3.0,
+        };
+        for GSpline { value, d_cos_ijk } in try_above_and_below(input.clone()) {
+            // Brenner table 3
+            assert_close!(rel=1e-10, value, 0.09733);
+            assert_close!(rel=1e-10, d_cos_ijk, 0.40000);
+        }
 
-            let GSpline { value, d_cos_ijk } = Input {
-                params,
-                type_i: AtomType::Carbon,
-                cos_ijk: -1.0/3.0 - 1e-12,
-                tcoord_ij: 4.0,
-            }.compute();
-            assert_close!(rel=tol, value, 0.09733);
-            assert_close!(rel=tol, d_cos_ijk, 0.40000);
+        input.params = &lammps;
+        for GSpline { value, d_cos_ijk } in try_above_and_below(input) {
+            // Stuart Table VII
+            assert_close!(rel=1e-10, value, 0.097_321);
+            assert_close!(rel=1e-10, d_cos_ijk, 0.400_000);
         }
     }
 
     #[test]
     fn numerical_derivatives() {
         let all_params = vec![
-            (1e-7, Params::new_brenner()),
-            (2e-3, Params::new_lammps()),
+            Params::new_brenner(),
+            Params::new_lammps(),
         ];
-        for (tol, ref params) in all_params {
+        for ref params in all_params {
             for type_i in AtomType::iter_all() {
                 let x_divs = match type_i {
                     AtomType::Carbon => params.G.carbon_low_coord.x_div,
@@ -2018,10 +2026,10 @@ mod g_spline {
                         let input = Input { params, type_i, cos_ijk, tcoord_ij };
                         let GSpline { value: _, d_cos_ijk } = input.compute();
                         assert_close!(
-                            rel=tol, abs=tol,
+                            rel=1e-7, abs=1e-7,
                             d_cos_ijk,
                             numerical::slope(
-                                1e-7, None,
+                                1e-5, None,
                                 cos_ijk,
                                 |cos_ijk| Input { params, type_i, cos_ijk, tcoord_ij }.compute().value,
                             ),
@@ -2035,10 +2043,10 @@ mod g_spline {
     #[test]
     fn continuity() {
         let iter = vec![
-            (1e-13, Params::new_brenner()),
-            (1e-9, Params::new_lammps()), // these coeffs are rounded pretty badly
+            Params::new_brenner(),
+            Params::new_lammps(),
         ];
-        for (tol, ref params) in iter {
+        for ref params in iter {
             for spline in params.G.all_splines() {
                 for i in 1..spline.poly.len() {
                     // Should be continuous up to 2nd derivative
@@ -2049,9 +2057,9 @@ mod g_spline {
                     let poly_db = poly_b.derivative();
                     let poly_dda = poly_da.derivative();
                     let poly_ddb = poly_db.derivative();
-                    assert_close!(rel=tol, poly_a.evaluate(x).0, poly_b.evaluate(x).0);
-                    assert_close!(rel=tol, poly_da.evaluate(x).0, poly_db.evaluate(x).0);
-                    assert_close!(rel=tol, poly_dda.evaluate(x).0, poly_ddb.evaluate(x).0);
+                    assert_close!(rel=1e-13, poly_a.evaluate(x).0, poly_b.evaluate(x).0);
+                    assert_close!(rel=1e-13, poly_da.evaluate(x).0, poly_db.evaluate(x).0);
+                    assert_close!(rel=1e-13, poly_dda.evaluate(x).0, poly_ddb.evaluate(x).0);
                 }
             }
         }
@@ -2577,18 +2585,19 @@ struct ForceFile {
 #[cfg(test)]
 mod input_tests {
     use super::*;
-    use ::std::{path::Path, fs::File};
+    use ::std::{path::Path, fs::File, io};
     use ::rsp2_structure_io::Poscar;
     use ::rsp2_array_types::Unvee;
 
     const RESOURCE_DIR: &'static str = "tests/resources/potential/rebo";
+
 
     #[test]
     fn all() -> FailResult<()> {
         let mut matches = vec![];
         for entry in Path::new(RESOURCE_DIR).read_dir()? {
             let entry: String = entry?.path().display().to_string();
-            if let Some(base) = strip_suffix(".rebo.lmp.json", &entry) {
+            if let Some(base) = strip_suffix(".rebo.lmp.json.xz", &entry) {
                 matches.push(Path::new(&base).file_name().unwrap().to_string_lossy().into_owned());
             }
         }
@@ -2618,11 +2627,11 @@ mod input_tests {
         let use_rayon = false; // FIXME: revert to true
         let params = Params::new_lammps();
 
-        let in_path = Path::new(RESOURCE_DIR).join(name.to_string() + ".vasp");
-        let out_path = Path::new(RESOURCE_DIR).join(name.to_string() + ".rebo.lmp.json");
+        let in_path = Path::new(RESOURCE_DIR).join(name.to_string() + ".vasp.xz");
+        let out_path = Path::new(RESOURCE_DIR).join(name.to_string() + ".rebo.lmp.json.xz");
 
-        let expected: ForceFile = ::serde_json::from_reader(File::open(&out_path)?)?;
-        let Poscar { coords, elements, .. } = Poscar::from_reader(File::open(in_path)?)?;
+        let expected: ForceFile = ::serde_json::from_reader(open_xz(out_path)?)?;
+        let Poscar { coords, elements, .. } = Poscar::from_reader(open_xz(in_path)?)?;
         let bond_graph = compute_bond_graph(&params, &coords, &elements)?;
 
         let (value, grad) = compute(&params, &coords, &elements, &bond_graph, use_rayon)?;
@@ -2630,6 +2639,10 @@ mod input_tests {
         assert_close!(abs=1e-11, rel=1e-10, value, expected.value, "in file: {}", name);
         assert_close!(abs=1e-11, rel=1e-10, grad.unvee(), expected.grad.unvee(), "in file: {}", name);
         Ok(())
+    }
+
+    fn open_xz(path: impl AsRef<Path>) -> io::Result<impl io::Read> {
+        File::open(path).map(::xz2::read::XzDecoder::new)
     }
 
     fn strip_suffix<'a>(suffix: &str, s: &str) -> Option<String> {
