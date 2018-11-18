@@ -2188,7 +2188,7 @@ mod f_spline {
     // particular coordinations
     impl<'a> Input<'a> {
         pub(super) fn is_tested(&self) -> bool {
-            use self::splines::{MAX_I, MAX_J, MAX_K};
+            use self::splines::tricubic::{MAX_I, MAX_J, MAX_K};
 
             let Input { params: _, type_i, type_j, tcoord_ij, tcoord_ji, xcoord_ij } = *self;
 
@@ -2207,7 +2207,7 @@ mod f_spline {
             int_point[2] = int_point[2].min(MAX_K);
 
             // NOTE: F_CH(j,i,k) = F_CH(i,j,k) (see note in `splines::F::brenner_CH`),
-            //       so we can limit ourselves to `i` and `j` regardless of atom type.
+            //       so we can limit ourselves to `i < j` regardless of atom type.
             let V3([i, j, k]) = int_point;
             let (i, j) = (usize::min(i, j), usize::max(i, j));
 
