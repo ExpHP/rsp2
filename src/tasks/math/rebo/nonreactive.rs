@@ -70,12 +70,35 @@ use ::rsp2_minimize::numerical;
 use ::rsp2_minimize::numerical::DerivativeKind::*;
 
 //-------------------------------------------------------
+// Debugging utils:
 
+/// Emit tracing debug output.
+///
+/// Optimizations will constant-fold this so that no code is emitted if the requisite
+/// env var is not defined during compilation.
+///
+/// Ideally, you also have a version of lammps that is patched to produce similar output
+/// to the usage of `dbg!` in this file. See the `sorted-diff` and `filter-out` scripts
+/// in the rebo test directory for how to compare these outputs.
 macro_rules! dbg {
-    ($($t:tt)*) => {
-        println!($($t)*);
+    ($flag:expr, $($t:tt)*) => {
+        if option_env!("RSP2_REBO_TRACE") == Some("1".as_ref()) {
+            if $flag == Debug::Auto {
+                println!($($t)*);
+            }
+        }
     };
 }
+
+/// Used to prevent extraneous calls to a function from producing misleading debug output.
+///
+/// The default value of `Auto` is generally propagated from the root function all the way down.
+///
+/// Some `compute` functions in this module have a `compute_paranoid(tol)` alternative that
+/// checks numerical derivatives on every call.  The calls made during numerical differentiation
+/// use `Debug::Never` to suppress debug output.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum Debug { Auto, Never }
 
 //-------------------------------------------------------
 // # A note on stylistic conventions
@@ -277,8 +300,9 @@ mod params {
         /// The HH parameters have changed a fair bit compared to the parameters
         /// originally published in Brenner's paper.
         ///
-        /// The G splines (functions of bond angle) are also significantly different,
-        /// and quite possibly less precise.
+        /// The G splines (functions of bond angle) are also different, solved from
+        /// the parameters in the AIREBO paper.  (as a result, these are not quite
+        /// identical to LAMMPS's splines, which were formatted to poor precision)
         pub fn new_lammps() -> Self {
             let type_params_cc = TypeParams {
                 B: [
@@ -341,7 +365,7 @@ mod params {
                 use_airebo_lambda: true,
                 G: Cow::Owned(splines::G::STUART),
                 P: Cow::Borrowed(&splines::P::FAVATA),
-                F: Cow::Borrowed(&splines::F::BRENNER),
+                F: Cow::Borrowed(&splines::F::LAMMPS),
                 T: Cow::Borrowed(&splines::T::STUART),
                 by_type,
             }
@@ -590,6 +614,15 @@ fn compute_rebo_bonds(
     interactions: &Interactions,
     use_rayon: bool,
 ) -> FailResult<(f64, IndexVec<BondI, V3>)> {
+    _compute_rebo_bonds(params, interactions, use_rayon, Debug::Auto)
+}
+
+fn _compute_rebo_bonds(
+    params: &Params,
+    interactions: &Interactions,
+    use_rayon: bool,
+    dbg: Debug,
+) -> FailResult<(f64, IndexVec<BondI, V3>)> {
     use self::interactions::{Site, Bond};
     // Brenner:
     // Eq  1:  V = sum_{i < j} V^R(r_ij) + b_{ij} V^A(r_ij)
@@ -604,8 +637,8 @@ fn compute_rebo_bonds(
     // Q, A, alpha, beta_n, B_n are parameters
     // b_{ij}^{pi}, b_{ij}^{sigma-pi}, b_{ij}^{DH} are complicated bond-order subexpressions
 
-    dbg!("nsites: {}", interactions.num_sites());
-    dbg!("nbonds: {}", interactions.num_bonds());
+    dbg!(dbg, "nsites: {}", interactions.num_sites());
+    dbg!(dbg, "nbonds: {}", interactions.num_bonds());
 
     //-------------------
     // NOTE:
@@ -657,8 +690,6 @@ fn compute_rebo_bonds(
             let mut bond_VA_d_delta = SiteBondVec::new();
             let mut bond_weight = SiteBondVec::new();
 
-//            dbg!("{:#?}", interactions.bonds(site_i).collect::<Vec<_>>());
-
             for __bond in interactions.bonds(site_i) {
                 let site_j = __bond.target;
                 let delta = __bond.cart_vector;
@@ -667,17 +698,20 @@ fn compute_rebo_bonds(
                 let (length, length_d_delta) = norm(delta);
                 let EasyParts {
                     weight, VA, VA_d_length, VR, VR_d_length,
-                } = easy_parts::Input { params, type_i, type_j, length }.compute()?;
+                } = easy_parts::Input {
+                    params, type_i, type_j, length
+                //}.compute_paranoid(dbg, 1e-9)?;
+                }.compute(dbg)?;
 
-                dbg!("weight: {:.9}", weight);
+                dbg!(dbg, "weight: {:.9}", weight);
                 tcoord += weight;
                 bond_weight.push(weight);
 
-                dbg!("VR: {:.9}", VR);
+                dbg!(dbg, "VR: {:.9}", VR);
                 bond_VR.push(VR);
                 bond_VR_d_delta.push(VR_d_length * length_d_delta);
 
-                dbg!("VA: {:.9}", VA);
+                dbg!(dbg, "VA: {:.9}", VA);
                 bond_VA.push(VA);
                 bond_VA_d_delta.push(VA_d_length * length_d_delta);
             } // for _ in interactions.bonds(site)
@@ -718,7 +752,7 @@ fn compute_rebo_bonds(
 
         // Add in the repulsive terms, which each only depend on one bond delta.
         for _bond_VR_ij in bond_VR {
-            dbg!("Vterm(R): {:.9}", 0.5 * _bond_VR_ij);
+            dbg!(dbg, "Vterm(R): {:.9}", 0.5 * _bond_VR_ij);
         }
         site_V += 0.5 * bond_VR.iter().sum::<f64>();
         axpy_mut(&mut site_V_d_delta, 0.5, &bond_VR_d_delta);
@@ -736,8 +770,8 @@ fn compute_rebo_bonds(
             site: site_i,
             bond_weights: bond_weight,
             bond_VAs: bond_VA,
-//        }.compute_paranoid(1e-3);
-        }.compute();
+        }.compute_paranoid(dbg, 1e-9);
+//        }.compute(dbg);
         let SiteSigmaPiTerm {
             value: Vsp_i,
             d_deltas: Vsp_i_d_delta,
@@ -788,18 +822,19 @@ fn compute_rebo_bonds(
                 params, interactions, site_i, bond_ij,
                 tcoords_k, tcoords_l, weights_ik, weights_jl,
                 alt_weights_ik, alt_weights_jl,
-            }.compute();
+//            }.compute(dbg);
+            }.compute_paranoid(dbg, 1e-9);
             let BondOrderPi {
                 value: bpi,
                 d_deltas_ik: mut bpi_d_deltas_ik,
                 d_deltas_jl: mut bpi_d_deltas_jl,
             } = out;
-            dbg!("bpi: {:.9}", bpi);
+            dbg!(dbg, "bpi: {:.9}", bpi);
 
             let VA_ij = bond_VA[index_ij];
             let VA_ij_d_delta_ij = bond_VA_d_delta[index_ij];
 
-            dbg!("Vterm(pi): {:.9}", bpi * VA_ij);
+            dbg!(dbg, "Vterm(pi): {:.9}", bpi * VA_ij);
             site_V += bpi * VA_ij;
             site_V_d_delta[index_ij] += bpi * VA_ij_d_delta_ij;
 
@@ -852,17 +887,17 @@ use self::easy_parts::EasyParts;
 mod easy_parts {
     use super::*;
 
-    pub type Output = EasyParts;
+    pub(super) type Output = EasyParts;
 
     #[derive(Debug, Clone)]
-    pub struct Input<'a> {
+    pub(super) struct Input<'a> {
         pub params: &'a Params,
         pub type_i: AtomType,
         pub type_j: AtomType,
         pub length: f64,
     }
 
-    pub struct EasyParts {
+    pub(super) struct EasyParts {
         pub weight: f64,
         pub VA: f64,
         pub VA_d_length: f64,
@@ -871,11 +906,12 @@ mod easy_parts {
     }
 
     impl<'a> Input<'a> {
-        pub fn compute(self) -> FailResult<Output> { compute(self) }
+        pub(super) fn compute(self, dbg: Debug) -> FailResult<Output> { compute(self, dbg) }
     }
 
     // free function for smaller indent
-    fn compute(input: Input<'_>) -> FailResult<Output> {
+    fn compute(input: Input<'_>, dbg: Debug) -> FailResult<Output> {
+        let _ = dbg;
         let Input { params, type_i, type_j, length } = input;
         let params_ij = params.by_type[type_i][type_j];
 
@@ -929,8 +965,8 @@ mod easy_parts {
     impl<'a> Input<'a> {
         // For debugging; feel free to swap out the `compute` call with this.
         #[allow(unused)]
-        pub fn compute_paranoid(self, tol: f64) -> FailResult<Output> {
-            let output = self.clone().compute()?;
+        pub(super) fn compute_paranoid(self, dbg: Debug, tol: f64) -> FailResult<Output> {
+            let output = self.clone().compute(dbg)?;
             let Output { weight, VA, VA_d_length, VR, VR_d_length } = output;
 
             assert_close!(
@@ -938,7 +974,7 @@ mod easy_parts {
                 VA_d_length,
                 numerical::try_slope(
                     1e-4, None, self.length,
-                    |length| Input { length, ..self }.compute().map(|x| x.VA),
+                    |length| Input { length, ..self }.compute(Debug::Never).map(|x| x.VA),
                 )?,
             );
             assert_close!(
@@ -946,7 +982,7 @@ mod easy_parts {
                 VR_d_length,
                 numerical::try_slope(
                     1e-4, None, self.length,
-                    |length| Input { length, ..self }.compute().map(|x| x.VR),
+                    |length| Input { length, ..self }.compute(Debug::Never).map(|x| x.VR),
                 )?,
             );
             Ok(output)
@@ -964,10 +1000,10 @@ mod site_sigma_pi_term {
 
     use super::*;
 
-    pub type Output = SiteSigmaPiTerm;
+    pub(super) type Output = SiteSigmaPiTerm;
 
     #[derive(Debug, Clone)]
-    pub struct Input<'a> {
+    pub(super) struct Input<'a> {
         pub params: &'a Params,
         pub interactions: &'a Interactions,
         pub site: SiteI,
@@ -975,7 +1011,7 @@ mod site_sigma_pi_term {
         // The VA_ij terms for each bond at site i.
         pub bond_VAs: &'a [f64],
     }
-    pub struct SiteSigmaPiTerm {
+    pub(super) struct SiteSigmaPiTerm {
         pub value: f64,
         /// Derivatives with respect to the bonds listed in order of `interactions.bonds(site_i)`.
         pub d_deltas: SiteBondVec<V3>,
@@ -983,11 +1019,11 @@ mod site_sigma_pi_term {
     }
 
     impl<'a> Input<'a> {
-        pub fn compute(self) -> Output { compute(self) }
+        pub(super) fn compute(self, dbg: Debug) -> Output { compute(self, dbg) }
     }
 
     // free function for smaller indent
-    fn compute(input: Input<'_>) -> Output {
+    fn compute(input: Input<'_>, dbg: Debug) -> Output {
         // Eq 8:  b_{ij}^{sigma-pi} = sqrt(
         //                     1 + sum_{k /= i, j} f^c(r_{ik}) G(cos(t_{ijk}) e^{lambda_{ijk}
         //                       + P_{ij}(N_ij^C, N_ij^H)
@@ -1035,7 +1071,7 @@ mod site_sigma_pi_term {
             let hcoord_ij = hcoord_i - boole(type_j == AtomType::Hydrogen) * weight_ij;
 
             let P_ij = p_spline::Input { params, type_i, type_j, ccoord_ij, hcoord_ij }.compute();
-            dbg!("P: {:.9}", P_ij);
+            dbg!(dbg, "P: {:.9}", P_ij);
 
             // Gather all cosines between bond i->j and other bonds i->k.
             let mut coses_ijk = SiteBondVec::new();
@@ -1072,8 +1108,8 @@ mod site_sigma_pi_term {
                     types_k: &bond_target_types,
                     weights_ik: bond_weights,
                     lengths_ik: &bond_lengths,
-                }.compute_paranoid(1e-3);
-//                }.compute()?;
+                }.compute_paranoid(dbg, 1e-9);
+//                }.compute(dbg)?;
                 let BondOrderSigmaPi {
                     value: tmp_value,
                     d_lengths_ik: bsp_ij_d_lengths_ik,
@@ -1109,13 +1145,13 @@ mod site_sigma_pi_term {
 
                 bsp_ij = tmp_value;
                 bsp_ij_d_deltas = tmp_d_deltas;
-                dbg!("bsp: {:.9}", bsp_ij);
+                dbg!(dbg, "bsp: {:.9}", bsp_ij);
             }
 
             // True term to add to sum is 0.5 * VA_ij * bsp_ij
             let VA_ij = bond_VAs[index_ij];
 
-            dbg!("Vterm(sp): {:.9}", 0.5 * VA_ij * bsp_ij);
+            dbg!(dbg, "Vterm(sp): {:.9}", 0.5 * VA_ij * bsp_ij);
             value += 0.5 * VA_ij * bsp_ij;
             d_VAs[index_ij] += 0.5 * bsp_ij;
             axpy_mut(&mut d_deltas, 0.5 * VA_ij, &bsp_ij_d_deltas);
@@ -1127,10 +1163,10 @@ mod site_sigma_pi_term {
     impl<'a> Input<'a> {
         // For debugging; feel free to swap out the `compute` call with this.
         #[allow(unused)]
-        pub fn compute_paranoid(self, tol: f64) -> Output {
+        pub fn compute_paranoid(self, dbg: Debug, tol: f64) -> Output {
             let mut interactions = self.interactions.clone(); // FIXME oof
 
-            let output = self.clone().compute();
+            let output = self.clone().compute(dbg);
             { // FIXME block unnecessary after NLL lands
                 let Output { value, ref d_deltas, ref d_VAs } = output;
 
@@ -1141,7 +1177,7 @@ mod site_sigma_pi_term {
                         d_deltas[index_ij].0,
                         num_grad_v3(1e-4, interactions.bond(bond_ij).cart_vector, |x| {
                             interactions.with_modified_delta(bond_ij, x, |interactions| {
-                                Input { interactions: interactions, ..self }.compute().value
+                                Input { interactions, ..self }.compute(Debug::Never).value
                             })
                         }).0,
                     );
@@ -1151,7 +1187,7 @@ mod site_sigma_pi_term {
                     rel=tol, abs=tol,
                     &d_VAs[..],
                     &numerical::gradient(1e-4, None, self.bond_VAs, |bond_VAs| {
-                        Input { bond_VAs, ..self }.compute().value
+                        Input { bond_VAs, ..self }.compute(Debug::Never).value
                     })[..],
                 );
             }
@@ -1164,10 +1200,10 @@ use self::bondorder_sigma_pi::BondOrderSigmaPi;
 mod bondorder_sigma_pi {
     use super::*;
 
-    pub type Output = BondOrderSigmaPi;
+    pub(super) type Output = BondOrderSigmaPi;
 
     #[derive(Debug, Clone)]
-    pub struct Input<'a> {
+    pub(super) struct Input<'a> {
         pub params: &'a Params,
         // bond from atom i to another atom j
         pub type_i: AtomType,
@@ -1184,18 +1220,18 @@ mod bondorder_sigma_pi {
         pub coses_ijk: &'a [f64], // cosine between i->j and i->k
     }
 
-    pub struct BondOrderSigmaPi {
+    pub(super) struct BondOrderSigmaPi {
         pub value: f64,
         pub d_coses_ijk: SiteBondVec<f64>, // value at index_ij is unspecified
         pub d_lengths_ik: SiteBondVec<f64>, // this one has values at all indices
     }
 
     impl<'a> Input<'a> {
-        pub fn compute(self) -> Output { compute(self) }
+        pub(super) fn compute(self, dbg: Debug) -> Output { compute(self, dbg) }
     }
 
     // free function for smaller indent
-    fn compute<'a>(input: Input<'a>) -> Output {
+    fn compute<'a>(input: Input<'a>, dbg: Debug) -> Output {
         // Eq 8:  b_{ij}^{sigma-pi} = recip(sqrt(
         //                     1 + sum_{k /= i, j} f^c(r_{ik}) G(cos(t_{ijk}) e^{lambda_{ijk}
         //                       + P_{ij}(N_i^C, N_i^H)
@@ -1205,7 +1241,7 @@ mod bondorder_sigma_pi {
             types_k, lengths_ik, weights_ik, coses_ijk, index_ij,
         } = input;
         let tcoord_ij = ccoord_ij + hcoord_ij;
-        dbg!("Nt: {:.9}", tcoord_ij);
+        dbg!(dbg, "Nt: {:.9}", tcoord_ij);
 
         // properties of the stuff in the square root
         let mut inner_value = 0.0;
@@ -1238,14 +1274,14 @@ mod bondorder_sigma_pi {
                 d_length_ik: exp_d_length_ik,
             } = exp_lambda::Input {
                 params, type_i, type_j, type_k, length_ij, length_ik,
-            }.compute();
-            dbg!("explambda: {:.9}", exp);
+            }.compute(dbg);
+            dbg!(dbg, "explambda: {:.9}", exp);
 
             let GSpline {
                 value: G,
                 d_cos_ijk: G_d_cos_ijk,
             } = g_spline::Input { params, type_i, cos_ijk, tcoord_ij }.compute();
-            dbg!("g: {:.9} {:.9}", G, G_d_cos_ijk);
+            dbg!(dbg, "g: {:.9} {:.9}", G, G_d_cos_ijk);
 
 //            dbg!("bspterm: {:.9}", exp_lambda * weight_ik * G);
             inner_value += exp * weight_ik * G;
@@ -1271,8 +1307,8 @@ mod bondorder_sigma_pi {
     impl<'a> Input<'a> {
         // For debugging; feel free to swap out the `compute` call with this.
         #[allow(unused)]
-        pub fn compute_paranoid(self, tol: f64) -> Output {
-            let output = self.clone().compute();
+        pub(super) fn compute_paranoid(self, dbg: Debug, tol: f64) -> Output {
+            let output = self.clone().compute(dbg);
             { // FIXME block unnecessary after NLL lands
                 let Output { value, ref d_coses_ijk, ref d_lengths_ik } = output;
 
@@ -1288,7 +1324,7 @@ mod bondorder_sigma_pi {
                             // FIXME so dumb
                             let old = self.coses_ijk[index_ik];
                             coses_ijk[index_ik] = cos_ijk;
-                            let out = Input { coses_ijk: &coses_ijk, ..self }.compute().value;
+                            let out = Input { coses_ijk: &coses_ijk, ..self }.compute(Debug::Never).value;
                             coses_ijk[index_ik] = old;
                             out
                         }),
@@ -1299,7 +1335,7 @@ mod bondorder_sigma_pi {
                     rel=tol, abs=tol,
                     &d_lengths_ik[..],
                     &numerical::gradient(1e-4, None, self.lengths_ik, |lengths_ik| {
-                        Input { lengths_ik, ..self }.compute().value
+                        Input { lengths_ik, ..self }.compute(Debug::Never).value
                     })[..],
                 );
             }
@@ -1313,10 +1349,10 @@ use self::bondorder_pi::BondOrderPi;
 mod bondorder_pi {
     use super::*;
 
-    pub type Output = BondOrderPi;
+    pub(super) type Output = BondOrderPi;
 
     #[derive(Debug, Clone)]
-    pub struct Input<'a> {
+    pub(super) struct Input<'a> {
         pub params: &'a Params,
         pub interactions: &'a Interactions,
         pub site_i: SiteI,
@@ -1331,18 +1367,18 @@ mod bondorder_pi {
         pub alt_weights_ik: &'a [f64],
         pub alt_weights_jl: &'a [f64],
     }
-    pub struct BondOrderPi {
+    pub(super) struct BondOrderPi {
         pub value: f64,
         pub d_deltas_ik: SiteBondVec<V3>,
         pub d_deltas_jl: SiteBondVec<V3>,
     }
 
     impl<'a> Input<'a> {
-        pub fn compute(self) -> Output { compute(self) }
+        pub(super) fn compute(self, dbg: Debug) -> Output { compute(self, dbg) }
     }
 
     // free function for smaller indent
-    fn compute(input: Input<'_>) -> Output {
+    fn compute(input: Input<'_>, dbg: Debug) -> Output {
         let Input {
             params, interactions, site_i, bond_ij, weights_ik, weights_jl,
             tcoords_k, tcoords_l, alt_weights_ik, alt_weights_jl,
@@ -1364,14 +1400,14 @@ mod bondorder_pi {
             weights_ik: weights_ik,
             tcoords_k: tcoords_k,
             types_k: &types_k,
-        }.compute();
+        }.compute(dbg);
 
         let ycoord_ji = ycoord::Input {
             skip_index: index_ji,
             weights_ik: weights_jl,
             tcoords_k: tcoords_l,
             types_k: &types_l,
-        }.compute();
+        }.compute(dbg);
 
         // NConj = 1 + (square sum over bonds ik) + (square sum over bonds jl)
         let xcoord_ij = 1.0 + ycoord_ij + ycoord_ji;
@@ -1461,7 +1497,7 @@ mod bondorder_pi {
             } // for bond_ik
 
             let T = t_spline::Input { params, type_i, type_j, tcoord_ij, tcoord_ji, xcoord_ij }.compute();
-            dbg!("T: {:.9}", T);
+            dbg!(dbg, "T: {:.9}", T);
 
             value += T * sum;
             axpy_mut(&mut d_deltas_ik, T, &sum_d_deltas_ik);
@@ -1480,7 +1516,7 @@ mod bondorder_pi {
         let F = f_input.compute();
         value += F;
 
-        dbg!("F: {:.9}", F);
+        dbg!(dbg, "F: {:.9}", F);
 
         Output { value, d_deltas_ik, d_deltas_jl }
     }
@@ -1488,14 +1524,14 @@ mod bondorder_pi {
     impl<'a> Input<'a> {
         // For debugging; feel free to swap out the `compute` call with this.
         #[allow(unused)]
-        pub fn compute_paranoid(self, tol: f64) -> Output {
+        pub(super) fn compute_paranoid(self, dbg: Debug, tol: f64) -> Output {
             let mut interactions = self.interactions.clone(); // FIXME oof
             let bond_ij = self.bond_ij;
             let bond_ji = interactions.bond(bond_ij).reverse_index;
             let index_ij = interactions.sbvec_index(bond_ij);
             let index_ji = interactions.sbvec_index(bond_ji);
 
-            let output = self.clone().compute();
+            let output = self.clone().compute(dbg);
             { // FIXME block unnecessary after NLL lands
                 let Output { value, ref d_deltas_ik, ref d_deltas_jl } = output;
 
@@ -1513,7 +1549,7 @@ mod bondorder_pi {
                             d_deltas_ik[index_ik].0,
                             num_grad_v3(1e-4, interactions.bond(bond_ik).cart_vector, |p| {
                                 interactions.with_modified_delta(bond_ik, p, |interactions| {
-                                    Input { interactions: interactions, ..self }.compute().value
+                                    Input { interactions, ..self }.compute(Debug::Never).value
                                 })
                             }).0,
                             "in {}", err_hint,
@@ -1533,7 +1569,7 @@ mod bondorder_pi {
                 let expected = d_deltas_ik[index_ij] - d_deltas_jl[index_ji];
                 let num_grad = num_grad_v3(1e-4, interactions.bond(bond_ij).cart_vector, |p| {
                     interactions.with_modified_delta(bond_ij, p, |interactions| {
-                        Input { interactions: interactions, ..self }.compute().value
+                        Input { interactions, ..self }.compute(Debug::Never).value
                     })
                 });
                 assert_close!(rel=tol, abs=tol, expected.0, num_grad.0, "in delta_ij");
@@ -1551,12 +1587,13 @@ mod bondorder_pi {
 //     xcoord_ij = 1 + ycoord_ij + ycoord_ji
 //
 // ...but `xcoord` is not a useful thing to wrap a function around because it has a ton of
-// derivatives and amounts to little more than two computations of `ycoord`.
+// derivatives (in the reactive form, at least) and amounts to little more than two computations
+// of `ycoord`.
 mod ycoord {
     use super::*;
 
-    pub type Output = f64;
-    pub struct Input<'a> {
+    pub(super) type Output = f64;
+    pub(super) struct Input<'a> {
         pub skip_index: usize,
         pub weights_ik: &'a [f64],
         pub tcoords_k: &'a [f64],
@@ -1564,11 +1601,13 @@ mod ycoord {
     }
 
     impl<'a> Input<'a> {
-        pub fn compute(self) -> Output { compute(self) }
+        pub(super) fn compute(self, dbg: Debug) -> Output { compute(self, dbg) }
     }
 
     // free function for smaller indent
-    fn compute(input: Input<'_>) -> Output {
+    fn compute(input: Input<'_>, dbg: Debug) -> Output {
+        let _ = dbg;
+
         let Input { skip_index, weights_ik, tcoords_k, types_k } = input;
 
         // Compute the sum without the square
@@ -1594,8 +1633,8 @@ use self::exp_lambda::ExpLambda;
 mod exp_lambda {
     use super::*;
 
-    pub type Output = ExpLambda;
-    pub struct Input<'a> {
+    pub(super) type Output = ExpLambda;
+    pub(super) struct Input<'a> {
         pub params: &'a Params,
         pub type_i: AtomType,
         pub type_j: AtomType,
@@ -1604,7 +1643,7 @@ mod exp_lambda {
         pub length_ik: f64,
     }
 
-    pub struct ExpLambda {
+    pub(super) struct ExpLambda {
         pub value: f64,
         pub d_length_ij: f64,
         pub d_length_ik: f64,
@@ -1617,10 +1656,12 @@ mod exp_lambda {
     }
 
     impl<'a> Input<'a> {
-        pub fn compute(self) -> Output { compute(self) }
+        pub(super) fn compute(self, dbg: Debug) -> Output { compute(self, dbg) }
     }
 
-    fn compute(input: Input<'_>) -> Output {
+    fn compute(input: Input<'_>, dbg: Debug) -> Output {
+        let _ = dbg;
+
         let Input { params, type_i, type_j, type_k, length_ij, length_ik } = input;
         match params.use_airebo_lambda {
             // `exp(lambda_ijk)` as defined in the 2nd-gen REBO paper.
@@ -1683,14 +1724,14 @@ mod dihedral_sine_sq {
     //! describing interactions of 4 atoms.
     use super::*;
 
-    pub type Output = DihedralSineSq;
-    pub struct Input {
+    pub(super) type Output = DihedralSineSq;
+    pub(super) struct Input {
         pub delta_ij: V3,
         pub delta_ik: V3,
         pub delta_jl: V3,
     }
 
-    pub struct DihedralSineSq {
+    pub(super) struct DihedralSineSq {
         pub value: f64,
         pub d_delta_ij: V3,
         pub d_delta_ik: V3,
@@ -1811,20 +1852,20 @@ mod bond_cosine {
     //! Diff function for the cos(θ) between bonds.
     use super::*;
 
-    pub type Output = BondCosine;
-    pub struct Input {
+    pub(super) type Output = BondCosine;
+    pub(super) struct Input {
         pub delta_ij: V3,
         pub delta_ik: V3,
     }
 
-    pub struct BondCosine {
+    pub(super) struct BondCosine {
         pub value: f64,
         pub d_delta_ij: V3,
         pub d_delta_ik: V3,
     }
 
     impl Input {
-        pub fn compute(self) -> Output { compute(self) }
+        pub(super) fn compute(self) -> Output { compute(self) }
     }
 
     // free function for smaller indent
@@ -1884,22 +1925,22 @@ use self::g_spline::GSpline;
 mod g_spline {
     use super::*;
 
-    pub type Output = GSpline;
+    pub(super) type Output = GSpline;
     #[derive(Clone)]
-    pub struct Input<'a> {
+    pub(super) struct Input<'a> {
         pub params: &'a Params,
         pub type_i: AtomType,
         pub tcoord_ij: f64,
         pub cos_ijk: f64,
     }
 
-    pub struct GSpline {
+    pub(super) struct GSpline {
         pub value: f64,
         pub d_cos_ijk: f64,
     }
 
     impl<'a> Input<'a> {
-        pub fn compute(self) -> Output { compute(self) }
+        pub(super) fn compute(self) -> Output { compute(self) }
     }
 
     // free function for smaller indent
@@ -2072,7 +2113,7 @@ mod p_spline {
     use self::splines::bicubic;
 
     type Output = f64;
-    pub struct Input<'a> {
+    pub(super) struct Input<'a> {
         pub params: &'a Params,
         pub type_i: AtomType,
         pub type_j: AtomType,
@@ -2081,7 +2122,7 @@ mod p_spline {
     }
 
     impl<'a> Input<'a> {
-        pub fn compute(&self) -> Output {
+        pub(super) fn compute(&self) -> Output {
             let Input { ref params, type_i, type_j, ccoord_ij, hcoord_ij } = *self;
 
             let poly = match (type_i, type_j) {
@@ -2109,8 +2150,8 @@ mod f_spline {
     //
     // For that reason, we don't actually currently use the tricubic splines, and instead just
     // check for a few special cases.
-    pub type Output = f64;
-    pub struct Input<'a> {
+    pub(super) type Output = f64;
+    pub(super) struct Input<'a> {
         pub params: &'a Params,
         pub type_i: AtomType,
         pub type_j: AtomType,
@@ -2120,7 +2161,7 @@ mod f_spline {
     }
 
     impl<'a> Input<'a> {
-        pub fn compute(self) -> Output { compute(self) }
+        pub(super) fn compute(self) -> Output { compute(self) }
     }
 
     // Tables 4, 6, and 9
@@ -2146,7 +2187,7 @@ mod f_spline {
     // indicates whether RSP2 has been tested with structures that have these
     // particular coordinations
     impl<'a> Input<'a> {
-        pub fn is_tested(&self) -> bool {
+        pub(super) fn is_tested(&self) -> bool {
             use self::splines::{MAX_I, MAX_J, MAX_K};
 
             let Input { params: _, type_i, type_j, tcoord_ij, tcoord_ji, xcoord_ij } = *self;
@@ -2202,8 +2243,8 @@ mod t_spline {
 
     use super::*;
 
-    pub type Output = f64;
-    pub struct Input<'a> {
+    pub(super) type Output = f64;
+    pub(super) struct Input<'a> {
         pub params: &'a Params,
         pub type_i: AtomType,
         pub type_j: AtomType,
@@ -2213,7 +2254,7 @@ mod t_spline {
     }
 
     impl<'a> Input<'a> {
-        pub fn compute(self) -> Output { compute(self) }
+        pub(super) fn compute(self) -> Output { compute(self) }
     }
 
     // Tables 4, 6, and 9
@@ -2439,7 +2480,7 @@ mod reactive_warnings {
         };
     }
 
-    pub fn log_nonbonded(interval: (f64, f64), value: f64) {
+    pub(super) fn log_nonbonded(interval: (f64, f64), value: f64) {
         let (alpha, _) = linterp_from(interval, (1.0, 0.0), value); // flipped so unbonded gets 0
         if alpha > RECORDS.read().unwrap().worst_nonbonded_alpha.unwrap_or(0.0) {
             let mut records = RECORDS.write().unwrap();
@@ -2453,7 +2494,7 @@ mod reactive_warnings {
         }
     }
 
-    pub fn log_bonded(interval: (f64, f64), value: f64) {
+    pub(super) fn log_bonded(interval: (f64, f64), value: f64) {
         let (alpha, _) = linterp_from(interval, (0.0, 1.0), value);
         if alpha > RECORDS.read().unwrap().worst_bonded_alpha.unwrap_or(0.0) {
             let mut records = RECORDS.write().unwrap();
@@ -2477,6 +2518,23 @@ mod reactive_warnings {
             "},
             _ => {},
         }
+    }
+}
+
+#[test]
+fn d_linterp_from() {
+    for _ in 0..10 {
+        let xs = (uniform(-10.0, 10.0), uniform(-10.0, 10.0));
+        let ys = (uniform(-10.0, 10.0), uniform(-10.0, 10.0));
+        let x = uniform(-30.0, 30.0);
+        let f = |x| linterp_from(xs, ys, x);
+        let (_, diff) = f(x);
+
+        // linear function so central difference is exact
+        //
+        // sometimes the diff is small, so also allow abs tolerance
+        let num_diff = numerical::slope(1e-1, Some(CentralDifference), x, |x| f(x).0);
+        assert_close!{rel=1e-11, abs=1e-11, diff, num_diff};
     }
 }
 
@@ -2522,33 +2580,6 @@ fn concat_any_order<T>(a: Vec<T>, b: Vec<T>) -> Vec<T> {
 fn cleared<T>(mut vec: Vec<T>) -> Vec<T> {
     vec.clear();
     vec
-}
-
-//-----------------------------------------------------------------------------
-
-#[cfg(test)]
-#[deny(unused)]
-mod derivative_tests {
-    use super::*;
-
-    #[test]
-    fn d_linterp_from() {
-        for _ in 0..10 {
-            let xs = (uniform(-10.0, 10.0), uniform(-10.0, 10.0));
-            let ys = (uniform(-10.0, 10.0), uniform(-10.0, 10.0));
-            let x = uniform(-30.0, 30.0);
-            let f = |x| linterp_from(xs, ys, x);
-            let (_, diff) = f(x);
-
-            // linear function so central difference is exact
-            //
-            // sometimes the diff is small, so also allow abs tolerance
-            let num_diff = numerical::slope(1e-1, Some(CentralDifference), x, |x| f(x).0);
-            assert_close!{rel=1e-11, abs=1e-11, diff, num_diff};
-        }
-    }
-
-    // Numerical tests for brenner_G are in that module
 }
 
 //-----------------------------------------------------------------------------
@@ -2616,6 +2647,12 @@ mod input_tests {
         single("7azz-gnr")
     }
 
+    #[test]
+    fn nanotubes() -> FailResult<()> {
+        single("nanotubes")?;
+        panic!()
+    }
+
     fn single(name: &str) -> FailResult<()> {
         use ::std::{path, fs::File};
         use ::rsp2_structure_io::Poscar;
@@ -2636,8 +2673,8 @@ mod input_tests {
 
         let (value, grad) = compute(&params, &coords, &elements, &bond_graph, use_rayon)?;
 
-        assert_close!(abs=1e-11, rel=1e-10, value, expected.value, "in file: {}", name);
-        assert_close!(abs=1e-11, rel=1e-10, grad.unvee(), expected.grad.unvee(), "in file: {}", name);
+        assert_close!(abs=1e-9, rel=1e-8, value, expected.value, "in file: {}", name);
+        assert_close!(abs=1e-9, rel=1e-8, grad.unvee(), expected.grad.unvee(), "in file: {}", name);
         Ok(())
     }
 

@@ -24,8 +24,20 @@ use ::std::ops::RangeInclusive;
 use ::std::borrow::Borrow;
 use ::rsp2_array_types::{V2, V3};
 
-// Until we get const generics, it's too much trouble to be generic over lengths,
-// so we'll just use one fixed dimension.
+// NOTE: Rust doesn't have const generics yet, and this makes it too much trouble
+//       to be generic over lengths, so we pick one size for the core of the implementation
+//       and let the other sizes be wrappers around it.
+//
+// In reality, the ideal choice of domains for our splines are:
+//
+//    P(i,j):   (0,0)   to (4,4)
+//    T(i,j,k): (0,0,0) to (3,3,9)
+//    F(i,j,k): (0,0,0) to (3,3,9)
+//
+// where values beyond the end of this domain are clipped to the max value.
+// (this is something that must explicitly be done for F and T;  meanwhile, P is defined
+//  to be zero outside its domain, and thus we have simply choosen a domain large enough
+//  that the value is zero along all of the upper boundaries)
 pub const MAX_I: usize = 4;
 pub const MAX_J: usize = 4;
 pub const MAX_K: usize = 9;
@@ -198,13 +210,9 @@ pub mod F {
         pub HH: TricubicGrid,
     }
 
+    #[allow(unused)]
     lazy_static! {
         /// Brenner (2002), Tables 4, 6, and 9.
-        ///
-        /// This has NOT been thoroughly checked against Stuart and LAMMPS, although
-        /// all of what I have checked so far against Stuart matches.  (LAMMPS takes
-        /// some creative freedom with the values of the splines near some of the
-        /// boundaries, and I haven't yet figured out precisely what it does)
         ///
         /// **Caution:** This very likely contains errors, and using it is currently
         /// inadvisable.
@@ -212,6 +220,20 @@ pub mod F {
             CC: brenner_CC(),
             HH: brenner_HH(),
             CH: brenner_CH(),
+        };
+
+        /// Tables verified to identically match LAMMPS' fitting data.
+        ///
+        /// (modulo one bug in LAMMPS that is not replicated; see the bottom of the source body
+        ///  of `lammps_CC()`)
+        ///
+        /// Mind, they do differ from Brenner's tables in some ways (*especially* the CH grid,
+        /// but also a decent-sized block of the CC grid where i=0 or j=0).  It is not yet
+        /// clear to me whether this is a problem.
+        pub static ref LAMMPS: SplineSet = SplineSet {
+            CC: lammps_CC(),
+            HH: lammps_HH(),
+            CH: lammps_CH(),
         };
     }
 
@@ -307,7 +329,7 @@ pub mod F {
         input.dk.assign((1, 2, 4), -0.020_044);
         input.dk.assign((1, 2, 5), -0.020_044);
 
-        // symmetrize
+        // F(i,j,k) = F(j,i,k)
         let input = input.symmetrize();
 
         // The values in Brenner (2002) are actually 2 * F.
@@ -315,15 +337,138 @@ pub mod F {
         input.solve().unwrap()
     }
 
+    /// Verified to be identical to the grid used by LAMMPS.
+    ///
+    /// (not counting one bug in LAMMPS which was found to be a nuisance to replicate;
+    ///  see the comment at the end of the source function body)
+    ///
+    /// It is probably similar to Stuart's Table IX.
+    fn lammps_CC() -> TricubicGrid {
+        let mut input = tricubic::Input::default();
+
+        // Comments with fitting species are from Brenner's table.
+
+        input.value.assign((1, 1, 1), 0.05250); // Acetylene
+        input.value.assign((1, 1, 2), -0.002088750); // H2C=C=CH
+        input.value.assign((1, 1, 3..=9), -0.00804280); // C4
+        input.value.assign((2, 2, 1), 0.0472247850);  // (CH3)2C=C(CH3)2
+        input.value.assign((2, 2, 2), 0.0110); // Benzene
+
+        // !!!!!!!!!!!!
+        // NOTE: The correctness of these lines is uncertain, but they are
+        //       consistent between Brenner, Stuart, and the LAMMPS implementation.
+        //
+        // The comments in Brenner's table describes them as the
+        // "average from difference F(2, 2, 2) to difference F(2, 2, 9)".
+        //
+        // They do have a constant difference, but if we were really starting from
+        // the value of F[2][2][2], then that difference should be around 0.00314, not 0.00662.
+        // (notice how F[2][2][3] > F[2][2][2])
+        //
+        // My best guess is that the comment is mistaken, and F[2][2][3] was fit
+        // to a species.                                           -ML
+        // !!!!!!!!!!!!
+        input.value.assign((2, 2, 3), 0.0198529350);
+        input.value.assign((2, 2, 4), 0.01654411250);
+        input.value.assign((2, 2, 5), 0.013235290);
+        input.value.assign((2, 2, 6), 0.00992646749999);
+        input.value.assign((2, 2, 7), 0.006617644999);
+        input.value.assign((2, 2, 8), 0.00330882250);
+        input.dk.assign((2, 2, 4..=8), -0.0033090);
+
+        input.value.assign((0, 1, 1), 0.021693495);  // C2H
+        input.value.assign((0, 1, 2..=9), 0.0049586079); // C3 (NOTE: Different from Brenner)
+        input.value.assign((0, 2, 1), 0.024698831850); // CCH2
+        input.value.assign((0, 2, 2), -0.00597133450); // CCH(CH2)
+        input.value.assign((0, 3, 1..=2), -0.05989946750); // H3CC
+        input.value.assign((0, 3, 3..=9), 0.0049586079); // (NOTE: Different from Brenner)
+
+        input.value.assign((1, 2, 1), 0.00482478490); // H2CCH
+        input.value.assign((1, 2, 2), 0.0150); // H2C=C=CH2
+        input.value.assign((1, 2, 3), -0.010); // C6H5
+
+        // !!!!!!!!!!!!
+        // NOTE: The correctness of these lines is uncertain. They are consistent
+        //       between Brenner, Stuart, and the LAMMPS implementation, but
+        //       unfortunately it seems they might all be incorrect.
+        //
+        // The comment in Brenner's table is "Average from F(1,2,3) to F(1,2,6)".
+        // This time, the comment is correct; these elements do form a line.
+        // But the explicitly assigned derivative is wrong, likely causing
+        // 'S' shapes to appear in the shape of F.
+        //
+        // Because changing these params might invalidate the work done to fit
+        // other parameters by the authors of the REBO paper, I'm leaving them as is.
+        // !!!!!!!!!!!!
+        input.value.assign((1, 2, 4), -0.01168893870);
+        input.value.assign((1, 2, 5), -0.013377877400);
+        input.dk.assign((1, 2, 4..=5), -0.0100220);
+
+        input.value.assign((1, 2, 6..=9), -0.015066816000); // Graphite vacancy
+        input.value.assign((1, 3, 2..=9), -0.0624183760); // H3C–CCH
+        input.value.assign((2, 3, 1..=9), -0.02235469150); // Diamond vacancy
+
+        // NOTE: These are present in Stuart but not in Brenner.
+        //       I didn't see any explanation for them.
+        input.value.assign((0, 0, 3..=9), 0.0049586079);
+        input.value.assign((0, 2, 3..=9), 0.0049586079);
+
+        //-----------
+        // derivatives
+
+        input.di.assign((2, 1, 1), -0.026250);
+        input.di.assign((2, 1, 5..=9), -0.0271880);
+        input.di.assign((1, 3, 2), 0.0187723882);
+        input.di.assign((2, 3, 2..=9), 0.031209);
+
+        // NOTE: mind that two of the dk derivatives were written above
+        input.dk.assign((1, 1, 2), -0.0302715);
+        // NOTE: dk(1, 2, 4..=5) is written above
+        // NOTE: dk(2, 2, 4..=8) is written above
+
+        // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        // NOTE: At this point, LAMMPS also does this thing where it copies values from the knots
+        //       at i=3 to i=4 and from j=3 to j=4 in an attempt to satisfy the rules that
+        //       F(>3,j,k) = F(3,j,k) and F(i,>3,k) = F(i,3,k).
+        //
+        // There are a couple of things to say about this:
+        //
+        // * We don't need to do this because we clip points to i<=3, j<=3 before evaluation.
+        //   In other words, we never use the curves defined on `3 <= i <= 4` or `3 <= j <= 4` for
+        //   the F spline.
+        //
+        //   Ideally, we wouldn't even have solutions for that region; the only reason we do is
+        //   so that the code for the P spline (which does require knots at `i=4` and `j=4`)
+        //   could be implemented in terms of the tricubic spline code.  Once rust has const
+        //   generics we'll be able to use smaller arrays here.
+        //
+        //   (and the only reason that LAMMPS doesn't just clip the point is... ¯\_(ツ)_/¯)
+        //
+        // * The manner in which Lammps does this as of the 10Oct2018 version is bugged, anyways.
+        //   It only copies the value when it should also be copying the perpendicular derivatives.
+        //   (this causes some df/di derivatives to be lost at j=4 and vice versa).
+        // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+        let input = input.symmetrize();
+        input.solve().unwrap()
+    }
+
     // Brenner, Table 6
-    // TODO: Check against Stuart and LAMMPS
     fn brenner_HH() -> TricubicGrid {
         let mut input = tricubic::Input::default();
         input.value.assign((1, 1, 1), 0.249_831_916);
 
+        let input = input.symmetrize();
+
         // The values in Brenner (2002) are actually 2 * F.
         let input = input.scale(0.5);
         input.solve().unwrap()
+    }
+
+    fn lammps_HH() -> TricubicGrid {
+        let mut input = tricubic::Input::default();
+        input.value.assign((1, 1, 1), 0.124_915_958);
+        input.symmetrize().solve().unwrap()
     }
 
     // Brenner, Table 9
@@ -354,6 +499,36 @@ pub mod F {
 
         // The values in Brenner (2002) are actually 2 * F.
         let input = input.scale(0.5);
+        input.solve().unwrap()
+    }
+
+    // Verified to identically match LAMMPS' parameter grid for piCH.
+    fn lammps_CH() -> TricubicGrid {
+        let mut input = tricubic::Input::default();
+
+        // Brenner's comment for this is "C6H6"
+        input.value.assign((0, 2, 5..=9), -0.004523893758064);
+
+        // Brenner's comment for all of these is "Equations (23)–(25)"
+        // However, these are all VERY DIFFERENT from Brenner's!
+
+        // NOTE: in Brenner these are F(1, 1, 1..=9) = -0.25
+        // That's an order of magnitude difference!
+        // ...not to mention the one modified element in the middle.
+        input.value.assign((1, 1, 1..=2), -0.050);
+        input.value.assign((1, 1, 3), -0.30);
+        input.value.assign((1, 1, 4..=9), -0.050);
+
+        // NOTE: in Brenner these are F(1, 3, 1..=9) = -0.125
+        // (i.e. both Brenner and Stuart wrote -0.250, but one has an implicit factor of 2)
+        input.value.assign((1, 2, 2..=3), -0.250);
+
+        // NOTE: in Brenner these are F(1, 3, 1..=9) = -0.1065
+        input.value.assign((1, 3, 1), -0.10);
+        input.value.assign((1, 3, 2..=3), -0.125);
+        input.value.assign((1, 3, 4..=9), -0.10);
+
+        let input = input.symmetrize();
         input.solve().unwrap()
     }
 }
@@ -756,7 +931,7 @@ pub mod tricubic {
     ///
     /// F. Lekien and J. Marsden, Tricubic interpolation in three dimensions,
     /// Int. J. Numer. Meth. Engng 2005; 63:455–471
-    #[derive(Debug, Clone, Default)]
+    #[derive(Debug, Clone, PartialEq, Default)]
     pub struct _Input<G> {
         pub value: G,
         pub di: G,
@@ -859,14 +1034,14 @@ pub mod tricubic {
             Ok(TricubicGrid { fit_params, polys })
         }
 
-        pub fn scale(mut self, factor: f64) -> Self {
+        pub fn map_all_floats(mut self, mut f: impl FnMut(f64) -> f64) -> Self {
             { // FIXME: block will be unnecessary once NLL lands
                 let Input { value, di, dj, dk } = &mut self;
                 for &mut &mut ref mut array in &mut[value, di, dj, dk] {
                     for plane in array {
                         for row in plane {
                             for x in row {
-                                *x *= factor;
+                                *x = f(*x);
                             }
                         }
                     }
@@ -874,6 +1049,8 @@ pub mod tricubic {
             }
             self
         }
+
+        pub fn scale(self, factor: f64) -> Self { self.map_all_floats(|x| factor * x) }
 
         /// Symmetrize a function so that `F(i, j, k) = F(j, i, k)`.
         ///
@@ -1295,7 +1472,7 @@ pub mod bicubic {
     /// Input for a bicubic spline.
     ///
     /// Not included is an implicit constraint that `d^2/didj = 0` at all integer points.
-    #[derive(Default)]
+    #[derive(Default, Clone, PartialEq)]
     pub struct Input {
         pub value: EndpointGrid<f64>,
         pub di: EndpointGrid<f64>,

@@ -67,13 +67,13 @@ def _main(temp, poscar, tty_hack):
     print()
 
 def populate_tempdir(temp, poscar):
-    import gzip
+    import lzma
     shutil.copyfile('lmp.in', join(temp, 'lmp.in'))
     data = subprocess.check_output(['python3', 'generate.py', poscar])
     with open(join(temp, 'structure.data'), 'wb') as f:
         f.write(data)
 
-    with gzip.open('CH.airebo-nonreactive.gz', 'rt') as f:
+    with lzma.open('CH.airebo-nonreactive.xz', 'rt') as f:
         s = f.read()
     with open(join(temp, 'CH.airebo-nonreactive'), 'w') as f:
         f.write(s)

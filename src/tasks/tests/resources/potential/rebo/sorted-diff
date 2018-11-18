@@ -24,6 +24,7 @@ def main():
     p.add_argument('FILE_A')
     p.add_argument('FILE_B')
     p.add_argument('-n', '--natural', help='give the results naturally sorted. (default is lexical)')
+    p.add_argument('-e', '--equal', action='store_true', help='include lines that are shared')
     p.add_argument('--color', choices=['never', 'always', 'auto'], default = 'auto')
     args = p.parse_args()
 
@@ -48,11 +49,11 @@ def main():
     lines_a = get_sorted(list(open(args.FILE_A)))
     lines_b = get_sorted(list(open(args.FILE_B)))
 
-    diff = sorted_diff(lines_a, lines_b)
+    diff = sorted_diff(lines_a, lines_b, emit_eq=args.equal)
 
     format_diff(diff, use_color, file=sys.stdout)
 
-def sorted_diff(a, b):
+def sorted_diff(a, b, emit_eq):
 
     DONE = object()
     def maybe_next(it):
@@ -73,21 +74,32 @@ def sorted_diff(a, b):
             yield ('>', next_b)
             next_b = maybe_next(b)
         elif next_a == next_b:
+            if emit_eq:
+                yield ('=', next_a)
             next_a = maybe_next(a)
             next_b = maybe_next(b)
         else:
             raise ValueError("input does not obey a total order")
+
+    if next_a is not DONE:
+        yield ('<', next_a)
+        yield from (('<', x) for x in a)
+    if next_b is not DONE:
+        yield ('>', next_b)
+        yield from (('>', x) for x in b)
 
 def format_diff(diff, use_color, file):
     if use_color:
         side_formatter = {
             '<': (lambda s: colored.stylize('< ' + s, colored.fg('red'))),
             '>': (lambda s: colored.stylize('> ' + s, colored.fg('green'))),
+            '=': (lambda s: '= ' + s),
         }
     else:
         side_formatter = {
             '<': (lambda s: '< ' + s),
             '>': (lambda s: '> ' + s),
+            '=': (lambda s: '= ' + s),
         }
 
     for side, line in diff:
