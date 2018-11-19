@@ -26,10 +26,8 @@ use ::math::rebo::nonreactive as rebo_imp;
 
 /// Rust implementation of Kolmogorov-Crespi Z.
 ///
-/// NOTE: This has the limitation that the set of pairs within interaction range
-///       must not change after the construction of the DiffFn.
-///
-///       The elements also must not change.
+/// **NOTE:** This has the limitation that the set of pairs within interaction range
+/// must not change after the construction of the DiffFn. The elements also must not change.
 #[derive(Debug, Clone)]
 pub struct KolmogorovCrespiZ(pub(super) cfg::PotentialKolmogorovCrespiZNew);
 

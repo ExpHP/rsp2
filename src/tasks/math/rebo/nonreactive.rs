@@ -2716,6 +2716,7 @@ mod input_tests {
     use ::rsp2_array_types::Unvee;
 
     const RESOURCE_DIR: &'static str = "tests/resources/potential/rebo";
+    const BIG_INPUT: &'static str = "tblg-2011-150-a";
 
     #[test]
     fn all() -> FailResult<()> {
@@ -2729,16 +2730,18 @@ mod input_tests {
         assert!(!matches.is_empty());
 
         for name in matches {
-            println!("Testing {}", name);
-            single(&name)?;
+            if name != BIG_INPUT {
+                println!("Testing {}", name);
+                single(&name)?;
+            }
         }
         Ok(())
     }
 
-    // Can single out one of the tests for obtaining its debug output
     #[test]
-    fn singled_out() -> FailResult<()> {
-        single("gyroid-1")
+    #[ignore] // time consuming; run with --ignored
+    fn big_input() -> FailResult<()> {
+        single(BIG_INPUT)
     }
 
     fn single(name: &str) -> FailResult<()> {
