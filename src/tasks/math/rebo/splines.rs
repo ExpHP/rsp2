@@ -1124,8 +1124,8 @@ pub mod tricubic {
         assert_eq!(spline.evaluate(V3([1.0, -1.0, 1.0])), spline.evaluate(V3([1.0, 0.0, 1.0])));
         assert_eq!(spline.evaluate(V3([1.0, 1.0, -1.0])), spline.evaluate(V3([1.0, 1.0, 0.0])));
         assert_eq!(spline.evaluate(V3([MAX_I as f64 + 3.0, 1.0, 1.0])), spline.evaluate(V3([MAX_I as f64, 1.0, 1.0])));
-        assert_eq!(spline.evaluate(V3([1.0, MAX_J as f64 + 3.0, 1.0])), spline.evaluate(V3([1.0, MAX_I as f64, 1.0])));
-        assert_eq!(spline.evaluate(V3([1.0, 1.0, MAX_K as f64 + 3.0])), spline.evaluate(V3([1.0, 1.0, MAX_I as f64])));
+        assert_eq!(spline.evaluate(V3([1.0, MAX_J as f64 + 3.0, 1.0])), spline.evaluate(V3([1.0, MAX_J as f64, 1.0])));
+        assert_eq!(spline.evaluate(V3([1.0, 1.0, MAX_K as f64 + 3.0])), spline.evaluate(V3([1.0, 1.0, MAX_K as f64])));
         Ok(())
     }
 } // mod tricubic
@@ -1307,7 +1307,7 @@ pub mod bicubic {
         assert_eq!(spline.evaluate(V2([-1.0, 1.0])), spline.evaluate(V2([0.0, 1.0])));
         assert_eq!(spline.evaluate(V2([1.0, -1.0])), spline.evaluate(V2([1.0, 0.0])));
         assert_eq!(spline.evaluate(V2([MAX_I as f64 + 3.0, 1.0])), spline.evaluate(V2([MAX_I as f64, 1.0])));
-        assert_eq!(spline.evaluate(V2([1.0, MAX_J as f64 + 3.0])), spline.evaluate(V2([1.0, MAX_I as f64])));
+        assert_eq!(spline.evaluate(V2([1.0, MAX_J as f64 + 3.0])), spline.evaluate(V2([1.0, MAX_J as f64])));
         Ok(())
     }
 }
