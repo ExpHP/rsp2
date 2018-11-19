@@ -193,6 +193,7 @@ impl_dyn_clone_detail!{
     impl[] DynCloneDetail<CommonMeta> for Rebo { ... }
 }
 
+#[cfg(not_now)]
 #[test]
 fn test_rebo_diff() -> FailResult<()> {
     use ::rsp2_structure::{Lattice, CoordsKind, consts as elem};
@@ -245,6 +246,7 @@ fn test_rebo_diff() -> FailResult<()> {
     Ok(())
 }
 
+#[cfg(not_now)]
 #[test]
 fn test_rebo_value() -> FailResult<()> {
     use ::rsp2_structure::{Lattice, CoordsKind, consts as elem};
