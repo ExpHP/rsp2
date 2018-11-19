@@ -19,13 +19,11 @@ def lammps_lattice(matrix):
         a = -a
 
     xx = norm(a)
-    a_unit = a/norm(a)
-    yx = np.dot(b, a_unit)
-    yy = norm(np.cross(a_unit, b))
-    ab_unit = np.cross(a, b) / norm(np.cross(a, b))
-    zx = np.dot(c, a_unit)
-    zy = np.dot(c, np.cross(ab_unit, a_unit))
-    zz = norm(np.dot(c, ab_unit))
+    yx = np.dot(b,a)/norm(a)
+    yy = (np.dot(b,b) - yx*yx)**0.5
+    zx = np.dot(c,a)/norm(a)
+    zy = (np.dot(b,c) - yx*zx)/yy
+    zz = (np.dot(c,c) - zx*zx - zy*zy)**0.5
 
     if is_negative:
         xx = -xx
@@ -52,7 +50,7 @@ print()
 print(f'0.0 {lattice[0][0]} xlo xhi')
 print(f'0.0 {lattice[1][1]} ylo yhi')
 print(f'0.0 {lattice[2][2]} zlo zhi')
-print(f'{lattice[0][1]} {lattice[0][2]} {lattice[1][2]} xy xz yz')
+print(f'{lattice[1][0]} {lattice[2][0]} {lattice[2][1]} xy xz yz')
 print()
 print(f'Masses')
 print()
