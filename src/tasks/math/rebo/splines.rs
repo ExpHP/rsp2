@@ -24,9 +24,6 @@ use ::std::ops::RangeInclusive;
 use ::std::borrow::Borrow;
 use ::rsp2_array_types::{V2, V3};
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-enum EvalKind { Fast, Slow }
-
 pub mod P {
     use super::*;
 
@@ -853,6 +850,15 @@ format_lmp(hcurve)
         #[cfg(test)]
         pub fn derivative(&self) -> Polynomial1d<Vec<f64>> {
             Polynomial1d(polyder_dec(self.0.borrow().iter().cloned()).collect())
+        }
+
+        #[cfg(test)]
+        pub fn nth_derivative(&self, n: u32) -> Polynomial1d<Vec<f64>> {
+            let mut cur = Polynomial1d(self.0.borrow().to_vec());
+            for _ in 0..n {
+                cur = cur.derivative();
+            }
+            cur
         }
     }
 

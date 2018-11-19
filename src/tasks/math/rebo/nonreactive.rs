@@ -67,7 +67,7 @@ use ::slice_of_array::prelude::*;
 
 use ::rsp2_minimize::numerical;
 #[cfg(test)]
-use ::rsp2_minimize::numerical::DerivativeKind::*;
+use ::rsp2_minimize::numerical::DerivativeKind;
 
 //-------------------------------------------------------
 // Debugging utils:
@@ -703,6 +703,7 @@ fn _compute_rebo_bonds(
                 //}.compute_paranoid(dbg, 1e-9)?;
                 }.compute(dbg)?;
 
+                dbg!(dbg, "length: {:.9}", length);
                 dbg!(dbg, "weight: {:.9}", weight);
                 tcoord += weight;
                 bond_weight.push(weight);
@@ -770,8 +771,8 @@ fn _compute_rebo_bonds(
             site: site_i,
             bond_weights: bond_weight,
             bond_VAs: bond_VA,
-        }.compute_paranoid(dbg, 1e-9);
-//        }.compute(dbg);
+//        }.compute_paranoid(dbg, 1e-7);
+        }.compute(dbg);
         let SiteSigmaPiTerm {
             value: Vsp_i,
             d_deltas: Vsp_i_d_delta,
@@ -822,8 +823,8 @@ fn _compute_rebo_bonds(
                 params, interactions, site_i, bond_ij,
                 tcoords_k, tcoords_l, weights_ik, weights_jl,
                 alt_weights_ik, alt_weights_jl,
-//            }.compute(dbg);
-            }.compute_paranoid(dbg, 1e-9);
+            }.compute(dbg);
+//            }.compute_paranoid(dbg, 1e-9);
             let BondOrderPi {
                 value: bpi,
                 d_deltas_ik: mut bpi_d_deltas_ik,
@@ -1108,8 +1109,8 @@ mod site_sigma_pi_term {
                     types_k: &bond_target_types,
                     weights_ik: bond_weights,
                     lengths_ik: &bond_lengths,
-                }.compute_paranoid(dbg, 1e-9);
-//                }.compute(dbg)?;
+//                }.compute_paranoid(dbg, 1e-7); // generous tolerance for G
+                }.compute(dbg);
                 let BondOrderSigmaPi {
                     value: tmp_value,
                     d_lengths_ik: bsp_ij_d_lengths_ik,
@@ -1186,7 +1187,7 @@ mod site_sigma_pi_term {
                 assert_close!(
                     rel=tol, abs=tol,
                     &d_VAs[..],
-                    &numerical::gradient(1e-4, None, self.bond_VAs, |bond_VAs| {
+                    &numerical::gradient(1e-3, None, self.bond_VAs, |bond_VAs| {
                         Input { bond_VAs, ..self }.compute(Debug::Never).value
                     })[..],
                 );
@@ -1306,6 +1307,9 @@ mod bondorder_sigma_pi {
 
     impl<'a> Input<'a> {
         // For debugging; feel free to swap out the `compute` call with this.
+        //
+        // CAUTION: This should use a fairly generous tolerance because numerical derivatives of
+        //          the G spline can have fairly big error.
         #[allow(unused)]
         pub(super) fn compute_paranoid(self, dbg: Debug, tol: f64) -> Output {
             let output = self.clone().compute(dbg);
@@ -1317,6 +1321,7 @@ mod bondorder_sigma_pi {
                     if index_ik == self.index_ij {
                         continue;
                     }
+
                     assert_close!(
                         rel=tol, abs=tol,
                         d_coses_ijk[index_ik],
@@ -1516,7 +1521,7 @@ mod bondorder_pi {
         let F = f_input.compute();
         value += F;
 
-        dbg!(dbg, "F: {:.9}", F);
+        dbg!(dbg, "F: {:.9} {:.9e}", F, weight_ij);
 
         Output { value, d_deltas_ik, d_deltas_jl }
     }
@@ -2052,10 +2057,17 @@ mod g_spline {
                 };
 
                 let mut coses = vec![];
+
+                let lo_xs = &x_divs[..x_divs.len()-1];
+                let hi_xs = &x_divs[1..];
+                let mid_xs = &x_divs[1..x_divs.len()-1];
+
                 // points within a region
-                coses.extend(x_divs[1..].iter().map(|x| x - 1e-4));
-                // points straddling two regions
-                coses.extend(x_divs[1..x_divs.len()-1].iter().cloned());
+                // points straddling two regions (with a tiny shift to get the derivative
+                coses.extend(zip_eq!(lo_xs, hi_xs).map(|(&a, &b)| 0.5 * (a + b)));
+                //  from either of the two regions)
+                coses.extend(mid_xs.iter().map(|&x| x - 1e-11));
+                coses.extend(mid_xs.iter().map(|&x| x + 1e-11));
 
                 let mut tcoords = vec![
                     3.0,
@@ -2064,18 +2076,128 @@ mod g_spline {
                 ];
                 for &cos_ijk in &coses {
                     for &tcoord_ij in &tcoords {
+                        println!("{} {}", cos_ijk, tcoord_ij);
                         let input = Input { params, type_i, cos_ijk, tcoord_ij };
+
+                        // NOTE: Numerical differentation of this function near a region boundary
+                        //       is particularly sensitive to step size, due to inherent errors
+                        //       explained in the next unit test below.
                         let GSpline { value: _, d_cos_ijk } = input.compute();
-                        assert_close!(
-                            rel=1e-7, abs=1e-7,
-                            d_cos_ijk,
+                        let num_diff_with_step = |step| {
                             numerical::slope(
-                                1e-5, None,
+                                step, Some(DerivativeKind::Stencil(5)),
                                 cos_ijk,
                                 |cos_ijk| Input { params, type_i, cos_ijk, tcoord_ij }.compute().value,
-                            ),
-                        );
+                            )
+                        };
+
+                        // (these are the best tolerances we can manage based on step size)
+                        assert_close!(rel=1e-7, abs=1e-7, d_cos_ijk, num_diff_with_step(1e-3));
+                        assert_close!(rel=1e-9, abs=1e-9, d_cos_ijk, num_diff_with_step(1e-4));
                     }
+                }
+            }
+        }
+    }
+
+    //----------------------------------------------------------------------------------------------
+    //
+    //           ERROR INHERENT TO NUMERICAL DIFFERENTIATION OF G(cos_ijk) NEAR A KNOT
+    //
+    //
+    // Consider the method used to derive the finite-difference form of f'(x) using a 5-point
+    // stencil.  Typically, one begins by using the Taylor expansion of f around x to approximate
+    // f(x) at neighboring points:
+    //
+    //  f(x-2h) = f(x)  - 2h f'(x)  +   2  h² f"(x)  - (4/3) h³ f‴(x)  +  (2/3) h⁴ f""(x)  + O(h⁵)
+    //  f(x-1h) = f(x)  -  h f'(x)  + (1/2)h² f"(x)  - (1/6) h³ f‴(x)  + (1/24) h⁴ f""(x)  + O(h⁵)
+    //  f(x+1h) = f(x)  +  h f'(x)  + (1/2)h² f"(x)  + (1/6) h³ f‴(x)  + (1/24) h⁴ f""(x)  + O(h⁵)
+    //  f(x+2h) = f(x)  + 2h f'(x)  +   2  h² f"(x)  + (4/3) h³ f‴(x)  +  (2/3) h⁴ f""(x)  + O(h⁵)
+    //
+    // And by taking linear combinations of equations, one can cause all h², h³, and h⁴ terms to
+    // cancel out, to eventually obtain:
+    //
+    //     8[f(x+2h) - f(x-2h)] - [f(x+h) - f(x-h)]  =  12 h f'(x)  + O(h⁵)
+    //
+    // However, suppose that we use this to perform numerical differentiation at one of the knots
+    // of G(cos_ijk).  Because G is not analytic at this point, points above and below x must use
+    // different Taylor expansions!  Luckily, G does have C2 continuity since all of our fitting
+    // parameters were chosen to match the value, first, and second derivatives at the knots. This
+    // means that f‴(x) is the first derivative that will be different between the two Taylor
+    // expansions.
+    //
+    // Here are the equations adjusted to take that into account: (the only change is that f‴(x)
+    // and f""(x) have been replaced by subscripted quantities f‴₊(x), f‴₋(x), and etc.)
+    //
+    //  f(x-2h) = f(x) - 2h f'(x)  +   2  h² f"(x)  - (4/3) h³ f‴₋(x)  +  (2/3) h⁴ f""₋(x)  + O(h⁵)
+    //  f(x-1h) = f(x) -  h f'(x)  + (1/2)h² f"(x)  - (1/6) h³ f‴₋(x)  + (1/24) h⁴ f""₋(x)  + O(h⁵)
+    //  f(x+1h) = f(x) +  h f'(x)  + (1/2)h² f"(x)  + (1/6) h³ f‴₊(x)  + (1/24) h⁴ f""₊(x)  + O(h⁵)
+    //  f(x+2h) = f(x) + 2h f'(x)  +   2  h² f"(x)  + (4/3) h³ f‴₊(x)  +  (2/3) h⁴ f""₊(x)  + O(h⁵)
+    //
+    // If you try to apply the same linear combination that solved the problem earlier, you'll find
+    // that the third derivatives *do* still cancel out, but the fourth derivatives do not.
+    //
+    //     8[f(x+2h) - f(x-2h)] - [f(x+h) - f(x-h)]  = 12 h f'(x)
+    //                                                - (1/3) h⁴ [ f""₊(x) - f""₋(x) ]
+    //                                                + O(h⁵)
+    //
+    // or in other words,
+    //
+    //     f'(x) = (8[f(x+2h) - f(x-2h)] - [f(x+h) - f(x-h)])/12h  <--- naive 5-point stencil value
+    //             + (1/36) h³ [ f""₊(x) - f""₋(x) ]               <--- correction
+    //             + O(h⁴)
+    //
+    // For a step size of 1e-3, this correction factor can take on values of over 1e-8, which is
+    // why numerical derivatives of G performed naively should use a small step size.
+    //
+    //----------------------------------------------------------------------
+
+    // A test which demonstrates that this does indeed account for the terrible quality observed
+    // in the numerical derivatives of G.
+    #[test]
+    fn numerical_derivative_inherent_error() {
+        let all_params = vec![
+            Params::new_brenner(),
+            Params::new_lammps(),
+        ];
+
+        for ref params in all_params {
+            let all_splines = vec![
+                &params.G.carbon_low_coord,
+                &params.G.carbon_high_coord,
+                &params.G.hydrogen,
+            ];
+
+            for spline in all_splines {
+                // Try each x value that is sitting right in-between two polynomial regions.
+                for i in 1..spline.poly.len() {
+                    let cos_ijk = spline.x_div[i];
+
+                    // First and 4th derivatives
+                    let left_d1 = spline.poly[i-1].evaluate(cos_ijk).1;
+                    let right_d1 = spline.poly[i].evaluate(cos_ijk).1;
+                    let left_d4 = spline.poly[i-1].nth_derivative(4).evaluate(cos_ijk).0;
+                    let right_d4 = spline.poly[i].nth_derivative(4).evaluate(cos_ijk).0;
+
+                    let step = 1e-3_f64;
+
+                    // (derivatives are close enough that it shouldn't matter which is used as
+                    //  the expected value)
+                    assert_close!(rel=1e-12, abs=1e-12, left_d1, right_d1);
+                    let expected_d_cos_ijk = left_d1;
+
+                    let num_deriv = numerical::slope(
+                        step, Some(DerivativeKind::Stencil(5)), cos_ijk, |x| spline.evaluate(x).0,
+                    );
+                    let correction = (1.0/36.0) * step.powi(3) * (right_d4 - left_d4);
+
+                    // With the correction in tow, we can use much harsher tolerances here than
+                    // were used in the numerical_derivative test.
+                    assert_close!(
+                        rel=1e-10, abs=1e-10,
+                        expected_d_cos_ijk,
+                        num_deriv + correction,
+                    );
                 }
             }
         }
@@ -2533,7 +2655,7 @@ fn d_linterp_from() {
         // linear function so central difference is exact
         //
         // sometimes the diff is small, so also allow abs tolerance
-        let num_diff = numerical::slope(1e-1, Some(CentralDifference), x, |x| f(x).0);
+        let num_diff = numerical::slope(1e-1, Some(DerivativeKind::CentralDifference), x, |x| f(x).0);
         assert_close!{rel=1e-11, abs=1e-11, diff, num_diff};
     }
 }
@@ -2644,7 +2766,7 @@ mod input_tests {
     // Can single out one of the tests for obtaining its debug output
     #[test]
     fn singled_out() -> FailResult<()> {
-        single("7azz-gnr")
+        single("tblg-2011-150-a")
     }
 
     #[test]

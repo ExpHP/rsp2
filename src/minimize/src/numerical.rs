@@ -16,55 +16,23 @@
 //! use these to debug the potentials they are giving to this crate.
 
 /// Approximation method for a numerical 1D derivative.
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum DerivativeKind {
-    /// Central difference approximation.
-    CentralDifference,
-    /// 4-point central difference with 4th order error.
-    ///
-    /// FIXME (this shouldn't exist, replace with a generalization)
-    CentralDifference4,
+    /// n-point stencil. `n` must be odd. Only implemented for `n = 3, 5, 7, 9`.
+    Stencil(u32),
+}
+
+impl DerivativeKind {
+    /// Alias for `DerivativeKind::Stencil(3)`.
+    #[allow(bad_style)]
+    pub const CentralDifference: Self = DerivativeKind::Stencil(3);
 }
 
 impl Default for DerivativeKind {
     fn default() -> DerivativeKind {
-        DerivativeKind::CentralDifference4
+        DerivativeKind::Stencil(5)
     }
 }
-
-///// Get all binomial coefficients of order n, as double-precision floats.
-/////
-///// Beware the easy fencepost error: The output will have `len = n + 1`.
-/////
-///// Binomial coefficients grow extremely fast.  You will start seeing inexact results
-///// as early as `n >= 57`, where they grow too large to fit in the floating point mantissa.
-//fn binom_coefficients(n: usize) -> Vec<f64> {
-//    let mut binoms = Vec::with_capacity(n + 1);
-//    binoms.push(1.0); // binom coeffs of order zero
-//
-//    // beyond order zero
-//    for order in 1..=n {
-//        // There is a well-known relation between the binoms of order n and those of order n - 1
-//        // (see Pascal's triangle)
-//        binoms.push(1.0);
-//        for i in 1..order {
-//            binoms[i] += binoms[i + 1];
-//        }
-//    }
-//    binoms
-//}
-//
-//// I don't trust that garbage I just wrote
-//#[test]
-//fn test_binom_coefficients() {
-//    // go go gadget pascal's triangle
-//    assert_eq!(binom_coefficients(0), vec![1.0]);
-//    assert_eq!(binom_coefficients(1), vec![1.0, 1.0]);
-//    assert_eq!(binom_coefficients(2), vec![1.0, 2.0, 1.0]);
-//    assert_eq!(binom_coefficients(3), vec![1.0, 3.0, 3.0, 1.0]);
-//    assert_eq!(binom_coefficients(4), vec![1.0, 4.0, 6.0, 4.0, 1.0]);
-//    assert_eq!(binom_coefficients(5), vec![1.0, 5.0, 10., 10., 5.0, 1.0]);
-//}
 
 enum Never {}
 
@@ -89,18 +57,73 @@ pub fn try_slope<E, F>(
 where
     F: FnMut(f64) -> Result<f64, E>,
 {
+    #[inline(always)]
+    fn dot(a: &[f64], b: &[f64]) -> f64 {
+        zip_eq!(a, b).map(|(&a, &b)| a * b).sum()
+    }
+
+    // http://www.holoborodko.com/pavel/numerical-methods/numerical-derivative/central-differences/
     match kind.unwrap_or_default() {
         DerivativeKind::CentralDifference => {
-            let val_plus = value_fn(point + 0.5 * interval_width)?;
-            let val_minus = value_fn(point - 0.5 * interval_width)?;
-            Ok((val_plus - val_minus) / interval_width)
+            let values = [
+                value_fn(point - 1.0 * interval_width)?,
+                value_fn(point + 1.0 * interval_width)?,
+            ];
+            let coeffs = [-1.0, 1.0];
+            let denom = 2.0 * interval_width;
+            Ok(dot(&values, &coeffs) / denom)
         },
-        DerivativeKind::CentralDifference4 => {
-            let val_plus2 = value_fn(point + 2.0 * interval_width)?;
-            let val_plus = value_fn(point + interval_width)?;
-            let val_minus = value_fn(point - interval_width)?;
-            let val_minus2 = value_fn(point - 2.0 * interval_width)?;
-            Ok((-val_plus2 + 8.0 * val_plus - 8.0 * val_minus + val_minus2) / (12.0 * interval_width))
+
+        DerivativeKind::Stencil(5) => {
+            let values = [
+                value_fn(point - 2.0 * interval_width)?,
+                value_fn(point - 1.0 * interval_width)?,
+                value_fn(point + 1.0 * interval_width)?,
+                value_fn(point + 2.0 * interval_width)?,
+            ];
+            let coeffs = [1.0, -8.0, 8.0, -1.0];
+            let denom = 12.0 * interval_width;
+            Ok(dot(&values, &coeffs) / denom)
+        },
+
+        DerivativeKind::Stencil(7) => {
+            let values = [
+                value_fn(point - 3.0 * interval_width)?,
+                value_fn(point - 2.0 * interval_width)?,
+                value_fn(point - 1.0 * interval_width)?,
+                value_fn(point + 1.0 * interval_width)?,
+                value_fn(point + 2.0 * interval_width)?,
+                value_fn(point + 3.0 * interval_width)?,
+            ];
+            let coeffs = [-1.0, 9.0, -45.0, 45.0, -9.0, 1.0];
+            let denom = 60.0 * interval_width;
+            Ok(dot(&values, &coeffs) / denom)
+        },
+
+        DerivativeKind::Stencil(9) => {
+            let values = [
+                value_fn(point - 4.0 * interval_width)?,
+                value_fn(point - 3.0 * interval_width)?,
+                value_fn(point - 2.0 * interval_width)?,
+                value_fn(point - 1.0 * interval_width)?,
+                value_fn(point + 1.0 * interval_width)?,
+                value_fn(point + 2.0 * interval_width)?,
+                value_fn(point + 3.0 * interval_width)?,
+                value_fn(point + 4.0 * interval_width)?,
+            ];
+            let coeffs = [3.0, -32.0, 168.0, -672.0, 672.0, -168.0, 32.0, -3.0];
+            let denom = 840.0 * interval_width;
+            Ok(dot(&values, &coeffs) / denom)
+        },
+
+        DerivativeKind::Stencil(n@0) |
+        DerivativeKind::Stencil(n@1) |
+        DerivativeKind::Stencil(n) if n % 2 == 0 => {
+            panic!("{}-point stencil does not exist", n);
+        },
+
+        DerivativeKind::Stencil(n) => {
+            panic!("{}-point stencil is not implemented", n);
         },
     }
 }
@@ -143,4 +166,43 @@ where
             )
         })
         .collect()
+}
+
+//---------------------------------------------------------
+
+#[test]
+fn num_diff() {
+    for n in vec![3, 5, 7, 9u32] {
+        for _ in 0..10 {
+            // n-point stencil is exact for polynomials up to order n-1
+            let poly = {
+                ::std::iter::repeat_with(|| uniform(-2.0, 2.0))
+                    .take(n as usize) // order n-1 means n coeffs
+                    .collect::<Vec<_>>()
+            };
+            let x = uniform(-10.0, 10.0);
+
+            let expected = polyval_dec(polyder_dec(poly.iter().cloned()), x);
+            let actual = slope(1e-1, Some(DerivativeKind::Stencil(n)), x, |x| {
+                polyval_dec(poly.iter().cloned(), x)
+            });
+            // NOTE: 1e-10 fails at a rate of around ~1 in 1e6
+            assert_close!(abs=1e-9, rel=1e-9, expected, actual, "{}-point", n);
+        }
+    }
+}
+
+#[cfg(test)]
+fn uniform(a: f64, b: f64) -> f64 { ::rand::random::<f64>() * (b - a) + a }
+
+#[cfg(test)]
+fn polyder_dec(
+    coeffs: impl DoubleEndedIterator<Item=f64> + ExactSizeIterator + Clone,
+) -> impl DoubleEndedIterator<Item=f64> + ExactSizeIterator + Clone
+{ coeffs.rev().skip(1).enumerate().map(|(n, x)| (n + 1) as f64 * x).rev() }
+
+#[cfg(test)]
+#[inline(always)]
+fn polyval_dec(coeffs: impl Iterator<Item=f64>, x: f64) -> f64 {
+    coeffs.fold(0.0, |acc, c| acc * x + c)
 }
