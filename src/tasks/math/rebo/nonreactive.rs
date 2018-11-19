@@ -449,30 +449,46 @@ mod interactions {
                 bond_div.push(BondI(bond_target.len()));
             } // for node
 
+
             // Get the index of each bond's reverse.
             let mut bond_reverse_index = IndexVec::<BondI, _>::new();
-            for node in bond_graph.node_indices() {
-                let site_i = SiteI(node.index());
+            { // FIXME block no longer necessary once NLL lands
 
-                for frac_bond_ij in bond_graph.frac_bonds_from(site_i.index()) {
-                    let site_j = SiteI(frac_bond_ij.to);
-                    let index_ji = {
-                        bond_graph.frac_bonds_from(site_j.index())
-                            .position(|bond| frac_bond_ij == bond.flip())
-                    };
-                    let index_ji = match index_ji {
-                        Some(x) => x,
-                        None => bail!("A bond has no counterpart in the reverse direction!"),
-                    };
-                    let bond_ji = BondI(bond_div[site_j].0 + index_ji);
-                    bond_reverse_index.push(bond_ji);
+                // We can no longer use bond_graph.frac_bonds_from because not all bonds in the input
+                // graph are represented in our vectors.
+                let frac_bonds_from = |site_i: SiteI| {
+                    let range = bond_div[site_i].0..bond_div[site_i.next()].0;
+                    zip_eq!(
+                        &bond_source.raw[range.clone()],
+                        &bond_target.raw[range.clone()],
+                        &bond_image_diff.raw[range.clone()],
+                    ).map(|(&SiteI(from), &SiteI(to), &image_diff)| FracBond { from, to, image_diff })
+                };
 
-                    if (site_type[site_i], site_type[site_j]) == (AtomType::Hydrogen, AtomType::Hydrogen) {
-                        println!("HH bond: {} {}", site_i, site_j);
-                    }
-                } // for bond_ij
-            } // for node
+                for node in bond_graph.node_indices() {
+                    let site_i = SiteI(node.index());
 
+                    for frac_bond_ij in frac_bonds_from(site_i) {
+                        let site_j = SiteI(frac_bond_ij.to);
+                        let index_ji = {
+                            frac_bonds_from(site_j)
+                                .position(|bond| frac_bond_ij == bond.flip())
+                        };
+                        let index_ji = match index_ji {
+                            Some(x) => x,
+                            None => bail!("A bond has no counterpart in the reverse direction!"),
+                        };
+                        let bond_ji = BondI(bond_div[site_j].0 + index_ji);
+                        bond_reverse_index.push(bond_ji);
+
+                        if (site_type[site_i], site_type[site_j]) == (AtomType::Hydrogen, AtomType::Hydrogen) {
+                            println!("HH bond: {} {}", site_i, site_j);
+                        }
+                    } // for bond_ij
+                } // for node
+            }
+
+            assert_eq!(bond_reverse_index.len(), bond_div.raw.last().unwrap().0);
             Ok(Interactions {
                 bond_div, site_type, bond_cart_vector, bond_is_canonical,
                 bond_target, bond_image_diff, bond_reverse_index, bond_source,
@@ -1461,6 +1477,30 @@ mod bondorder_pi {
                         continue; // site l is site i
                     }
 
+                    //-----------
+                    // FIXME: the AIREBO paper adds cutoff factors here:
+                    //
+                    //        sinsq_ijkl * alt_weight_ik * alt_weight_jl
+                    //                   * H(sin_ijk - s_min)
+                    //                   * H(sin_jil - s_min)    (s_min = 0.1)
+                    //
+                    // where H is the Heaviside function. (Of course, for C1 continuity, we should
+                    // use a smooth cutoff, and maybe not such a large interval! LAMMPS does
+                    // something that seems closer to the right idea...)
+                    //
+                    // These appear to be present to cut the term off for bond angles that are near
+                    // either 0 degrees or 180 degrees, because sin_ijkl is undefined in these
+                    // scenarios.  0 degrees should basically never happen, but 180 degrees could
+                    // be a real problem for us.
+                    //
+                    // Unfortunately, doing this "right" seems sufficiently complicated (and will be
+                    // seldom tested) that I don't currently feel like it's worth handling for now.
+                    //
+                    // (NOTE: once we do add this, we should get rid of the index checks above, as
+                    //  well as interactions.bond_source and bond_reverse_index which only exist for
+                    //  this purpose)
+                    //-----------
+
                     let delta_ij = interactions.bond(bond_ij).cart_vector;
                     let delta_ik = interactions.bond(bond_ik).cart_vector;
                     let delta_jl = interactions.bond(bond_jl).cart_vector;
@@ -1470,25 +1510,14 @@ mod bondorder_pi {
                         d_delta_ik: sinsq_d_delta_ik,
                         d_delta_jl: sinsq_d_delta_jl,
                     } = dihedral_sine_sq::Input { delta_ij, delta_ik, delta_jl }.compute();
+                    debug_assert_eq!(
+                        sinsq, sinsq,
+                        "sinsq_ijkl = NaN for vectors:\nij: {:?}\nik: {:?}\njl: {:?}",
+                        delta_ij, delta_ik, delta_jl,
+                    );
 
                     let index_ik = interactions.sbvec_index(bond_ik);
                     let index_jl = interactions.sbvec_index(bond_jl);
-
-                    //-----------
-                    // NOTE: for reasons I cannot determine, the (otherwise extremely sensible)
-                    //       AIREBO paper also uses Heaviside step functions here:
-                    //
-                    //        sinsq_ijkl * alt_weight_ik * alt_weight_jl
-                    //                   * H(sin_ijk - s_min)
-                    //                   * H(sin_jil - s_min)    (s_min = 0.1)
-                    //
-                    // These appear designed to cut the term off for very small angles (i.e.
-                    // neighbors that are very closely packed).  But this destroys the C1
-                    // continuity of the function and I couldn't find any justification for it.
-                    //
-                    // LAMMPS appears to handle this better, using a smooth cutoff around angle 0
-                    // with a smaller interval.
-                    //-----------
 
                     let alt_weight_ik = alt_weights_ik[index_ik];
                     let alt_weight_jl = alt_weights_jl[index_jl];
@@ -1510,18 +1539,12 @@ mod bondorder_pi {
         }
 
         // Second term: Just F.
-        let f_input = f_spline::Input { params, type_i, type_j, tcoord_ij, tcoord_ji, xcoord_ij };
-        if !f_input.is_tested() {
-            // NOTE: We're bailing out because I currently don't trust this spline.
-            panic!(
-                "Not yet tested for Brenner F: {}{} bond, Nij = {}, Nji = {}, Nconj = {}",
-                type_i.char(), type_j.char(), tcoord_ij, tcoord_ji, xcoord_ij,
-            );
-        }
-        let F = f_input.compute();
+        let F = f_spline::Input {
+            params, type_i, type_j, tcoord_ij, tcoord_ji, xcoord_ij,
+        }.compute();
         value += F;
 
-        dbg!(dbg, "F: {:.9} {:.9e}", F, weight_ij);
+        dbg!(dbg, "F: {:.9}", F);
 
         Output { value, d_deltas_ik, d_deltas_jl }
     }
@@ -2305,56 +2328,6 @@ mod f_spline {
 
         value
     }
-
-    // indicates whether RSP2 has been tested with structures that have these
-    // particular coordinations
-    impl<'a> Input<'a> {
-        pub(super) fn is_tested(&self) -> bool {
-            use self::splines::tricubic::{MAX_I, MAX_J, MAX_K};
-
-            let Input { params: _, type_i, type_j, tcoord_ij, tcoord_ji, xcoord_ij } = *self;
-
-            let point = V3([tcoord_ij, tcoord_ji, xcoord_ij]);
-            let int_point = V3([tcoord_ij, tcoord_ji, xcoord_ij]).map(|x| x as i32);
-            if point != int_point.map(|x| x as f64) {
-                return false; // fractional weight
-            }
-            // we waited to do this because the semantics of negative floating points
-            // being cast to unsigned ints is still uncertain;
-            // we know the only possible negative values have extremely small magnitude,
-            // and could not pass the round-trip test.
-            let mut int_point = int_point.map(|x| x as usize);
-            int_point[0] = int_point[0].min(MAX_I);
-            int_point[1] = int_point[1].min(MAX_J);
-            int_point[2] = int_point[2].min(MAX_K);
-
-            // NOTE: F_CH(j,i,k) = F_CH(i,j,k) (see note in `splines::F::brenner_CH`),
-            //       so we can limit ourselves to `i < j` regardless of atom type.
-            let V3([i, j, k]) = int_point;
-            let (i, j) = (usize::min(i, j), usize::max(i, j));
-
-            match (type_i, type_j) {
-                (AtomType::Carbon, AtomType::Carbon) => match [i, j, k] {
-                    [2, 2, 9] => true, // graphene/graphite
-                    [3, 3, MAX_K] => true, // gyroids (can reach [3, 3, 19]!)
-                    [1, 1, 3] |
-                    [1, 2, 6] |
-                    [0, 2, 5] => true, // nanotubes
-                    [2, 2, 3] |
-                    [2, 2, 6] => true, // GNR
-                    _ => false,
-                },
-
-                (AtomType::Carbon, AtomType::Hydrogen) |
-                (AtomType::Hydrogen, AtomType::Carbon) => match [i, j, k] {
-                    [0, 2, 5] => true, // GNR
-                    _ => false,
-                },
-
-                _ => false,
-            }
-        }
-    }
 }
 
 mod t_spline {
@@ -2744,7 +2717,6 @@ mod input_tests {
 
     const RESOURCE_DIR: &'static str = "tests/resources/potential/rebo";
 
-
     #[test]
     fn all() -> FailResult<()> {
         let mut matches = vec![];
@@ -2766,13 +2738,7 @@ mod input_tests {
     // Can single out one of the tests for obtaining its debug output
     #[test]
     fn singled_out() -> FailResult<()> {
-        single("tblg-2011-150-a")
-    }
-
-    #[test]
-    fn nanotubes() -> FailResult<()> {
-        single("nanotubes")?;
-        panic!()
+        single("gyroid-1")
     }
 
     fn single(name: &str) -> FailResult<()> {
@@ -2795,8 +2761,8 @@ mod input_tests {
 
         let (value, grad) = compute(&params, &coords, &elements, &bond_graph, use_rayon)?;
 
-        assert_close!(abs=1e-9, rel=1e-8, value, expected.value, "in file: {}", name);
-        assert_close!(abs=1e-9, rel=1e-8, grad.unvee(), expected.grad.unvee(), "in file: {}", name);
+        assert_close!(abs=1e-7, rel=1e-6, value, expected.value, "in file: {}", name);
+        assert_close!(abs=1e-7, rel=1e-6, grad.unvee(), expected.grad.unvee(), "in file: {}", name);
         Ok(())
     }
 

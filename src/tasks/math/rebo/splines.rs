@@ -416,13 +416,6 @@ pub mod F {
         //   In other words, we never use the curves defined on `3 <= i <= 4` or `3 <= j <= 4` for
         //   the F spline.
         //
-        //   Ideally, we wouldn't even have solutions for that region; the only reason we do is
-        //   so that the code for the P spline (which does require knots at `i=4` and `j=4`)
-        //   could be implemented in terms of the tricubic spline code.  Once rust has const
-        //   generics we'll be able to use smaller arrays here.
-        //
-        //   (and the only reason that LAMMPS doesn't just clip the point is... ¯\_(ツ)_/¯)
-        //
         // * The manner in which Lammps does this as of the 10Oct2018 version is bugged, anyways.
         //   It only copies the value when it should also be copying the perpendicular derivatives.
         //   (this causes some df/di derivatives to be lost at j=4 and vice versa).
