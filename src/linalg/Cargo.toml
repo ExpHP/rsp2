@@ -16,7 +16,6 @@ path = "lib.rs"
 rsp2-assert-close = { path = "../util/assert-close" }
 #!!rsp2-shims
 rsp2-array-types = { path = "../util/array-types" }
-rsp2-numtheory = { path = "../util/numtheory" }
 failure = "0.1.2"
 slice-of-array = "0.2.1"
 #!!frunk
@@ -28,5 +27,5 @@ num-traits = "0.2.3"
 num-integer = "0.1"
 
 [features]
-nightly = ["beta", "rsp2-array-types/nightly", "rsp2-assert-close/nightly", "rsp2-numtheory/nightly"]
-beta = ["rsp2-array-types/beta", "rsp2-assert-close/beta", "rsp2-numtheory/beta"]
+nightly = ["beta", "rsp2-array-types/nightly", "rsp2-assert-close/nightly"]
+beta = ["rsp2-array-types/beta", "rsp2-assert-close/beta"]
