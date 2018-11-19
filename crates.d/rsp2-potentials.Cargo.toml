@@ -1,0 +1,38 @@
+[package]
+!!CRATE-NAME-LINE
+version = "0.1.0"
+authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
+!!LICENSE-PERMISSIVE
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+!!rsp2-rayon-utils
+!!rsp2-structure
+!!rsp2-assert-close
+!!rsp2-array-types
+!!rsp2-array-utils
+!!rsp2-util-macros
+!!rsp2-newtype-indices
+!!rsp2-minimize
+
+!!slice-of-array
+!!lazy-static
+!!enum-map
+!!petgraph
+!!failure
+!!stack
+!!rayon
+!!log
+
+[dev-dependencies]
+!!rsp2-structure-io
+!!serde
+!!serde-json
+!!serde-derive
+!!rand
+!!xz2
+
+[features]
+!!NIGHTLY-FEATURE-LINE

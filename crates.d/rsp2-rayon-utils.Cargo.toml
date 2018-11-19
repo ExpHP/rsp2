@@ -1,0 +1,16 @@
+[package]
+!!CRATE-NAME-LINE
+version = "0.1.0"
+authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
+!!LICENSE-PERMISSIVE
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+!!itertools
+!!rayon
+!!either
+
+[features]
+!!NIGHTLY-FEATURE-LINE

@@ -15,13 +15,14 @@
 //! PotentialBuilder implementations for potentials implemented within rsp2.
 
 use super::{DynCloneDetail, PotentialBuilder, DiffFn, DispFn, CommonMeta};
-use ::FailResult;
-use ::meta::{self, prelude::*};
-use ::rsp2_structure::{Coords, consts as elem, layer::Layers};
-use ::rsp2_tasks_config as cfg;
-use ::rsp2_array_types::{V3};
-use ::math::rebo::nonreactive as rebo_imp;
+use crate::FailResult;
+use crate::meta::{self, prelude::*};
+use rsp2_structure::{Coords, consts as elem, layer::Layers};
+use rsp2_tasks_config as cfg;
+use rsp2_array_types::{V3};
 use rsp2_structure::bonds::{FracBonds, CartBond, FracBond, PeriodicGraph};
+use rsp2_potentials::crespi as crespi_imp;
+use rsp2_potentials::rebo::nonreactive as rebo_imp;
 
 /// Rust implementation of Kolmogorov-Crespi Z.
 ///
@@ -36,7 +37,7 @@ impl PotentialBuilder<CommonMeta> for KolmogorovCrespiZ {
     {
         fn fn_body(me: &KolmogorovCrespiZ, coords: &Coords, meta: CommonMeta) -> FailResult<Box<DiffFn<CommonMeta>>> {
             let cfg::PotentialKolmogorovCrespiZNew { cutoff_begin } = me.0;
-            let mut params = ::math::crespi::Params::default();
+            let mut params = crespi_imp::Params::default();
             if let Some(cutoff_begin) = cutoff_begin {
                 params.cutoff_begin = cutoff_begin;
             }
@@ -59,7 +60,7 @@ impl PotentialBuilder<CommonMeta> for KolmogorovCrespiZ {
         }
 
         struct Diff {
-            params: ::math::crespi::Params,
+            params: crespi_imp::Params,
             bonds: FracBonds,
         }
 
@@ -75,7 +76,7 @@ impl PotentialBuilder<CommonMeta> for KolmogorovCrespiZ {
                     if (elements[from], elements[to]) != (elem::CARBON, elem::CARBON) {
                         continue;
                     }
-                    let ::math::crespi::Output {
+                    let crespi_imp::Output {
                         value: part_value,
                         grad_rij: part_grad, ..
                     } = self.params.crespi_z(cart_vector);

@@ -29,7 +29,7 @@ use failure::Error;
 ///
 /// The lattice vector is chosen such that:
 ///
-/// ```rust
+/// ```text
 /// bond_cart_vector == carts[to] - carts[from] + image_diff * lattice
 /// ```
 ///

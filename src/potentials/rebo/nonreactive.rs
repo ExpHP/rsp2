@@ -42,10 +42,17 @@
 //! * **LAMMPS:** S. Plimpton, J Comp Phys, 117, 1-19 (1995)
 
 use super::splines::{self, TricubicGrid, BicubicGrid};
-
 use crate::FailResult;
-use crate::meta;
-use crate::util::CondIterator;
+
+use rsp2_rayon_utils::CondIterator;
+use rsp2_structure::{Element, Coords};
+use rsp2_structure::bonds::{FracBond, PeriodicGraph};
+use rsp2_minimize::numerical;
+#[cfg(test)]
+use rsp2_minimize::numerical::DerivativeKind;
+use rsp2_array_types::{V2, V3, M33, M3};
+#[allow(unused)] // https://github.com/rust-lang/rust/issues/45268
+use rsp2_newtype_indices::{Idx, IndexVec, Indexed, self as idx};
 
 use stack::{ArrayVec, Vector as StackVector};
 #[cfg(test)]
@@ -53,20 +60,11 @@ use std::f64::{consts::PI};
 use std::f64::NAN;
 use std::ops;
 use std::borrow::Cow;
-use rsp2_array_types::{V2, V3, M33, M3};
-use rsp2_structure::Coords;
-#[allow(unused)] // https://github.com/rust-lang/rust/issues/45268
-use rsp2_newtype_indices::{Idx, IndexVec, Indexed, self as idx};
 #[allow(unused)] // https://github.com/rust-lang/rust/issues/45268
 use petgraph::prelude::EdgeRef;
 use enum_map::EnumMap;
 use rayon::prelude::*;
 use slice_of_array::prelude::*;
-
-use rsp2_structure::bonds::{FracBond, PeriodicGraph};
-use rsp2_minimize::numerical;
-#[cfg(test)]
-use rsp2_minimize::numerical::DerivativeKind;
 
 //-------------------------------------------------------
 // Debugging utils:
@@ -147,7 +145,7 @@ impl AtomType {
         }
     }
 
-    pub fn from_element(elem: meta::Element) -> FailResult<Self> {
+    pub fn from_element(elem: rsp2_structure::Element) -> FailResult<Self> {
         use ::rsp2_structure::consts;
         match elem {
             consts::CARBON => Ok(AtomType::Carbon),
@@ -578,7 +576,7 @@ mod interactions {
 pub fn compute_bond_graph(
     params: &Params,
     coords: &Coords,
-    elements: &[meta::Element],
+    elements: &[Element],
 ) -> FailResult<PeriodicGraph> {
     let types = elements.iter().cloned().map(AtomType::from_element).collect::<FailResult<Vec<_>>>()?;
     let max_radius = {
@@ -600,7 +598,7 @@ pub fn compute_bond_graph(
 pub fn compute(
     params: &Params,
     coords: &Coords,
-    elements: &[meta::Element],
+    elements: &[Element],
     bonds: &PeriodicGraph,
     use_rayon: bool,
 ) -> FailResult<(f64, Vec<V3>)> {
@@ -2715,7 +2713,8 @@ mod input_tests {
     use ::rsp2_array_types::Unvee;
 
     const RESOURCE_DIR: &'static str = "tests/resources/potential/rebo";
-    const BIG_INPUT: &'static str = "tblg-2011-150-a";
+    const BIG_INPUT_1: &'static str = "tblg-2011-150-a";
+    const BIG_INPUT_2: &'static str = "gyroid-1";
 
     #[test]
     fn all() -> FailResult<()> {
@@ -2729,7 +2728,7 @@ mod input_tests {
         assert!(!matches.is_empty());
 
         for name in matches {
-            if name != BIG_INPUT {
+            if name != BIG_INPUT_1 && name != BIG_INPUT_2 {
                 println!("Testing {}", name);
                 single(&name)?;
             }
@@ -2739,16 +2738,20 @@ mod input_tests {
 
     #[test]
     #[ignore] // time consuming; run with --ignored
-    fn big_input() -> FailResult<()> {
-        single(BIG_INPUT)
+    fn big_input_1() -> FailResult<()> {
+        single(BIG_INPUT_1)
+    }
+
+    #[test]
+    #[ignore] // time consuming; run with --ignored
+    fn big_input_2() -> FailResult<()> {
+        single(BIG_INPUT_2)
     }
 
     fn single(name: &str) -> FailResult<()> {
         use ::std::{path, fs::File};
         use ::rsp2_structure_io::Poscar;
         use ::rsp2_array_types::Unvee;
-
-        ::ui::logging::init_test_logger();
 
         // Set this to false to let tests capture stdout
         let use_rayon = false; // FIXME: revert to true

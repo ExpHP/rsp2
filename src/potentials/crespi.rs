@@ -9,7 +9,7 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::rsp2_array_types::{V3, dot};
+use rsp2_array_types::{V3, dot};
 
 /// Constants used for calculation of the Kolmogorov-Crespi potential.
 ///

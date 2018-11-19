@@ -17,7 +17,6 @@
 use crate::FailResult;
 use crate::math::basis::Basis3;
 use crate::meta::{Element, Mass};
-
 use enum_map::EnumMap;
 use rsp2_array_types::{dot, mat, V3, M33};
 use rsp2_structure::bonds::{CartBond, CartBonds};
@@ -59,12 +58,11 @@ pub enum BondType { CC, CH, HH }
 
 impl BondType {
     fn from_elements(a: Element, b: Element) -> FailResult<BondType> {
-        use rsp2_structure::consts::{CARBON, HYDROGEN};
         Ok(match (a, b) {
-            (CARBON, CARBON) => BondType::CC,
-            (CARBON, HYDROGEN) => BondType::CH,
-            (HYDROGEN, CARBON) => BondType::CH,
-            (HYDROGEN, HYDROGEN) => BondType::HH,
+            (Element::CARBON, Element::CARBON) => BondType::CC,
+            (Element::CARBON, Element::HYDROGEN) => BondType::CH,
+            (Element::HYDROGEN, Element::CARBON) => BondType::CH,
+            (Element::HYDROGEN, Element::HYDROGEN) => BondType::HH,
             _ => bail!{
                 "No polarization constants specified for bonds between {} and {}",
                 a.symbol(), b.symbol(),

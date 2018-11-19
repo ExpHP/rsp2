@@ -49,7 +49,9 @@ rsp2-linalg         = "src/linalg"
 rsp2-integration-test = "src/util/integration-test"
 rsp2-soa-ops        = "src/util/soa-ops"
 rsp2-newtype-indices = "src/util/newtype-indices"
-rsp2-python = "src/python"
+rsp2-python         = "src/python"
+rsp2-potentials     = "src/potentials"
+rsp2-rayon-utils    = "src/util/rayon"
 #!!INSERTION POINT FOR NEW CRATES!!#
 
 #--------------------------------------------
