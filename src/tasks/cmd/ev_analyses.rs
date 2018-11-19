@@ -44,7 +44,7 @@ pub use ::meta::LayerScMatrices;
 #[derive(Debug, Clone)] pub struct EvClassifications(pub Vec<acoustic_search::ModeKind>);
 #[derive(Debug, Clone)] pub struct EvFrequencies(pub Vec<f64>);
 #[derive(Debug, Clone)] pub struct EvEigenvectors(pub Basis3);
-#[derive(Debug, Clone)] pub struct Bonds(pub ::math::bonds::CartBonds);
+#[derive(Debug, Clone)] pub struct Bonds(pub rsp2_structure::bonds::CartBonds);
 
 // Band unfolding is seriously expensive, and not at all useful for the sparse diagonalizer
 // during relaxation.

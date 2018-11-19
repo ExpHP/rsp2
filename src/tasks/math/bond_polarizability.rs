@@ -14,12 +14,13 @@
 //!
 //! Adapted from the sp2 code.
 
-use ::FailResult;
-use ::math::basis::Basis3;
-use ::math::bonds::{CartBond, CartBonds};
-use ::enum_map::EnumMap;
-use ::rsp2_array_types::{dot, mat, V3, M33};
-use ::meta::{Element, Mass};
+use crate::FailResult;
+use crate::math::basis::Basis3;
+use crate::meta::{Element, Mass};
+
+use enum_map::EnumMap;
+use rsp2_array_types::{dot, mat, V3, M33};
+use rsp2_structure::bonds::{CartBond, CartBonds};
 
 pub struct PolConstant {
     /// `a_par  -   a_perp`

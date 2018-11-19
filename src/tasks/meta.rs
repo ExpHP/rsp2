@@ -18,8 +18,8 @@
 //! number of extension traits. (where a reasonably ergonomic API that can handle
 //! differences in ownership would require at least half a dozen)
 
-use ::std::fmt;
-use ::std::rc::Rc;
+use std::fmt;
+use std::rc::Rc;
 
 macro_rules! derive_newtype_display {
     ($Type:ident) => {
@@ -39,7 +39,7 @@ macro_rules! derive_newtype_display {
 pub struct Mass(pub f64);
 derive_newtype_display!{ Mass }
 
-pub use ::rsp2_structure::Element;
+pub use rsp2_structure::Element;
 
 newtype_index!{
     #[derive(Serialize, Deserialize)]
@@ -54,9 +54,9 @@ newtype_index!{
 pub type SiteMasses = Rc<[Mass]>;
 pub type SiteElements = Rc<[Element]>;
 pub type SiteLayers = Rc<[Layer]>;
-pub type LayerScMatrices = Rc<[::math::bands::ScMatrix]>;
-pub type FracBonds = Rc<::math::bonds::FracBonds>;
-pub type CartBonds = Rc<::math::bonds::CartBonds>;
+pub type LayerScMatrices = Rc<[crate::math::bands::ScMatrix]>;
+pub type FracBonds = Rc<rsp2_structure::bonds::FracBonds>;
+pub type CartBonds = Rc<rsp2_structure::bonds::CartBonds>;
 
 //----------------------------------------------------------------------------------
 

@@ -20,9 +20,8 @@ use ::meta::{self, prelude::*};
 use ::rsp2_structure::{Coords, consts as elem, layer::Layers};
 use ::rsp2_tasks_config as cfg;
 use ::rsp2_array_types::{V3};
-use ::math::bonds::{FracBonds, CartBond, FracBond};
-use ::math::bond_graph::PeriodicGraph;
 use ::math::rebo::nonreactive as rebo_imp;
+use rsp2_structure::bonds::{FracBonds, CartBond, FracBond, PeriodicGraph};
 
 /// Rust implementation of Kolmogorov-Crespi Z.
 ///

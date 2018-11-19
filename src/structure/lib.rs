@@ -16,6 +16,7 @@ extern crate rsp2_array_types;
 extern crate rsp2_soa_ops;
 #[macro_use] extern crate rsp2_assert_close;
 
+extern crate petgraph;
 extern crate ordered_float;
 extern crate slice_of_array;
 #[macro_use] extern crate log;
@@ -42,6 +43,7 @@ pub struct IntPrecisionError {
     value: f64,
 }
 
+pub use ::algo::bonds;
 pub use ::algo::supercell;
 pub use ::algo::find_perm;
 pub use ::algo::layer;
@@ -55,18 +57,16 @@ mod element;
 //---------------------------
 // public reexports; API
 
-pub use ::core::lattice::Lattice;
-pub use ::core::coords::CoordsKind;
-pub use ::core::structure::Coords;
-pub use ::core::structure::NonEquivalentLattice;
-pub use ::algo::find_perm::Missing;
+pub use crate::core::lattice::Lattice;
+pub use crate::core::coords::CoordsKind;
+pub use crate::core::structure::Coords;
+pub use crate::core::structure::NonEquivalentLattice;
+pub use crate::algo::find_perm::Missing;
 
-pub use ::element::Element;
+pub use crate::element::Element;
+pub use crate::element::consts as consts;
 
-// yuck. would rather not expose this yet
-pub use ::oper::symmops::{IntRot, CartOp};
-
-pub use element::consts as consts;
+pub use crate::oper::symmops::{IntRot, CartOp};
 
 pub mod miller {
     //! Utilities for working with Miller indices of planes.

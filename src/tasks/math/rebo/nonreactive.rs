@@ -43,31 +43,30 @@
 
 use super::splines::{self, TricubicGrid, BicubicGrid};
 
-use ::FailResult;
-use ::math::bond_graph::PeriodicGraph;
-use ::math::bonds::FracBond;
-use ::meta;
-use ::util::CondIterator;
+use crate::FailResult;
+use crate::meta;
+use crate::util::CondIterator;
 
-use ::stack::{ArrayVec, Vector as StackVector};
+use stack::{ArrayVec, Vector as StackVector};
 #[cfg(test)]
-use ::std::f64::{consts::PI};
-use ::std::f64::NAN;
-use ::std::ops;
-use ::std::borrow::Cow;
-use ::rsp2_array_types::{V2, V3, M33, M3};
-use ::rsp2_structure::Coords;
+use std::f64::{consts::PI};
+use std::f64::NAN;
+use std::ops;
+use std::borrow::Cow;
+use rsp2_array_types::{V2, V3, M33, M3};
+use rsp2_structure::Coords;
 #[allow(unused)] // https://github.com/rust-lang/rust/issues/45268
-use ::rsp2_newtype_indices::{Idx, IndexVec, Indexed, self as idx};
+use rsp2_newtype_indices::{Idx, IndexVec, Indexed, self as idx};
 #[allow(unused)] // https://github.com/rust-lang/rust/issues/45268
-use ::petgraph::prelude::EdgeRef;
-use ::enum_map::EnumMap;
-use ::rayon::prelude::*;
-use ::slice_of_array::prelude::*;
+use petgraph::prelude::EdgeRef;
+use enum_map::EnumMap;
+use rayon::prelude::*;
+use slice_of_array::prelude::*;
 
-use ::rsp2_minimize::numerical;
+use rsp2_structure::bonds::{FracBond, PeriodicGraph};
+use rsp2_minimize::numerical;
 #[cfg(test)]
-use ::rsp2_minimize::numerical::DerivativeKind;
+use rsp2_minimize::numerical::DerivativeKind;
 
 //-------------------------------------------------------
 // Debugging utils:
@@ -589,7 +588,7 @@ pub fn compute_bond_graph(
     };
 
     Ok({
-        ::math::bonds::FracBonds::from_brute_force_with_meta(
+        rsp2_structure::bonds::FracBonds::from_brute_force_with_meta(
             &coords, max_radius, &types,
             |&a, &b| params.by_type[a][b].cutoff_region.1,
         )?.to_periodic_graph()

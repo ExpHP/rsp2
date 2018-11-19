@@ -44,7 +44,6 @@ use ::meta::{self, prelude::*};
 use ::util::ext_traits::{OptionResultExt, PathNiceExt};
 use ::math::{
     basis::{Basis3},
-    bonds::{FracBonds},
     bands::{ScMatrix},
     dynmat::{ForceConstants},
 };
@@ -58,7 +57,10 @@ use ::slice_of_array::prelude::*;
 use ::rsp2_array_utils::arr_from_fn;
 use ::rsp2_array_types::{V3, Unvee};
 use ::rsp2_structure::{Coords, Lattice};
-use ::rsp2_structure::layer::LayersPerUnitCell;
+use ::rsp2_structure::{
+    layer::LayersPerUnitCell,
+    bonds::FracBonds,
+};
 use ::phonopy::Builder as PhonopyBuilder;
 
 use ::rsp2_fs_util::{rm_rf, hard_link};
