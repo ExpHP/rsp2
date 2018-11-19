@@ -132,6 +132,11 @@ impl UnimodularState<M33<i64>>
         // gives us  u00*u11 - u01*u10 = 1 as an equation for the other row. Look at this carefully,
         // and see that it is a Bezout equation for the other two elements!
         let data_u = extended_gcd(u11, u10);
+
+        // FIXME: We have a bug; when `matrix[other_row][col] == matrix[gcd_row][col] == 0`,
+        //        extended_gcd returns (0, 0) for the Bezout coefficients, in which case they
+        //        fail to be coprime. (and in fact are unsuitable for use in the rest of this
+        //        function)
         debug_assert_eq!(data_u.gcd, 1, "bezout coefficients not coprime?!");
         let (u00, neg_u01) = data_u.coeffs;
         let u01 = -neg_u01;
