@@ -15,6 +15,11 @@ use ::std::sync::Arc;
 use ::std::fmt;
 use ::rsp2_array_types::{V3};
 
+pub use self::rayon_cond::CondIterator;
+mod rayon_cond;
+
+//--------------------------------------------------------
+
 #[derive(Clone)]
 pub(crate) struct AtomicCounter(Arc<AtomicUsize>);
 
@@ -67,6 +72,7 @@ pub(crate) fn index_of_shortest(carts: &[V3], tol: f64) -> Option<usize>
 { index_of_nearest(carts, V3([0.0; 3]), tol) }
 
 //--------------------------------------------------------
+
 pub(crate) use self::lockfile::{LockfilePath, LockfileGuard};
 mod lockfile {
     use ::FailResult;

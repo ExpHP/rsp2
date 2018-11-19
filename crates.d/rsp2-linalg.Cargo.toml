@@ -11,7 +11,6 @@ path = "lib.rs"
 !!rsp2-assert-close
 #!!rsp2-shims
 !!rsp2-array-types
-!!rsp2-numtheory
 !!failure
 !!slice-of-array
 #!!frunk

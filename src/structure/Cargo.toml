@@ -20,7 +20,7 @@ rsp2-assert-close = { path = "../util/assert-close" }
 rsp2-soa-ops = { path = "../util/soa-ops" }
 
 failure = "0.1.2"
-slice-of-array = "0.2"
+slice-of-array = "0.2.1"
 ordered-float = "1.0"
 itertools = "0.7"
 lazy_static = "0.2"

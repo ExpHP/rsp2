@@ -49,7 +49,6 @@ rsp2-linalg         = "src/linalg"
 rsp2-integration-test = "src/util/integration-test"
 rsp2-soa-ops        = "src/util/soa-ops"
 rsp2-newtype-indices = "src/util/newtype-indices"
-rsp2-numtheory      = "src/util/numtheory"
 rsp2-python = "src/python"
 #!!INSERTION POINT FOR NEW CRATES!!#
 
@@ -85,7 +84,7 @@ serde_yaml = "0.7"
 serde_ignored = "0.0.4"
 tempdir = "0.3"
 ansi_term = "0.10"
-slice-of-array = "0.2"
+slice-of-array = "0.2.1"
 rsp2-kets = { version = "0.3.6", git = "https://github.com/ExpHP/rsp2-kets", features = ["serde"] }
 #rsp2-kets = { path = "/home/lampam/cpp/other/rust/rsp2-kets" }
 #lammps-sys = { branch = "master", git = "https://github.com/ExpHP/lammps-sys" }
@@ -94,7 +93,7 @@ lammps-sys = { rev = "6bba3ad", git = "https://github.com/ExpHP/lammps-sys" }
 rayon = "1.0.1"
 vasp-poscar = "0.1.1"
 path_abs = "0.4.1"
-enum-map = "0.2.24"
+enum-map = "0.4.1"
 frunk = "0.2.0"
 shlex = "0.1.1"
 indoc = "0.2.3"
@@ -109,3 +108,5 @@ libffi-sys = "0.6.2"
 include_dir = "0.2.1"
 walkdir = "2"
 vergen = "2"
+stack = "0.3"
+xz2 = "0.1.6"

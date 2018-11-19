@@ -1,0 +1,28 @@
+package omp 0
+processors * * 1
+units metal
+atom_style atomic
+boundary p p p
+
+read_data ${input}
+
+thermo_modify lost error
+
+#box tilt small
+#region sim prism 0 2 0 2 0 2 0 0 0
+#create_box 1 sim
+
+pair_style rebo
+pair_coeff * * CH.airebo-nonreactive C H
+
+# Not supported by rebo
+#compute B all property/local natom1 natom2
+#compute F all pair/local fx fy fz
+#dump FB all local 1 dump.bond c_B[1] c_B[2] c_F[1] c_F[2] c_F[3]
+
+dump F all custom 1 dump.force id type fx fy fz
+dump_modify F format line "%d %d %.16g %.16g %.16g"
+thermo_style custom pe
+thermo_modify line multi format float %.16g
+
+run 0

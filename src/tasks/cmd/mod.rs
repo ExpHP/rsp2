@@ -141,7 +141,7 @@ impl TrialDir {
 
         let meta = meta.prepend({
             settings.bond_radius.map(|bond_radius| FailOk({
-                Rc::new(FracBonds::from_brute_force_very_dumb(&original_coords, bond_radius)?)
+                Rc::new(FracBonds::from_brute_force(&original_coords, bond_radius)?)
             })).fold_ok()?
         });
 
@@ -502,7 +502,7 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
             }
             // replicating the primitive cell bonds is not worth the trouble
             let super_bonds = settings.bond_radius.map(|bond_radius| FailOk({
-                Rc::new(FracBonds::from_brute_force_very_dumb(&super_coords, bond_radius)?)
+                Rc::new(FracBonds::from_brute_force(&super_coords, bond_radius)?)
             })).fold_ok()?;
             prim_meta.clone().map(hlist![
                 f!(),

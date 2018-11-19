@@ -38,13 +38,14 @@ rsp2-newtype-indices = { path = "../util/newtype-indices" }
 rsp2-python = { path = "../python" }
 
 clap = "2"
-slice-of-array = "0.2"
+slice-of-array = "0.2.1"
 rsp2-kets = { version = "0.3.6", git = "https://github.com/ExpHP/rsp2-kets", features = ["serde"] }
 rand = "0.3"
 log = "0.4"
 env_logger = "0.5.10"
 failure = "0.1.2"
 fern = { version = "0.5", features = ["colored"] }
+either = "1"
 extension-trait = "0.1.2"
 itertools = "0.7"
 lazy_static = "0.2"
@@ -57,7 +58,7 @@ serde_json = "1"
 serde_yaml = "0.7"
 serde_ignored = "0.0.4"
 path_abs = "0.4.1"
-enum-map = "0.2.24"
+enum-map = "0.4.1"
 frunk = "0.2.0"
 shlex = "0.1.1"
 indoc = "0.2.3"
@@ -66,6 +67,10 @@ lapack-src = { version = "0.1.4", features = ["openblas"] }
 num-traits = "0.2.3"
 num_cpus = "1.8"
 mpi = { version = "0.5.4", optional = true }
+stack = "0.3"
+
+[dev-dependencies]
+xz2 = "0.1.6"
 
 [features]
 default = []

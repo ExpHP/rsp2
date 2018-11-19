@@ -124,6 +124,7 @@ impl Coords {
     /// Mutably borrow the cartesian coordinates.
     ///
     /// This forcibly clears any cached fractional data.
+    #[inline] // hopefully elide branches in as_xxx_cached()
     pub fn carts_mut(&mut self) -> &mut [V3] {
         self.ensure_only_carts(); // 'only' because user modifications will invalidate fracs
         match &mut self.coords {
@@ -135,6 +136,7 @@ impl Coords {
     /// Mutably borrow the fractional coordinates.
     ///
     /// This forcibly clears any cached cartesian data.
+    #[inline] // hopefully elide branches in as_xxx_cached()
     pub fn fracs_mut(&mut self) -> &mut [V3] {
         self.ensure_only_fracs(); // 'only' because user modifications will invalidate carts
         match &mut self.coords {
@@ -152,7 +154,9 @@ impl Coords {
         assert_eq!(self.coords.len(), coords.len());
         self.coords = coords;
     }
+    #[inline] // hopefully elide branches in as_xxx_cached()
     pub fn set_carts(&mut self, carts: Vec<V3>) { self.set_coords(CoordsKind::Carts(carts)); }
+    #[inline] // hopefully elide branches in as_xxx_cached()
     pub fn set_fracs(&mut self, fracs: Vec<V3>) { self.set_coords(CoordsKind::Fracs(fracs)); }
 }
 
@@ -163,17 +167,20 @@ impl Coords {
     /// Ensures that the cartesian coordinates are cached if they aren't already.
     ///
     /// It is unspecified whether fractional coordinates remain cached after this call.
+    #[inline] // hopefully elide branches in as_xxx_cached()
     pub fn ensure_carts(&mut self) { self.ensure_only_carts(); }
 
     /// Ensures that the fractional coordinates are cached if they aren't already.
     ///
     /// It is unspecified whether cartesian coordinates remain cached after this call.
+    #[inline] // hopefully elide branches in as_xxx_cached()
     pub fn ensure_fracs(&mut self) { self.ensure_only_fracs(); }
 
     /// Ensure that carts are available, and that fracs are **not** available.
     ///
     /// Currently equivalent to `ensure_carts`, but that method may eventually
     /// retain the carts.
+    #[inline] // hopefully elide branches in as_xxx_cached()
     fn ensure_only_carts(&mut self) {
         let dummy = CoordsKind::Carts(vec![]);
         let coords = ::std::mem::replace(&mut self.coords, dummy);
@@ -184,6 +191,7 @@ impl Coords {
     ///
     /// Currently equivalent to `ensure_fracs`, but that method may eventually
     /// retain the carts.
+    #[inline] // hopefully elide branches in as_xxx_cached()
     fn ensure_only_fracs(&mut self) {
         let dummy = CoordsKind::Carts(vec![]);
         let coords = ::std::mem::replace(&mut self.coords, dummy);
@@ -196,8 +204,11 @@ impl Coords {
 /// # Chainable modification
 impl Coords {
     /// Construct a new `Coords` with the same lattice.  Length need not match.
+    #[inline] // hopefully elide branches in as_xxx_cached()
     pub fn with_coords(&self, coords: CoordsKind) -> Self { Coords::new(self.lattice.clone(), coords) }
+    #[inline] // hopefully elide branches in as_xxx_cached()
     pub fn with_carts(&self, carts: Vec<V3>) -> Self { self.with_coords(CoordsKind::Carts(carts)) }
+    #[inline] // hopefully elide branches in as_xxx_cached()
     pub fn with_fracs(&self, fracs: Vec<V3>) -> Self { self.with_coords(CoordsKind::Fracs(fracs)) }
 }
 

@@ -67,7 +67,9 @@ macro_rules! assert_close_impl {
         compile_error!{"check_close only takes 2 positional arguments"}
     };
     (@expand [check_close] [$($assignment:tt)*] [@comp $a:expr, $b:expr] [@fmt] ) => {{
-        let result = assert_close_impl!(@expand [__shared] [$($assignment)*] [@comp $a, $b] [@fmt]);
+        assert_close_impl!{
+            @expand [let result =] [$($assignment)*] [@comp $a, $b] [@fmt]
+        }
         result.0
     }};
 
@@ -75,20 +77,25 @@ macro_rules! assert_close_impl {
         assert_close_impl!{@expand [assert_close] [$($assignment)*] [@comp $a, $b] [@fmt "not nearly equal!"]}
     };
     (@expand [assert_close] [$($assignment:tt)*] [@comp $a:expr, $b:expr] [@fmt $($fmt:tt)+] ) => {{
-        let result = assert_close_impl!(@expand [__shared] [$($assignment)*] [@comp $a, $b] [@fmt]);
+        assert_close_impl!{
+            @expand [let result =] [$($assignment)*] [@comp $a, $b] [@fmt]
+        }
         if let (Err(e), a, b, abs, rel) = result {
             panic!(
-                "{} (tolerances: rel={}, abs={})\n left: {:?}\nright: {:?}\n{}",
+                "{} (tolerances: rel={:e}, abs={:e})\n left: {:?}\nright: {:?}\n{}\n",
                 format!($($fmt)*), rel, abs, a, b, e,
             );
         }
     }};
 
-    (@expand [__shared] [$($assignment:tt)*] [@comp $a:expr, $b:expr] [@fmt] ) => {{
+    // NOTE: This must expand to statements instead of a block so that temporaries in $a and $b
+    //       are assigned reasonable lifetimes.
+    (@expand [let $result:ident =] [$($assignment:tt)*] [@comp $a:expr, $b:expr] [@fmt] ) => {
         let a = $a;
         let b = $b;
         let abs: f64;
         let rel: f64;
+        let $result =
         ( // a tuple to include other things for use in assert_close!'s formatting
             #[allow(unused_mut)]
             #[allow(unused_assignments)]
@@ -105,8 +112,8 @@ macro_rules! assert_close_impl {
             },
             // (the other tuple items)
             a, b, abs, rel,
-        )
-    }};
+        );
+    };
     (@stmt::assign [$abs:ident, $rel:ident] [@abs $tol:expr]) => { $abs = $tol; };
     (@stmt::assign [$abs:ident, $rel:ident] [@rel $tol:expr]) => { $rel = $tol; };
 }
@@ -291,5 +298,14 @@ mod tests {
     #[cfg_attr(debug_assertions, should_panic)]
     fn debug_not_close() {
         debug_assert_close!(abs=0.0, rel=0.0, 1.0, 1.1);
+    }
+
+    #[test]
+    fn reasonable_lifetimes_of_temporaries() {
+        let vec = vec![1.0, 1.0];
+        assert_close!(
+            &vec.iter().cloned().collect::<Vec<_>>()[..],
+            &vec.iter().cloned().collect::<Vec<_>>()[..],
+        );
     }
 }
