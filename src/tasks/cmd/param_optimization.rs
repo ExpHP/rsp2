@@ -266,7 +266,7 @@ impl ScalableCoords {
         let initial_layer_seps = gaps;
 
         let lattice = coords.lattice().clone();
-        let axis = require_simple_axis_normal(V3(cfg.normal), &lattice).unwrap();
+        let axis = require_simple_axis_normal("coord scaling", V3(cfg.normal), &lattice).unwrap();
 
         let (mut fracs_in_plane, mut carts_along_normal) = (vec![], vec![]);
         for layer_coords in layers.partition_into_contiguous_layers(V3(cfg.normal), coords) {

@@ -12,10 +12,14 @@ import sys
 import shutil
 import subprocess
 
+
+#
+# I'd put this text in the file itself
+
 def main():
     import argparse
     p = argparse.ArgumentParser()
-    p.add_argument('POSCAR')
+    p.add_argument('INPUT')
     p.add_argument('-k', '--keep-temp', action='store_true')
     lmp = util.CallLammps(p)
 
@@ -24,31 +28,38 @@ def main():
 
     tempdir = tempfile.mkdtemp()
     try:
-        _main(temp=tempdir, poscar=args.POSCAR, lmp=lmp)
+        EXTENSION = '.pot.in'
+        input = args.INPUT
+        if not input.endswith(EXTENSION):
+            p.error(f"Input must be a {EXTENSION} file.")
+        input = input[:-len(EXTENSION)]
+
+        _main(temp=tempdir, input_base=input, lmp=lmp)
     finally:
         if args.keep_temp:
             print(f'Kept tempdir at {tempdir}')
         else:
             shutil.rmtree(tempdir)
 
-def _main(temp, poscar, lmp):
-    populate_tempdir(temp, poscar)
+def _main(temp, input_base, lmp):
+    populate_tempdir(temp, input_base)
     out = perform_call(temp, lmp)
     d = read_output(temp, out)
     json.dump(d, sys.stdout)
     print()
 
-def populate_tempdir(temp, poscar):
+def populate_tempdir(temp, input_base):
     import lzma
     shutil.copyfile('lmp.in', join(temp, 'lmp.in'))
-    data = subprocess.check_output(['python3', 'generate.py', poscar])
-    with open(join(temp, 'structure.data'), 'wb') as f:
-        f.write(data)
+    shutil.copyfile(input_base + '.pot.in', join(temp, 'pot.in'))
 
-    with lzma.open('CH.airebo-nonreactive.xz', 'rt') as f:
-        s = f.read()
-    with open(join(temp, 'CH.airebo-nonreactive'), 'w') as f:
-        f.write(s)
+    with lzma.open(input_base + '.data.xz', 'rb') as fin:
+        with open(join(temp, 'structure.data'), 'wb') as fout:
+            subprocess.run(['python3', 'numberize.py'], input=fin.read(), stdout=fout, check=True)
+
+    with lzma.open('CC.KC.xz', 'rt') as fin:
+        with open(join(temp, 'CC.KC'), 'w') as fout:
+            fout.write(fin.read())
 
 def perform_call(temp, lmp):
     env = os.environ.copy()

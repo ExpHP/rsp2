@@ -1,0 +1,16 @@
+package omp 0
+processors * * 1
+units metal
+atom_style atomic
+boundary p p p
+thermo_modify lost error
+
+read_data structure.data
+include pot.in
+
+dump F all custom 1 dump.force id fx fy fz
+dump_modify F format line "%d %.16g %.16g %.16g"
+thermo_style custom pe
+thermo_modify line multi format float %.16g
+
+run 0

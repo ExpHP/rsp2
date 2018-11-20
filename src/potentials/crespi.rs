@@ -194,9 +194,11 @@ impl Params {
 }
 
 impl Params {
-    /// Calculate the Kolmogorov-Crespi potential given the delta vector between two carbon atoms r_ij
-    /// as well as the unit normal vectors for each atom, n_i and n_j. Returns the potential as well
-    /// as the gradient of the potential with respect to r_ij, n_i, and n_j
+    /// Calculate the Kolmogorov-Crespi potential.
+    ///
+    /// Accepts the delta vector between two carbon atoms `r_ij` as well as the unit normal vectors
+    /// for each atom, `n_i` and `n_j`. Returns the potential as well as the gradient of the
+    /// potential with respect to `r_ij`, `n_i`, and `n_j`.
     #[inline(never)] // ensure visible in profiling output
     pub fn crespi(&self, r_ij: V3, normal_i: V3, normal_j: V3) -> Output {
         // NOTE: These are debug-only in the hope of optimizing branch prediction

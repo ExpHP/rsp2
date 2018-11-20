@@ -453,9 +453,7 @@ pub fn require_simple_axis_normal(normal: V3<i32>, lattice: &Lattice) -> Result<
         if k != axis {
             let cos = dot(&vecs[k], &vecs[axis]) / (norms[k] * norms[axis]);
             ensure!(cos.abs() < 1e-7,
-                "due to a design flaw, assign_layers is currently limited to \
-                lattices where the normal is perpendicular to the other two \
-                lattice vectors.");
+                "the normal must be perpendicular to the other two lattice vectors.");
         }
     }
     Ok(axis)
