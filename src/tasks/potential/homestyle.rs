@@ -20,7 +20,7 @@ use crate::meta::{self, prelude::*};
 use rsp2_structure::{Coords, consts as elem, layer::Layers};
 use rsp2_tasks_config as cfg;
 use rsp2_array_types::{V3};
-use rsp2_structure::bonds::{FracBonds, CartBond, FracBond, PeriodicGraph};
+use rsp2_structure::bonds::{FracBonds, CartBond, FracBond};
 use rsp2_potentials::crespi as crespi_imp;
 use rsp2_potentials::rebo::nonreactive as rebo_imp;
 
@@ -162,21 +162,20 @@ impl PotentialBuilder<CommonMeta> for Rebo {
             // FIXME: We can't currently use the bonds from meta because they might not have
             //        the right bond distances for our params.
             let elements: meta::SiteElements = meta.pick();
-            let bonds = rebo_imp::compute_bond_graph(&params, coords, &elements)?;
+            let interactions = rebo_imp::find_all_interactions(&params, coords, &elements)?;
             let parallel = me.parallel;
-            Ok(Box::new(Diff { params, bonds, parallel }))
+            Ok(Box::new(Diff { params, interactions, parallel }))
         }
 
         struct Diff {
             params: rebo_imp::Params,
-            bonds: PeriodicGraph,
+            interactions: rebo_imp::Interactions,
             parallel: bool,
         }
 
         impl DiffFn<CommonMeta> for Diff {
-            fn compute(&mut self, coords: &Coords, meta: CommonMeta) -> FailResult<(f64, Vec<V3>)> {
-                let elements: meta::SiteElements = meta.pick();
-                rebo_imp::compute_simple(&self.params, coords, &elements, &self.bonds, self.parallel)
+            fn compute(&mut self, coords: &Coords, _: CommonMeta) -> FailResult<(f64, Vec<V3>)> {
+                rebo_imp::compute(&self.params, &self.interactions, coords, self.parallel)
             }
         }
 

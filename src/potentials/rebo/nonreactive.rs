@@ -376,7 +376,7 @@ mod params {
 
 //---------------------------------------------------------------------------------
 
-use self::interactions::Interactions;
+pub use self::interactions::Interactions;
 mod interactions {
     use super::*;
 
@@ -542,40 +542,29 @@ mod interactions {
     }
 }
 
-pub fn compute_bond_graph(
+pub fn find_all_interactions(
     params: &Params,
     coords: &Coords,
     elements: &[Element],
-) -> FailResult<PeriodicGraph> {
-    let types = elements.iter().cloned().map(AtomType::from_element).collect::<FailResult<Vec<_>>>()?;
+) -> FailResult<Interactions> {
+    let ref types = elements.iter().cloned().map(AtomType::from_element).collect::<FailResult<Vec<_>>>()?;
     let max_radius = {
         params.by_type.values()
             .flat_map(|x| x.values().map(|x| x.cutoff_region.1))
             .fold(::std::f64::NEG_INFINITY, |a, b| f64::max(a, b))
     };
 
-    Ok({
+    let ref graph = {
         rsp2_structure::bonds::FracBonds::from_brute_force_with_meta(
-            &coords, max_radius, &types,
+            coords, max_radius, types,
             |&a, &b| params.by_type[a][b].cutoff_region.1,
         )?.to_periodic_graph()
-    })
+    };
+
+    Interactions::compute(params, coords, types, graph)
 }
 
 //---------------------------------------------------------------------------------
-
-// FIXME: Remove
-pub fn compute_simple(
-    params: &Params,
-    coords: &Coords,
-    elements: &[Element],
-    bonds: &PeriodicGraph,
-    use_rayon: bool,
-) -> FailResult<(f64, Vec<V3>)> {
-    let types = elements.iter().cloned().map(AtomType::from_element).collect::<FailResult<Vec<_>>>()?;
-    let interactions = Interactions::compute(params, coords, &types, bonds)?;
-    compute(params, &interactions, coords, use_rayon)
-}
 
 pub fn compute(
     params: &Params,
@@ -2724,16 +2713,16 @@ mod input_tests {
 
         // Set this to false to let tests capture stdout
         let use_rayon = false; // FIXME: revert to true
-        let params = Params::new_lammps();
+        let ref params = Params::new_lammps();
 
         let in_path = Path::new(RESOURCE_DIR).join(name.to_string() + ".vasp.xz");
         let out_path = Path::new(RESOURCE_DIR).join(name.to_string() + ".rebo.lmp.json.xz");
 
         let expected: ForceFile = ::serde_json::from_reader(open_xz(out_path)?)?;
-        let Poscar { coords, elements, .. } = Poscar::from_reader(open_xz(in_path)?)?;
-        let bond_graph = compute_bond_graph(&params, &coords, &elements)?;
+        let Poscar { ref coords, ref elements, .. } = Poscar::from_reader(open_xz(in_path)?)?;
+        let ref interactions = find_all_interactions(params, coords, elements)?;
 
-        let (value, grad) = compute_simple(&params, &coords, &elements, &bond_graph, use_rayon)?;
+        let (value, grad) = compute(params, interactions, coords, use_rayon)?;
 
         assert_close!(abs=1e-7, rel=1e-6, value, expected.value, "in file: {}", name);
         assert_close!(abs=1e-7, rel=1e-6, grad.unvee(), expected.grad.unvee(), "in file: {}", name);
