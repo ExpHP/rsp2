@@ -162,6 +162,10 @@ type TypeMap<T> = EnumMap<AtomType, T>;
 
 //---------------------------------------------------------------------------------
 
+// NOTE: While it's unlikely that one will ever confuse a site index for a bond index,
+//       wrapping BondI is extremely useful to prevent accidental confusion between
+//       "site-bond" indices (indices into a SiteBondVec) and "bond" indices (unique
+//       indices for all bonds)
 newtype_index!{SiteI}
 newtype_index!{BondI}
 
@@ -493,82 +497,47 @@ mod interactions {
         }
     }
 
-    #[derive(Debug)]
-    pub struct Site {
-        pub index: SiteI,
-        pub atom_type: AtomType,
-    }
-
-    #[derive(Debug)]
-    pub struct Bond {
-        pub index: BondI,
-        pub is_canonical: bool,
-        pub source: SiteI,
-        pub target: SiteI,
-        pub cart_vector: V3,
-        pub image_diff: V3<i32>,
-        pub reverse_index: BondI,
-    }
-
     impl Interactions {
         pub fn num_sites(&self) -> usize { self.site_type.len() }
         pub fn num_bonds(&self) -> usize { self.bond_target.len() }
 
-        #[inline(always)] // hopefully eliminate unused lookups to waste less cache
-        pub fn site(&self, index: SiteI) -> Site {
-            let atom_type = self.site_type[index];
-            Site { index, atom_type }
+        #[inline(always)] pub fn site_type(&self, site: SiteI) -> AtomType { self.site_type[site] }
+        #[inline(always)] pub fn bond_is_canonical(&self, bond: BondI) -> bool { self.bond_is_canonical[bond] }
+        #[inline(always)] pub fn bond_source(&self, bond: BondI) -> SiteI { self.bond_source[bond] }
+        #[inline(always)] pub fn bond_target(&self, bond: BondI) -> SiteI { self.bond_target[bond] }
+        #[inline(always)] pub fn bond_reverse_index(&self, bond: BondI) -> BondI { self.bond_reverse_index[bond] }
+        #[inline(always)] pub fn bond_image_diff(&self, bond: BondI) -> V3<i32> { self.bond_image_diff[bond] }
+        /// index of a bond into a SiteBondVec for its source Site
+        #[inline(always)] pub fn bond_sbvec_index(&self, bond: BondI) -> usize {
+            bond.0 - self.site_bond_range(self.bond_source[bond]).start
         }
 
-        #[inline(always)] // hopefully eliminate unused lookups to waste less cache
-        pub fn bond(&self, index: BondI) -> Bond {
-            let is_canonical = self.bond_is_canonical[index];
-            let cart_vector = self.bond_cart_vector[index];
-            let source = self.bond_source[index];
-            let target = self.bond_target[index];
-            let image_diff = self.bond_image_diff[index];
-            let reverse_index = self.bond_reverse_index[index];
-            Bond { index, is_canonical, cart_vector, target, reverse_index, image_diff, source }
+        #[inline(always)]
+        pub fn bond_targets(&self, site: SiteI) -> impl ExactSizeIterator<Item=SiteI> + '_ {
+            self.bonds(site).map(move |x| self.bond_target(x))
         }
 
-        pub fn sites(&self) -> impl ExactSizeIterator<Item=Site> + '_ {
-            (0..self.site_type.len()).map(move |i| self.site(SiteI(i)))
+        // NOTE: we often can't use this due to rayon
+        pub fn sites(&self) -> impl ExactSizeIterator<Item=SiteI> + '_ {
+            (0..self.num_sites()).map(SiteI)
         }
 
-        pub fn site_range(&self) -> ::std::ops::Range<usize> {
-            0..self.site_type.len()
+        pub fn bonds(&self, site: SiteI) -> impl ExactSizeIterator<Item=BondI> + '_ {
+            self.site_bond_range(site).map(BondI)
         }
 
-        pub fn bonds(&self, site: SiteI) -> impl ExactSizeIterator<Item=Bond> + '_ {
-            self.bond_range(site).map(move |i| self.bond(BondI(i)))
+        // Type-safe extraction of a "site-bond"-indexed slice of data from a vector of data
+        // at all bonds.
+        pub fn site_bond_slice<'b, T>(&self, site: SiteI, data: &'b Indexed<BondI, [T]>) -> &'b [T] {
+            &data.raw[self.site_bond_range(site)]
         }
 
-        pub fn bond_range(&self, site: SiteI) -> ::std::ops::Range<usize> {
+        pub fn site_bond_slice_mut<'b, T>(&self, site: SiteI, data: &'b mut Indexed<BondI, [T]>) -> &'b mut [T] {
+            &mut data.raw[self.site_bond_range(site)]
+        }
+
+        pub fn site_bond_range(&self, site: SiteI) -> ::std::ops::Range<usize> {
             self.bond_div[site].0..self.bond_div[site.next()].0
-        }
-
-        // index of a bond into a SiteBondVec for its source Site
-        pub fn sbvec_index(&self, bond: BondI) -> usize {
-            bond.0 - self.bond_range(self.bond_source[bond]).start
-        }
-
-        // For test purposes only (and it would be much better if this didn't need to exist)
-        pub fn with_modified_delta<B>(
-            &mut self,
-            bond_ij: BondI,
-            new_delta_ij: V3<f64>,
-            cont: impl FnOnce(&Self) -> B,
-        ) -> B {
-            let bond_ji = self.bond_reverse_index[bond_ij];
-            let orig_delta_ij = self.bond_cart_vector[bond_ij];
-            let orig_delta_ji = self.bond_cart_vector[bond_ji];
-
-            self.bond_cart_vector[bond_ij] = new_delta_ij;
-            self.bond_cart_vector[bond_ji] = -new_delta_ij;
-            let out = cont(&self);
-            self.bond_cart_vector[bond_ij] = orig_delta_ij;
-            self.bond_cart_vector[bond_ji] = orig_delta_ji;
-            out
         }
     }
 }
@@ -595,7 +564,8 @@ pub fn compute_bond_graph(
 
 //---------------------------------------------------------------------------------
 
-pub fn compute(
+// FIXME: Remove
+pub fn compute_simple(
     params: &Params,
     coords: &Coords,
     elements: &[Element],
@@ -604,15 +574,24 @@ pub fn compute(
 ) -> FailResult<(f64, Vec<V3>)> {
     let types = elements.iter().cloned().map(AtomType::from_element).collect::<FailResult<Vec<_>>>()?;
     let interactions = Interactions::compute(params, coords, &types, bonds)?;
-    let (value, d_deltas) = compute_rebo_bonds(params, &interactions, use_rayon)?;
+    compute(params, &interactions, coords, use_rayon)
+}
+
+pub fn compute(
+    params: &Params,
+    interactions: &Interactions,
+    coords: &Coords,
+    use_rayon: bool,
+) -> FailResult<(f64, Vec<V3>)> {
+    let bond_deltas = compute_bond_deltas(coords, &interactions, use_rayon);
+
+    let (value, d_deltas) = compute_rebo_bonds(params, &interactions, &bond_deltas, use_rayon)?;
 
     let mut d_positions = IndexVec::from_elem_n(V3::zero(), interactions.num_sites());
-    for __site in interactions.sites() {
-        let site_i = __site.index;
 
-        for __bond in interactions.bonds(site_i) {
-            let bond_ij = __bond.index;
-            let site_j = __bond.target;
+    for site_i in interactions.sites() {
+        for bond_ij in interactions.bonds(site_i) {
+            let site_j = interactions.bond_target(bond_ij);
 
             // delta_ij = (-pos_i) + pos_j
             d_positions[site_i] -= d_deltas[bond_ij];
@@ -622,21 +601,38 @@ pub fn compute(
     Ok((value, d_positions.raw))
 }
 
+fn compute_bond_deltas(
+    coords: &Coords,
+    interactions: &Interactions,
+    use_rayon: bool,
+) -> IndexVec<BondI, V3> {
+    let site_carts = IndexVec::<SiteI, _>::from_raw(coords.to_carts());
+    let vec = CondIterator::new(0..interactions.num_bonds(), use_rayon).map(|bond| {
+        let bond = BondI(bond);
+        let cart_from = site_carts[interactions.bond_source(bond)];
+        let cart_to = site_carts[interactions.bond_target(bond)];
+        let image_diff = interactions.bond_image_diff(bond);
+        cart_to - cart_from + image_diff.map(|x| x as f64) * coords.lattice()
+    }).collect();
+    IndexVec::from_raw(vec)
+}
+
 fn compute_rebo_bonds(
     params: &Params,
     interactions: &Interactions,
+    bond_deltas: &Indexed<BondI, [V3]>,
     use_rayon: bool,
 ) -> FailResult<(f64, IndexVec<BondI, V3>)> {
-    _compute_rebo_bonds(params, interactions, use_rayon, Debug::Auto)
+    _compute_rebo_bonds(params, interactions, bond_deltas, use_rayon, Debug::Auto)
 }
 
 fn _compute_rebo_bonds(
     params: &Params,
     interactions: &Interactions,
+    bond_deltas: &Indexed<BondI, [V3]>,
     use_rayon: bool,
     dbg: Debug,
 ) -> FailResult<(f64, IndexVec<BondI, V3>)> {
-    use self::interactions::{Site, Bond};
     // Brenner:
     // Eq  1:  V = sum_{i < j} V^R(r_ij) + b_{ij} V^A(r_ij)
     // Eq  5:  V^R(r) = f(r) (1 + Q/r) A e^{-alpha r}
@@ -691,10 +687,9 @@ fn _compute_rebo_bonds(
     }
 
     let site_data = IndexVec::<SiteI, _>::from_raw({
-        let iter = CondIterator::new(interactions.site_range(), use_rayon);
-        iter.map(SiteI::new).map(|site_i| {
-            let __site = interactions.site(site_i);
-            let type_i = __site.atom_type;
+        CondIterator::new(0..interactions.num_sites(), use_rayon).map(|site_i| {
+            let site_i = SiteI(site_i);
+            let type_i = interactions.site_type(site_i);
 
             let mut tcoord = 0.0;
             let mut bond_VR = SiteBondVec::new();
@@ -703,10 +698,10 @@ fn _compute_rebo_bonds(
             let mut bond_VA_d_delta = SiteBondVec::new();
             let mut bond_weight = SiteBondVec::new();
 
-            for __bond in interactions.bonds(site_i) {
-                let site_j = __bond.target;
-                let delta = __bond.cart_vector;
-                let type_j = interactions.site(site_j).atom_type;
+            for bond in interactions.bonds(site_i) {
+                let site_j = interactions.bond_target(bond);
+                let type_j = interactions.site_type(site_j);
+                let delta = bond_deltas[bond];
 
                 let (length, length_d_delta) = norm(delta);
                 let EasyParts {
@@ -739,9 +734,8 @@ fn _compute_rebo_bonds(
         }).collect::<FailResult<_>>()?
     });
 
-    let iter = CondIterator::new(interactions.site_range(), use_rayon);
-    let out = iter.map(SiteI::new).map(|site_i| {
-        let __site = interactions.site(site_i);
+    let out = CondIterator::new(0..interactions.num_sites(), use_rayon).map(|raw_site_i| {
+        let site_i = SiteI(raw_site_i);
         let FirstPassSiteData {
             tcoord: _,
             ref bond_weight,
@@ -784,6 +778,7 @@ fn _compute_rebo_bonds(
             site: site_i,
             bond_weights: bond_weight,
             bond_VAs: bond_VA,
+            bond_deltas: interactions.site_bond_slice(site_i, bond_deltas),
 //        }.compute_paranoid(dbg, 1e-7);
         }.compute(dbg);
         let SiteSigmaPiTerm {
@@ -807,12 +802,11 @@ fn _compute_rebo_bonds(
         // These are the only parts that depend on other sites' bond deltas.
 
         // Eq 3':  b_ij = boole(i < j) * b_ij^{pi}
-        for (index_ij, __bond) in interactions.bonds(site_i).enumerate() {
-            if !__bond.is_canonical {
+        for (sbidx_ij, bond_ij) in interactions.bonds(site_i).enumerate() {
+            if !interactions.bond_is_canonical(bond_ij) {
                 continue;
             }
-            let bond_ij = __bond.index;
-            let site_j = __bond.target;
+            let site_j = interactions.bond_target(bond_ij);
 
             let ref weights_ik = bond_weight;
             let ref weights_jl = site_data[site_j].bond_weight;
@@ -829,13 +823,20 @@ fn _compute_rebo_bonds(
             let alt_weights_ik = weights_ik;
             let alt_weights_jl = weights_jl;
 
-            let ref tcoords_k: SiteBondVec<_> = interactions.bonds(site_i).map(|bond| site_data[bond.target].tcoord).collect();
-            let ref tcoords_l: SiteBondVec<_> = interactions.bonds(site_j).map(|bond| site_data[bond.target].tcoord).collect();
+            let gather_site_tcoords = |site| -> SiteBondVec<_> {
+                interactions.bond_targets(site)
+                    .map(|target| site_data[target].tcoord)
+                    .collect()
+            };
 
             let out = bondorder_pi::Input {
-                params, interactions, site_i, bond_ij,
-                tcoords_k, tcoords_l, weights_ik, weights_jl,
+                params, interactions, bond_ij,
+                weights_ik, weights_jl,
                 alt_weights_ik, alt_weights_jl,
+                tcoords_k: &gather_site_tcoords(site_i),
+                tcoords_l: &gather_site_tcoords(site_j),
+                deltas_ik: interactions.site_bond_slice(site_i, &bond_deltas),
+                deltas_jl: interactions.site_bond_slice(site_j, &bond_deltas),
             }.compute(dbg);
 //            }.compute_paranoid(dbg, 1e-9);
             let BondOrderPi {
@@ -845,12 +846,12 @@ fn _compute_rebo_bonds(
             } = out;
             dbg!(dbg, "bpi: {:.9}", bpi);
 
-            let VA_ij = bond_VA[index_ij];
-            let VA_ij_d_delta_ij = bond_VA_d_delta[index_ij];
+            let VA_ij = bond_VA[sbidx_ij];
+            let VA_ij_d_delta_ij = bond_VA_d_delta[sbidx_ij];
 
             dbg!(dbg, "Vterm(pi): {:.9}", bpi * VA_ij);
             site_V += bpi * VA_ij;
-            site_V_d_delta[index_ij] += bpi * VA_ij_d_delta_ij;
+            site_V_d_delta[sbidx_ij] += bpi * VA_ij_d_delta_ij;
 
             axpy_mut(&mut site_V_d_delta, VA_ij, &bpi_d_deltas_ik);
             site_V_d_other_deltas.push((site_j, sbvec_scaled(VA_ij, bpi_d_deltas_jl)));
@@ -890,7 +891,7 @@ fn _compute_rebo_bonds(
     // and end this miserable function for good
     for (site_i, d_deltas_ij) in d_other_deltas {
         let _: SiteBondVec<V3> = d_deltas_ij;
-        axpy_mut(&mut d_deltas.raw[interactions.bond_range(site_i)], 1.0, &d_deltas_ij);
+        axpy_mut(interactions.site_bond_slice_mut(site_i, &mut d_deltas), 1.0, &d_deltas_ij);
     }
 
     assert_eq!(d_deltas.len(), interactions.num_bonds());
@@ -1021,6 +1022,7 @@ mod site_sigma_pi_term {
         pub params: &'a Params,
         pub interactions: &'a Interactions,
         pub site: SiteI,
+        pub bond_deltas: &'a [V3],
         pub bond_weights: &'a [f64],
         // The VA_ij terms for each bond at site i.
         pub bond_VAs: &'a [f64],
@@ -1043,10 +1045,10 @@ mod site_sigma_pi_term {
         //                       + P_{ij}(N_ij^C, N_ij^H)
         //        )
         let Input {
-            params, interactions, bond_weights, bond_VAs,
+            params, interactions, bond_weights, bond_VAs, bond_deltas,
             site: site_i,
         } = input;
-        let type_i = interactions.site(site_i).atom_type;
+        let type_i = interactions.site_type(site_i);
 
         // Tally up data about the bonds
         let mut type_present = enum_map!{_ => false};
@@ -1056,8 +1058,8 @@ mod site_sigma_pi_term {
         // (recompute these for a simpler signature and less data management)
         let mut bond_lengths = SiteBondVec::new();
         let mut bond_lengths_d_delta = SiteBondVec::new();
-        for (__bond, &weight) in zip_eq!(interactions.bonds(site_i), bond_weights) {
-            let target_type = interactions.site(__bond.target).atom_type;
+        for (bond, &weight, &delta) in zip_eq!(interactions.bonds(site_i), bond_weights, bond_deltas) {
+            let target_type = interactions.site_type(interactions.bond_target(bond));
             match target_type {
                 AtomType::Carbon => ccoord_i += weight,
                 AtomType::Hydrogen => hcoord_i += weight,
@@ -1065,7 +1067,7 @@ mod site_sigma_pi_term {
             bond_target_types.push(target_type);
             type_present[target_type] = true;
 
-            let (length, length_d_delta) = norm(__bond.cart_vector);
+            let (length, length_d_delta) = norm(delta);
             bond_lengths.push(length);
             bond_lengths_d_delta.push(length_d_delta);
         }
@@ -1075,9 +1077,9 @@ mod site_sigma_pi_term {
         let mut d_deltas = sbvec_filled(V3::zero(), bond_weights.len());
         let mut d_VAs = sbvec_filled(0.0, bond_weights.len());
 
-        for (index_ij, __bond) in interactions.bonds(site_i).enumerate() {
+        for (index_ij, _) in interactions.bonds(site_i).enumerate() {
             let type_j = bond_target_types[index_ij];
-            let delta_ij = __bond.cart_vector;
+            let delta_ij = bond_deltas[index_ij];
             let weight_ij = bond_weights[index_ij];
 
             // These are what Brenner's Ni REALLY are.
@@ -1091,8 +1093,8 @@ mod site_sigma_pi_term {
             let mut coses_ijk = SiteBondVec::new();
             let mut coses_ijk_d_delta_ij = SiteBondVec::new();
             let mut coses_ijk_d_delta_ik = SiteBondVec::new();
-            for (index_ik, __bond) in interactions.bonds(site_i).enumerate() {
-                let delta_ik = __bond.cart_vector;
+            for (index_ik, _) in interactions.bonds(site_i).enumerate() {
+                let delta_ik = bond_deltas[index_ik];
                 if index_ij == index_ik {
                     // set up bombs in case of possible misuse
                     coses_ijk.push(NAN);
@@ -1178,30 +1180,24 @@ mod site_sigma_pi_term {
         // For debugging; feel free to swap out the `compute` call with this.
         #[allow(unused)]
         pub fn compute_paranoid(self, dbg: Debug, tol: f64) -> Output {
-            let mut interactions = self.interactions.clone(); // FIXME oof
 
             let output = self.clone().compute(dbg);
             { // FIXME block unnecessary after NLL lands
                 let Output { value, ref d_deltas, ref d_VAs } = output;
 
-                for index_ij in 0..d_deltas.len() {
-                    let bond_ij = interactions.bonds(self.site).nth(index_ij).unwrap().index;
-                    assert_close!(
-                        rel=tol, abs=tol,
-                        d_deltas[index_ij].0,
-                        num_grad_v3(1e-4, interactions.bond(bond_ij).cart_vector, |x| {
-                            interactions.with_modified_delta(bond_ij, x, |interactions| {
-                                Input { interactions, ..self }.compute(Debug::Never).value
-                            })
-                        }).0,
-                    );
-                }
+                assert_close!(
+                    rel=tol, abs=tol,
+                    d_deltas.flat(),
+                    &numerical::gradient(1e-4, None, self.bond_deltas.flat(), |x| {
+                        Input { bond_deltas: x.nest(), ..self }.compute(Debug::Never).value
+                    })[..],
+                );
 
                 assert_close!(
                     rel=tol, abs=tol,
                     &d_VAs[..],
-                    &numerical::gradient(1e-3, None, self.bond_VAs, |bond_VAs| {
-                        Input { bond_VAs, ..self }.compute(Debug::Never).value
+                    &numerical::gradient(1e-3, None, self.bond_VAs, |x| {
+                        Input { bond_VAs: x, ..self }.compute(Debug::Never).value
                     })[..],
                 );
             }
@@ -1373,12 +1369,13 @@ mod bondorder_pi {
     pub(super) struct Input<'a> {
         pub params: &'a Params,
         pub interactions: &'a Interactions,
-        pub site_i: SiteI,
         pub bond_ij: BondI,
         // info about all bonds ik connected to site i
         // and all bonds jl connected to site j
         pub tcoords_k: &'a [f64],
         pub tcoords_l: &'a [f64],
+        pub deltas_ik: &'a [V3],
+        pub deltas_jl: &'a [V3],
         pub weights_ik: &'a [f64],
         pub weights_jl: &'a [f64],
         // weights that use an alternate interval in AIREBO (defined by `cutoff_max_2`)
@@ -1398,20 +1395,27 @@ mod bondorder_pi {
     // free function for smaller indent
     fn compute(input: Input<'_>, dbg: Debug) -> Output {
         let Input {
-            params, interactions, site_i, bond_ij, weights_ik, weights_jl,
-            tcoords_k, tcoords_l, alt_weights_ik, alt_weights_jl,
+            params, interactions, bond_ij,
+            tcoords_k, weights_ik, alt_weights_ik, deltas_ik,
+            tcoords_l, weights_jl, alt_weights_jl, deltas_jl,
         } = input;
 
-        let site_j = interactions.bond(bond_ij).target;
-        let type_i = interactions.site(site_i).atom_type;
-        let type_j = interactions.site(site_j).atom_type;
-        let bond_ji = interactions.bond(bond_ij).reverse_index;
+        let site_i = interactions.bond_source(bond_ij);
+        let site_j = interactions.bond_target(bond_ij);
+        let type_i = interactions.site_type(site_i);
+        let type_j = interactions.site_type(site_j);
+        let bond_ji = interactions.bond_reverse_index(bond_ij);
 
-        let types_k: SiteBondVec<_> = interactions.bonds(site_i).map(|bond| interactions.site(bond.target).atom_type).collect();
-        let types_l: SiteBondVec<_> = interactions.bonds(site_j).map(|bond| interactions.site(bond.target).atom_type).collect();
+        let gather_target_tcoords = |site| -> SiteBondVec<_> {
+            interactions.bond_targets(site)
+                .map(|target| interactions.site_type(target))
+                .collect()
+        };
+        let types_k: SiteBondVec<_> = gather_target_tcoords(site_i);
+        let types_l: SiteBondVec<_> = gather_target_tcoords(site_j);
 
-        let index_ij = interactions.sbvec_index(bond_ij);
-        let index_ji = interactions.sbvec_index(bond_ji);
+        let index_ij = interactions.bond_sbvec_index(bond_ij);
+        let index_ji = interactions.bond_sbvec_index(bond_ji);
 
         let ycoord_ij = ycoord::Input {
             skip_index: index_ij,
@@ -1455,22 +1459,19 @@ mod bondorder_pi {
             let mut sum_d_deltas_jl = sbvec_filled(V3::zero(), weights_jl.len()); // w.r.t. bonds around site j
             // We must iterate over groups of four atoms ijkl,
             // where k and l are not equal to i or j.
-            for __bond in interactions.bonds(site_i) {
-                let bond_ik = __bond.index;
+            for (index_ik, _) in interactions.bonds(site_i).enumerate() {
 
                 // Recall that because a site may have multiple images involved in the interaction,
                 // simply comparing site indices is not good enough.
                 //
                 // Thankfully, verifying i != l and j != k is easily done because we can
                 // compare bond indices.
-                if bond_ik == bond_ij {
+                if index_ik == index_ij {
                     continue; // site k is site j
                 }
 
-                for __bond in interactions.bonds(site_j) {
-                    let bond_jl = __bond.index;
-
-                    if bond_jl == bond_ji {
+                for (index_jl, _) in interactions.bonds(site_j).enumerate() {
+                    if index_jl == index_ji {
                         continue; // site l is site i
                     }
 
@@ -1498,9 +1499,9 @@ mod bondorder_pi {
                     //  this purpose)
                     //-----------
 
-                    let delta_ij = interactions.bond(bond_ij).cart_vector;
-                    let delta_ik = interactions.bond(bond_ik).cart_vector;
-                    let delta_jl = interactions.bond(bond_jl).cart_vector;
+                    let delta_ij = deltas_ik[index_ij];
+                    let delta_ik = deltas_ik[index_ik];
+                    let delta_jl = deltas_jl[index_jl];
                     let DihedralSineSq {
                         value: sinsq,
                         d_delta_ij: sinsq_d_delta_ij,
@@ -1512,9 +1513,6 @@ mod bondorder_pi {
                         "sinsq_ijkl = NaN for vectors:\nij: {:?}\nik: {:?}\njl: {:?}",
                         delta_ij, delta_ik, delta_jl,
                     );
-
-                    let index_ik = interactions.sbvec_index(bond_ik);
-                    let index_jl = interactions.sbvec_index(bond_jl);
 
                     let alt_weight_ik = alt_weights_ik[index_ik];
                     let alt_weight_jl = alt_weights_jl[index_jl];
@@ -1550,54 +1548,25 @@ mod bondorder_pi {
         // For debugging; feel free to swap out the `compute` call with this.
         #[allow(unused)]
         pub(super) fn compute_paranoid(self, dbg: Debug, tol: f64) -> Output {
-            let mut interactions = self.interactions.clone(); // FIXME oof
-            let bond_ij = self.bond_ij;
-            let bond_ji = interactions.bond(bond_ij).reverse_index;
-            let index_ij = interactions.sbvec_index(bond_ij);
-            let index_ji = interactions.sbvec_index(bond_ji);
-
             let output = self.clone().compute(dbg);
             { // FIXME block unnecessary after NLL lands
                 let Output { value, ref d_deltas_ik, ref d_deltas_jl } = output;
 
-                for (err_hint, d_deltas_ik, skip_index, site_i) in vec![
-                    ("d_deltas_ik", d_deltas_ik, index_ij, self.site_i),
-                    ("d_deltas_jl", d_deltas_jl, index_ji, interactions.bond(self.bond_ij).target),
-                ] {
-                    for index_ik in 0..d_deltas_ik.len() {
-                        let bond_ik = interactions.bonds(site_i).nth(index_ik).unwrap().index;
-                        if index_ik == skip_index {
-                            continue; // this one is trickier; see below
-                        }
-                        assert_close!(
-                            rel=tol, abs=tol,
-                            d_deltas_ik[index_ik].0,
-                            num_grad_v3(1e-4, interactions.bond(bond_ik).cart_vector, |p| {
-                                interactions.with_modified_delta(bond_ik, p, |interactions| {
-                                    Input { interactions, ..self }.compute(Debug::Never).value
-                                })
-                            }).0,
-                            "in {}", err_hint,
-                        );
-                    }
-                }
+                assert_close!(
+                    rel=tol, abs=tol,
+                    d_deltas_ik.flat(),
+                    &numerical::gradient(1e-4, None, self.deltas_ik.flat(), |x| {
+                        Input { deltas_ik: x.nest(), ..self }.compute(Debug::Never).value
+                    })[..],
+                );
 
-                // HACK
-                //
-                // bond ij is in both arrays, and `interactions.with_modified_delta` modifies both
-                // the ij and ji deltas.  Therefore, for this bond alone, we must consider two
-                // of the output derivatives to be reflected in the numerical derivative.
-                //
-                // (in practice, the output ji delta is zero, so `with_modified_delta(bond_ij, ...)`
-                //  and `with_modified_delta(bond_ji, ...)` both simply produce similar changes in
-                //  the output ij delta.)
-                let expected = d_deltas_ik[index_ij] - d_deltas_jl[index_ji];
-                let num_grad = num_grad_v3(1e-4, interactions.bond(bond_ij).cart_vector, |p| {
-                    interactions.with_modified_delta(bond_ij, p, |interactions| {
-                        Input { interactions, ..self }.compute(Debug::Never).value
-                    })
-                });
-                assert_close!(rel=tol, abs=tol, expected.0, num_grad.0, "in delta_ij");
+                assert_close!(
+                    rel=tol, abs=tol,
+                    d_deltas_jl.flat(),
+                    &numerical::gradient(1e-4, None, self.deltas_jl.flat(), |x| {
+                        Input { deltas_jl: x.nest(), ..self }.compute(Debug::Never).value
+                    })[..],
+                );
             }
             output
         }
@@ -2764,7 +2733,7 @@ mod input_tests {
         let Poscar { coords, elements, .. } = Poscar::from_reader(open_xz(in_path)?)?;
         let bond_graph = compute_bond_graph(&params, &coords, &elements)?;
 
-        let (value, grad) = compute(&params, &coords, &elements, &bond_graph, use_rayon)?;
+        let (value, grad) = compute_simple(&params, &coords, &elements, &bond_graph, use_rayon)?;
 
         assert_close!(abs=1e-7, rel=1e-6, value, expected.value, "in file: {}", name);
         assert_close!(abs=1e-7, rel=1e-6, grad.unvee(), expected.grad.unvee(), "in file: {}", name);

@@ -176,7 +176,7 @@ impl PotentialBuilder<CommonMeta> for Rebo {
         impl DiffFn<CommonMeta> for Diff {
             fn compute(&mut self, coords: &Coords, meta: CommonMeta) -> FailResult<(f64, Vec<V3>)> {
                 let elements: meta::SiteElements = meta.pick();
-                rebo_imp::compute(&self.params, coords, &elements, &self.bonds, self.parallel)
+                rebo_imp::compute_simple(&self.params, coords, &elements, &self.bonds, self.parallel)
             }
         }
 
