@@ -2712,7 +2712,7 @@ mod input_tests {
     use ::rsp2_structure_io::Poscar;
     use ::rsp2_array_types::Unvee;
 
-    const RESOURCE_DIR: &'static str = "tests/resources/potential/rebo";
+    const RESOURCE_DIR: &'static str = "tests/resources/rebo";
     const BIG_INPUT_1: &'static str = "tblg-2011-150-a";
     const BIG_INPUT_2: &'static str = "gyroid-1";
 

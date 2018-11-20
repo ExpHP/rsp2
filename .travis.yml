@@ -65,8 +65,9 @@ install:
 
 script:
 - cargo build --all $RSP2_FEATURES
+- cargo build --all $RSP2_FEATURES --release
 - cargo test --all $RSP2_FEATURES
-- cargo test --all $RSP2_FEATURES -- --ignored
+- cargo test --all $RSP2_FEATURES --release -- --ignored
 
 before_cache:
 - $TRAVIS_BUILD_DIR/travis/cargo-cache.sh store
