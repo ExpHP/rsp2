@@ -471,15 +471,15 @@ mod interactions {
 
                     for frac_bond_ij in frac_bonds_from(site_i) {
                         let site_j = SiteI(frac_bond_ij.to);
-                        let index_ji = {
+                        let sbindex_ji = {
                             frac_bonds_from(site_j)
                                 .position(|bond| frac_bond_ij == bond.flip())
                         };
-                        let index_ji = match index_ji {
+                        let sbindex_ji = match sbindex_ji {
                             Some(x) => x,
                             None => bail!("A bond has no counterpart in the reverse direction!"),
                         };
-                        let bond_ji = BondI(bond_div[site_j].0 + index_ji);
+                        let bond_ji = BondI(bond_div[site_j].0 + sbindex_ji);
                         bond_reverse_index.push(bond_ji);
 
                         if (site_type[site_i], site_type[site_j]) == (AtomType::Hydrogen, AtomType::Hydrogen) {
@@ -778,10 +778,10 @@ fn _compute_rebo_bonds(
 
         site_V += Vsp_i;
         axpy_mut(&mut site_V_d_delta, 1.0, &Vsp_i_d_delta);
-        for index_ij in 0..bond_VA.len() {
-            let Vsp_i_d_VA_ij = Vsp_i_d_VA[index_ij];
-            let VA_ij_d_delta_ij = bond_VA_d_delta[index_ij];
-            site_V_d_delta[index_ij] += Vsp_i_d_VA_ij * VA_ij_d_delta_ij;
+        for sbindex_ij in 0..bond_VA.len() {
+            let Vsp_i_d_VA_ij = Vsp_i_d_VA[sbindex_ij];
+            let VA_ij_d_delta_ij = bond_VA_d_delta[sbindex_ij];
+            site_V_d_delta[sbindex_ij] += Vsp_i_d_VA_ij * VA_ij_d_delta_ij;
         }
 
         //-----------------------------------------------
@@ -1066,10 +1066,10 @@ mod site_sigma_pi_term {
         let mut d_deltas = sbvec_filled(V3::zero(), bond_weights.len());
         let mut d_VAs = sbvec_filled(0.0, bond_weights.len());
 
-        for (index_ij, _) in interactions.bonds(site_i).enumerate() {
-            let type_j = bond_target_types[index_ij];
-            let delta_ij = bond_deltas[index_ij];
-            let weight_ij = bond_weights[index_ij];
+        for (sbindex_ij, _) in interactions.bonds(site_i).enumerate() {
+            let type_j = bond_target_types[sbindex_ij];
+            let delta_ij = bond_deltas[sbindex_ij];
+            let weight_ij = bond_weights[sbindex_ij];
 
             // These are what Brenner's Ni REALLY are.
             let ccoord_ij = ccoord_i - boole(type_j == AtomType::Carbon) * weight_ij;
@@ -1082,9 +1082,9 @@ mod site_sigma_pi_term {
             let mut coses_ijk = SiteBondVec::new();
             let mut coses_ijk_d_delta_ij = SiteBondVec::new();
             let mut coses_ijk_d_delta_ik = SiteBondVec::new();
-            for (index_ik, _) in interactions.bonds(site_i).enumerate() {
-                let delta_ik = bond_deltas[index_ik];
-                if index_ij == index_ik {
+            for (sbindex_ik, _) in interactions.bonds(site_i).enumerate() {
+                let delta_ik = bond_deltas[sbindex_ik];
+                if sbindex_ij == sbindex_ik {
                     // set up bombs in case of possible misuse
                     coses_ijk.push(NAN);
                     coses_ijk_d_delta_ij.push(V3::from_fn(|_| NAN));
@@ -1108,7 +1108,7 @@ mod site_sigma_pi_term {
             {
                 // Compute bsp as a function of many things...
                 let out = bondorder_sigma_pi::Input {
-                    params, type_i, type_j, ccoord_ij, hcoord_ij, P_ij, index_ij,
+                    params, type_i, type_j, ccoord_ij, hcoord_ij, P_ij, sbindex_ij,
                     coses_ijk: &coses_ijk,
                     types_k: &bond_target_types,
                     weights_ik: bond_weights,
@@ -1125,27 +1125,27 @@ mod site_sigma_pi_term {
                 // and lengths, knowing that they each are a function of the deltas.
                 let mut tmp_d_deltas: SiteBondVec<V3> = sbvec_filled(V3::zero(), bond_weights.len());
 
-                // Cosines at all indices except index_ij
-                for (index_ik, bsp_ij_d_cos_ijk) in bsp_ij_d_coses_ijk.into_iter().enumerate() {
+                // Cosines at all indices except sbindex_ij
+                for (sbindex_ik, bsp_ij_d_cos_ijk) in bsp_ij_d_coses_ijk.into_iter().enumerate() {
                     // Mind the gap
-                    if index_ij == index_ik {
+                    if sbindex_ij == sbindex_ik {
                         continue;
                     }
 
                     // cos_ijk = cos_ijk(delta_ij, delta_ik)
-                    // These are both index_ik because we are indexing the cosines.
-                    let cos_ijk_d_delta_ij = coses_ijk_d_delta_ij[index_ik];
-                    let cos_ijk_d_delta_ik = coses_ijk_d_delta_ik[index_ik];
+                    // These are both sbindex_ik because we are indexing the cosines.
+                    let cos_ijk_d_delta_ij = coses_ijk_d_delta_ij[sbindex_ik];
+                    let cos_ijk_d_delta_ik = coses_ijk_d_delta_ik[sbindex_ik];
 
-                    // These are index_ij and index_ik because we are indexing the deltas.
-                    tmp_d_deltas[index_ij] += bsp_ij_d_cos_ijk * cos_ijk_d_delta_ij;
-                    tmp_d_deltas[index_ik] += bsp_ij_d_cos_ijk * cos_ijk_d_delta_ik;
+                    // These are sbindex_ij and sbindex_ik because we are indexing the deltas.
+                    tmp_d_deltas[sbindex_ij] += bsp_ij_d_cos_ijk * cos_ijk_d_delta_ij;
+                    tmp_d_deltas[sbindex_ik] += bsp_ij_d_cos_ijk * cos_ijk_d_delta_ik;
                 }
 
                 // Lengths at all indices
-                for (index_ik, bsp_ij_d_length_ik) in bsp_ij_d_lengths_ik.into_iter().enumerate() {
-                    let length_ik_d_delta_ik = bond_lengths_d_delta[index_ik];
-                    tmp_d_deltas[index_ik] += bsp_ij_d_length_ik * length_ik_d_delta_ik;
+                for (sbindex_ik, bsp_ij_d_length_ik) in bsp_ij_d_lengths_ik.into_iter().enumerate() {
+                    let length_ik_d_delta_ik = bond_lengths_d_delta[sbindex_ik];
+                    tmp_d_deltas[sbindex_ik] += bsp_ij_d_length_ik * length_ik_d_delta_ik;
                 }
 
                 bsp_ij = tmp_value;
@@ -1154,11 +1154,11 @@ mod site_sigma_pi_term {
             }
 
             // True term to add to sum is 0.5 * VA_ij * bsp_ij
-            let VA_ij = bond_VAs[index_ij];
+            let VA_ij = bond_VAs[sbindex_ij];
 
             dbg!(dbg, "Vterm(sp): {:.9}", 0.5 * VA_ij * bsp_ij);
             value += 0.5 * VA_ij * bsp_ij;
-            d_VAs[index_ij] += 0.5 * bsp_ij;
+            d_VAs[sbindex_ij] += 0.5 * bsp_ij;
             axpy_mut(&mut d_deltas, 0.5 * VA_ij, &bsp_ij_d_deltas);
         }
         Output { value, d_deltas, d_VAs }
@@ -1207,7 +1207,7 @@ mod bondorder_sigma_pi {
         // bond from atom i to another atom j
         pub type_i: AtomType,
         pub type_j: AtomType,
-        pub index_ij: usize, // SiteBondVec index
+        pub sbindex_ij: usize, // SiteBondVec index
         pub ccoord_ij: f64,
         pub hcoord_ij: f64,
         // precomputed spline that depends on the coordination at i and the atom type at j
@@ -1221,7 +1221,7 @@ mod bondorder_sigma_pi {
 
     pub(super) struct BondOrderSigmaPi {
         pub value: f64,
-        pub d_coses_ijk: SiteBondVec<f64>, // value at index_ij is unspecified
+        pub d_coses_ijk: SiteBondVec<f64>, // value at sbindex_ij is unspecified
         pub d_lengths_ik: SiteBondVec<f64>, // this one has values at all indices
     }
 
@@ -1237,7 +1237,7 @@ mod bondorder_sigma_pi {
         //        ))
         let Input {
             params, type_i, type_j, ccoord_ij, hcoord_ij, P_ij,
-            types_k, lengths_ik, weights_ik, coses_ijk, index_ij,
+            types_k, lengths_ik, weights_ik, coses_ijk, sbindex_ij,
         } = input;
         let tcoord_ij = ccoord_ij + hcoord_ij;
         dbg!(dbg, "Nt: {:.9}", tcoord_ij);
@@ -1253,19 +1253,19 @@ mod bondorder_sigma_pi {
         inner_value += P_ij;
 
         let iter = zip_eq!(coses_ijk, types_k).enumerate();
-        for (index_ik, (&cos_ijk, &type_k)) in iter {
-            let weight_ik = weights_ik[index_ik];
+        for (sbindex_ik, (&cos_ijk, &type_k)) in iter {
+            let weight_ik = weights_ik[sbindex_ik];
             if weight_ik == 0.0 {
                 inner_d_coses_ijk.push(0.0);
                 continue;
             }
-            if index_ik == index_ij {
+            if sbindex_ik == sbindex_ij {
                 inner_d_coses_ijk.push(NAN);
                 continue;
             }
 
-            let length_ij = lengths_ik[index_ij];
-            let length_ik = lengths_ik[index_ik];
+            let length_ij = lengths_ik[sbindex_ij];
+            let length_ik = lengths_ik[sbindex_ik];
 
             let ExpLambda {
                 value: exp,
@@ -1285,8 +1285,8 @@ mod bondorder_sigma_pi {
 //            dbg!("bspterm: {:.9}", exp_lambda * weight_ik * G);
             inner_value += exp * weight_ik * G;
             inner_d_coses_ijk.push(exp * weight_ik * G_d_cos_ijk);
-            inner_d_lengths_ik[index_ik] += exp_d_length_ik * weight_ik * G;
-            inner_d_lengths_ik[index_ij] += exp_d_length_ij * weight_ik * G;
+            inner_d_lengths_ik[sbindex_ik] += exp_d_length_ik * weight_ik * G;
+            inner_d_lengths_ik[sbindex_ij] += exp_d_length_ij * weight_ik * G;
         }
 
 //        dbg!("bspsum: {:.9}", inner_value);
@@ -1315,20 +1315,20 @@ mod bondorder_sigma_pi {
                 let Output { value, ref d_coses_ijk, ref d_lengths_ik } = output;
 
                 let mut coses_ijk = self.coses_ijk.to_vec();
-                for index_ik in 0..self.coses_ijk.len() {
-                    if index_ik == self.index_ij {
+                for sbindex_ik in 0..self.coses_ijk.len() {
+                    if sbindex_ik == self.sbindex_ij {
                         continue;
                     }
 
                     assert_close!(
                         rel=tol, abs=tol,
-                        d_coses_ijk[index_ik],
-                        numerical::slope(1e-4, None, self.coses_ijk[index_ik], |cos_ijk| {
+                        d_coses_ijk[sbindex_ik],
+                        numerical::slope(1e-4, None, self.coses_ijk[sbindex_ik], |cos_ijk| {
                             // FIXME so dumb
-                            let old = self.coses_ijk[index_ik];
-                            coses_ijk[index_ik] = cos_ijk;
+                            let old = self.coses_ijk[sbindex_ik];
+                            coses_ijk[sbindex_ik] = cos_ijk;
                             let out = Input { coses_ijk: &coses_ijk, ..self }.compute(Debug::Never).value;
-                            coses_ijk[index_ik] = old;
+                            coses_ijk[sbindex_ik] = old;
                             out
                         }),
                     );
@@ -1403,18 +1403,18 @@ mod bondorder_pi {
         let types_k: SiteBondVec<_> = gather_target_tcoords(site_i);
         let types_l: SiteBondVec<_> = gather_target_tcoords(site_j);
 
-        let index_ij = interactions.bond_sbvec_index(bond_ij);
-        let index_ji = interactions.bond_sbvec_index(bond_ji);
+        let sbindex_ij = interactions.bond_sbvec_index(bond_ij);
+        let sbindex_ji = interactions.bond_sbvec_index(bond_ji);
 
         let ycoord_ij = ycoord::Input {
-            skip_index: index_ij,
+            skip_index: sbindex_ij,
             weights_ik: weights_ik,
             tcoords_k: tcoords_k,
             types_k: &types_k,
         }.compute(dbg);
 
         let ycoord_ji = ycoord::Input {
-            skip_index: index_ji,
+            skip_index: sbindex_ji,
             weights_ik: weights_jl,
             tcoords_k: tcoords_l,
             types_k: &types_l,
@@ -1423,13 +1423,13 @@ mod bondorder_pi {
         // NConj = 1 + (square sum over bonds ik) + (square sum over bonds jl)
         let xcoord_ij = 1.0 + ycoord_ij + ycoord_ji;
 
-        let weight_ij = weights_ik[index_ij];
-        let weight_ji = weights_jl[index_ji];
+        let weight_ij = weights_ik[sbindex_ij];
+        let weight_ji = weights_jl[sbindex_ji];
 
         // (these are not flipped; tcoords_k and tcoords_l describe the tcoords of
         //  the *target* atoms, so tcoord_i is in tcoords_l and etc.)
-        let tcoord_i = tcoords_l[index_ji];
-        let tcoord_j = tcoords_k[index_ij];
+        let tcoord_i = tcoords_l[sbindex_ji];
+        let tcoord_j = tcoords_k[sbindex_ij];
 
         let tcoord_ij = tcoord_i - weight_ij;
         let tcoord_ji = tcoord_j - weight_ji;
@@ -1448,19 +1448,19 @@ mod bondorder_pi {
             let mut sum_d_deltas_jl = sbvec_filled(V3::zero(), weights_jl.len()); // w.r.t. bonds around site j
             // We must iterate over groups of four atoms ijkl,
             // where k and l are not equal to i or j.
-            for (index_ik, _) in interactions.bonds(site_i).enumerate() {
+            for (sbindex_ik, _) in interactions.bonds(site_i).enumerate() {
 
                 // Recall that because a site may have multiple images involved in the interaction,
                 // simply comparing site indices is not good enough.
                 //
                 // Thankfully, verifying i != l and j != k is easily done because we can
                 // compare bond indices.
-                if index_ik == index_ij {
+                if sbindex_ik == sbindex_ij {
                     continue; // site k is site j
                 }
 
-                for (index_jl, _) in interactions.bonds(site_j).enumerate() {
-                    if index_jl == index_ji {
+                for (sbindex_jl, _) in interactions.bonds(site_j).enumerate() {
+                    if sbindex_jl == sbindex_ji {
                         continue; // site l is site i
                     }
 
@@ -1488,9 +1488,9 @@ mod bondorder_pi {
                     //  this purpose)
                     //-----------
 
-                    let delta_ij = deltas_ik[index_ij];
-                    let delta_ik = deltas_ik[index_ik];
-                    let delta_jl = deltas_jl[index_jl];
+                    let delta_ij = deltas_ik[sbindex_ij];
+                    let delta_ik = deltas_ik[sbindex_ik];
+                    let delta_jl = deltas_jl[sbindex_jl];
                     let DihedralSineSq {
                         value: sinsq,
                         d_delta_ij: sinsq_d_delta_ij,
@@ -1503,14 +1503,14 @@ mod bondorder_pi {
                         delta_ij, delta_ik, delta_jl,
                     );
 
-                    let alt_weight_ik = alt_weights_ik[index_ik];
-                    let alt_weight_jl = alt_weights_jl[index_jl];
+                    let alt_weight_ik = alt_weights_ik[sbindex_ik];
+                    let alt_weight_jl = alt_weights_jl[sbindex_jl];
 
                     sum += sinsq * alt_weight_ik * alt_weight_jl;
 
-                    sum_d_deltas_ik[index_ij] += sinsq_d_delta_ij * alt_weight_ik * alt_weight_jl;
-                    sum_d_deltas_ik[index_ik] += sinsq_d_delta_ik * alt_weight_ik * alt_weight_jl;
-                    sum_d_deltas_jl[index_jl] += sinsq_d_delta_jl * alt_weight_ik * alt_weight_jl;
+                    sum_d_deltas_ik[sbindex_ij] += sinsq_d_delta_ij * alt_weight_ik * alt_weight_jl;
+                    sum_d_deltas_ik[sbindex_ik] += sinsq_d_delta_ik * alt_weight_ik * alt_weight_jl;
+                    sum_d_deltas_jl[sbindex_jl] += sinsq_d_delta_jl * alt_weight_ik * alt_weight_jl;
                 } // for bond_jl
             } // for bond_ik
 
@@ -1596,8 +1596,8 @@ mod ycoord {
         // Compute the sum without the square
         let mut inner_value = 0.0;
         let iter = zip_eq!(tcoords_k, weights_ik, types_k).enumerate();
-        for (index_ik, (&tcoord_k, &weight_ik, &type_k)) in iter {
-            if index_ik == skip_index || type_k == AtomType::Hydrogen {
+        for (sbindex_ik, (&tcoord_k, &weight_ik, &type_k)) in iter {
+            if sbindex_ik == skip_index || type_k == AtomType::Hydrogen {
                 continue;
             }
             let tcoord_ki = tcoord_k - weight_ik;
