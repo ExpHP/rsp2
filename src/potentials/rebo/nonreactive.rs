@@ -387,10 +387,8 @@ mod interactions {
         bond_div: IndexVec<SiteI, BondI>,
 
         site_type: IndexVec<SiteI, AtomType>,
-        bond_cart_vector: IndexVec<BondI, V3>,
         bond_image_diff: IndexVec<BondI, V3<i32>>,
         bond_reverse_index: IndexVec<BondI, BondI>,
-        bond_is_canonical: IndexVec<BondI, bool>,
         bond_source: IndexVec<BondI, SiteI>,
         bond_target: IndexVec<BondI, SiteI>,
     }
@@ -403,11 +401,11 @@ mod interactions {
             bond_graph: &PeriodicGraph,
         ) -> FailResult<Self> {
             let mut bond_div = IndexVec::<SiteI, _>::from_raw(vec![BondI(0)]);
-            let mut bond_cart_vector = IndexVec::<BondI, _>::new();
-            let mut bond_is_canonical = IndexVec::<BondI, _>::new();
-            let mut bond_source = IndexVec::<BondI, SiteI>::new();
-            let mut bond_target = IndexVec::<BondI, SiteI>::new();
-            let mut bond_image_diff = IndexVec::<BondI, V3<i32>>::new();
+            bond_div.raw.reserve(bond_graph.node_count());
+
+            let mut bond_source = IndexVec::<BondI, SiteI>::with_capacity(bond_graph.edge_count());
+            let mut bond_target = IndexVec::<BondI, SiteI>::with_capacity(bond_graph.edge_count());
+            let mut bond_image_diff = IndexVec::<BondI, V3<i32>>::with_capacity(bond_graph.edge_count());
             let site_type = IndexVec::<SiteI, _>::from_raw(types.to_vec());
 
             let cart_cache = coords.with_carts(coords.to_carts());
@@ -438,8 +436,6 @@ mod interactions {
 
                     bond_source.push(site_i);
                     bond_target.push(site_j);
-                    bond_is_canonical.push(frac_bond_ij.is_canonical());
-                    bond_cart_vector.push(cart_vector);
                     bond_image_diff.push(frac_bond_ij.image_diff);
                 } // for bond_ij
 
@@ -491,7 +487,7 @@ mod interactions {
 
             assert_eq!(bond_reverse_index.len(), bond_div.raw.last().unwrap().0);
             Ok(Interactions {
-                bond_div, site_type, bond_cart_vector, bond_is_canonical,
+                bond_div, site_type,
                 bond_target, bond_image_diff, bond_reverse_index, bond_source,
             })
         }
@@ -502,7 +498,6 @@ mod interactions {
         pub fn num_bonds(&self) -> usize { self.bond_target.len() }
 
         #[inline(always)] pub fn site_type(&self, site: SiteI) -> AtomType { self.site_type[site] }
-        #[inline(always)] pub fn bond_is_canonical(&self, bond: BondI) -> bool { self.bond_is_canonical[bond] }
         #[inline(always)] pub fn bond_source(&self, bond: BondI) -> SiteI { self.bond_source[bond] }
         #[inline(always)] pub fn bond_target(&self, bond: BondI) -> SiteI { self.bond_target[bond] }
         #[inline(always)] pub fn bond_reverse_index(&self, bond: BondI) -> BondI { self.bond_reverse_index[bond] }
@@ -538,6 +533,14 @@ mod interactions {
 
         pub fn site_bond_range(&self, site: SiteI) -> ::std::ops::Range<usize> {
             self.bond_div[site].0..self.bond_div[site.next()].0
+        }
+
+        pub fn bond_is_canonical(&self, bond: BondI) -> bool {
+            FracBond {
+                from: self.bond_source[bond].0,
+                to: self.bond_target[bond].0,
+                image_diff: self.bond_image_diff[bond],
+            }.is_canonical()
         }
     }
 }
