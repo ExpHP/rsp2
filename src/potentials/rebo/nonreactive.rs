@@ -559,8 +559,10 @@ pub fn find_all_interactions(
 
     let ref graph = {
         rsp2_structure::bonds::FracBonds::from_brute_force_with_meta(
-            coords, max_radius, types,
-            |&a, &b| params.by_type[a][b].cutoff_region.1,
+            coords, types.iter().cloned(),
+            max_radius,
+            // FIXME should return None for other elements
+            |&a, &b| Some(params.by_type[a][b].cutoff_region.1),
         )?.to_periodic_graph()
     };
 

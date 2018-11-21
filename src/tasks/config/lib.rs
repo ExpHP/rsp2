@@ -327,7 +327,7 @@ pub enum PotentialKind {
 derive_yaml_read!{PotentialKind}
 
 #[derive(Serialize, Deserialize)]
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub struct PotentialAirebo {
     /// Cutoff radius (x3.4A)
@@ -339,14 +339,14 @@ pub struct PotentialAirebo {
 }
 
 #[derive(Serialize, Deserialize)]
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub struct PotentialRebo {
     pub omp: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize)]
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub struct PotentialKolmogorovCrespiZ {
     // NOTE: some defaults are not here because they are defined in rsp2_tasks,
@@ -367,7 +367,7 @@ pub struct PotentialKolmogorovCrespiZ {
 fn _potential_kolmogorov_crespi_z__rebo() -> bool { true }
 
 #[derive(Serialize, Deserialize)]
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub struct PotentialKolmogorovCrespiZNew {
     // NOTE: defaults are not here because they are defined in rsp2_tasks,
@@ -375,7 +375,10 @@ pub struct PotentialKolmogorovCrespiZNew {
     /// Cutoff radius (Angstrom?)
     #[serde(rename = "cutoff")]
     pub cutoff_begin: Option<f64>,
+    #[serde(default = "_potential_kolmogorov_crespi_z_new__skin_depth")]
+    pub skin_depth: f64,
 }
+fn _potential_kolmogorov_crespi_z_new__skin_depth() -> f64 { 1.0 }
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]

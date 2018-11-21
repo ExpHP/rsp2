@@ -435,7 +435,7 @@ impl PotentialBuilder {
                 Box::new(pot)
             },
             cfg::PotentialKind::KolmogorovCrespiZNew(cfg) => {
-                let rebo_cfg = cfg::PotentialKind::Rebo(Default::default());
+                let rebo_cfg = cfg::PotentialKind::Rebo(from_json!{ {} });
                 let rebo = PotentialBuilder::from_config_parts(trial_dir, on_demand, threading, update_style, axis_mask, &rebo_cfg);
                 let kc_z = self::homestyle::KolmogorovCrespiZ(cfg.clone());
                 let pot = self::helper::Sum(rebo, kc_z);

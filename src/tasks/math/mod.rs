@@ -5,3 +5,4 @@ pub(crate) mod dynmat;
 pub(crate) mod sparse;
 pub(crate) mod stars;
 pub(crate) mod displacements;
+pub(crate) mod frac_bonds_with_skin;

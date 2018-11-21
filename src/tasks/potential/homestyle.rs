@@ -16,11 +16,11 @@
 
 use super::{DynCloneDetail, PotentialBuilder, DiffFn, DispFn, CommonMeta};
 use crate::FailResult;
+use crate::math::frac_bonds_with_skin::FracBondsWithSkin;
 use crate::meta::{self, prelude::*};
-use rsp2_structure::{Coords, consts as elem, layer::Layers};
+use rsp2_structure::{Coords, layer::Layers, Element, consts::{CARBON}};
 use rsp2_tasks_config as cfg;
 use rsp2_array_types::{V3};
-use rsp2_structure::bonds::{FracBonds, CartBond, FracBond};
 use rsp2_potentials::crespi as crespi_imp;
 use rsp2_potentials::rebo::nonreactive as rebo_imp;
 
@@ -36,53 +36,64 @@ impl PotentialBuilder<CommonMeta> for KolmogorovCrespiZ {
     fn initialize_diff_fn(&self, coords: &Coords, meta: CommonMeta) -> FailResult<Box<DiffFn<CommonMeta>>>
     {
         fn fn_body(me: &KolmogorovCrespiZ, coords: &Coords, meta: CommonMeta) -> FailResult<Box<DiffFn<CommonMeta>>> {
-            let cfg::PotentialKolmogorovCrespiZNew { cutoff_begin } = me.0;
+            let cfg::PotentialKolmogorovCrespiZNew { cutoff_begin, skin_depth } = me.0;
             let mut params = crespi_imp::Params::default();
             if let Some(cutoff_begin) = cutoff_begin {
                 params.cutoff_begin = cutoff_begin;
             }
 
-            let elements: meta::SiteElements = meta.pick();
             let layers = me.find_layers(coords, &meta).by_atom();
 
-            // Collect VDW bonds
-            // (with a much larger interaction radius than the bonds from CommonMeta)
-            let bonds = FracBonds::from_brute_force(&coords, params.cutoff_end() * 1.001)?;
-            let bonds = FracBonds::from_iter(coords.len(),
-                (&bonds).into_iter()
-                     // FIXME we should only enable interactions between adjacent layers
-                     .filter(|&FracBond { from, to, image_diff: _ }| {
-                        layers[from] != layers[to] && elements[from] != elements[to]
-                     })
+            let interaction_radius = params.cutoff_end() * (1.0 + 1e-7);
+            let bonds = FracBondsWithSkin::new(
+                interaction_radius,
+                Box::new(move |&(elem_a, layer_a): &BondMeta, &(elem_b, layer_b): &BondMeta| {
+                    match (elem_a, elem_b) {
+                        (CARBON, CARBON) => match i32::abs(layer_a as i32 - layer_b as i32) {
+                            1 => Some(interaction_radius),
+                            _ => None,
+                        },
+                        _ => None,
+                    }
+                }) as Box<dyn Fn(&_, &_) -> _>,
+                skin_depth,
             );
 
-            Ok(Box::new(Diff { params, bonds }))
+            Ok(Box::new(Diff { params, bonds, layers }))
         }
 
+        type BondMeta = (Element, usize);
         struct Diff {
             params: crespi_imp::Params,
-            bonds: FracBonds,
+            layers: Vec<usize>,
+            bonds: FracBondsWithSkin<
+                BondMeta,
+                dyn Fn(&BondMeta, &BondMeta) -> Option<f64>,
+            >,
         }
 
         impl DiffFn<CommonMeta> for Diff {
             fn compute(&mut self, coords: &Coords, meta: CommonMeta) -> FailResult<(f64, Vec<V3>)> {
                 let elements: meta::SiteElements = meta.pick();
 
-                let bonds = self.bonds.to_cart_bonds(coords);
+                let meta_for_bonds = zip_eq!(elements.iter().cloned(), self.layers.iter().cloned());
+                let frac_bonds = self.bonds.compute(coords, meta_for_bonds)?;
+
+                let cart_coords = coords.with_carts(coords.to_carts());
 
                 let mut value = 0.0;
                 let mut grad = vec![V3::zero(); coords.num_atoms()];
-                for CartBond { from, to, cart_vector } in &bonds {
-                    if (elements[from], elements[to]) != (elem::CARBON, elem::CARBON) {
-                        continue;
-                    }
+                for bond in frac_bonds {
+                    debug_assert_eq!((elements[bond.from], elements[bond.to]), (CARBON, CARBON));
+                    let cart_vector = bond.cart_vector_using_cache(&cart_coords).unwrap();
                     let crespi_imp::Output {
                         value: part_value,
                         grad_rij: part_grad, ..
                     } = self.params.crespi_z(cart_vector);
 
                     value += part_value;
-                    grad[to] += part_grad;
+                    grad[bond.to] += part_grad;
+                    grad[bond.from] -= part_grad;
                 }
                 trace!("KCZ: {}", value);
                 Ok((value, grad))
@@ -193,7 +204,7 @@ impl_dyn_clone_detail!{
 #[cfg(not_now)]
 #[test]
 fn test_rebo_diff() -> FailResult<()> {
-    use ::rsp2_structure::{Lattice, CoordsKind, consts as elem};
+    use ::rsp2_structure::{Lattice, CoordsKind, bonds::FracBonds};
     use ::rsp2_array_types::{Envee};
     use ::rsp2_minimize::numerical;
     use ::slice_of_array::prelude::*;
@@ -222,7 +233,7 @@ fn test_rebo_diff() -> FailResult<()> {
             "params": "lammps",
         },
     }};
-    let elements: meta::SiteElements = vec![elem::CARBON; 2].into();
+    let elements: meta::SiteElements = vec![CARBON; 2].into();
     let masses: meta::SiteMasses = vec![meta::Mass(12.0107); 2].into();
     let bonds: meta::FracBonds = ::std::rc::Rc::new(FracBonds::from_brute_force(&coords, 2.0)?);
     let meta = hlist![elements, masses, Some(bonds)];
@@ -246,7 +257,7 @@ fn test_rebo_diff() -> FailResult<()> {
 #[cfg(not_now)]
 #[test]
 fn test_rebo_value() -> FailResult<()> {
-    use ::rsp2_structure::{Lattice, CoordsKind, consts as elem};
+    use ::rsp2_structure::{Lattice, CoordsKind, bonds::FracBonds};
     use ::rsp2_array_types::{Envee, Unvee};
     use ::meta::{self, prelude::*};
 
@@ -275,7 +286,7 @@ fn test_rebo_value() -> FailResult<()> {
         },
     }};
 
-    let elements: meta::SiteElements = vec![elem::CARBON; 2].into();
+    let elements: meta::SiteElements = vec![CARBON; 2].into();
     let masses: meta::SiteMasses = vec![meta::Mass(12.0107); 2].into();
     let bonds: meta::FracBonds = ::std::rc::Rc::new(FracBonds::from_brute_force(&coords, 2.0)?);
     println!("{:?}", bonds);

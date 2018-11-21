@@ -242,6 +242,7 @@ impl<'a> IntoIterator for &'a CartBonds {
 
 //=================================================================
 
+// TODO: Remove this. Minimum is pointless.
 pub trait BondRange: Copy {
     fn minimum(self) -> f64;
     fn maximum(self) -> f64;
@@ -277,6 +278,12 @@ impl FracBonds {
     /// faster eventually.
     ///
     /// ...it has survived surprisingly well.
+    ///
+    /// # Numerical rounding, and distances of zero
+    ///
+    /// Behavior is specified such that distances exactly equal to the interaction range are
+    /// guaranteed to be included. I.e. `FracBonds::from_brute_force(coords, 0.0)` will produce
+    /// pairs of sites that are superimposed on each other.
     pub fn from_brute_force(
         original_coords: &Coords,
         range: impl BondRange,
@@ -284,25 +291,32 @@ impl FracBonds {
         let fake_meta = vec![(); original_coords.len()];
         Self::from_brute_force_with_meta(
             original_coords,
-            (range.minimum(), range.maximum()),
             &fake_meta,
-            |(), ()| range.maximum(),
+            (range.minimum(), range.maximum()),
+            |(), ()| Some(range.maximum()),
         )
     }
 
     /// Compute bonds, using different bond lengths for different types.
     ///
-    /// `meta_range` must be symmetric, i.e. `meta_range(a, b) == meta_range(b, a)`;
-    /// this is not validated.
+    /// `meta_range` must be symmetric, i.e. `meta_range(a, b) == meta_range(b, a)`.
+    /// It must also be non-negative. Neither of these properties are validated (in release mode).
+    ///
+    /// # Non-interacting pairs
+    ///
+    /// If two types of atoms do not interact, `meta_range` can return `None` to guarantee that no
+    /// bonds between these types are included in the output.
     pub fn from_brute_force_with_meta<M>(
         original_coords: &Coords,
+        meta: impl IntoIterator<Item=M>,
         // The largest possible range needed. This will affect the size of the
         // supercell used to search for bonds.
         full_range: impl BondRange,
-        meta: &[M],
-        // (note: returning impl BondRange is not yet supported by rust)
-        mut meta_range: impl FnMut(&M, &M) -> f64,
+        // Range for different atom types. This will affect membership of bonds in the output.
+        mut meta_range: impl FnMut(&M, &M) -> Option<f64>,
     ) -> Result<Self, Error> {
+        let meta = meta.into_iter().collect::<Vec<_>>();
+
         // Construct a supercell large enough to contain all atoms that interact with an atom
         // in the centermost unit cell, assuming they're all reduced.
         let sc_builder = {
@@ -335,7 +349,11 @@ impl FracBonds {
             num_visited += 1;
 
             for (&latt_to, &site_to, &cart_to) in izip!(&sc_latts, &sc_sites, &sc_carts) {
-                let range = (full_range.minimum(), meta_range(&meta[site_from], &meta[site_to]));
+                let range_lo = full_range.minimum();
+                let range_hi = match meta_range(&meta[site_from], &meta[site_to]) {
+                    None => continue,
+                    Some(x) => x,
+                };
 
                 // FIXME: To ensure the result is symmetric, we rather precariously rely on the
                 //        assumption that `a - b == -(b - a)` for all floating point numbers where
@@ -343,7 +361,7 @@ impl FracBonds {
                 //        possible rounding modes.
                 let sqnorm = (cart_to - cart_from).sqnorm();
                 let square = |x| x*x;
-                if square(range.0) <= sqnorm && sqnorm <= square(range.1) {
+                if square(range_lo) <= sqnorm && sqnorm <= square(range_hi) {
                     // No self interactions!
                     if (site_from, latt_from) == (site_to, latt_to) {
                         continue;
@@ -365,7 +383,7 @@ impl FracBonds {
 
         let out = FracBonds { num_atoms, from, to, image_diff };
         if cfg!(debug_assertions) {
-            out.sanity_check(original_coords, full_range, meta, meta_range);
+            out.sanity_check(original_coords, full_range, &meta, meta_range);
         }
         Ok(out)
     }
@@ -392,14 +410,17 @@ impl FracBonds {
         coords: &Coords,
         full_range: impl BondRange,
         meta: &[M],
-        mut meta_range: impl FnMut(&M, &M) -> f64,
+        mut meta_range: impl FnMut(&M, &M) -> Option<f64>,
     ) {
         let square = |x| x*x;
         let cart_bonds = self.to_cart_bonds(coords);
         for CartBond { cart_vector, from, to } in &cart_bonds {
             let sqnorm = cart_vector.sqnorm();
             let min = full_range.minimum();
-            let max = meta_range(&meta[from], &meta[to]).maximum();
+            let max = match meta_range(&meta[from], &meta[to]) {
+                None => continue,
+                Some(x) => x,
+            };
             assert!(
                 square(min) * (1.0 - 1e-9) <= sqnorm && sqnorm <= square(max) * (1.0 + 1e-9),
                 "(BUG) bad bond length: {} vs ({}, {})",
@@ -444,6 +465,10 @@ fn sufficiently_large_centered_supercell(
     lattice: &Lattice,
     mut interaction_range: f64,
 ) -> Result<supercell::Builder, Error> {
+    if interaction_range == 0.0 {
+        return Ok(supercell::diagonal([1, 1, 1]));
+    }
+
     // Search for a slightly larger range to account for numerical fuzz.
     interaction_range *= 1.0 + 1e-4;
 
@@ -734,7 +759,7 @@ mod tests {
         let range = (1.5, 2.5);
 
         let bonds = FracBonds::from_brute_force(&coords, range).unwrap();
-        let actual = bonds.into_iter().collect::<BTreeSet<_>>();
+        let actual = (&bonds).into_iter().collect::<BTreeSet<_>>();
         assert_eq!{
             actual,
             vec![
@@ -764,7 +789,7 @@ mod tests {
         let range = 0.1 * 1.1;
 
         let bonds = FracBonds::from_brute_force(&coords, range).unwrap();
-        let actual = bonds.into_iter().collect::<BTreeSet<_>>();
+        let actual = (&bonds).into_iter().collect::<BTreeSet<_>>();
         assert_eq!{
             actual,
             vec![
@@ -789,12 +814,61 @@ mod tests {
         let range = 1.01 * 2.0;
 
         let bonds = FracBonds::from_brute_force(&coords, range).unwrap();
-        let actual = bonds.into_iter().collect::<BTreeSet<_>>();
+        let actual = (&bonds).into_iter().collect::<BTreeSet<_>>();
         assert_eq!{
             actual,
             vec![
                 FracBond { from: 0, to: 1, image_diff: V3([0, 0, 0]) },
                 FracBond { from: 1, to: 0, image_diff: V3([0, 0, 0]) },
+            ].into_iter().collect::<BTreeSet<_>>(),
+        }
+    }
+
+    #[test]
+    fn zero_distance() {
+        // Two sites super-imposed on each other. (e.g. one is a pseudoparticle)
+        let coords = Coords::new(
+            Lattice::orthorhombic(100.0, 100.0, 22.510051727295),
+            CoordsKind::Carts(vec![
+                V3([4.0, -0.4, 8.0]),
+                V3([4.0, -0.4, 8.0]),
+            ]),
+        );
+
+        // Zero distance
+        let bonds = FracBonds::from_brute_force(&coords, 0.0).unwrap();
+        let actual = (&bonds).into_iter().collect::<BTreeSet<_>>();
+        assert_eq!{
+            actual,
+            vec![
+                FracBond { from: 0, to: 1, image_diff: V3([0, 0, 0]) },
+                FracBond { from: 1, to: 0, image_diff: V3([0, 0, 0]) },
+            ].into_iter().collect::<BTreeSet<_>>(),
+        }
+
+        // Switching based on metadata
+        let coords = Coords::new(
+            Lattice::orthorhombic(100.0, 100.0, 22.510051727295),
+            CoordsKind::Carts(vec![
+                V3([4.0, -0.4, 8.0]),
+                V3([4.0, -0.4, 8.0]),
+                V3([4.0, -0.4, 8.0]),
+            ]),
+        );
+        let meta = vec!["C", "yellowish blue", "hole defect"];
+        let get_range = |&a: &&_, &b: &&_| match (a, b) {
+            ("C", "hole defect") |
+            ("hole defect", "C") => Some(0.0),
+            _ => None,
+        };
+
+        let bonds = FracBonds::from_brute_force_with_meta(&coords, meta, 0.0, get_range).unwrap();
+        let actual = (&bonds).into_iter().collect::<BTreeSet<_>>();
+        assert_eq!{
+            actual,
+            vec![
+                FracBond { from: 0, to: 2, image_diff: V3([0, 0, 0]) },
+                FracBond { from: 2, to: 0, image_diff: V3([0, 0, 0]) },
             ].into_iter().collect::<BTreeSet<_>>(),
         }
     }
