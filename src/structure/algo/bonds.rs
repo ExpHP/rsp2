@@ -242,24 +242,6 @@ impl<'a> IntoIterator for &'a CartBonds {
 
 //=================================================================
 
-// TODO: Remove this. Minimum is pointless.
-pub trait BondRange: Copy {
-    fn minimum(self) -> f64;
-    fn maximum(self) -> f64;
-}
-
-impl BondRange for f64 {
-    fn minimum(self) -> f64 { 0.0 }
-    fn maximum(self) -> f64 { self }
-}
-
-impl BondRange for (f64, f64) {
-    fn minimum(self) -> f64 { self.0 }
-    fn maximum(self) -> f64 { self.1 }
-}
-
-//=================================================================
-
 impl FracBonds {
     pub fn len(&self) -> usize
     { self.from.len() }
@@ -286,15 +268,10 @@ impl FracBonds {
     /// pairs of sites that are superimposed on each other.
     pub fn from_brute_force(
         original_coords: &Coords,
-        range: impl BondRange,
+        range: f64,
     ) -> Result<Self, Error> {
         let fake_meta = vec![(); original_coords.len()];
-        Self::from_brute_force_with_meta(
-            original_coords,
-            &fake_meta,
-            (range.minimum(), range.maximum()),
-            |(), ()| Some(range.maximum()),
-        )
+        Self::from_brute_force_with_meta(original_coords, &fake_meta, range, |(), ()| Some(range))
     }
 
     /// Compute bonds, using different bond lengths for different types.
@@ -311,7 +288,7 @@ impl FracBonds {
         meta: impl IntoIterator<Item=M>,
         // The largest possible range needed. This will affect the size of the
         // supercell used to search for bonds.
-        full_range: impl BondRange,
+        full_range: f64,
         // Range for different atom types. This will affect membership of bonds in the output.
         mut meta_range: impl FnMut(&M, &M) -> Option<f64>,
     ) -> Result<Self, Error> {
@@ -320,7 +297,7 @@ impl FracBonds {
         // Construct a supercell large enough to contain all atoms that interact with an atom
         // in the centermost unit cell, assuming they're all reduced.
         let sc_builder = {
-            sufficiently_large_centered_supercell(original_coords.lattice(), full_range.maximum())?
+            sufficiently_large_centered_supercell(original_coords.lattice(), full_range)?
         };
 
         // ...like I said; they gotta be reduced.
@@ -349,7 +326,6 @@ impl FracBonds {
             num_visited += 1;
 
             for (&latt_to, &site_to, &cart_to) in izip!(&sc_latts, &sc_sites, &sc_carts) {
-                let range_lo = full_range.minimum();
                 let range_hi = match meta_range(&meta[site_from], &meta[site_to]) {
                     None => continue,
                     Some(x) => x,
@@ -361,7 +337,7 @@ impl FracBonds {
                 //        possible rounding modes.
                 let sqnorm = (cart_to - cart_from).sqnorm();
                 let square = |x| x*x;
-                if square(range_lo) <= sqnorm && sqnorm <= square(range_hi) {
+                if sqnorm <= square(range_hi) {
                     // No self interactions!
                     if (site_from, latt_from) == (site_to, latt_to) {
                         continue;
@@ -408,7 +384,7 @@ impl FracBonds {
     pub(crate) fn sanity_check<M>(
         &self,
         coords: &Coords,
-        full_range: impl BondRange,
+        full_range: f64,
         meta: &[M],
         mut meta_range: impl FnMut(&M, &M) -> Option<f64>,
     ) {
@@ -416,15 +392,14 @@ impl FracBonds {
         let cart_bonds = self.to_cart_bonds(coords);
         for CartBond { cart_vector, from, to } in &cart_bonds {
             let sqnorm = cart_vector.sqnorm();
-            let min = full_range.minimum();
             let max = match meta_range(&meta[from], &meta[to]) {
                 None => continue,
                 Some(x) => x,
             };
             assert!(
-                square(min) * (1.0 - 1e-9) <= sqnorm && sqnorm <= square(max) * (1.0 + 1e-9),
-                "(BUG) bad bond length: {} vs ({}, {})",
-                cart_vector.norm(), min, max,
+                sqnorm <= square(max) * (1.0 + 1e-9),
+                "(BUG) bad bond length: {} vs (0.0, {})",
+                cart_vector.norm(), max,
             );
         }
     }
@@ -658,7 +633,6 @@ mod tests {
     use crate::CoordsKind;
 
     use std::collections::BTreeSet;
-    use rsp2_array_types::Envee;
 
     #[test]
     fn self_interactions() {
@@ -740,37 +714,6 @@ mod tests {
         let coords = CoordsKind::Carts(vec![V3::zero()]);
         let coords = Coords::new(lattice, coords);
         FracBonds::from_brute_force(&coords, 1.2).unwrap();
-    }
-
-    #[test]
-    fn both_cutoffs() {
-        // Test on a linear chain of atoms, with both cutoffs enabled.
-        //
-        // There are three atoms per cell, and they each only interact with
-        // the atoms at a distance of 2 away.
-        let coords = Coords::new(
-            Lattice::orthorhombic(10.0, 10.0, 3.0),
-            CoordsKind::Carts(vec![
-                [0.0, 0.0, 0.0],
-                [0.0, 0.0, 1.0],
-                [0.0, 0.0, 2.0],
-            ].envee()),
-        );
-        let range = (1.5, 2.5);
-
-        let bonds = FracBonds::from_brute_force(&coords, range).unwrap();
-        let actual = (&bonds).into_iter().collect::<BTreeSet<_>>();
-        assert_eq!{
-            actual,
-            vec![
-                FracBond { from: 0, to: 2, image_diff: V3([0, 0,  0]) },
-                FracBond { from: 0, to: 1, image_diff: V3([0, 0, -1]) },
-                FracBond { from: 1, to: 2, image_diff: V3([0, 0, -1]) },
-                FracBond { from: 1, to: 0, image_diff: V3([0, 0,  1]) },
-                FracBond { from: 2, to: 0, image_diff: V3([0, 0,  0]) },
-                FracBond { from: 2, to: 1, image_diff: V3([0, 0,  1]) },
-            ].into_iter().collect::<BTreeSet<_>>(),
-        }
     }
 
     #[test]
