@@ -19,10 +19,10 @@ rsp2-array-utils = { path = "../array" }
 slice-of-array = "0.2.1"
 num-traits = "0.2.3"
 serde = { version = "1.0.63", features = ["derive", "rc"], optional = true }
+rand = "0.3"
 
 [dev-dependencies]
 rsp2-assert-close = { path = "../assert-close" }
-rand = "0.3"
 
 [features]
 default = []

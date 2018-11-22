@@ -35,6 +35,7 @@ extern crate slice_of_array;
 
 pub mod crespi;
 pub mod rebo;
+pub(crate) mod util;
 
 pub type FailResult<T> = Result<T, ::failure::Error>;
 #[allow(bad_style)]

@@ -14,10 +14,10 @@ path = "lib.rs"
 !!slice-of-array
 !!num-traits
 !!serde { optional = true, features = ["derive"] }
+!!rand
 
 [dev-dependencies]
 !!rsp2-assert-close
-!!rand
 
 [features]
 default = []

@@ -171,6 +171,7 @@ pub(crate) mod internal {
     pub trait PrimitiveFloat
         : PrimitiveRing
         + SelfDiv + RefDiv
+        + rand::Rand
     {
         // (allow(unused) because these are arbitrarily added as they're needed,
         //  and it's annoying to have to remove them only to possibly later have
@@ -179,6 +180,8 @@ pub(crate) mod internal {
         #[allow(unused)] fn min(self, b: Self) -> Self;
         #[allow(unused)] fn max(self, b: Self) -> Self;
         #[allow(unused)] fn acos(self) -> Self;
+
+        #[allow(unused)] fn uniform_with(rng: impl rand::Rng, _: (Self, Self)) -> Self;
     }
 
     gen_each!{
@@ -190,6 +193,11 @@ pub(crate) mod internal {
                 #[inline(always)] fn min(self, b: Self) -> $T { self.min(b) }
                 #[inline(always)] fn max(self, b: Self) -> $T { self.max(b) }
                 #[inline(always)] fn acos(self) -> $T { self.acos() }
+
+                #[inline(always)] fn uniform_with(mut rng: impl rand::Rng, (lo, hi): (Self, Self)) -> Self {
+                    let alpha: Self = rng.gen();
+                    lo + (hi - lo) * alpha
+                }
             }
         };
     }

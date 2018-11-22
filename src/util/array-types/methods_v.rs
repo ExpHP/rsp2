@@ -85,6 +85,21 @@ gen_each!{
             where X: Field + PrimitiveFloat,
             { self / self.norm() }
 
+            /// Generate a randomly-oriented unit vector whose direction comes from a uniform
+            /// distribution.
+            #[inline(always)]
+            pub fn random_unit() -> Self
+            where Self: RandomUnit,
+            { RandomUnit::random_unit() }
+
+            /// Generate a randomly-oriented unit vector whose direction comes from a uniform
+            /// distribution.
+            #[inline(always)]
+            pub fn random_unit_with(rng: impl rand::Rng) -> Self
+            where Self: RandomUnit,
+            { RandomUnit::random_unit_with(rng) }
+
+
             /// Get the shortest angle (as a value in `[0, pi]`) between this vector and another.
             #[inline(always)]
             pub fn angle_to(&self, other: &Self) -> ScalarT<Self>
@@ -250,6 +265,63 @@ gen_each!{
 
 // ---------------------------------------------------------------------------
 
+/// Implementation detail of the inherent method `{V2,V3,V4}::random_unit`.
+///
+/// > **_Fuggedaboudit._**
+pub trait RandomUnit: IsV + Sized {
+    #[inline]
+    fn random_unit() -> Self
+    { RandomUnit::random_unit_with(rand::thread_rng()) }
+
+    fn random_unit_with(rng: impl rand::Rng) -> Self;
+}
+
+// http://mathworld.wolfram.com/CirclePointPicking.html
+impl<X: Field> RandomUnit for V2<X>
+ where X: PrimitiveFloat,
+{
+    #[inline]
+    fn random_unit_with(mut rng: impl rand::Rng) -> Self
+    {
+        loop {
+            let x1 = X::uniform_with(&mut rng, (-X::one(), X::one()));
+            let x2 = X::uniform_with(&mut rng, (-X::one(), X::one()));
+            let denom = x1*x1 + x2*x2;
+            if denom >= X::one() {
+                continue;
+            }
+            let x = (x1*x1 - x2*x2) / denom;
+            let y = X::two()*x1*x2 / denom;
+            return V2([x, y]);
+        }
+    }
+}
+
+// http://mathworld.wolfram.com/CirclePointPicking.html
+impl<X: Field> RandomUnit for V3<X>
+ where X: PrimitiveFloat,
+{
+    #[inline]
+    fn random_unit_with(mut rng: impl rand::Rng) -> Self
+    {
+        loop {
+            let x1 = X::uniform_with(&mut rng, (-X::one(), X::one()));
+            let x2 = X::uniform_with(&mut rng, (-X::one(), X::one()));
+            let sqsum = x1*x1 + x2*x2;
+            if sqsum >= X::one() {
+                continue;
+            }
+            let root = X::sqrt(X::one() - sqsum);
+            let x = X::two() * x1 * root;
+            let y = X::two() * x2 * root;
+            let z = X::one() - X::two() * sqsum;
+            return V3([x, y, z]);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+
 // slice-of-array integration.
 
 // because `x.nest::<[_; 3]>().envee()` (turbofish required) really sucks.
@@ -305,6 +377,14 @@ mod tests {
             let a: V3 = V3(::rand::random());
             let b: V3 = V3(::rand::random());
             assert_close!(abs=1e-10, 0.0, dot(&a.perp(&b), &b));
+        }
+    }
+
+    #[test]
+    fn random_unit_norm() {
+        for _ in 0..10 {
+            assert_close!(abs=1e-10, 1.0, V2::random_unit().sqnorm());
+            assert_close!(abs=1e-10, 1.0, V3::random_unit().sqnorm());
         }
     }
 }

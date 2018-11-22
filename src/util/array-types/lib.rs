@@ -18,7 +18,6 @@ extern crate rsp2_assert_close;
 #[macro_use]
 extern crate serde;
 extern crate slice_of_array;
-#[cfg(test)]
 extern crate rand;
 extern crate num_traits;
 

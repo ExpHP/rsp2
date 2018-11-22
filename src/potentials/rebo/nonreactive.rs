@@ -43,6 +43,8 @@
 
 use super::splines::{self, TricubicGrid, BicubicGrid};
 use crate::FailResult;
+#[cfg(test)] use crate::util::uniform;
+use crate::util::{try_num_grad_v3, num_grad_v3, switch};
 
 use rsp2_rayon_utils::CondIterator;
 use rsp2_structure::{Element, Coords};
@@ -1607,7 +1609,7 @@ mod ycoord {
             }
             let tcoord_ki = tcoord_k - weight_ik;
 
-            let (alpha, alpha_d_tcoord_ki) = switch((3.0, 2.0), tcoord_ki);
+            let (alpha, alpha_d_tcoord_ki) = switch::poly5((3.0, 2.0), tcoord_ki);
             assert_eq!(alpha.fract(), 0.0);
             assert_eq!(alpha_d_tcoord_ki, 0.0);
             inner_value += weight_ik * alpha;
@@ -1952,7 +1954,7 @@ mod g_spline {
         match type_i {
             AtomType::Carbon => {
                 let switch_interval = (params.G.low_coord, params.G.high_coord);
-                let (alpha, alpha_d_tcoord_ij) = switch(switch_interval, tcoord_ij);
+                let (alpha, alpha_d_tcoord_ij) = switch::poly5(switch_interval, tcoord_ij);
 
                 if alpha == 0.0 && alpha_d_tcoord_ij == 0.0 {
                     use_single_poly!(&params.G.carbon_low_coord)
@@ -2411,85 +2413,6 @@ fn cross(a: V3, b: V3) -> (V3, (M33, M33)) {
 //-----------------------------------------------------------------------------
 // utils
 
-/// Switches from 0 to 1 as x goes from `interval.0` to `interval.1`.
-#[inline(always)] // elide direction check hopefully since intervals should be constant
-fn switch(interval: (f64, f64), x: f64) -> (f64, f64) {
-    match IntervalSide::classify(interval, x) {
-        IntervalSide::Left => (0.0, 0.0),
-        IntervalSide::Inside => switch_poly5(interval, x),
-        IntervalSide::Right => (1.0, 0.0),
-    }
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-enum IntervalSide { Left, Inside, Right }
-impl IntervalSide {
-    /// Determine if a value is before the beginning or after the end of a directed interval
-    /// (directed as in, `interval.1 < interval.0` is ok and flips the classifications of ±∞)
-    ///
-    /// Neither endpoint is considered to lie in the interval.
-    ///
-    /// Output is unspecified if `interval.0 == x == interval.1`.
-    #[inline(always)] // elide direction check hopefully since intervals should be constant
-    fn classify(interval: (f64, f64), x: f64) -> Self {
-        if interval.0 < interval.1 {
-            // interval is (min, max)
-            match x {
-                x if x <= interval.0 => IntervalSide::Left,
-                x if interval.1 <= x => IntervalSide::Right,
-                _ => IntervalSide::Inside,
-            }
-        } else {
-            // interval is (max, min)
-            match x {
-                x if interval.0 <= x => IntervalSide::Left,
-                x if x <= interval.1 => IntervalSide::Right,
-                _ => IntervalSide::Inside,
-            }
-        }
-    }
-}
-
-#[test]
-fn switch_direction() {
-    assert_eq!(switch((1.5, 2.0), 1.0).0, 0.0);
-    assert_eq!(switch((1.5, 2.0), 2.5).0, 1.0);
-    assert_eq!(switch((2.0, 1.5), 1.0).0, 1.0);
-    assert_eq!(switch((2.0, 1.5), 2.5).0, 0.0);
-}
-
-#[test]
-fn switch_middle() {
-    assert_close!(switch((1.5, 2.0), 1.75).0, 0.5);
-    assert_close!(switch((2.0, 1.5), 1.75).0, 0.5);
-}
-
-#[test]
-fn switch_endpoint() {
-    for _ in 0..10 {
-        let a = uniform(-10.0, 10.0);
-        let b = uniform(-10.0, 10.0);
-        assert_eq!(switch((a, b), a).0, 0.0);
-        assert_eq!(switch((a, b), b).0, 1.0);
-    }
-}
-
-// Solution to:  y[x0] = 0;  y'[x0] = 0;  y''[x0] = 0;
-//               y[x1] = 1;  y'[x1] = 0;  y''[x1] = 0;
-fn switch_poly5(interval: (f64, f64), x: f64) -> (f64, f64) {
-    let (alpha, alpha_d_x) = linterp_from(interval, (0.0, 1.0), x);
-
-    let alpha2 = alpha*alpha;
-    let alpha3 = alpha2*alpha;
-    let alpha4 = alpha2*alpha2;
-    let alpha5 = alpha2*alpha3;
-    let value = 10.0*alpha3 - 15.0*alpha4 + 6.0*alpha5;
-    let d_alpha = 10.0*3.0*alpha2 - 15.0*4.0*alpha3 + 6.0*5.0*alpha4;
-    let d_x = d_alpha * alpha_d_x;
-
-    (value, d_x)
-}
-
 /// Maps `[0, 1]` to `[y1, y2]` by a linear transform.
 #[inline(always)] // enable elision of ops when args are 0.0, 1.0 etc
 fn linterp((y_lo, y_hi): (f64, f64), alpha: f64) -> (f64, f64) {
@@ -2635,28 +2558,6 @@ fn concat_any_order<T>(a: Vec<T>, b: Vec<T>) -> Vec<T> {
 fn cleared<T>(mut vec: Vec<T>) -> Vec<T> {
     vec.clear();
     vec
-}
-
-//-----------------------------------------------------------------------------
-
-#[cfg(test)]
-fn uniform(a: f64, b: f64) -> f64 { ::rand::random::<f64>() * (b - a) + a }
-
-fn try_num_grad_v3<E>(
-    interval: f64,
-    point: V3,
-    mut value_fn: impl FnMut(V3) -> Result<f64, E>,
-) -> Result<V3, E> {
-    numerical::try_gradient(interval, None, &point.0, |v| value_fn(v.to_array()))
-        .map(|x| x.to_array())
-}
-
-fn num_grad_v3(
-    interval: f64,
-    point: V3,
-    mut value_fn: impl FnMut(V3) -> f64,
-) -> V3 {
-    numerical::gradient(interval, None, &point.0, |v| value_fn(v.to_array())).to_array()
 }
 
 //-----------------------------------------------------------------------------
