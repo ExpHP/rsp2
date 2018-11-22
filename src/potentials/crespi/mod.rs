@@ -9,36 +9,28 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
+#![allow(non_snake_case)]
+
 use crate::util::switch;
 use rsp2_array_types::V3;
-
-/// Constants used for calculation of the Kolmogorov-Crespi potential.
-///
-/// These match the values used by default by the implementation of kolmogorov/crespi/z in Lammps,
-/// which is scaled to Lammps' rebo's bond length.
-pub mod consts {
-    /// Transverse distance scaling factor. Units are Angstroms.
-    pub const DELTA: f64 = 0.578;
-
-    /// Distance scaling factor for the repulsive potential. Units are inverse Angstroms.
-    pub const LAMBDA: f64 = 3.629;
-
-    /// Multiplicative factor for the attractive potential. Units are eV.
-    pub const A: f64 = 10.238e-3;
-
-    /// "Convenience scaling factor" Units are Angstroms.
-    pub const Z_0: f64 = 3.34;
-
-    /// Offset constant used in repulsive potential. Units are eV.
-    pub const C: f64 = 3.030e-3;
-
-    /// Multiplicative constants used in repulsive potential. Contains C_0, C_2, C_4. Units are eV.
-    pub const C2N: [f64; 3] = [15.71e-3, 12.29e-3, 4.933e-3];
-}
 
 //------------------------------------------------------------------
 
 pub struct Params {
+    /// Transverse distance scaling factor. Units are Angstroms.
+    pub delta: f64,
+    /// Distance scaling factor for the repulsive potential. Units are inverse Angstroms.
+    pub lambda: f64,
+    /// Multiplicative factor for the attractive potential. Units are eV.
+    pub A: f64,
+    /// "Convenience scaling factor." Units are Angstroms.
+    pub z0: f64,
+    /// Offset constant used in repulsive potential. Units are eV.
+    pub C: f64,
+    /// Multiplicative constants used in repulsive potential.
+    /// Contains C0, C2, C4. Units are eV.
+    pub C2N: [f64; 3],
+
     /// Distance at which the Kolmogorov-Crespi potential starts to switch to zero.
     /// Units are Angstroms.
     pub cutoff_begin: f64,
@@ -48,8 +40,18 @@ pub struct Params {
 }
 
 impl Default for Params {
+    /// Constants used for calculation of the Kolmogorov-Crespi potential.
+    ///
+    /// These match the values used by default by the implementation of kolmogorov/crespi/z in
+    /// Lammps, which is scaled to Lammps' rebo's bond length.
     fn default() -> Params {
         Params {
+            delta: 0.578, // Angstroms
+            lambda: 3.629, // Angstroms
+            A: 10.238e-3, // eV
+            z0: 3.34, // Angstroms
+            C: 3.030e-3, // eV
+            C2N: [15.71e-3, 12.29e-3, 4.933e-3], // eV
             cutoff_begin: 11.0,
             cutoff_transition_dist: 2.0,
         }
@@ -146,13 +148,13 @@ fn compute(params: &Params, rij: V3, ni: V3, nj: V3) -> Output {
     let (cutoff, cutoff_d_dist) = switch::poly5((cutoff_end, params.cutoff_begin), dist);
 
     // first get the attractive part of the potential
-    let (attractive, attractive_d_r) = attractive_part(distsq, rij);
+    let (attractive, attractive_d_r) = attractive_part(params, distsq, rij);
 
     // then the repulsive
-    let (rep, rep_d_r, rep_d_ni, rep_d_nj) = repulsive_part(distsq, rij, ni, nj);
+    let (rep, rep_d_r, rep_d_ni, rep_d_nj) = repulsive_part(params, distsq, rij, ni, nj);
 
     // as well as its scaling term
-    let (scale, scale_d_dist) = crespi_scaling(dist);
+    let (scale, scale_d_dist) = crespi_scaling(params, dist);
 
     // chain rule, etc, etc, etc
     let value = scale * rep + attractive;
@@ -170,24 +172,22 @@ fn compute(params: &Params, rij: V3, ni: V3, nj: V3) -> Output {
 }
 
 /// The attractive part of the potential.
-fn attractive_part(distsq: f64, r: V3) -> (f64, V3) {
+fn attractive_part(params: &Params, distsq: f64, r: V3) -> (f64, V3) {
     debug_assert_eq!(distsq, r.sqnorm());
 
-    use self::consts::{Z_0, A};
-    let z0_div_distsq = (Z_0 * Z_0) / distsq;
+    let z0_div_distsq = (params.z0 * params.z0) / distsq;
 
     // A * (z_0 / rho)^6
-    let value = -A * (z0_div_distsq * z0_div_distsq * z0_div_distsq);
+    let value = -params.A * (z0_div_distsq * z0_div_distsq * z0_div_distsq);
     let d_r = -6.0 * r * value / distsq;
 
     (value, d_r)
 }
 
 /// The exponential scaling part of the repulsive potential
-fn crespi_scaling(dist: f64) -> (f64, f64) {
-    use self::consts::{LAMBDA, Z_0};
-    let value = f64::exp(-LAMBDA * (dist - Z_0));
-    let d_dist = -LAMBDA * value;
+fn crespi_scaling(params: &Params, dist: f64) -> (f64, f64) {
+    let value = f64::exp(-params.lambda * (dist - params.z0));
+    let d_dist = -params.lambda * value;
 
     (value, d_dist)
 }
@@ -209,16 +209,15 @@ fn rho_squared(distsq: f64, r: V3, n: V3) -> (f64, V3, V3) {
 }
 
 /// The repulsive function f(rho_ij), note: takes rho _squared_ not rho.
-fn crespi_fp(rhosq: f64) -> (f64, f64) {
-    use self::consts::{DELTA, C2N};
-
+fn crespi_fp(params: &Params, rhosq: f64) -> (f64, f64) {
     // Reformulate in terms of a normalized input:  beta = rho^2 / delta^2
-    let beta = rhosq / (DELTA * DELTA);
-    let beta_d_rhosq = f64::recip(DELTA * DELTA);
+    let beta = rhosq / (params.delta * params.delta);
+    let beta_d_rhosq = f64::recip(params.delta * params.delta);
 
     // f(rho) = exp(-beta)(C_0 + C_1 * beta + C_2 * beta^2)
-    let poly = C2N[0] + beta * (C2N[1] + beta * C2N[2]);
-    let poly_d_beta = C2N[1] + 2.0 * beta * C2N[2];
+    let [C0, C2, C4] = params.C2N;
+    let poly = C0 + beta * (C2 + beta * C4);
+    let poly_d_beta = C2 + 2.0 * beta * C4;
 
     let exp = f64::exp(-beta);
     let exp_d_beta = -exp;
@@ -233,12 +232,12 @@ fn crespi_fp(rhosq: f64) -> (f64, f64) {
 
 /// The repulsive part of the potential f(rho), but calculates rho from input distance vector
 /// r, and unit normal n
-fn crespi_f(distsq: f64, r: V3, n: V3) -> (f64, V3, V3) {
+fn crespi_f(params: &Params, distsq: f64, r: V3, n: V3) -> (f64, V3, V3) {
     // first we need the transverse distances (aka rho^2)
     let (rhosq, rhosq_d_r, rhosq_d_n) = rho_squared(distsq, r, n);
 
     // then we calculate f itself
-    let (f, f_d_rhosq) = crespi_fp(rhosq);
+    let (f, f_d_rhosq) = crespi_fp(params, rhosq);
 
     let value = f;
     let d_r = f_d_rhosq * rhosq_d_r;
@@ -248,16 +247,16 @@ fn crespi_f(distsq: f64, r: V3, n: V3) -> (f64, V3, V3) {
 }
 
 /// The repulsive part of the potential.
-fn repulsive_part(distsq: f64, r: V3, ni: V3, nj: V3) -> (f64, V3, V3, V3) {
+fn repulsive_part(params: &Params, distsq: f64, r: V3, ni: V3, nj: V3) -> (f64, V3, V3, V3) {
     debug_assert_eq!(distsq, r.sqnorm());
 //    debug_assert_close!(1.0, ni.sqnorm());  // untrue during numerical differentiation
 //    debug_assert_close!(1.0, nj.sqnorm());  // untrue during numerical differentiation
 
     // calculate f(rho_ij) for ij and ji
-    let (fij, fij_d_r, fij_d_ni) = crespi_f(distsq, r, ni);
-    let (fji, fji_d_r, fji_d_nj) = crespi_f(distsq, r, nj);
+    let (fij, fij_d_r, fij_d_ni) = crespi_f(params, distsq, r, ni);
+    let (fji, fji_d_r, fji_d_nj) = crespi_f(params, distsq, r, nj);
 
-    let value = consts::C + fij + fji;
+    let value = params.C + fij + fji;
     let d_r = fij_d_r + fji_d_r;
     let d_ni = fij_d_ni;
     let d_nj = fji_d_nj;
@@ -292,7 +291,7 @@ mod numerical_tests {
 
             assert_close!{
                 rel=1e-10, abs=1e-10, grad_rij.0,
-                num_grad_v3(1e-3, rij, |rij| super::compute(&params, rij, ni, nj).value).0,
+                num_grad_v3(1e-3, rij, |rij| super::compute(params, rij, ni, nj).value).0,
             }
 
             // Finite differences w.r.t. n seem unreliable when n is in the vicinity of r_hat
@@ -305,13 +304,13 @@ mod numerical_tests {
             let tol = get_n_tol(ni);
             assert_close!{
                 rel=tol, abs=tol, grad_ni.0,
-                num_grad_v3(1e-5, ni, |ni| super::compute(&params, rij, ni, nj).value).0,
+                num_grad_v3(1e-5, ni, |ni| super::compute(params, rij, ni, nj).value).0,
             }
 
             let tol = get_n_tol(nj);
             assert_close!{
                 rel=tol, abs=tol, grad_nj.0,
-                num_grad_v3(1e-5, nj, |nj| super::compute(&params, rij, ni, nj).value).0,
+                num_grad_v3(1e-5, nj, |nj| super::compute(params, rij, ni, nj).value).0,
             }
         }
     }
@@ -323,11 +322,11 @@ mod numerical_tests {
 
         for _ in 0..NTRIAL {
             let rij = params.random_r();
-            let (_, d_rij) = super::attractive_part(rij.sqnorm(), rij);
+            let (_, d_rij) = super::attractive_part(params, rij.sqnorm(), rij);
 
             assert_close!{
                 rel=1e-11, abs=1e-11, d_rij.0,
-                num_grad_v3(1e-3, rij, |rij| super::attractive_part(rij.sqnorm(), rij).0).0,
+                num_grad_v3(1e-3, rij, |rij| super::attractive_part(params, rij.sqnorm(), rij).0).0,
             }
         }
     }
@@ -358,11 +357,11 @@ mod numerical_tests {
         for _ in 0..NTRIAL {
             let rij = params.random_r();
             let rhosq = V3::dot(&rij, &V3::random_unit());
-            let (_, d_rhosq) = super::crespi_fp(rhosq);
+            let (_, d_rhosq) = super::crespi_fp(params, rhosq);
 
             assert_close!{
                 rel=1e-10, abs=1e-10, d_rhosq,
-                numerical::slope(1e-3, None, rhosq, |rhosq| super::crespi_fp(rhosq).0),
+                numerical::slope(1e-3, None, rhosq, |rhosq| super::crespi_fp(params, rhosq).0),
             }
         }
     }
@@ -373,11 +372,11 @@ mod numerical_tests {
         for _ in 0..NTRIAL {
             let r = params.random_r();
             let n = V3::random_unit();
-            let (_, d_r, d_n) = super::crespi_f(r.sqnorm(), r, n);
+            let (_, d_r, d_n) = super::crespi_f(params, r.sqnorm(), r, n);
 
             assert_close!{
                 rel=1e-11, abs=1e-11, d_r.0,
-                num_grad_v3(1e-3, r, |r| super::crespi_f(r.sqnorm(), r, n).0).0,
+                num_grad_v3(1e-3, r, |r| super::crespi_f(params, r.sqnorm(), r, n).0).0,
             }
 
             // Finite differences w.r.t. n seem unreliable when n is in the vicinity of r_hat
@@ -387,7 +386,7 @@ mod numerical_tests {
             };
             assert_close!{
                 rel=n_tol, abs=n_tol, d_n.0,
-                num_grad_v3(1e-5, n, |n| super::crespi_f(r.sqnorm(), r, n).0).0,
+                num_grad_v3(1e-5, n, |n| super::crespi_f(params, r.sqnorm(), r, n).0).0,
                 "unitdot: {}", V3::dot(&r.unit(), &n).abs(),
             }
         }
@@ -402,11 +401,11 @@ mod numerical_tests {
             let ni = V3::random_unit();
             let nj = V3::random_unit();
 
-            let (_, d_rij, d_ni, d_nj) = super::repulsive_part(rij.sqnorm(), rij, ni, nj);
+            let (_, d_rij, d_ni, d_nj) = super::repulsive_part(params, rij.sqnorm(), rij, ni, nj);
 
             assert_close!{
                 rel=1e-11, abs=1e-11, d_rij.0,
-                num_grad_v3(1e-3, rij, |rij| super::repulsive_part(rij.sqnorm(), rij, ni, nj).0).0,
+                num_grad_v3(1e-3, rij, |rij| super::repulsive_part(params, rij.sqnorm(), rij, ni, nj).0).0,
             }
 
             // Finite differences w.r.t. n seem unreliable when n is in the vicinity of r_hat
@@ -418,14 +417,14 @@ mod numerical_tests {
             let tol = get_n_tol(ni);
             assert_close!{
                 rel=tol, abs=tol, d_ni.0,
-                num_grad_v3(1e-5, ni, |ni| super::repulsive_part(rij.sqnorm(), rij, ni, nj).0).0,
+                num_grad_v3(1e-5, ni, |ni| super::repulsive_part(params, rij.sqnorm(), rij, ni, nj).0).0,
                 "unitdot: {}", V3::dot(&rij.unit(), &ni).abs(),
             }
 
             let tol = get_n_tol(nj);
             assert_close!{
                 rel=tol, abs=tol, d_nj.0,
-                num_grad_v3(1e-5, nj, |nj| super::repulsive_part(rij.sqnorm(), rij, ni, nj).0).0,
+                num_grad_v3(1e-5, nj, |nj| super::repulsive_part(params, rij.sqnorm(), rij, ni, nj).0).0,
                 "unitdot: {}", V3::dot(&rij.unit(), &nj).abs(),
             }
         }
