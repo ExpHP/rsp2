@@ -10,11 +10,9 @@
 ** ************************************************************************ */
 
 //! Implementations of splines used by REBO.
-
-// FIXME: The current implementation of REBO never has fractional weights
-//        and thus the bicubic/tricubic spline implementations are unnecessary.
-//
-//        They should be removed if these circumstances persist.
+//!
+//! ...well. Most have been removed. These are largely dummy types that expose
+//! the same API as they would if the splines *were* implemented.
 
 use ::FailResult;
 #[allow(unused)] // https://github.com/rust-lang/rust/issues/45268

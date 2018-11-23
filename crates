@@ -200,7 +200,10 @@ def make_macro_lookup(force_workspace, fail):
 #[workspace]
                     '''.strip()
                 else:
-                    return '[workspace]'
+                    return '''
+[workspace]
+exclude = "./scripts"
+                    '''.strip()
 
         class CrateNameLineMacro(NoArgMacro):
             def expand_noarg(self, *, cur_name, **_ignored):

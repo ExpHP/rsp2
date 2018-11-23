@@ -1,0 +1,16 @@
+[package]
+name = "rsp2-pot-debug"
+version = "0.1.0"
+authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
+description = "Utility for working with debug output files in rsp2-potentials"
+license = "MIT OR Apache 2.0"
+
+[[bin]]
+name = "rsp2-pot-debug"
+path = "main.rs"
+
+[dependencies]
+clap = "2"
+atty = "0.2"
+ordered-float = "1.0"
+rsp2-clap = { path = "../../src/util/clap" }

@@ -6,7 +6,7 @@
 # `./make-expected` to automate the process of running lammps.
 # (that script also outputs the json file for expected output)
 
-import sys
+import sys, os
 from pymatgen.io.vasp import Poscar
 from pymatgen.core import Structure
 from numpy.linalg import norm
@@ -37,14 +37,15 @@ def lammps_friendly(structure):
     return Structure(lmp_lattice, structure.species, fracs)
 
 input = sys.argv[1]
-if input.endswith('.xz'):
-    import lzma
-    with lzma.open(input, 'rt') as f:
-        poscar_str = f.read()
-else:
-    with open(input, 'rt') as f:
-        poscar_str = f.read()
-structure = Poscar.from_string(poscar_str).structure
+
+import lzma, json
+with lzma.open(os.path.join(input, 'structure.vasp.xz'), 'rt') as f:
+    structure = Poscar.from_string(f.read()).structure
+with lzma.open(os.path.join(input, 'layers.json.xz'), 'rt') as f:
+    layers = json.load(f)
+
+num_types = max(layers) + 1
+
 structure = lammps_friendly(structure)
 carts = structure.cart_coords
 lattice = structure.lattice.matrix
@@ -53,7 +54,7 @@ print()
 print()
 print(f'{len(carts)} atoms')
 print()
-print(f'2 atom types')
+print(f'{num_types} atom types')
 print()
 print(f'0.0 {lattice[0][0]} xlo xhi')
 print(f'0.0 {lattice[1][1]} ylo yhi')
@@ -62,14 +63,11 @@ print(f'{lattice[1][0]} {lattice[2][0]} {lattice[2][1]} xy xz yz')
 print()
 print(f'Masses')
 print()
-print(f'1 12.01')
-print(f'2 1.00794')
+for i in range(num_types):
+    print(f'{i+1} 12.01')
 print()
 print('Atoms')
 print()
-for n, ((x, y, z), s) in enumerate(zip(carts, species), start=1):
-    ty = {
-        'C': 1,
-        'H': 2,
-    }[str(s)]
+for n, ((x, y, z), s, layer) in enumerate(zip(carts, species, layers), start=1):
+    ty = str(layer + 1)
     print(f'{n} {ty} {x} {y} {z}')

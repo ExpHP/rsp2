@@ -2572,24 +2572,24 @@ struct ForceFile {
 #[cfg(test)]
 mod input_tests {
     use super::*;
-    use ::std::{path::Path, fs::File, io};
-    use ::rsp2_structure_io::Poscar;
-    use ::rsp2_array_types::Unvee;
+    use std::{path::Path, fs::File, io};
+    use rsp2_structure_io::Poscar;
+    use rsp2_array_types::Unvee;
 
-    const RESOURCE_DIR: &'static str = "tests/resources/rebo";
+    const RESOURCE_DIR: &'static str = "tests/resources";
     const BIG_INPUT_1: &'static str = "tblg-2011-150-a";
     const BIG_INPUT_2: &'static str = "gyroid-1";
 
     #[test]
     fn all() -> FailResult<()> {
         let mut matches = vec![];
-        for entry in Path::new(RESOURCE_DIR).read_dir()? {
+        for entry in Path::new(RESOURCE_DIR).join("rebo").read_dir()? {
             let entry: String = entry?.path().display().to_string();
-            if let Some(base) = strip_suffix(".rebo.lmp.json.xz", &entry) {
+            if let Some(base) = strip_suffix(".lmp.json.xz", &entry) {
                 matches.push(Path::new(&base).file_name().unwrap().to_string_lossy().into_owned());
             }
         }
-        assert!(!matches.is_empty());
+        assert!(!matches.is_empty(), "failed to locate test inputs!");
 
         for name in matches {
             if name != BIG_INPUT_1 && name != BIG_INPUT_2 {
@@ -2621,8 +2621,8 @@ mod input_tests {
         let use_rayon = false; // FIXME: revert to true
         let ref params = Params::new_lammps();
 
-        let in_path = Path::new(RESOURCE_DIR).join(name.to_string() + ".vasp.xz");
-        let out_path = Path::new(RESOURCE_DIR).join(name.to_string() + ".rebo.lmp.json.xz");
+        let in_path = Path::new(RESOURCE_DIR).join("structure").join(name).join("structure.vasp.xz");
+        let out_path = Path::new(RESOURCE_DIR).join("rebo").join(name.to_string() + ".lmp.json.xz");
 
         let expected: ForceFile = ::serde_json::from_reader(open_xz(out_path)?)?;
         let Poscar { ref coords, ref elements, .. } = Poscar::from_reader(open_xz(in_path)?)?;

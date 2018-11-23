@@ -1,0 +1,3 @@
+pair_style hybrid/overlay kolmogorov/crespi/z 14
+pair_coeff * * none
+pair_coeff 1 2 kolmogorov/crespi/z CC.KC C C

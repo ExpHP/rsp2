@@ -12,10 +12,6 @@ import sys
 import shutil
 import subprocess
 
-
-#
-# I'd put this text in the file itself
-
 def main():
     import argparse
     p = argparse.ArgumentParser()
@@ -53,9 +49,10 @@ def populate_tempdir(temp, input_base):
     shutil.copyfile('lmp.in', join(temp, 'lmp.in'))
     shutil.copyfile(input_base + '.pot.in', join(temp, 'pot.in'))
 
-    with lzma.open(input_base + '.data.xz', 'rb') as fin:
-        with open(join(temp, 'structure.data'), 'wb') as fout:
-            subprocess.run(['python3', 'numberize.py'], input=fin.read(), stdout=fout, check=True)
+    structure_path = os.path.join('../structure', os.path.basename(input_base))
+    data = subprocess.check_output(['python3', 'generate.py', structure_path])
+    with open(join(temp, 'structure.data'), 'wb') as fout:
+        fout.write(data)
 
     with lzma.open('CC.KC.xz', 'rt') as fin:
         with open(join(temp, 'CC.KC'), 'w') as fout:

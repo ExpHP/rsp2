@@ -86,7 +86,7 @@ impl PotentialBuilder<CommonMeta> for KolmogorovCrespiZ {
                 for bond in frac_bonds {
                     debug_assert_eq!((elements[bond.from], elements[bond.to]), (CARBON, CARBON));
                     let cart_vector = bond.cart_vector_using_cache(&cart_coords).unwrap();
-                    let (part_value, part_grad) = self.params.crespi_z(cart_vector);
+                    let (part_value, part_grad) = self.params.compute_z(cart_vector);
 
                     value += part_value;
                     grad[bond.to] += part_grad;

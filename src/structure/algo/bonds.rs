@@ -47,9 +47,9 @@ use failure::Error;
 ///    bond graph would need to change)
 /// * applying a cartesian operator to the lattice (e.g. rotating or scaling
 ///   the entire structure while preserving frac coords)
-#[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
-#[serde(rename_all = "kebab-case")]
+#[cfg_attr(feature="serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature="serde", serde(rename_all = "kebab-case"))]
 pub struct FracBonds {
     num_atoms: usize, // used for sanity checks
     from: Vec<usize>,
@@ -70,9 +70,9 @@ pub struct FracBonds {
 ///
 /// * replacing a coordinate with an image
 /// * unimodular transformations of the lattice
-#[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
-#[serde(rename_all = "kebab-case")]
+#[cfg_attr(feature="serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature="serde", serde(rename_all = "kebab-case"))]
 pub struct CartBonds {
     num_atoms: usize, // used for sanity checks
     from: Vec<usize>,
