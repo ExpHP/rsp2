@@ -113,7 +113,7 @@ pub struct Settings {
     #[serde(default)]
     pub threading: Threading,
 
-    pub potential: PotentialKind,
+    pub potential: Potential,
 
     // (FIXME: weird name)
     #[serde(default)]
@@ -233,7 +233,7 @@ impl<'de> serde::Deserialize<'de> for Parameter {
                 _ => Err(Error::invalid_value(Unexpected::Str(s), &self)),
             }}
 
-            fn visit_none<E>(self) -> Result<Parameter, E>
+            fn visit_unit<E>(self) -> Result<Parameter, E>
             where E: Error,
             { Ok(Parameter::NotPeriodic) }
         }
@@ -368,7 +368,7 @@ pub struct EnergyPlotSettings {
     pub normalization: NormalizationMode,
     //pub phonons: Phonons,
 
-    pub potential: PotentialKind,
+    pub potential: Potential,
 
     // FIXME there should be a general lammps section
     #[serde(default)]
@@ -387,6 +387,15 @@ pub enum EnergyPlotEvIndices {
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
+#[serde(untagged)]
+pub enum Potential {
+    Single(PotentialKind),
+    Sum(Vec<PotentialKind>),
+}
+derive_yaml_read!{Potential}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum PotentialKind {
     #[serde(rename = "rebo")] Rebo(PotentialRebo),
     #[serde(rename = "airebo")] Airebo(PotentialAirebo),
@@ -398,7 +407,6 @@ pub enum PotentialKind {
     /// Arranges atoms into a chain along the first lattice vector.
     #[serde(rename = "test-func-chainify")] TestChainify,
 }
-derive_yaml_read!{PotentialKind}
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
@@ -449,6 +457,8 @@ pub struct PotentialKolmogorovCrespiZNew {
     /// Cutoff radius (Angstrom?)
     #[serde(rename = "cutoff")]
     pub cutoff_begin: Option<f64>,
+    #[serde(rename = "cutoff-length")]
+    pub cutoff_transition_dist: Option<f64>,
     #[serde(default = "_potential_kolmogorov_crespi_z_new__skin_depth")]
     pub skin_depth: f64,
 }

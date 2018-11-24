@@ -1,15 +1,26 @@
+/* ************************************************************************ **
+** This file is part of rsp2, and is licensed under EITHER the MIT license  **
+** or the Apache 2.0 license, at your option.                               **
+**                                                                          **
+**     http://www.apache.org/licenses/LICENSE-2.0                           **
+**     http://opensource.org/licenses/MIT                                   **
+**                                                                          **
+** Be aware that not all of rsp2 is provided under this permissive license, **
+** and that the project as a whole is licensed under the GPL 3.0.           **
+** ************************************************************************ */
 
+use crate::{FailResult};
+use crate::potential::{CommonMeta, PotentialBuilder, DiffFn, BondGrad};
+use crate::meta::{prelude::*};
 
-use ::{FailResult};
-use ::potential::{CommonMeta, PotentialBuilder, DiffFn};
-use ::meta::{prelude::*};
-
-use ::rsp2_minimize::exact_ls::{Value, Golden};
-use ::rsp2_structure::{Lattice, CoordsKind, Coords};
-use ::rsp2_structure::layer::{LayersPerUnitCell, require_simple_axis_normal};
-use ::rsp2_structure_io::assemble::{Assemble, RawAssemble};
-use ::rsp2_array_types::{V3};
-use ::rsp2_tasks_config as cfg;
+use rsp2_minimize::exact_ls::{Value, Golden};
+use rsp2_structure::{Lattice, CoordsKind, Coords};
+use rsp2_structure::layer::{LayersPerUnitCell, require_simple_axis_normal};
+use rsp2_structure_io::assemble::{Assemble, RawAssemble};
+use rsp2_array_types::{V3};
+use rsp2_tasks_config as cfg;
+use stack::{ArrayVec, Vector as StackVector};
+use slice_of_array::prelude::*;
 
 pub(crate) fn optimize_layer_parameters(
     settings: &cfg::ScaleRanges,
@@ -292,5 +303,150 @@ impl ScalableCoords {
             check_intralayer_distance: Some(cfg.threshold),
         }).unwrap();
         ScalableCoords::KnownLayers { layer_builder }
+    }
+}
+
+//----------------------------------------------------------------
+
+/// Maps coordinates into a flat representation that includes up to three elements representing
+/// the lattice parameters, so that the parameters can be optimized as part of a relaxation.
+pub struct RelaxationOptimizationHelper {
+    param_primary_axis: ArrayVec<[usize; 3]>,
+    axis_param: [Option<usize>; 3],
+    // Original input lattice, with the vectors each scaled so that the "primary" axes
+    // have a norm of 1.0, and so that axes with the same parameter have vectors that
+    // maintain their original proportions with respect to each other.
+    normalized_lattice: Lattice,
+}
+
+impl RelaxationOptimizationHelper {
+    pub fn new(params: &cfg::Parameters, original_lattice: &Lattice) -> Self {
+        use rsp2_array_utils::arr_from_fn;
+
+        let mut map = std::collections::BTreeMap::new();
+        let mut param_primary_axis = ArrayVec::<[usize; 3]>::new();
+        let axis_param: [_; 3] = arr_from_fn(|axis| match params[axis] {
+            cfg::Parameter::Param(c) => {
+                let param_index = *map.entry(c).or_insert_with(|| {
+                    let out = param_primary_axis.len();
+                    param_primary_axis.push(axis);
+                    out
+                });
+                Some(param_index)
+            },
+            cfg::Parameter::One |
+            cfg::Parameter::NotPeriodic => None,
+        });
+
+        let original_params = Self::_read_lattice_params(&param_primary_axis, original_lattice);
+        let mut axis_vectors = *original_lattice.vectors();
+        for axis in 0..3 {
+            if let Some(param) = axis_param[axis] {
+                axis_vectors[axis] /= original_params[param];
+            }
+        }
+        let normalized_lattice = Lattice::from_vectors(&axis_vectors);
+        RelaxationOptimizationHelper { param_primary_axis, axis_param, normalized_lattice }
+    }
+
+    pub fn num_params(&self) -> usize { self.param_primary_axis.len() }
+
+    /// Produce a flat representation of the coords, with lattice params included as elements.
+    pub fn flatten_coords(&self, coords: &Coords) -> Vec<f64> {
+        let mut out = coords.to_fracs().flat().to_vec();
+        out.extend(self.read_lattice_params(coords.lattice()));
+        out
+    }
+
+    /// Recover a Coords from the flattened representation
+    pub fn unflatten_coords(&self, flat: &[f64]) -> Coords {
+        let (flat_fracs, params) = flat.split_at(flat.len() - self.num_params());
+
+        Coords::new(
+            self.lattice_with_params(params),
+            CoordsKind::Fracs(flat_fracs.nest().to_vec()),
+        )
+    }
+
+    /// Get the effective gradient on the coordinates in the flattened representation
+    /// given gradients with respect to the cartesian bond vectors.
+    pub fn flatten_grad(&self, flat: &[f64], bond_grads: &[BondGrad]) -> Vec<f64> {
+        #![allow(bad_style)]
+
+        let mut out = vec![0.0; flat.len()];
+        { // FIXME: Block will be unnecessary once NLL lands
+            let divider = flat.len() - self.num_params();
+            let (_, params) = flat.split_at(divider);
+            let (d_site_frac, d_param) = out.split_at_mut(divider);
+            let d_site_frac: &mut [V3] = d_site_frac.nest_mut();
+
+            let ref lattice = self.lattice_with_params(params);
+            let reciprocal_lattice = self.normalized_lattice.reciprocal();
+            let diag = V3::from_fn(|axis| self.axis_param[axis].map_or(1.0, |param| params[param]));
+
+            for item in bond_grads {
+                // We have a term of the potential that can be expressed as V(cart), where
+                //
+                // cart =     frac    * lattice
+                //      = frac * diag * normalized_lattice
+                //      =    scaled   * normalized_lattice
+                //
+                // cart is the cartesian vector of a bond.
+                // frac is the vector in fractional coordinates.
+                // diag is a diagonal 3x3 matrix formed from the lattice params.
+                //
+                // and we want to reformulate it as V(frac, params)
+
+                // using the notation from rsp2-potentials (each row in a_J_b is a gradient of
+                // an element of a with respect to b, so that products compose sensibly)
+                let cart = item.cart_vector;
+                let frac = cart / lattice;
+                let term_d_cart = item.grad;
+
+                let cart_J_scaled = reciprocal_lattice.inverse_matrix(); // = L^T
+
+                let term_d_scaled = term_d_cart * cart_J_scaled;
+
+                // scaled_J_frac = diag.t()
+                let term_d_frac = term_d_scaled.mul_diag(&diag);
+
+                // frac = fracs[plus_site] - fracs[minus_site]
+                d_site_frac[item.plus_site] += term_d_frac;
+                d_site_frac[item.minus_site] -= term_d_frac;
+
+                // scaled_J_param = frac * (a diagonal matrix of 1s and 0s for each param)
+                for axis in 0..3 {
+                    if let Some(param) = self.axis_param[axis] {
+                        d_param[param] += term_d_scaled[axis] * frac[axis];
+                    }
+                }
+            }
+        }
+
+        out
+    }
+
+    fn read_lattice_params(&self, lattice: &Lattice) -> ArrayVec<[f64; 3]> {
+        Self::_read_lattice_params(&self.param_primary_axis, lattice)
+    }
+
+    fn _read_lattice_params(param_primary_axis: &[usize], lattice: &Lattice) -> ArrayVec<[f64; 3]> {
+        let mut out = ArrayVec::<[f64; 3]>::new();
+        for &axis in param_primary_axis {
+            out.push(lattice.vectors()[axis].norm());
+        }
+        out
+    }
+
+    fn lattice_with_params(&self, params: &[f64]) -> Lattice {
+        assert_eq!(params.len(), self.num_params());
+
+        let mut vectors = *self.normalized_lattice.vectors();
+        for axis in 0..3 {
+            if let Some(param) = self.axis_param[axis] {
+                vectors[axis] *= params[param];
+            }
+        }
+        Lattice::from_vectors(&vectors)
     }
 }

@@ -40,10 +40,13 @@ impl PotentialBuilder<CommonMeta> for KolmogorovCrespiZ {
     fn initialize_bond_diff_fn(&self, coords: &Coords, meta: CommonMeta) -> FailResult<Option<Box<dyn BondDiffFn<CommonMeta>>>>
     {
         fn fn_body(me: &KolmogorovCrespiZ, coords: &Coords, meta: CommonMeta) -> FailResult<Option<Box<dyn BondDiffFn<CommonMeta>>>> {
-            let cfg::PotentialKolmogorovCrespiZNew { cutoff_begin, skin_depth } = me.0;
+            let cfg::PotentialKolmogorovCrespiZNew { cutoff_begin, cutoff_transition_dist, skin_depth } = me.0;
             let mut params = crespi_imp::Params::default();
             if let Some(cutoff_begin) = cutoff_begin {
                 params.cutoff_begin = cutoff_begin;
+            }
+            if let Some(cutoff_transition_dist) = cutoff_transition_dist {
+                params.cutoff_transition_dist = cutoff_transition_dist;
             }
 
             let layers = me.find_layers(coords, &meta).by_atom();
@@ -104,7 +107,6 @@ impl PotentialBuilder<CommonMeta> for KolmogorovCrespiZ {
                         cart_vector,
                     });
                 }
-                trace!("KCZ: {}", value);
                 Ok((value, grad))
             }
         }

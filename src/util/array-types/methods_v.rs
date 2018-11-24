@@ -99,7 +99,6 @@ gen_each!{
             where Self: RandomUnit,
             { RandomUnit::random_unit_with(rng) }
 
-
             /// Get the shortest angle (as a value in `[0, pi]`) between this vector and another.
             #[inline(always)]
             pub fn angle_to(&self, other: &Self) -> ScalarT<Self>
@@ -109,6 +108,13 @@ gen_each!{
                 let out = X::acos(arg.min(X::one()).max(-X::one()));
                 out
             }
+
+            /// Perform elementwise multiplication, or multiplication of a vector by a diagonal
+            /// matrix.
+            #[inline(always)]
+            pub fn mul_diag(&self, other: &Self) -> Self
+            where X: Semiring + PrimitiveSemiring,
+            { Self::from_fn(|i| self[i] * other[i]) }
 
             /// Get the part of the vector that is parallel to `r`.
             #[inline]

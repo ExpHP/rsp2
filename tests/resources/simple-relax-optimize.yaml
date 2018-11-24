@@ -1,0 +1,26 @@
+potential:
+  - kc-z-new:
+      cutoff: 14
+      cutoff-length: 0 # simulate lammps' quirks
+  - rebo-new:
+      params: lammps
+
+scale-ranges:
+  scalables:
+    # make the lattice parameter incorrect
+    - parameter:
+        axis-mask: [1, 1, 0]
+        value: 0.95
+
+# enable optimization during relaxation
+parameters: ['a', 'a', null]
+
+phonons:
+  disp-finder.~~REPLACE~~:
+    phonopy: {}
+  eigensolver.~~REPLACE~~:
+    phonopy:
+      save-bands: false
+
+bond-radius: 1.8
+lammps-processor-axis-mask: [true, true, false]

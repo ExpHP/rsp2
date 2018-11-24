@@ -15,16 +15,16 @@
 //! Dummy potentials for testing purposes
 
 use super::{DynCloneDetail, PotentialBuilder, DiffFn, DispFn, BondDiffFn, BondGrad};
-use ::FailResult;
-use ::rsp2_structure::{Coords, CoordsKind};
-use ::rsp2_array_types::{V3};
+use crate::FailResult;
+use rsp2_structure::{Coords, CoordsKind};
+use rsp2_array_types::{V3};
 
 /// The test Potential `V = 0`.
 #[derive(Debug, Clone)]
 pub struct Zero;
 
 impl<Meta: Clone + 'static> PotentialBuilder<Meta> for Zero {
-    fn initialize_diff_fn<'a>(&self, _: &Coords, _: Meta) -> FailResult<Box<DiffFn<Meta>>>
+    fn initialize_diff_fn<'a>(&self, _: &Coords, _: Meta) -> FailResult<Box<dyn DiffFn<Meta>>>
     {
         struct Diff;
         impl<M> DiffFn<M> for Diff {
@@ -35,7 +35,7 @@ impl<Meta: Clone + 'static> PotentialBuilder<Meta> for Zero {
         Ok(Box::new(Diff) as Box<_>)
     }
 
-    fn initialize_bond_diff_fn<'a>(&self, _: &Coords, _: Meta) -> FailResult<Option<Box<BondDiffFn<Meta>>>>
+    fn initialize_bond_diff_fn<'a>(&self, _: &Coords, _: Meta) -> FailResult<Option<Box<dyn BondDiffFn<Meta>>>>
     {
         struct Diff;
         impl<M> BondDiffFn<M> for Diff {
@@ -46,7 +46,7 @@ impl<Meta: Clone + 'static> PotentialBuilder<Meta> for Zero {
         Ok(Some(Box::new(Diff) as Box<_>))
     }
 
-    fn initialize_disp_fn(&self, coords: &Coords, meta: Meta) -> FailResult<Box<DispFn>>
+    fn initialize_disp_fn(&self, coords: &Coords, meta: Meta) -> FailResult<Box<dyn DispFn>>
     { self._default_initialize_disp_fn(coords, meta) }
 }
 
@@ -69,10 +69,13 @@ impl ConvergeTowards {
 
 /// ConvergeTowards can also serve as its own PotentialBuilder.
 impl<Meta: Clone + 'static> PotentialBuilder<Meta> for ConvergeTowards {
-    fn initialize_diff_fn(&self, _: &Coords, _: Meta) -> FailResult<Box<DiffFn<Meta>>>
+    fn initialize_diff_fn(&self, _: &Coords, _: Meta) -> FailResult<Box<dyn DiffFn<Meta>>>
     { Ok(Box::new(self.clone()) as Box<_>) }
 
-    fn initialize_disp_fn(&self, coords: &Coords, meta: Meta) -> FailResult<Box<DispFn>>
+    fn initialize_bond_diff_fn(&self, _: &Coords, _: Meta) -> FailResult<Option<Box<dyn BondDiffFn<Meta>>>>
+    { Ok(None) }
+
+    fn initialize_disp_fn(&self, coords: &Coords, meta: Meta) -> FailResult<Box<dyn DispFn>>
     { self._default_initialize_disp_fn(coords, meta) }
 }
 
@@ -167,7 +170,10 @@ impl<Meta: Clone + 'static> PotentialBuilder<Meta> for Chainify {
         Ok(Box::new(ConvergeTowards::new(target)) as Box<_>)
     }
 
-    fn initialize_disp_fn(&self, coords: &Coords, meta: Meta) -> FailResult<Box<DispFn>>
+    fn initialize_bond_diff_fn(&self, _: &Coords, _: Meta) -> FailResult<Option<Box<dyn BondDiffFn<Meta>>>>
+    { Ok(None) }
+
+    fn initialize_disp_fn(&self, coords: &Coords, meta: Meta) -> FailResult<Box<dyn DispFn>>
     { self._default_initialize_disp_fn(coords, meta) }
 }
 

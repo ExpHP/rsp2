@@ -12,24 +12,25 @@
 ** parts of it are licensed under more permissive terms.                  **
 ** ********************************************************************** */
 
+use crate::{FailResult, FailOk};
+use crate::filetypes::stored_structure::StoredStructure;
+use crate::potential::{self, PotentialBuilder, DiffFn, BondDiffFn, DynFlatDiffFn};
+use crate::meta::{self, prelude::*};
+use crate::hlist_aliases::*;
+use crate::math::basis::{Basis3, EvDirection};
+
 use super::trial::TrialDir;
 use super::GammaSystemAnalysis;
 use super::{write_eigen_info_for_humans, write_eigen_info_for_machines};
 use super::{EvLoopStructureKind, Iteration};
+use super::param_optimization::RelaxationOptimizationHelper;
 
-use ::{FailResult, FailOk};
-use ::rsp2_tasks_config::{self as cfg, Settings};
-use ::filetypes::stored_structure::StoredStructure;
-use ::potential::{self, PotentialBuilder, DiffFn, DynFlatDiffFn};
-use ::meta::{self, prelude::*};
-use ::hlist_aliases::*;
+use rsp2_tasks_config::{self as cfg, Settings};
 
-use ::math::basis::{Basis3, EvDirection};
-
-use ::slice_of_array::prelude::*;
-use ::rsp2_slice_math::{v, V, vdot};
-use ::rsp2_array_types::{V3};
-use ::rsp2_structure::{Coords};
+use slice_of_array::prelude::*;
+use rsp2_slice_math::{v, V, vdot};
+use rsp2_array_types::{V3};
+use rsp2_structure::{Coords};
 
 pub trait EvLoopDiagonalizer {
     type ExtraOut;
@@ -137,7 +138,9 @@ impl TrialDir {
         trace!("============================");
         trace!("Begin relaxation # {}", iteration);
 
-        let coords = do_cg_relax(pot, &settings.cg, coords, meta.sift())?;
+        let coords = do_cg_relax_with_param_optimization_if_supported(
+            pot, &settings.cg, settings.parameters.as_ref(), coords, meta.sift(),
+        )?;
 
         trace!("============================");
 
@@ -287,6 +290,7 @@ impl EvLoopFsm {
 fn do_cg_relax(
     pot: &PotentialBuilder,
     cg_settings: &cfg::Acgsd,
+    // NOTE: takes ownership of coords because it is likely an accident to reuse them
     coords: Coords,
     meta: potential::CommonMeta,
 ) -> FailResult<Coords>
@@ -299,6 +303,59 @@ fn do_cg_relax(
     ).unwrap().position;
     coords.with_carts(relaxed_flat.nest().to_vec())
 })}
+
+//------------------
+
+fn do_cg_relax_with_param_optimization_if_supported(
+    pot: &PotentialBuilder,
+    cg_settings: &cfg::Acgsd,
+    parameters: Option<&cfg::Parameters>,
+    // NOTE: takes ownership of coords because it is likely an accident to reuse them
+    coords: Coords,
+    meta: potential::CommonMeta,
+) -> FailResult<Coords>
+{
+    if let Some(parameters) = parameters {
+        if let Some(x) = do_cg_relax_with_param_optimization(pot, cg_settings, parameters, &coords, meta.sift())? {
+            return Ok(x);
+        } else {
+            trace!("Not relaxing with parameters because the potential does not support it.");
+        }
+    } else {
+        trace!("Not relaxing with parameters because 'parameters' was not supplied.");
+    }
+    do_cg_relax(pot, cg_settings, coords, meta)
+}
+
+/// Returns Ok(None) if the potential does not support this method.
+fn do_cg_relax_with_param_optimization(
+    pot: &PotentialBuilder,
+    cg_settings: &cfg::Acgsd,
+    parameters: &cfg::Parameters,
+    coords: &Coords,
+    meta: potential::CommonMeta,
+) -> FailResult<Option<Coords>>
+{Ok({
+    let mut bond_diff_fn = match pot.parallel(true).initialize_bond_diff_fn(&coords, meta.sift())? {
+        None => return Ok(None),
+        Some(f) => f,
+    };
+    trace!("Incorporating parameter optimization into relaxation");
+    let helper = RelaxationOptimizationHelper::new(parameters, coords.lattice());
+    let relaxed_flat = ::rsp2_minimize::acgsd(
+        cg_settings,
+        &helper.flatten_coords(&coords),
+        |flat_coords| {
+            let ref coords = helper.unflatten_coords(flat_coords);
+            let (value, bond_grads) = bond_diff_fn.compute(coords, meta.clone())?;
+            let flat_grad = helper.flatten_grad(flat_coords, &bond_grads);
+            FailOk((value, flat_grad))
+        },
+    ).unwrap().position;
+    Some(helper.unflatten_coords(&relaxed_flat))
+})}
+
+//------------------
 
 fn do_eigenvector_chase(
     pot: &PotentialBuilder,

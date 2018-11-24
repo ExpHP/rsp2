@@ -20,7 +20,7 @@
 // This is where we decide e.g. atom type assignments and `pair_coeff` commands.
 // (which are decisions that `rsp2_lammps_wrap` has largely chosen to defer)
 
-use super::{DynCloneDetail, PotentialBuilder, DiffFn, DispFn, CommonMeta, helper};
+use super::{DynCloneDetail, PotentialBuilder, DiffFn, DispFn, CommonMeta, helper, BondDiffFn};
 use ::FailResult;
 #[allow(unused)] // rustc bug
 use ::meta::{self, prelude::*};
@@ -144,10 +144,10 @@ impl<M: Clone + 'static, P: LammpsPotential<Meta=M> + Clone + Send + Sync + 'sta
     ///
     /// Some data may be pre-allocated or precomputed based on the input structure,
     /// so the resulting DiffFn may not support arbitrary structures as input.
-    pub(crate) fn lammps_diff_fn(&self, coords: &Coords, meta: M) -> FailResult<Box<DiffFn<M>>>
+    pub(crate) fn lammps_diff_fn(&self, coords: &Coords, meta: M) -> FailResult<Box<dyn DiffFn<M>>>
     {
         // a DiffFn 'lambda' whose type will be erased
-        struct MyDiffFn<Mm: Clone>(::rsp2_lammps_wrap::Lammps<Box<LammpsPotential<Meta=Mm>>>);
+        struct MyDiffFn<Mm: Clone>(::rsp2_lammps_wrap::Lammps<Box<dyn LammpsPotential<Meta=Mm>>>);
         impl<Mm: Clone> DiffFn<Mm> for MyDiffFn<Mm> {
             fn compute(&mut self, coords: &Coords, meta: Mm) -> FailResult<(f64, Vec<V3>)> {
                 let lmp = &mut self.0;
@@ -173,7 +173,7 @@ impl<M: Clone + 'static, P: LammpsPotential<Meta=M> + Clone + Send + Sync + 'sta
         Ok(Box::new(MyDiffFn::<M>(lmp)) as Box<_>)
     }
 
-    pub(crate) fn lammps_disp_fn(&self, coords: &Coords, meta: M) -> FailResult<Box<DispFn>>
+    pub(crate) fn lammps_disp_fn(&self, coords: &Coords, meta: M) -> FailResult<Box<dyn DispFn>>
     {
         struct MyDispFn<Q: LammpsPotential>(::rsp2_lammps_wrap::DispFn<Q>);
         impl<Mm: Clone + 'static, Q: LammpsPotential<Meta=Mm>> DispFn for MyDispFn<Q> {
@@ -207,10 +207,13 @@ impl<M: Clone + 'static, P: Clone + LammpsPotential<Meta=M> + Send + Sync + 'sta
         me
     })}
 
-    fn initialize_diff_fn(&self, coords: &Coords, meta: M) -> FailResult<Box<DiffFn<M>>>
+    fn initialize_bond_diff_fn(&self, _: &Coords, _: M) -> FailResult<Option<Box<dyn BondDiffFn<M>>>>
+    { Ok(None) }
+
+    fn initialize_diff_fn(&self, coords: &Coords, meta: M) -> FailResult<Box<dyn DiffFn<M>>>
     { self.lammps_diff_fn(coords, meta) }
 
-    fn initialize_disp_fn(&self, coords: &Coords, meta: M) -> FailResult<Box<DispFn>>
+    fn initialize_disp_fn(&self, coords: &Coords, meta: M) -> FailResult<Box<dyn DispFn>>
     { self.lammps_disp_fn(coords, meta) }
 
     fn _eco_mode(&self, cont: &mut dyn FnMut())
@@ -395,7 +398,6 @@ mod overlay {
         );
     }
 }
-
 
 pub use self::airebo::Airebo;
 mod airebo {

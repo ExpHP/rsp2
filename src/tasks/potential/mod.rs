@@ -40,7 +40,7 @@ pub trait FlatDiffFn: FnMut(&[f64]) -> FailResult<(f64, Vec<f64>)> {}
 impl<F> FlatDiffFn for F where F: FnMut(&[f64]) -> FailResult<(f64, Vec<f64>)> {}
 
 // Type aliases for the trait object types, to work around #23856
-pub type DynFlatDiffFn<'a> = FlatDiffFn<Output=FailResult<(f64, Vec<f64>)>> + 'a;
+pub type DynFlatDiffFn<'a> = dyn FlatDiffFn<Output=FailResult<(f64, Vec<f64>)>> + 'a;
 
 /// This is what gets passed around by very high level code to represent a
 /// potential function. Basically:
@@ -116,7 +116,7 @@ pub trait PotentialBuilder<Meta = CommonMeta>
     /// even the set of bonds (e.g. in the case of nonreactive REBO).
     fn initialize_bond_diff_fn(&self, _init_coords: &Coords, _meta: Meta) -> FailResult<Option<Box<dyn BondDiffFn<Meta>>>>
     where Meta: Clone + 'static
-    { Ok(None) }
+    ;
 
     /// Convenience method to get a function suitable for `rsp2_minimize`.
     ///
@@ -259,6 +259,9 @@ where Meta: Clone + 'static,
 
     fn initialize_flat_diff_fn(&self, coords: &Coords, meta: Meta) -> FailResult<Box<DynFlatDiffFn<'static>>>
     { (**self).initialize_flat_diff_fn(coords, meta) }
+
+    fn initialize_bond_diff_fn(&self, init_coords: &Coords, meta: Meta) -> FailResult<Option<Box<dyn BondDiffFn<Meta>>>>
+    { (**self).initialize_bond_diff_fn(init_coords, meta) }
 
     fn one_off(&self) -> OneOff<'_, Meta>
     { (**self).one_off() }
@@ -444,6 +447,33 @@ impl PotentialBuilder {
         threading: &cfg::Threading,
         update_style: &cfg::LammpsUpdateStyle,
         axis_mask: &[bool; 3], // HACK; lammps should have its own section
+        config: &cfg::Potential,
+    ) -> Box<PotentialBuilder> {
+        match config {
+            cfg::Potential::Single(cfg) => {
+                PotentialBuilder::single_from_config_parts(trial_dir, on_demand, threading, update_style, axis_mask, &cfg)
+            },
+            cfg::Potential::Sum(cfgs) => {
+                let mut iter = {
+                    cfgs.into_iter()
+                        // (we simply cannot support LammpsOnDemand here)
+                        .map(|cfg| PotentialBuilder::single_from_config_parts(trial_dir, None, threading, update_style, axis_mask, &cfg))
+                };
+                let first = match iter.next() {
+                    None => return Box::new(self::test_functions::Zero),
+                    Some(x) => x,
+                };
+                iter.fold(first, |a, b| Box::new(helper::Sum(a, b)))
+            },
+        }
+    }
+
+    pub(crate) fn single_from_config_parts(
+        trial_dir: Option<&TrialDir>,
+        on_demand: Option<LammpsOnDemand>,
+        threading: &cfg::Threading,
+        update_style: &cfg::LammpsUpdateStyle,
+        axis_mask: &[bool; 3], // HACK; lammps should have its own section
         config: &cfg::PotentialKind,
     ) -> Box<PotentialBuilder> {
         match config {
@@ -463,10 +493,7 @@ impl PotentialBuilder {
                 Box::new(pot)
             },
             cfg::PotentialKind::KolmogorovCrespiZNew(cfg) => {
-                let rebo_cfg = cfg::PotentialKind::Rebo(from_json!{ {} });
-                let rebo = PotentialBuilder::from_config_parts(trial_dir, on_demand, threading, update_style, axis_mask, &rebo_cfg);
-                let kc_z = self::homestyle::KolmogorovCrespiZ(cfg.clone());
-                let pot = self::helper::Sum(rebo, kc_z);
+                let pot = self::homestyle::KolmogorovCrespiZ(cfg.clone());
                 Box::new(pot)
             },
             cfg::PotentialKind::ReboNew(cfg) => {

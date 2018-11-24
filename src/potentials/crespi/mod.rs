@@ -160,7 +160,7 @@ fn compute(params: &Params, rij: V3, ni: V3, nj: V3) -> Output {
     if distsq > cutoff_end * cutoff_end {
         return Output::zero();
     }
-    println!("rsq: {:.9}", distsq);
+    dbg!("rsq: {:.9}", distsq);
 
     let dist = distsq.sqrt();
     let dist_d_rij = rij / dist;

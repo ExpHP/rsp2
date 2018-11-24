@@ -1,6 +1,9 @@
 potential:
-  kc-z:
-     cutoff: 14
+  - kc-z-new:
+      cutoff: 14
+      cutoff-length: 0 # simulate lammps' quirks
+  - rebo-new:
+      params: lammps
 
 scale-ranges:
   scalables: []

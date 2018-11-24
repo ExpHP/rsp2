@@ -30,3 +30,51 @@ fn simple_test() {
         )
         .run().unwrap();
 }
+
+// Uses the rust reimplementations of REBO/KCZ
+#[ignore] // This test is expensive; use `cargo test -- --ignored` to run it!
+#[test]
+fn simple_test_rust() {
+    CliTest::cargo_binary("rsp2")
+        .arg("-c").arg(resource("defaults.yaml"))
+        .arg("-c").arg(resource("simple-rust.yaml"))
+        .arg(resource("simple.vasp").as_path())
+        .arg("-o").arg("out")
+        .check_file::<filetypes::RamanJson>(
+            "out/raman.json".as_ref(),
+            resource("simple-out/raman.json").as_ref(),
+            filetypes::RamanJsonTolerances {
+                frequency: filetypes::FrequencyTolerances {
+                    max_acoustic: 0.01,
+                    rel_tol: 1e-7,
+                },
+                intensity_nonzero_thresh: 1e-19,
+                intensity_nonzero_rel_tol: 1e-6,
+            },
+        )
+        .run().unwrap();
+}
+
+// Tests optimization during relaxation.
+#[ignore] // This test is expensive; use `cargo test -- --ignored` to run it!
+#[test]
+fn simple_test_optimize() {
+    CliTest::cargo_binary("rsp2")
+        .arg("-c").arg(resource("defaults.yaml"))
+        .arg("-c").arg(resource("simple-relax-optimize.yaml"))
+        .arg(resource("simple.vasp").as_path())
+        .arg("-o").arg("out")
+        .check_file::<filetypes::RamanJson>(
+            "out/raman.json".as_ref(),
+            resource("simple-out/raman.json").as_ref(),
+            filetypes::RamanJsonTolerances {
+                frequency: filetypes::FrequencyTolerances {
+                    max_acoustic: 0.01,
+                    rel_tol: 1e-4,
+                },
+                intensity_nonzero_thresh: 1e-19,
+                intensity_nonzero_rel_tol: 1e-4,
+            },
+        )
+        .run().unwrap();
+}
