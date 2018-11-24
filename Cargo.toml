@@ -138,14 +138,4 @@ beta = ["rsp2-array-types/beta", "rsp2-array-utils/beta", "rsp2-assert-close/bet
 [workspace]
 exclude = ["./scripts"]
 
-[profile.dev.overrides."rsp2-array-types"]
-opt-level = 3
 
-[profile.dev.overrides."rsp2-array-utils"]
-opt-level = 3
-
-[profile.dev.overrides."rsp2-kets"]
-opt-level = 3
-
-[profile.dev.overrides."rsp2-structure"]
-opt-level = 3

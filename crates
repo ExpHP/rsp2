@@ -1079,6 +1079,9 @@ class OptimizeDepsMacro(NoArgMacro):
         self.crate_opt_levels = crate_opt_levels
 
     def expand_noarg(self, *, cur_name, fail, **_ignored):
+        if not self.enabled:
+            return ''
+
         deps = read_dep_names_from_macros(cur_name, self.lookup_get, fail=fail)
 
         out = []
