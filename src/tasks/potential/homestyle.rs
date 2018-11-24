@@ -14,7 +14,8 @@
 
 //! PotentialBuilder implementations for potentials implemented within rsp2.
 
-use super::{DynCloneDetail, PotentialBuilder, DiffFn, DispFn, CommonMeta};
+use super::{DynCloneDetail, PotentialBuilder, DiffFn, DispFn, CommonMeta, BondDiffFn, BondGrad};
+use super::helper::DiffFnFromBondDiffFn;
 use crate::FailResult;
 use crate::math::frac_bonds_with_skin::FracBondsWithSkin;
 use crate::meta::{self, prelude::*};
@@ -33,9 +34,12 @@ pub struct KolmogorovCrespiZ(pub(super) cfg::PotentialKolmogorovCrespiZNew);
 
 // FIXME the whole layer deal is such a mess
 impl PotentialBuilder<CommonMeta> for KolmogorovCrespiZ {
-    fn initialize_diff_fn(&self, coords: &Coords, meta: CommonMeta) -> FailResult<Box<DiffFn<CommonMeta>>>
+    fn initialize_diff_fn(&self, coords: &Coords, meta: CommonMeta) -> FailResult<Box<dyn DiffFn<CommonMeta>>>
+    { Ok(Box::new(DiffFnFromBondDiffFn::new(self.initialize_bond_diff_fn(coords, meta)?.unwrap()))) }
+
+    fn initialize_bond_diff_fn(&self, coords: &Coords, meta: CommonMeta) -> FailResult<Option<Box<dyn BondDiffFn<CommonMeta>>>>
     {
-        fn fn_body(me: &KolmogorovCrespiZ, coords: &Coords, meta: CommonMeta) -> FailResult<Box<DiffFn<CommonMeta>>> {
+        fn fn_body(me: &KolmogorovCrespiZ, coords: &Coords, meta: CommonMeta) -> FailResult<Option<Box<dyn BondDiffFn<CommonMeta>>>> {
             let cfg::PotentialKolmogorovCrespiZNew { cutoff_begin, skin_depth } = me.0;
             let mut params = crespi_imp::Params::default();
             if let Some(cutoff_begin) = cutoff_begin {
@@ -59,7 +63,7 @@ impl PotentialBuilder<CommonMeta> for KolmogorovCrespiZ {
                 skin_depth,
             );
 
-            Ok(Box::new(Diff { params, bonds, layers }))
+            Ok(Some(Box::new(Diff { params, bonds, layers })))
         }
 
         type BondMeta = (Element, usize);
@@ -72,8 +76,8 @@ impl PotentialBuilder<CommonMeta> for KolmogorovCrespiZ {
             >,
         }
 
-        impl DiffFn<CommonMeta> for Diff {
-            fn compute(&mut self, coords: &Coords, meta: CommonMeta) -> FailResult<(f64, Vec<V3>)> {
+        impl BondDiffFn<CommonMeta> for Diff {
+            fn compute(&mut self, coords: &Coords, meta: CommonMeta) -> FailResult<(f64, Vec<BondGrad>)> {
                 let elements: meta::SiteElements = meta.pick();
 
                 let meta_for_bonds = zip_eq!(elements.iter().cloned(), self.layers.iter().cloned());
@@ -82,15 +86,23 @@ impl PotentialBuilder<CommonMeta> for KolmogorovCrespiZ {
                 let cart_coords = coords.with_carts(coords.to_carts());
 
                 let mut value = 0.0;
-                let mut grad = vec![V3::zero(); coords.num_atoms()];
+                let mut grad = Vec::with_capacity(frac_bonds.len() / 2); // just canonical ones
                 for bond in frac_bonds {
+                    if !bond.is_canonical() {
+                        continue;
+                    }
+
                     debug_assert_eq!((elements[bond.from], elements[bond.to]), (CARBON, CARBON));
                     let cart_vector = bond.cart_vector_using_cache(&cart_coords).unwrap();
                     let (part_value, part_grad) = self.params.compute_z(cart_vector);
 
                     value += part_value;
-                    grad[bond.to] += part_grad;
-                    grad[bond.from] -= part_grad;
+                    grad.push(BondGrad {
+                        plus_site: bond.to,
+                        minus_site: bond.from,
+                        grad: part_grad,
+                        cart_vector,
+                    });
                 }
                 trace!("KCZ: {}", value);
                 Ok((value, grad))
@@ -147,32 +159,30 @@ pub struct Rebo {
 }
 
 impl PotentialBuilder<CommonMeta> for Rebo {
+    fn initialize_diff_fn(&self, coords: &Coords, meta: CommonMeta) -> FailResult<Box<dyn DiffFn<CommonMeta>>>
+    { Ok(Box::new(DiffFnFromBondDiffFn::new(self.initialize_bond_diff_fn(coords, meta)?.unwrap()))) }
+
     fn parallel(&self, parallel: bool) -> Box<dyn PotentialBuilder<CommonMeta>> {
         let mut me = self.clone();
         me.parallel = parallel;
         Box::new(me)
     }
 
-    fn initialize_diff_fn(&self, coords: &Coords, meta: CommonMeta) -> FailResult<Box<DiffFn<CommonMeta>>>
+    fn initialize_bond_diff_fn(&self, coords: &Coords, meta: CommonMeta) -> FailResult<Option<Box<dyn BondDiffFn<CommonMeta>>>>
     {
-        fn fn_body(me: &Rebo, coords: &Coords, meta: CommonMeta) -> FailResult<Box<DiffFn<CommonMeta>>> {
+        fn fn_body(me: &Rebo, coords: &Coords, meta: CommonMeta) -> FailResult<Option<Box<dyn BondDiffFn<CommonMeta>>>> {
             let cfg::PotentialReboNew { params } = me.cfg;
             let params = match params {
                 cfg::PotentialReboNewParams::Lammps => rebo_imp::Params::new_lammps(),
                 cfg::PotentialReboNewParams::Brenner => rebo_imp::Params::new_brenner(),
             };
 
-//            let bonds: meta::FracBonds = match meta.pick() {
-//                Some(bonds) => bonds,
-//                None => bail!("REBO requires a bond graph."),
-//            };
-
-            // FIXME: We can't currently use the bonds from meta because they might not have
-            //        the right bond distances for our params.
+            // NOTE: We can't (currently) use the bonds from meta because they might not have
+            //       the right bond distances for our params.
             let elements: meta::SiteElements = meta.pick();
             let interactions = rebo_imp::find_all_interactions(&params, coords, &elements)?;
             let parallel = me.parallel;
-            Ok(Box::new(Diff { params, interactions, parallel }))
+            Ok(Some(Box::new(Diff { params, interactions, parallel })))
         }
 
         struct Diff {
@@ -181,9 +191,16 @@ impl PotentialBuilder<CommonMeta> for Rebo {
             parallel: bool,
         }
 
-        impl DiffFn<CommonMeta> for Diff {
-            fn compute(&mut self, coords: &Coords, _: CommonMeta) -> FailResult<(f64, Vec<V3>)> {
-                rebo_imp::compute(&self.params, &self.interactions, coords, self.parallel)
+        impl BondDiffFn<CommonMeta> for Diff {
+            fn compute(&mut self, coords: &Coords, _: CommonMeta) -> FailResult<(f64, Vec<BondGrad>)> {
+                let (value, grad) = rebo_imp::compute_by_bond(&self.params, &self.interactions, coords, self.parallel)?;
+                let grad = {
+                    grad.into_iter().map(|item| {
+                        let rebo_imp::BondGrad { plus_site, minus_site, cart_vector, grad } = item;
+                        super::BondGrad { plus_site, minus_site, cart_vector, grad }
+                    }).collect()
+                };
+                Ok((value, grad))
             }
         }
 

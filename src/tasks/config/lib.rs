@@ -116,7 +116,11 @@ pub struct Settings {
     pub potential: PotentialKind,
 
     // (FIXME: weird name)
+    #[serde(default)]
     pub scale_ranges: ScaleRanges,
+
+    #[serde(default)]
+    pub parameters: Option<Parameters>,
 
     #[serde(default)]
     pub acoustic_search: AcousticSearch,
@@ -177,6 +181,76 @@ pub struct ScaleRanges {
 fn _scale_ranges__repeat_count() -> u32 { 1 }
 fn _scale_ranges__warn_threshold() -> Option<f64> { Some(0.01) }
 fn _scale_ranges__fail() -> bool { false }
+
+// Require "scalables" if "scale-ranges" is provided, but allow it to be defaulted to
+// an empty list otherwise.
+impl Default for ScaleRanges {
+    fn default() -> Self {
+        ScaleRanges {
+            scalables: vec![],
+            repeat_count: _scale_ranges__repeat_count(),
+            warn_threshold: _scale_ranges__warn_threshold(),
+            fail: _scale_ranges__fail(),
+        }
+    }
+}
+
+pub type Parameters = [Parameter; 3];
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum Parameter {
+    Param(char),
+    One,
+    NotPeriodic,
+}
+
+impl<'de> serde::Deserialize<'de> for Parameter {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where D: serde::Deserializer<'de>,
+    {
+        use serde::de::Unexpected;
+        use serde::de::Error;
+
+        struct Visitor;
+
+        impl<'a> serde::de::Visitor<'a> for Visitor {
+            type Value = Parameter;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                write!(f, "1, a single character, or null")
+            }
+
+            fn visit_i64<E>(self, value: i64) -> Result<Parameter, E>
+            where E: Error,
+            { match value {
+                1 => Ok(Parameter::One),
+                n => Err(Error::invalid_value(Unexpected::Signed(n), &self)),
+            }}
+
+            fn visit_str<E>(self, s: &str) -> Result<Parameter, E>
+            where E: Error,
+            { match s.len() {
+                1 => Ok(Parameter::Param(s.chars().next().unwrap())),
+                _ => Err(Error::invalid_value(Unexpected::Str(s), &self)),
+            }}
+
+            fn visit_none<E>(self) -> Result<Parameter, E>
+            where E: Error,
+            { Ok(Parameter::NotPeriodic) }
+        }
+
+        deserializer.deserialize_any(Visitor)
+    }
+}
+
+impl serde::Serialize for Parameter {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where S: serde::Serializer,
+    { match *self {
+        Parameter::One => serializer.serialize_i32(1),
+        Parameter::NotPeriodic => serializer.serialize_none(),
+        Parameter::Param(c) => serializer.serialize_char(c),
+    }}
+}
 
 #[derive(Debug, Clone, PartialEq)]
 #[derive(Serialize, Deserialize)]

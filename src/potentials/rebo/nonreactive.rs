@@ -573,6 +573,13 @@ pub fn find_all_interactions(
 
 //---------------------------------------------------------------------------------
 
+pub struct BondGrad {
+    pub plus_site: usize,
+    pub minus_site: usize,
+    pub cart_vector: V3,
+    pub grad: V3,
+}
+
 pub fn compute(
     params: &Params,
     interactions: &Interactions,
@@ -580,11 +587,9 @@ pub fn compute(
     use_rayon: bool,
 ) -> FailResult<(f64, Vec<V3>)> {
     let bond_deltas = compute_bond_deltas(coords, &interactions, use_rayon);
-
     let (value, d_deltas) = compute_rebo_bonds(params, &interactions, &bond_deltas, use_rayon)?;
 
     let mut d_positions = IndexVec::from_elem_n(V3::zero(), interactions.num_sites());
-
     for site_i in interactions.sites() {
         for bond_ij in interactions.bonds(site_i) {
             let site_j = interactions.bond_target(bond_ij);
@@ -595,6 +600,32 @@ pub fn compute(
         }
     }
     Ok((value, d_positions.raw))
+}
+
+pub fn compute_by_bond(
+    params: &Params,
+    interactions: &Interactions,
+    coords: &Coords,
+    use_rayon: bool,
+) -> FailResult<(f64, Vec<BondGrad>)> {
+    let bond_deltas = compute_bond_deltas(coords, &interactions, use_rayon);
+    let (value, d_deltas) = compute_rebo_bonds(params, &interactions, &bond_deltas, use_rayon)?;
+
+    let mut grad_items = Vec::with_capacity(interactions.num_bonds());
+    for site_i in interactions.sites() {
+        for bond_ij in interactions.bonds(site_i) {
+            let site_j = interactions.bond_target(bond_ij);
+
+            // delta_ij = (-pos_i) + pos_j
+            grad_items.push(BondGrad {
+                plus_site: site_j.0,
+                minus_site: site_i.0,
+                cart_vector: bond_deltas[bond_ij],
+                grad: d_deltas[bond_ij],
+            });
+        }
+    }
+    Ok((value, grad_items))
 }
 
 fn compute_bond_deltas(

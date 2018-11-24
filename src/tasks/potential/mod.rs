@@ -90,23 +90,33 @@ pub trait PotentialBuilder<Meta = CommonMeta>
     ///
     /// The default implementation just ignores the call.
     #[must_use = "this is not an in-place mutation!"]
-    fn parallel(&self, _parallel: bool) -> Box<PotentialBuilder<Meta>>
+    fn parallel(&self, _parallel: bool) -> Box<dyn PotentialBuilder<Meta>>
     { self.box_clone() }
 
     /// May be used to provide a hint that blocking indefinitely for a resource
     /// is acceptible. Intended for use in unit tests, which cargo tries to run
     /// in parallel.
     #[must_use = "this is not an in-place mutation!"]
-    fn allow_blocking(&self, _allow: bool) -> Box<PotentialBuilder<Meta>>
+    fn allow_blocking(&self, _allow: bool) -> Box<dyn PotentialBuilder<Meta>>
     { self.box_clone() }
 
     /// Create the DiffFn.  This does potentially expensive initialization, maybe calling out
     /// to external C APIs and etc.
     ///
-    /// **NOTE:** This takes a structure for historic (read: dumb) reasons.  Hopefully it can
-    /// be removed soon. For now, just make sure to give it something with the same chemical
-    /// composition, number of atoms, and lattice type as the structures you'll be computing.
-    fn initialize_diff_fn(&self, coords: &Coords, meta: Meta) -> FailResult<Box<DiffFn<Meta>>>;
+    /// The structure given to this is used to supply the lattice and metadata.
+    /// Also, some other data may be precomputed from it.
+    fn initialize_diff_fn(&self, coords: &Coords, meta: Meta) -> FailResult<Box<dyn DiffFn<Meta>>>;
+
+    /// Create a DiffFn that computes individual forces per pair interaction.
+    ///
+    /// Not all potentials support this; the default implementation simply returns `Ok(None)`.
+    /// An implementation is required if one wants to optimize lattice params during relaxation.
+    ///
+    /// The structure given to this is used to supply the lattice and metadata, and possibly
+    /// even the set of bonds (e.g. in the case of nonreactive REBO).
+    fn initialize_bond_diff_fn(&self, _init_coords: &Coords, _meta: Meta) -> FailResult<Option<Box<dyn BondDiffFn<Meta>>>>
+    where Meta: Clone + 'static
+    { Ok(None) }
 
     /// Convenience method to get a function suitable for `rsp2_minimize`.
     ///
@@ -130,7 +140,7 @@ pub trait PotentialBuilder<Meta = CommonMeta>
     }
 
     /// Create a DispFn, a non-threadsafe object that can compute many displacements very quickly.
-    fn initialize_disp_fn(&self, equilibrium_coords: &Coords, meta: Meta) -> FailResult<Box<DispFn>>
+    fn initialize_disp_fn(&self, equilibrium_coords: &Coords, meta: Meta) -> FailResult<Box<dyn DispFn>>
     where Meta: Clone + 'static,
     ;
 
@@ -139,7 +149,7 @@ pub trait PotentialBuilder<Meta = CommonMeta>
     /// **This method exists solely for the convenience of implementors of the trait.** It should not
     /// be overridden, and the only place it should ever be used is in the definition of
     /// `initialize_disp_fn` in a trait impl.
-    fn _default_initialize_disp_fn(&self, coords: &Coords, meta: Meta) -> FailResult<Box<DispFn>>
+    fn _default_initialize_disp_fn(&self, coords: &Coords, meta: Meta) -> FailResult<Box<dyn DispFn>>
     where
         Meta: Clone + 'static,
         Self: Sized,
@@ -210,41 +220,41 @@ where
 /// There's a macro for this.
 pub trait DynCloneDetail<Meta> {
     /// "Clone" the trait object.
-    fn box_clone(&self) -> Box<PotentialBuilder<Meta>>;
+    fn box_clone(&self) -> Box<dyn PotentialBuilder<Meta>>;
 
     /// "Borrow" the trait object.
-    fn _as_ref_dyn(&self) -> &PotentialBuilder<Meta>;
+    fn _as_ref_dyn(&self) -> &dyn PotentialBuilder<Meta>;
 }
 
 #[macro_export]
 macro_rules! impl_dyn_clone_detail {
     (impl[$($bnd:tt)*] DynCloneDetail<$Meta:ty> for $Type:ty { ... }) => {
         impl<$($bnd)*> DynCloneDetail<$Meta> for $Type {
-            fn box_clone(&self) -> Box<PotentialBuilder<$Meta>> {
+            fn box_clone(&self) -> Box<dyn PotentialBuilder<$Meta>> {
                 Box::new(<$Type as Clone>::clone(self))
             }
-            fn _as_ref_dyn(&self) -> &PotentialBuilder<$Meta> { self }
+            fn _as_ref_dyn(&self) -> &dyn PotentialBuilder<$Meta> { self }
         }
     };
 }
 
-impl<M> Clone for Box<PotentialBuilder<M>>
+impl<M> Clone for Box<dyn PotentialBuilder<M>>
 where M: 'static, // FIXME why is this necessary? PotentialBuilder doesn't borrow from M...
 {
     fn clone(&self) -> Self { self.box_clone() }
 }
 
 // necessary for combinators like Sum to be possible
-impl<Meta> PotentialBuilder<Meta> for Box<PotentialBuilder<Meta>>
+impl<Meta> PotentialBuilder<Meta> for Box<dyn PotentialBuilder<Meta>>
 where Meta: Clone + 'static,
 {
-    fn parallel(&self, parallel: bool) -> Box<PotentialBuilder<Meta>>
+    fn parallel(&self, parallel: bool) -> Box<dyn PotentialBuilder<Meta>>
     { (**self).parallel(parallel) }
 
-    fn allow_blocking(&self, allow: bool) -> Box<PotentialBuilder<Meta>>
+    fn allow_blocking(&self, allow: bool) -> Box<dyn PotentialBuilder<Meta>>
     { (**self).allow_blocking(allow) }
 
-    fn initialize_diff_fn(&self, coords: &Coords, meta: Meta) -> FailResult<Box<DiffFn<Meta>>>
+    fn initialize_diff_fn(&self, coords: &Coords, meta: Meta) -> FailResult<Box<dyn DiffFn<Meta>>>
     { (**self).initialize_diff_fn(coords, meta) }
 
     fn initialize_flat_diff_fn(&self, coords: &Coords, meta: Meta) -> FailResult<Box<DynFlatDiffFn<'static>>>
@@ -253,7 +263,7 @@ where Meta: Clone + 'static,
     fn one_off(&self) -> OneOff<'_, Meta>
     { (**self).one_off() }
 
-    fn initialize_disp_fn(&self, equilibrium_coords: &Coords, meta: Meta) -> FailResult<Box<DispFn>>
+    fn initialize_disp_fn(&self, equilibrium_coords: &Coords, meta: Meta) -> FailResult<Box<dyn DispFn>>
     { (**self).initialize_disp_fn(equilibrium_coords, meta) }
 
     fn _eco_mode(&self, cont: &mut dyn FnMut())
@@ -261,7 +271,7 @@ where Meta: Clone + 'static,
 }
 
 impl_dyn_clone_detail!{
-    impl[Meta: Clone + 'static] DynCloneDetail<Meta> for Box<PotentialBuilder<Meta>> { ... }
+    impl[Meta: Clone + 'static] DynCloneDetail<Meta> for Box<dyn PotentialBuilder<Meta>> { ... }
 }
 
 //-------------------------------------
@@ -296,23 +306,43 @@ pub trait DiffFn<Meta> {
 }
 
 // necessary for combinators like sum
-impl<'d, Meta> DiffFn<Meta> for Box<DiffFn<Meta> + 'd> {
-    /// Compute the value and gradient.
+impl<'d, Meta> DiffFn<Meta> for Box<dyn DiffFn<Meta> + 'd> {
     fn compute(&mut self, coords: &Coords, meta: Meta) -> FailResult<(f64, Vec<V3>)>
     { (**self).compute(coords, meta) }
 
-    /// Convenience method to compute the potential.
     fn compute_value(&mut self, coords: &Coords, meta: Meta) -> FailResult<f64>
     { (**self).compute_value(coords, meta) }
 
-    /// Convenience method to compute the gradient.
     fn compute_grad(&mut self, coords: &Coords, meta: Meta) -> FailResult<Vec<V3>>
     { (**self).compute_grad(coords, meta) }
 
-    /// Convenience method to compute the force.
     fn compute_force(&mut self, coords: &Coords, meta: Meta) -> FailResult<Vec<V3>>
     { (**self).compute_force(coords, meta) }
 }
+
+//-------------------------------------
+
+/// Represents a single pair interaction in the potential.
+pub struct BondGrad {
+    /// The bond vector `carts[plus_site] - carts[minus_site] + unspecified_lattice_point`.
+    pub cart_vector: V3,
+    /// The gradient of a summand in the potential with respect to that vector.
+    pub grad: V3,
+    pub minus_site: usize,
+    pub plus_site: usize,
+}
+
+pub trait BondDiffFn<Meta> {
+    fn compute(&mut self, coords: &Coords, meta: Meta) -> FailResult<(f64, Vec<BondGrad>)>;
+}
+
+// necessary for combinators like sum
+impl<'d, Meta> BondDiffFn<Meta> for Box<dyn BondDiffFn<Meta> + 'd> {
+    fn compute(&mut self, coords: &Coords, meta: Meta) -> FailResult<(f64, Vec<BondGrad>)>
+    { (**self).compute(coords, meta) }
+}
+
+//-------------------------------------
 
 // FIXME: this is no longer used, but another comment in this file refers to its
 //        doc comment for explanation.  The relevant details should be moved there.
@@ -362,8 +392,6 @@ pub fn ensure_only_carts(coords: &mut Coords) {
     let _ = coords.carts_mut();
 }
 
-//-------------------------------------
-
 /// This is `FnMut((usize, V3)) -> FailResult<(f64, Vec<V3>)>` with convenience methods.
 ///
 /// A `DispFn` usually has been initialized with the equilibrium structure, and may contain
@@ -384,7 +412,7 @@ pub trait DispFn {
 //-------------------------------------
 
 /// See `PotentialBuilder::one_off` for more information.
-pub struct OneOff<'a, M: 'a>(&'a PotentialBuilder<M>);
+pub struct OneOff<'a, M: 'a>(&'a dyn PotentialBuilder<M>);
 impl<'a, M: Clone + 'static> DiffFn<M> for OneOff<'a, M> {
     fn compute(&mut self, coords: &Coords, meta: M) -> FailResult<(f64, Vec<V3>)> {
         self.0.initialize_diff_fn(coords, meta.clone())?.compute(coords, meta)

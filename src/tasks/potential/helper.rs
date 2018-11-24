@@ -14,11 +14,11 @@
 
 //! Combinators and other helper implementations of PotentialBuilder and friends.
 
-use super::{DynCloneDetail, PotentialBuilder, DiffFn, DispFn};
-use ::FailResult;
-use ::rsp2_structure::{Coords, CoordsKind, Lattice};
-use ::rsp2_array_types::{V3};
-use ::std::collections::BTreeMap;
+use super::{DynCloneDetail, PotentialBuilder, DiffFn, DispFn, BondDiffFn, BondGrad};
+use crate::FailResult;
+use rsp2_structure::{Coords, CoordsKind, Lattice};
+use rsp2_array_types::{V3};
+use std::collections::BTreeMap;
 
 /// A sum of two PotentialBuilders or DiffFns.
 #[derive(Debug, Clone)]
@@ -30,20 +30,33 @@ where
     A: Clone + PotentialBuilder<M>,
     B: Clone + PotentialBuilder<M>,
 {
-    fn parallel(&self, parallel: bool) -> Box<PotentialBuilder<M>>
+    fn parallel(&self, parallel: bool) -> Box<dyn PotentialBuilder<M>>
     { Box::new(Sum(self.0.parallel(parallel), self.1.parallel(parallel))) }
 
-    fn allow_blocking(&self, allow: bool) -> Box<PotentialBuilder<M>>
+    fn allow_blocking(&self, allow: bool) -> Box<dyn PotentialBuilder<M>>
     { Box::new(Sum(self.0.allow_blocking(allow), self.1.allow_blocking(allow))) }
 
-    fn initialize_diff_fn(&self, coords: &Coords, meta: M) -> FailResult<Box<DiffFn<M>>>
+    fn initialize_diff_fn(&self, coords: &Coords, meta: M) -> FailResult<Box<dyn DiffFn<M>>>
     {
         let a_diff_fn = self.0.initialize_diff_fn(coords, meta.clone())?;
         let b_diff_fn = self.1.initialize_diff_fn(coords, meta.clone())?;
         Ok(Box::new(Sum(a_diff_fn, b_diff_fn)))
     }
 
-    fn initialize_disp_fn(&self, _: &Coords, _: M) -> FailResult<Box<DispFn>>
+    fn initialize_bond_diff_fn(&self, coords: &Coords, meta: M) -> FailResult<Option<Box<dyn BondDiffFn<M>>>>
+    {
+        let a_diff_fn = match self.0.initialize_bond_diff_fn(coords, meta.clone())? {
+            Some(x) => x,
+            None => return Ok(None),
+        };
+        let b_diff_fn = match self.1.initialize_bond_diff_fn(coords, meta.clone())? {
+            Some(x) => x,
+            None => return Ok(None),
+        };
+        Ok(Some(Box::new(Sum(a_diff_fn, b_diff_fn))))
+    }
+
+    fn initialize_disp_fn(&self, _: &Coords, _: M) -> FailResult<Box<dyn DispFn>>
     { unimplemented!("should use DispFns of sub potentials, rather than DefaultDispFn") }
 
     fn _eco_mode(&self, cont: &mut dyn FnMut())
@@ -77,6 +90,23 @@ where
     }
 }
 
+impl<M, A, B> BondDiffFn<M> for Sum<A, B>
+where
+    M: Clone,
+    A: BondDiffFn<M>,
+    B: BondDiffFn<M>,
+{
+    fn compute(&mut self, coords: &Coords, meta: M) -> FailResult<(f64, Vec<BondGrad>)> {
+        let (a_value, a_grad) = self.0.compute(coords, meta.clone())?;
+        let (b_value, b_grad) = self.1.compute(coords, meta.clone())?;
+        let value = a_value + b_value;
+        let mut grad = a_grad;
+        grad.extend(b_grad);
+        Ok((value, grad))
+    }
+}
+
+
 //--------------------------------
 
 pub struct DefaultDispFn<Meta> {
@@ -86,13 +116,13 @@ pub struct DefaultDispFn<Meta> {
     lattice: Lattice,
     equilibrium_force: Vec<V3>,
     meta: Meta,
-    diff_fn: Box<DiffFn<Meta>>,
+    diff_fn: Box<dyn DiffFn<Meta>>,
 }
 
 impl<Meta> DefaultDispFn<Meta>
 where Meta: Clone + 'static,
 {
-    pub fn initialize(equilibrium_coords: &Coords, meta: Meta, pot: &PotentialBuilder<Meta>) -> FailResult<Self>
+    pub fn initialize(equilibrium_coords: &Coords, meta: Meta, pot: &dyn PotentialBuilder<Meta>) -> FailResult<Self>
     {Ok({
         let lattice = equilibrium_coords.lattice().clone();
         let equilibrium_carts = equilibrium_coords.to_carts();
@@ -142,7 +172,7 @@ where Meta: Clone,
 /// Which is good, because it's tough to define an approximate scale for comparison
 /// here, as the forces are the end-result of catastrophic cancellations.
 pub fn sparse_force_from_dense_deterministic(
-    disp_fn: &mut DispFn,
+    disp_fn: &mut dyn DispFn,
     original_force: &[V3],
     disp: (usize, V3),
 ) -> FailResult<BTreeMap<usize, V3>> {
@@ -158,4 +188,33 @@ pub fn sparse_force_from_dense_deterministic(
 //                .map(|(atom, (_old, new))| (atom, new))
     };
     Ok(diffs.collect())
+}
+
+//--------------------------------
+
+/// Provides a default DiffFn that can be used by a potential that defines a BondDiffFn.
+pub struct DiffFnFromBondDiffFn<Meta>(Box<dyn BondDiffFn<Meta>>);
+
+impl<Meta> DiffFnFromBondDiffFn<Meta>
+where Meta: Clone + 'static,
+{
+    pub fn new(f: Box<dyn BondDiffFn<Meta>>) -> Self {
+        DiffFnFromBondDiffFn(f)
+    }
+}
+
+
+impl<Meta> DiffFn<Meta> for DiffFnFromBondDiffFn<Meta>
+where Meta: Clone,
+{
+    fn compute(&mut self, coords: &Coords, meta: Meta) -> FailResult<(f64, Vec<V3>)>
+    {Ok({
+        let (potential, bond_grad) = self.0.compute(coords, meta)?;
+        let mut out_grad = vec![V3::zero(); coords.len()];
+        for BondGrad { plus_site, minus_site, grad, cart_vector: _ } in bond_grad {
+            out_grad[plus_site] += grad;
+            out_grad[minus_site] -= grad;
+        }
+        (potential, out_grad)
+    })}
 }

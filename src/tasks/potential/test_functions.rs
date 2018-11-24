@@ -14,7 +14,7 @@
 
 //! Dummy potentials for testing purposes
 
-use super::{DynCloneDetail, PotentialBuilder, DiffFn, DispFn};
+use super::{DynCloneDetail, PotentialBuilder, DiffFn, DispFn, BondDiffFn, BondGrad};
 use ::FailResult;
 use ::rsp2_structure::{Coords, CoordsKind};
 use ::rsp2_array_types::{V3};
@@ -33,6 +33,17 @@ impl<Meta: Clone + 'static> PotentialBuilder<Meta> for Zero {
             }
         }
         Ok(Box::new(Diff) as Box<_>)
+    }
+
+    fn initialize_bond_diff_fn<'a>(&self, _: &Coords, _: Meta) -> FailResult<Option<Box<BondDiffFn<Meta>>>>
+    {
+        struct Diff;
+        impl<M> BondDiffFn<M> for Diff {
+            fn compute(&mut self, _: &Coords, _: M) -> FailResult<(f64, Vec<BondGrad>)> {
+                Ok((0.0, vec![]))
+            }
+        }
+        Ok(Some(Box::new(Diff) as Box<_>))
     }
 
     fn initialize_disp_fn(&self, coords: &Coords, meta: Meta) -> FailResult<Box<DispFn>>
