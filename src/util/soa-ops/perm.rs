@@ -242,7 +242,7 @@ impl PermVec {
     {
         let offset = self.0.len();
         self.0.extend(other.0.iter().map(|&i| i + offset));
-        PermVec::validate_data(&self.0);
+        debug_assert!(PermVec::validate_data(&self.0));
     }
 
     #[must_use = "not an in-place operation"]

@@ -47,4 +47,3 @@ beta = ["rsp2-array-types/beta", "rsp2-array-utils/beta", "rsp2-assert-close/bet
 # see https://github.com/rust-lang/cargo/issues/1286 (problem and proposal)
 #     https://github.com/rust-lang/cargo/issues/5565 (tracking issue, of sorts)
 serde-support = ["serde", "rsp2-array-types/serde"]
-

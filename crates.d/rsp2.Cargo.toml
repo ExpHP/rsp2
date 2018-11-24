@@ -1,3 +1,5 @@
+!!MAYBE-CARGO-FEATURES
+
 [package]
 !!CRATE-NAME-LINE
 version = "0.1.0"
@@ -61,3 +63,5 @@ mpi-support = ["mpi", "rsp2-tasks/mpi-support"]
 !!NIGHTLY-FEATURE-LINE
 
 !!MAYBE-ITS-A-WORKSPACE
+
+!!MAYBE-OPTIMIZE-SOME-DEPS

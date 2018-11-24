@@ -75,9 +75,9 @@ class Gen:
     @staticmethod
     def configure(sub):
         sub.add_argument(
-            '--force-workspace', action='store_true',
-            help='temporarily override the simulated-workspace setting to prevent '
-                 'undue changes that would be checked into VCS')
+            '--vcs', action='store_true',
+            help='temporarily override some user config settings to avoid '
+                 'undue changes from being checked into VCS')
 
     @staticmethod
     def run(args, fail):
@@ -115,7 +115,7 @@ class Gen:
             make_binary_shims(binary_shim_pairs)
             # FIXME ^^^ this is waaaaaay too application-specific.
 
-            lookup_get = make_macro_lookup(args.force_workspace, fail)
+            lookup_get = make_macro_lookup(args.vcs, fail)
 
             if user_conf.simulated_workspace.enabled:
                 simulated_workspace_gen_symlinks(crates, user_conf.simulated_workspace, fail)
@@ -162,11 +162,12 @@ class Gen:
                             fail=fail,
                         ))
 
-def make_macro_lookup(force_workspace, fail):
+def make_macro_lookup(vcs_safe, fail):
     with pushd(search_for_root(fail)):
         data = read_master_config(fail)
         crates = data.pop('crates')
         preferred_versions = data.pop('preferred-versions')
+        opt_levels = data.pop('always-optimize')
         user_conf = read_master_user_config(fail)
         root_name = get_root_package(fail)
 
@@ -185,7 +186,7 @@ def make_macro_lookup(force_workspace, fail):
             def expand_noarg(self, **_ignored):
                 # This is unfortunate. The Cargo.toml files should not depend on
                 # config, but there is no other way to disable a workspace.
-                if user_conf.simulated_workspace.enabled and not force_workspace:
+                if user_conf.simulated_workspace.enabled and not vcs_safe:
                     # This message is intended to be seen from a git diff.
                     return '''
 # !!! CAUTION !!!
@@ -195,14 +196,14 @@ def make_macro_lookup(force_workspace, fail):
 # To correct it, do the following to temporarily override the
 # simulated-workspace setting before committing:
 #
-#      ./crates gen --force-workspace
+#      ./crates gen --vcs
 #
 #[workspace]
                     '''.strip()
                 else:
                     return '''
 [workspace]
-exclude = "./scripts"
+exclude = ["./scripts"]
                     '''.strip()
 
         class CrateNameLineMacro(NoArgMacro):
@@ -235,6 +236,10 @@ exclude = "./scripts"
 
             # FIXME this is waaaaaay too application-specific.
             'NIGHTLY-FEATURE-LINE': NightlyFeaturesMacro(lookup_get, crates),
+
+            # FIXME this is waaaaaay too application-specific.
+            'MAYBE-CARGO-FEATURES': CargoFeaturesMacro(user_conf, vcs_safe),
+            'MAYBE-OPTIMIZE-SOME-DEPS': OptimizeDepsMacro(lookup_get, user_conf, opt_levels, vcs_safe),
         }
 
         for (name, path) in crates.items():
@@ -256,6 +261,11 @@ class Macro:
     # A list of the internal dep crate names that would be added if this
     # macro were expanded in the proper location.
     def internal_deps(self):
+        return []
+
+    # A list of the external dep crate names that would be added if this
+    # macro were expanded in the proper location.
+    def external_deps(self):
         return []
 
 class NoArgMacro(Macro):
@@ -309,6 +319,9 @@ class ExternalDepMacro(Macro):
         else:
             rhs = self.rhs
         return f'{self.dep_name} = {inline_toml(rhs)}'
+
+    def external_deps(self):
+        return [self.dep_name]
 
 def extend_dependency_toml(dest, src, *, dep_name, fail):
     if isinstance(dest, str):
@@ -656,9 +669,8 @@ class Test:
             if code:
                 sys.exit(code)
 
-        user_config = read_master_user_config(fail)
         with pushd(search_for_root(fail)):
-            if user_config.simulated_workspace.enabled:
+            if read_master_user_config(fail).simulated_workspace.enabled:
                 # do the insane thing
 
                 # Create a replica that looks exactly like our project,
@@ -832,10 +844,12 @@ class UserConfig:
     def __init__(self, d):
         d = dict(d)
         simulated_workspace = d.pop('simulated-workspace', {})
+        nightly_cargo = d.pop('nightly-cargo', {})
         for key in d:
             warnings.warn(f"Unrecognized user-config section: {key}")
 
         self.simulated_workspace = CfgSimulatedWorkspace(simulated_workspace)
+        self.nightly_cargo = CfgNightlyCargo(nightly_cargo)
 
     @classmethod
     def default(cls):
@@ -850,6 +864,13 @@ class CfgSimulatedWorkspace:
         self.shared_dot_vscode = d.pop('shared-dot-vscode', False)
         for key in d:
             warnings.warn(f'Unrecognized user-config key: simulated-workspace.{key}')
+
+class CfgNightlyCargo:
+    def __init__(self, d):
+        d = dict(d)
+        self.always_optimize_some_deps = d.pop('always-optimize-some-deps', False)
+        for key in d:
+            warnings.warn(f'Unrecognized user-config key: nightly-cargo.{key}')
 
 #------------
 
@@ -1015,24 +1036,7 @@ class NightlyFeaturesMacro(NoArgMacro):
         self.crates = crates
 
     def expand_noarg(self, *, cur_name, fail, **_ignored):
-        # To figure out the list of internal crates that this crate depends on,
-        # we directly re-parse the template Cargo.toml files and look for macros
-        # that generate internal deps.
-        #
-        # It'd be much nicer to get this information from the expanded TOML,
-        # but there is a chicken-and-egg problem there as we are currently in
-        # the middle of macro expansion!
-        #
-        deps = []
-        with open(root_rel_src_toml_path(cur_name)) as f:
-            for line in f:
-                invocation = MacroInvocation.try_parse(line, fail=fail)
-                if invocation is None:
-                    continue
-
-                macro = self.lookup_get(invocation.name)
-                deps.extend(macro.internal_deps())
-        deps = sorted(deps)
+        deps = read_dep_names_from_macros(cur_name, self.lookup_get, fail=fail, external=False)
 
         def recursive_feature_line(feature, base_list=()):
             toml_strs = [f'"{f}"' for f in base_list]
@@ -1042,6 +1046,71 @@ class NightlyFeaturesMacro(NoArgMacro):
         nightly = recursive_feature_line("nightly", ['beta'])
         beta = recursive_feature_line("beta")
         return f'{nightly}\n{beta}'
+
+class CargoFeaturesMacro(NoArgMacro):
+    def __init__(self, config, vcs_safe):
+        self.features = []
+        if not vcs_safe:
+            if config.nightly_cargo.always_optimize_some_deps:
+                self.features.append('profile-overrides')
+
+    def expand_noarg(self, *_bleh, **_ignored):
+        if not self.features:
+            return ''
+
+        return f'''
+# !!! CAUTION !!!
+# Nightly cargo features are enabled in the user config of 'crates'.
+# Please do not check this change into VCS!!!
+#
+# To correct it, do the following to temporarily override the
+# cargo-nightly settings before committing:
+#
+#      ./crates gen --vcs
+#
+
+cargo-features = {repr(self.features)}
+'''.strip()
+
+class OptimizeDepsMacro(NoArgMacro):
+    def __init__(self, lookup_get, config, crate_opt_levels, vcs_safe):
+        self.lookup_get = lookup_get
+        self.enabled = config.nightly_cargo.always_optimize_some_deps and not vcs_safe
+        self.crate_opt_levels = crate_opt_levels
+
+    def expand_noarg(self, *, cur_name, fail, **_ignored):
+        deps = read_dep_names_from_macros(cur_name, self.lookup_get, fail=fail)
+
+        out = []
+        for dep in deps:
+            if dep in self.crate_opt_levels:
+                out.append(f'''
+[profile.dev.overrides."{dep}"]
+opt-level = {self.crate_opt_levels[dep]}
+'''.strip())
+
+        return '\n\n'.join(out)
+
+# HACK:
+# To figure out the list of crates that a crate depends on during macro
+# expansion, we directly re-parse the template Cargo.toml files and look for
+# macros that generate deps.
+#
+# It'd be much nicer to get this information from the expanded TOML,
+# but there is a chicken-and-egg problem there as we are currently in
+# the middle of macro expansion!
+def read_dep_names_from_macros(crate_name, lookup_get, fail, external=True, internal=True):
+    deps = []
+    with open(root_rel_src_toml_path(crate_name)) as f:
+        for line in f:
+            invocation = MacroInvocation.try_parse(line, fail=fail)
+            if invocation is None:
+                continue
+
+            macro = lookup_get(invocation.name)
+            if internal: deps.extend(macro.internal_deps())
+            if external: deps.extend(macro.external_deps())
+    return sorted(deps)
 
 #------------
 

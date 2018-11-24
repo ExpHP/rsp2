@@ -5,6 +5,12 @@
 # (CAUTION: don't trust that the values in here are necessarily the defaults,
 #  because this file is currently maintained by hand and mistakes are possible)
 
+[nightly-cargo]
+# Enables nightly cargo features
+
+# Optimizes the crates listed under [always-optimize] in crates.toml
+always-optimize-some-deps = false
+
 [simulated-workspace]
 # A.k.a. "VSCode compatibility mode"
 

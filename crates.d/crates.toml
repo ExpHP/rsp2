@@ -112,3 +112,18 @@ walkdir = "2"
 vergen = "2"
 stack = "0.3"
 xz2 = "0.1.6"
+
+#--------------------------------------------
+# Always optimize some crates when they appear as dependencies.
+#
+# Choose crates that contain monomorphized instances of code that is critical
+# to efficiency. (`pub` generic functions will generally not benefit from the
+# feature).
+#
+# This depends on a cargo nightly feature, so support must be explicitly
+# enabled for it in .crates.d/config.toml
+[always-optimize]
+rsp2-kets = 3
+rsp2-array-utils = 3
+rsp2-array-types = 3
+rsp2-structure = 3
