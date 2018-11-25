@@ -36,9 +36,9 @@ where V: Zero + IsV,
 { Zero::zero() }
 
 gen_each!{
-    @{Vn}
+    @{Vn_n}
     for_each!(
-        {$Vn:ident}
+        {$Vn:ident $n:expr}
     ) => {
         impl<X> $Vn<X> {
             /// Get a zero vector.
@@ -84,6 +84,19 @@ gen_each!{
             pub fn unit(&self) -> Self
             where X: Field + PrimitiveFloat,
             { self / self.norm() }
+
+            /// Get a basis vector.
+            #[inline(always)]
+            pub fn axis_unit(i: usize) -> Self
+            where
+                Self: Zero,
+                X: Semiring + PrimitiveSemiring,
+            {
+                let mut v = Self::zero();
+                *v.get_mut(i)
+                    .unwrap_or_else(|| panic!("Invalid axis for {}d vector: {}", $n, i)) = X::one();
+                v
+            }
 
             /// Generate a randomly-oriented unit vector whose direction comes from a uniform
             /// distribution.

@@ -13,10 +13,9 @@ use crate::supercell;
 use crate::{Coords, Lattice};
 
 use std::fmt;
-use std::ops::Deref;
+use std::ops::{Deref};
 use rsp2_soa_ops::{Perm, Permute};
-use rsp2_array_utils::{arr_from_fn, try_map_arr};
-use rsp2_array_types::{V3, M3, dot};
+use rsp2_array_types::{V3};
 use failure::Error;
 
 /// Bond data in a more widely-reusable form than `CartBonds`.
@@ -259,7 +258,8 @@ impl FracBonds {
     /// I wrote it I was almost 100% certain it would have to be replaced with something
     /// faster eventually.
     ///
-    /// ...it has survived surprisingly well.
+    /// ...aside from one small optimization of a constant factor of about 8,
+    /// it has survived surprisingly well.
     ///
     /// # Numerical rounding, and distances of zero
     ///
@@ -315,6 +315,14 @@ impl FracBonds {
         let sc_carts = superstructure.to_carts();
         let sc_latts = sc.atom_lattice_points();
         let sc_sites = sc.atom_primitive_atoms();
+
+        // The single optimization added since forever.
+        let good_mask = {
+            mask_faraway_atoms(&original_coords.lattice(), &superstructure, full_range, sc_centermost_latt)
+        };
+        let sc_latts = mask_vec(sc_latts, &good_mask);
+        let sc_sites = mask_vec(sc_sites, &good_mask);
+        let sc_carts = mask_vec(sc_carts, &good_mask);
 
         // The supercell is large enough that we can disregard its periodicity, and consider
         // interactions between its centermost cell and any other atom.
@@ -447,20 +455,15 @@ fn sufficiently_large_centered_supercell(
     // Search for a slightly larger range to account for numerical fuzz.
     interaction_range *= 1.0 + 1e-4;
 
-    let get_permuted_vectors = |vectors: &[_; 3], k| (
-        vectors[(k + 0) % 3],
-        vectors[(k + 1) % 3],
-        vectors[(k + 2) % 3],
-    );
-
-    let get_scaled_vectors = |coeffs: [u32; 3]| {
+    let get_scaled_lattice = |coeffs: [u32; 3]| {
         let mut vectors = lattice.vectors().clone();
         for k in 0..3 {
             vectors[k] *= coeffs[k] as f64;
         }
-        vectors
+        Lattice::from_vectors(&vectors)
     };
 
+    //-------------
     // Bail out on skewed structures, because it's unclear how to handle them.
     //
     // Specifically, this implementation is limited to cells with the following property
@@ -471,56 +474,44 @@ fn sufficiently_large_centered_supercell(
     //   `a` and `b`. When this ray exits the unit cell, it will touch the face of the
     //   periodic boundary spanned by `a` and `b`. (i.e. the one it is normal to)
     //
-    // The key advantage of such a cell is that the closest points on the parallelepiped
-    // surface to the cell center must necessarily be among those six "normal ray"
-    // intersection points. (FIXME: proof? Seems obviously true if you picture it though)
+    // The key advantage of such a cell is that these six "normal ray" intersection points must
+    // necessarily be the only points on the parallelepiped where distance to the origin is
+    // a local minimum. (hence, the global minimum must be among them)
     //
     // (TODO: can it be shown that a Delaunay or Niggli cell meets this criteria?)
-    let check_plane_distances = |vectors: &[V3; 3]| {
 
-        let matrix = M3(*vectors);
-        let origin = V3([0.0; 3]) * &matrix;
-        let center = V3([0.5; 3]) * &matrix;
+    let check_plane_distances = |lattice: &Lattice| {
+        // Recognizing that the plane normals are reciprocal lattice vectors, it is easy to prove
+        // the following: The requirement that the ray drawn from the origin along reciprocal basis
+        // vector `b_i` does not cross the plane of a face normal to `b_k` before crossing the plane
+        // of a face normal to `b_i` can be written as:
+        //
+        //                         abs(b_i dot b_k) <= b_i dot b_i
+        //
+        let recip = lattice.reciprocal();
+        let recip_metric = recip.matrix() * &recip.matrix().t(); // matrix of dot products
+        for i in 0..3 {
+            for k in 0..3 {
+                if i != k {
+                    ensure!(
+                        // The fuzz is to allow matrices like this, where two faces tie.
+                        // (i.e. one of the rays exits through an edge of the parallelepiped):
+                        //
+                        //                     [[1 1 0], [0 1 0], [0 0 1]]
+                        //
+                        // (which is a useful lattice for test cases since it is unimodular)
+                        //                                                                   - ML
+                        f64::abs(recip_metric[i][k]) <= recip_metric[i][i] * (1.0 + 1e-4),
+                        "cell is too skewed for bond search"
+                    );
+                }
+            }
+        }
 
-        try_map_arr([0, 1, 2], |k| {
-            use self::geometry::PointNormalPlane as Plane;
-            use self::geometry::ParametricLine as Line;
-
-            let (v, p, q) = get_permuted_vectors(vectors, k);
-
-            // Planes touching the origin. (the other three planes are equivalent under inversion)
-            let good = Plane::from_span_and_point((p, q), origin);
-            let bad1 = Plane::from_span_and_point((v, p), origin);
-            let bad2 = Plane::from_span_and_point((v, q), origin);
-
-            // Line touching the cell center with unit direction.
-            let line = Line { start: center, vector: good.normal };
-
-            // I have no strategy for how to adjust supercell size when this property fails,
-            // so verify that the correct surface is touched first.
-            let dist = |plane| line.t_at_plane_intersection(plane).abs();
-            ensure!(
-                // NOTE: previously this used a strict `<` comparison, with the note:
-                //
-                //      (numerical fuzz doesn't matter here; there are no ties because
-                //       we cannot possibly touch the paralellepiped at a vertex)
-                //
-                // I'm not sure why I thought this. It doesn't need to pass through a vertex for
-                // there to be a tie (it can pass through an edge), and in fact it is easy to
-                // construct a 'small-skew' lattice where this occurs:
-                //
-                //                     [[1 1 0], [0 1 0], [0 0 1]]
-                //
-                // (which is a useful lattice for test cases since it is unimodular)
-                //                                                                   - ML
-                dist(&good) <= f64::min(dist(&bad1), dist(&bad2)) * (1.0 + 1e-4),
-                "cell is too skewed for bond search"
-            );
-
-            Ok(dist(&good))
-        })
+        // Return the plane distances from the origin.
+        Ok(V3::from_fn(|axis| 0.5 * lattice.plane_spacing(V3::axis_unit(axis))))
     };
-    check_plane_distances(lattice.vectors())?;
+    let distances = check_plane_distances(lattice)?;
 
     // If we expand the cell large enough that all of these normal intersection points
     // are at a distance `>= interaction_range` from the center, then we have guaranteed
@@ -528,22 +519,18 @@ fn sufficiently_large_centered_supercell(
     // cell center.
 
     // The small-skew property makes it safe to do this analysis per-axis and take a
-    // diagonal supercell.
-    let mut coeffs = arr_from_fn(|k| {
-        // Get the part of this vector orthogonal to both other vectors.
-        let (v, p, q) = get_permuted_vectors(lattice.vectors(), k);
-        let v = v.par(&V3::cross(&p, &q));
+    // diagonal supercell.  We just pick large enough multiples along each axis so that rays normal
+    // to the cell faces will exit the sphere centered at the origin before it exits its
+    // corresponding face.
+    let mut coeffs = distances.map(|dist: f64| f64::ceil(interaction_range / dist) as u32).0;
 
-        // Make sure the "height" of the parallelepiped can fit the sphere diameter.
-        f64::ceil((2.0 * interaction_range) / v.norm()) as u32
-    });
-
-    // ...just one thing.  By picking different multiples for each cell vector,
-    // we may have destroyed the small-skew property, and thus the shortest distance
-    // to the periodic boundary may be shorter than what we targeted.
+    // ...just one thing.  In theory, by picking different multiples for each cell vector, we may
+    // have accidentally destroyed the small-skew property.  (meaning that, while each ray
+    // definitely intersects its corresponding face at a distance beyond `interaction_range`, they
+    // may theoretically intersect another face before that point)
     //
     // ...I think.  Better safe than sorry, anyways.
-    let distances = match check_plane_distances(&get_scaled_vectors(coeffs)) {
+    let distances = match check_plane_distances(&get_scaled_lattice(coeffs)) {
         Ok(distances) => {
             trace!("bond graph: intermediate supercell: {:?}, r = {}", coeffs, interaction_range);
             distances
@@ -553,7 +540,7 @@ fn sufficiently_large_centered_supercell(
             coeffs = [*coeffs.iter().max().unwrap(); 3];
             trace!("bond graph: taking uniform intermediate supercell: {:?}, r = {}", coeffs, interaction_range);
 
-            check_plane_distances(&get_scaled_vectors(coeffs))
+            check_plane_distances(&get_scaled_lattice(coeffs))
                 .expect("(bug) uniform supercell does not satisfy the property!?")
         }
     };
@@ -575,39 +562,57 @@ fn sufficiently_large_centered_supercell(
     Ok(supercell::centered_diagonal(coeffs))
 }
 
-mod geometry {
-    use super::*;
+//=================================================================
 
-    /// Locus of points `x` in 3D space satisfying `dot(normal, x - point) == 0`.
-    pub struct PointNormalPlane {
-        pub point: V3,
-        pub normal: V3,
+// Trim atoms that very definitely cannot interact with anything inside the image of
+// the unit cell with the specified `latt`, assuming that positions were all reduced
+// into the cell prior to supercell generation.
+//
+// This provides a constant factor speedup of about 8 on large systems.
+//
+// NOTE: This is correct even for arbitrarily-skewed cells.
+fn mask_faraway_atoms(
+    prim_lattice: &Lattice,
+    super_coords: &Coords,
+    interaction_range: f64,
+    latt: V3<i32>,
+) -> Vec<bool> {
+    let mut super_carts = super_coords.to_carts();
+
+    // Move the center of the chosen cell to the origin.
+    let center = latt.map(|x| x as f64 + 0.5) * prim_lattice;
+    for cart in &mut super_carts {
+        *cart -= center;
     }
 
-    /// The curve `x(t) = start + t * vector`.
-    pub struct ParametricLine {
-        pub start: V3,
-        pub vector: V3,
-    }
+    let mut good_mask: Vec<bool> = std::iter::repeat(true).take(super_coords.len()).collect();
 
-    impl PointNormalPlane {
-        /// NOTE: The direction of the normal is arbitrarily chosen
-        pub fn from_span_and_point((a, b): (V3, V3), point: V3) -> Self {
-            PointNormalPlane {
-                normal: V3::cross(&a, &b).unit(),
-                point,
+    // Pick a pair of faces to consider.
+    for axis in 0..3 {
+        // Consider distances not along the lattice vectors, but rather, along the face normals.
+        let miller = V3::axis_unit(axis);
+        let plane_spacing = prim_lattice.plane_spacing(miller);
+        let normal = prim_lattice.plane_normal(miller);
+
+        // Along the axis represented by `normal`, no matter *how* skewed the cell is, we know that
+        // all atoms in the central unit cell have a projection of `abs(x) <= 0.5 * plane_spacing`.
+        //
+        // This means that anything with a projection `x` with `abs(x) >= 0.5 * plane_spacing +
+        // interaction_range` is too far to interact with this image.
+        let threshold = 0.5 * plane_spacing + interaction_range ;
+        for (i, &cart) in super_carts.iter().enumerate() {
+            if V3::dot(&cart, &normal).abs() >= threshold * (1.0+1e-6) {
+                good_mask[i] = false;
             }
         }
     }
 
-    impl ParametricLine {
-        /// Solve for the value of `t` where this line intersects a plane.
-        pub fn t_at_plane_intersection(&self, plane: &PointNormalPlane) -> f64 {
-            let numer = dot(&plane.normal, &(&plane.point - &self.start));
-            let denom = dot(&plane.normal, &self.vector);
-            numer / denom
-        }
-    }
+    good_mask
+}
+
+fn mask_vec<T>(vec: Vec<T>, mask: &[bool]) -> Vec<T> {
+    assert_eq!(vec.len(), mask.len());
+    vec.into_iter().zip(mask).filter(|t| *t.1).map(|t| t.0).collect()
 }
 
 //=================================================================
@@ -680,7 +685,7 @@ mod tests {
 
         let bonds = FracBonds::from_brute_force(&coords, range).unwrap();
         let actual = bonds.into_iter().collect::<BTreeSet<_>>();
-        
+
         // For frac vector v and lattice L:
         //                         [1 1 0]
         // L transformed as  L ->  [0 1 0] L,   and the cart vector (v L) must remain fixed,
@@ -708,6 +713,20 @@ mod tests {
     fn too_skewed() {
         let lattice = Lattice::from([
             [1.0, 3.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ]);
+        let coords = CoordsKind::Carts(vec![V3::zero()]);
+        let coords = Coords::new(lattice, coords);
+        FracBonds::from_brute_force(&coords, 1.2).unwrap();
+    }
+
+    // (crosses at the opposite face from the first test, to test the `abs` in the check)
+    #[test]
+    #[should_panic(expected = "too skewed")]
+    fn too_skewed_minus() {
+        let lattice = Lattice::from([
+            [1.0, -3.0, 0.0],
             [0.0, 1.0, 0.0],
             [0.0, 0.0, 1.0],
         ]);

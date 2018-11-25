@@ -54,6 +54,7 @@ impl PotentialBuilder<CommonMeta> for KolmogorovCrespiZ {
             let interaction_radius = params.cutoff_end() * (1.0 + 1e-7);
             let bonds = FracBondsWithSkin::new(
                 interaction_radius,
+                // FIXME: This closure represents a significant cost of the FracBonds search
                 Box::new(move |&(elem_a, layer_a): &BondMeta, &(elem_b, layer_b): &BondMeta| {
                     match (elem_a, elem_b) {
                         (CARBON, CARBON) => match i32::abs(layer_a as i32 - layer_b as i32) {
