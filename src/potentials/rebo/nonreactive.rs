@@ -553,16 +553,9 @@ pub fn find_all_interactions(
     elements: &[Element],
 ) -> FailResult<Interactions> {
     let ref types = elements.iter().cloned().map(AtomType::from_element).collect::<FailResult<Vec<_>>>()?;
-    let max_radius = {
-        params.by_type.values()
-            .flat_map(|x| x.values().map(|x| x.cutoff_region.1))
-            .fold(::std::f64::NEG_INFINITY, |a, b| f64::max(a, b))
-    };
-
     let ref graph = {
         rsp2_structure::bonds::FracBonds::from_brute_force_with_meta(
             coords, types.iter().cloned(),
-            max_radius,
             // FIXME should return None for other elements
             |&a, &b| Some(params.by_type[a][b].cutoff_region.1),
         )?.to_periodic_graph()

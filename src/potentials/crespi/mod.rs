@@ -521,7 +521,6 @@ mod input_tests {
         let bonds = FracBonds::from_brute_force_with_meta(
             coords,
             zip_eq!(elements, layers),
-            14.0 * 1.001,
             |(&ea, &la), (&eb, &lb)| match ((ea, eb), i32::abs(la - lb)) {
                 ((CARBON, CARBON), 1) => Some(14.0 * 1.001),
                 _ => None,

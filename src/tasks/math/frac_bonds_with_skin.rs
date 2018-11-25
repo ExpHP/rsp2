@@ -22,7 +22,6 @@ use rsp2_structure::{Coords, Lattice};
 pub struct FracBondsWithSkin<M, F: ?Sized> {
     last: Option<Cache<M>>,
     skin_distance: f64,
-    max_range: f64,
 
     // FIXME: This should just be F, but until `Box<Fn()>` is finally able to implement `Fn()`,
     //        the only way we can let the caller use dynamic polymorphism without introducing
@@ -45,11 +44,11 @@ enum CacheStatus { Applicable, Invalidated }
 impl<M, F: ?Sized> FracBondsWithSkin<M, F>
 where
     F: Fn(&M, &M) -> Option<f64>,
-    M: Eq,
+    M: Ord,
 {
-    pub fn new(max_range: f64, meta_range: Box<F>, skin_distance: f64) -> Self {
+    pub fn new(meta_range: Box<F>, skin_distance: f64) -> Self {
         let last = None;
-        Self { last, max_range, meta_range, skin_distance }
+        Self { last, meta_range, skin_distance }
     }
 
     /// Compute the `FracBonds` for a given structure, possibly reusing results cached from a
@@ -127,12 +126,10 @@ where
     ) -> FailResult<FracBonds> {
         FracBonds::from_brute_force_with_meta(
             coords, meta.clone(),
-            self.max_search_range(),
             |a, b| self.meta_search_range(a, b),
         )
     }
 
-    fn max_search_range(&self) -> f64 { self.max_range + self.skin_distance }
     fn meta_search_range(&self, a: &M, b: &M) -> Option<f64> {
         (self.meta_range)(a, b).map(|x| x + self.skin_distance)
     }

@@ -271,7 +271,7 @@ impl FracBonds {
         range: f64,
     ) -> Result<Self, Error> {
         let fake_meta = vec![(); original_coords.len()];
-        Self::from_brute_force_with_meta(original_coords, &fake_meta, range, |(), ()| Some(range))
+        Self::from_brute_force_with_meta(original_coords, &fake_meta, |(), ()| Some(range))
     }
 
     /// Compute bonds, using different bond lengths for different types.
@@ -283,21 +283,49 @@ impl FracBonds {
     ///
     /// If two types of atoms do not interact, `meta_range` can return `None` to guarantee that no
     /// bonds between these types are included in the output.
-    pub fn from_brute_force_with_meta<M>(
+    pub fn from_brute_force_with_meta<M: Ord>(
         original_coords: &Coords,
         meta: impl IntoIterator<Item=M>,
-        // The largest possible range needed. This will affect the size of the
-        // supercell used to search for bonds.
-        full_range: f64,
         // Range for different atom types. This will affect membership of bonds in the output.
         mut meta_range: impl FnMut(&M, &M) -> Option<f64>,
     ) -> Result<Self, Error> {
         let meta = meta.into_iter().collect::<Vec<_>>();
 
+        // Go from meta of arbitrary M type to a fixed set of indices.
+        let mut unique_meta = meta.iter().collect::<Vec<_>>();
+        unique_meta.sort();
+        unique_meta.dedup();
+
+        let map: std::collections::BTreeMap<&M, u32> = {
+            unique_meta.iter().cloned().enumerate().map(|(i, x)| (x, i as u32)).collect()
+        };
+        let meta_indices = meta.iter().map(|x| map[x]).collect::<Vec<_>>();
+
+        // Collect all interaction distances, squared.
+        let dense_ranges_sq = Dense::from_fn(unique_meta.len(), |r, c| {
+            meta_range(unique_meta[r], unique_meta[c]).map(|dist| dist * dist)
+        });
+
+        let out = Self::_from_brute_force_with_meta(original_coords, &meta_indices, &dense_ranges_sq)?;
+        if cfg!(debug_assertions) {
+            let full_range = f64::sqrt(max_value_present(&dense_ranges_sq.flat));
+            out.sanity_check(original_coords, full_range, &meta, meta_range);
+        }
+        Ok(out)
+    }
+
+    // Monomorphic, so that it can be optimized even in debug builds using cargo profile overrides.
+    fn _from_brute_force_with_meta(
+        original_coords: &Coords,
+        original_meta: &[u32],
+        meta_range_sq: &Dense<Option<f64>>,
+    ) -> Result<Self, Error> {
         // Construct a supercell large enough to contain all atoms that interact with an atom
         // in the centermost unit cell, assuming they're all reduced.
+        let max_range_sq = max_value_present(&meta_range_sq.flat);
+        let max_range = f64::sqrt(max_range_sq);
         let sc_builder = {
-            sufficiently_large_centered_supercell(original_coords.lattice(), full_range)?
+            sufficiently_large_centered_supercell(original_coords.lattice(), max_range)?
         };
 
         // ...like I said; they gotta be reduced.
@@ -318,7 +346,7 @@ impl FracBonds {
 
         // The single optimization added since forever.
         let good_mask = {
-            mask_faraway_atoms(&original_coords.lattice(), &superstructure, full_range, sc_centermost_latt)
+            mask_faraway_atoms(&original_coords.lattice(), &superstructure, max_range, sc_centermost_latt)
         };
         let sc_latts = mask_vec(sc_latts, &good_mask);
         let sc_sites = mask_vec(sc_sites, &good_mask);
@@ -332,9 +360,11 @@ impl FracBonds {
                 continue;
             }
             num_visited += 1;
+            let meta_from = original_meta[site_from];
 
             for (&latt_to, &site_to, &cart_to) in izip!(&sc_latts, &sc_sites, &sc_carts) {
-                let range_hi = match meta_range(&meta[site_from], &meta[site_to]) {
+                let meta_to = original_meta[site_to];
+                let range_sq = match meta_range_sq[(meta_from, meta_to)] {
                     None => continue,
                     Some(x) => x,
                 };
@@ -343,9 +373,7 @@ impl FracBonds {
                 //        assumption that `a - b == -(b - a)` for all floating point numbers where
                 //        the result is not NaN.  However, I do not believe this is true in all
                 //        possible rounding modes.
-                let sqnorm = (cart_to - cart_from).sqnorm();
-                let square = |x| x*x;
-                if sqnorm <= square(range_hi) {
+                if (cart_to - cart_from).sqnorm() <= range_sq {
                     // No self interactions!
                     if (site_from, latt_from) == (site_to, latt_to) {
                         continue;
@@ -365,11 +393,7 @@ impl FracBonds {
         let num_atoms = original_coords.num_atoms();
         assert_eq!(num_visited, num_atoms, "(BUG) wrong # atoms in center cell?");
 
-        let out = FracBonds { num_atoms, from, to, image_diff };
-        if cfg!(debug_assertions) {
-            out.sanity_check(original_coords, full_range, &meta, meta_range);
-        }
-        Ok(out)
+        Ok(FracBonds { num_atoms, from, to, image_diff })
     }
 
     #[inline]
@@ -560,6 +584,39 @@ fn sufficiently_large_centered_supercell(
     trace!("bond graph: true supercell: centered_diagonal({:?})", coeffs);
 
     Ok(supercell::centered_diagonal(coeffs))
+}
+
+//=================================================================
+
+// a dense square matrix
+struct Dense<T> {
+    width: usize,
+    flat: Vec<T>,
+}
+
+impl<T> Dense<T> {
+    fn from_fn(width: usize, mut f: impl FnMut(usize, usize) -> T) -> Self {
+        let mut flat = Vec::with_capacity((width*width) as usize);
+        for r in 0..width {
+            for c in 0..width {
+                flat.push(f(r, c))
+            }
+        }
+        Dense { width, flat }
+    }
+}
+
+impl<T> std::ops::Index<(u32, u32)> for Dense<T> {
+    type Output = T;
+
+    #[inline(always)]
+    fn index(&self, (r, c): (u32, u32)) -> &T {
+        &self.flat[r as usize * self.width + c as usize]
+    }
+}
+
+fn max_value_present(values: &[Option<f64>]) -> f64 {
+    values.iter().cloned().fold(0.0, |a, b| a.max(b.unwrap_or(0.0)))
 }
 
 //=================================================================
@@ -824,7 +881,7 @@ mod tests {
             _ => None,
         };
 
-        let bonds = FracBonds::from_brute_force_with_meta(&coords, meta, 0.0, get_range).unwrap();
+        let bonds = FracBonds::from_brute_force_with_meta(&coords, meta, get_range).unwrap();
         let actual = (&bonds).into_iter().collect::<BTreeSet<_>>();
         assert_eq!{
             actual,
