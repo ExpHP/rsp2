@@ -1707,6 +1707,9 @@ impl TrialDir {
     pub fn eigensols_path(&self, iteration: Iteration) -> PathBuf
     { self.join(format!("ev-loop-modes-{:02}.json", iteration)) }
 
+    pub fn modified_settings_path(&self, iteration: Iteration) -> PathBuf
+    { self.join(format!("ev-loop-modes-{:02}.yaml", iteration)) }
+
     pub fn uncompressed_gamma_dynmat_path(&self, iteration: Iteration) -> PathBuf
     { self.join(format!("gamma-dynmat-{:02}.json", iteration)) }
 

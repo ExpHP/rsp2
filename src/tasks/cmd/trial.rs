@@ -25,6 +25,8 @@ use ::rsp2_fs_util::rm_rf;
 pub struct TrialDir {
     path: PathDir,
     _lock: LockfileGuard,
+    // it is a logic error to read the settings more than once
+    settings_were_read: bool,
 }
 
 impl AsPath for TrialDir {
@@ -59,6 +61,7 @@ impl TrialDir {
 
         // Obtain a lock before writing anything to the directory.
         let trial_dir = TrialDir {
+            settings_were_read: false,
             _lock: match Self::lockfile_path(&trial_dir).try_lock()? {
                 None => bail!("the lockfile was stolen from under our feet!"),
                 Some(g) => g,
@@ -78,7 +81,7 @@ impl TrialDir {
 
         // This file is saved not just for the user's benefit, but also to allow some
         // commands to operate on an existing output directory.
-        Yaml(&config).save(Self::_settings_path(&trial_dir))?;
+        Yaml(&config).save(Self::_base_settings_path(&trial_dir))?;
 
         trial_dir.validate()
     }
@@ -86,15 +89,16 @@ impl TrialDir {
     fn lockfile_path(dir: &PathDir) -> LockfilePath
     { LockfilePath(dir.join("rsp2.lock").into()) }
 
-    fn _settings_path(path: &PathDir) -> PathArc
+    fn _base_settings_path(path: &PathDir) -> PathArc
     { PathArc::new(path.join("settings.yaml")) }
 
-    fn settings_path(&self) -> FailResult<PathFile>
-    { Ok(Self::_settings_path(self).canonicalize()?.into_file()?) }
+    fn base_settings_path(&self) -> FailResult<PathFile>
+    { Ok(Self::_base_settings_path(self).canonicalize()?.into_file()?) }
 
     pub fn from_existing(path: &PathArc) -> FailResult<Self> {
         let path = PathArc::new(path).canonicalize()?.into_dir()?;
         TrialDir {
+            settings_were_read: false,
             _lock: match Self::lockfile_path(&path).try_lock()? {
                 None => bail!("the trial directory is already in use"),
                 Some(g) => g,
@@ -105,7 +109,7 @@ impl TrialDir {
 
     pub fn validate(self) -> FailResult<Self> {
         // Double-check that these files exist.
-        let _ = self.settings_path()?;
+        let _ = self.base_settings_path()?;
         let _ = Self::lockfile_path(&self).canonicalize()?.into_file()?;
         Ok(self)
     }
@@ -142,11 +146,50 @@ impl TrialDir {
     pub fn read_file(&self, path: impl AsPath) -> FailResult<FileRead>
     { Ok(PathFile::new(self.join(path))?.read()?) }
 
-    pub fn read_settings<T>(&self) -> FailResult<T>
+    // HACK: A quick check for a simple logic error.
+    //       (settings should ONLY be read in the entry_point, with borrows propagated
+    //        down throughout the rest of the code. This is because they may be monkey-patched
+    //        in secondary runs on the same trial dir)
+    fn mark_settings_read(&mut self) {
+        if self.settings_were_read {
+            panic!("\
+                (BUG) A trial dir's settings file was read multiple times! This is likely \
+                a logic error.\
+            ");
+        }
+        self.settings_were_read = true;
+    }
+
+    pub fn read_base_settings<T>(&mut self) -> FailResult<T>
     where T: YamlRead,
     {
-        let file = FileRead::read(self.settings_path()?)?;
+        self.mark_settings_read();
+        let file = FileRead::read(self.base_settings_path()?)?;
         Ok(YamlRead::from_reader(file)?)
+    }
+
+    pub fn read_modified_settings<T>(
+        &mut self,
+        mut sources: crate::ui::cfg_merging::ConfigSources,
+        save_path: Option<impl AsPath>,
+    ) -> FailResult<T>
+    where T: YamlRead,
+    {
+        self.mark_settings_read();
+
+        // Get base settings, monkey-patched with the additional sources
+        sources.prepend_file(self.base_settings_path()?)?;
+
+        // Possibly save them
+        let yaml = sources.into_effective_yaml();
+        if let Some(save_path) = save_path {
+            trace!("Patched settings for this run will be recorded at {}", save_path.as_path().nice());
+            Yaml(&yaml).save(save_path)?;
+        }
+
+        // (better error messages for type errors if we reparse from a string)
+        let s = ::serde_yaml::to_string(&yaml)?;
+        YamlRead::from_reader(s.as_bytes())
     }
 }
 

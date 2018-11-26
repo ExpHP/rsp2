@@ -9,12 +9,13 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::FailResult;
+use crate::FailResult;
 
-use ::rsp2_tasks_config::YamlRead;
+use rsp2_tasks_config::YamlRead;
 
-use ::serde_yaml::{Value, Mapping};
-use ::path_abs::PathFile;
+use serde_yaml::{Value, Mapping};
+use path_abs::PathFile;
+use std::path::Path;
 
 pub const CONFIG_HELP_STR: &'static str = "\
     config yaml, provided as either a filepath, or as an embedded literal \
@@ -32,6 +33,14 @@ pub const CONFIG_HELP_STR: &'static str = "\
     Note that detection of filepaths versus literals is based solely \
     on the presence of a colon, and no means of escaping one in a path \
     are currently provided.\
+";
+
+pub const CONFIG_OVERRIDE_HELP_STR: &'static str = "\
+    additional config yamls used only for this step.  If provided, these will be merged on top of \
+    the `settings.yaml` saved inside the trial directory from the initial run to provide a new \
+    effective configuration for this step.\
+    \n\n\
+    See `rsp2 --help` for more information about the config argument syntax.\
 ";
 
 /// A list of config yamls that can be merged into a single effective config.
@@ -62,15 +71,30 @@ impl Config {
     /// May do path resolution and file IO
     pub(crate) fn resolve_from_arg(s: &str) -> FailResult<Config>
     { resolve_from_arg::resolve_from_arg(s) }
+
+    fn read_file(path: impl AsRef<Path>) -> FailResult<Config> {
+        Self::_read_file(path.as_ref())
+    }
+
+    fn _read_file(path: &Path) -> FailResult<Config> {
+        let path = PathFile::new(path)?;
+        let yaml = YamlRead::from_reader(path.read()?)?;
+        let yaml = expand_dot_keys(yaml)?;
+        let yaml = validate_replacements_from_one_config(yaml)?;
+
+        let source = ConfigSource::File(path);
+        Ok(Config { yaml, source })
+    }
 }
 
 mod resolve_from_arg {
     use super::*;
 
+    // May do path resolution and file IO
     pub(crate) fn resolve_from_arg(s: &str) -> FailResult<Config> {
         // NOTE: unapologetically, no mechanism is provided for escaping a path containing ':'.
         if s.contains(":") { lit_from_arg(s) }
-        else { read_file_from_arg(s) }
+        else { Config::read_file(s) }
     }
 
     fn lit_from_arg(s: &str) -> FailResult<Config> {
@@ -93,17 +117,6 @@ mod resolve_from_arg {
         let yaml = validate_replacements_from_one_config(yaml)?;
 
         let source = ConfigSource::Argument;
-        Ok(Config { yaml, source })
-    }
-
-    // May do path resolution and file IO
-    fn read_file_from_arg(path: &str) -> FailResult<Config> {
-        let path = PathFile::new(path)?;
-        let yaml = YamlRead::from_reader(path.read()?)?;
-        let yaml = expand_dot_keys(yaml)?;
-        let yaml = validate_replacements_from_one_config(yaml)?;
-
-        let source = ConfigSource::File(path);
         Ok(Config { yaml, source })
     }
 
@@ -205,6 +218,13 @@ impl ConfigSources {
         let empty = FullyResolved(ConflictFree(DotFree(Value::Mapping(Default::default()))));
         self.0.into_iter()
             .fold(empty, |a, b| merge_nodot_and_replace(a, b.yaml))
+    }
+
+    // prepend a file source, so that all of the sources in this struct are considered to be
+    // patches to it.
+    pub fn prepend_file(&mut self, path: impl AsRef<Path>) -> FailResult<()> {
+        self.0.insert(0, Config::read_file(path)?);
+        Ok(())
     }
 
     pub fn deserialize<T: YamlRead>(self) -> FailResult<T> {

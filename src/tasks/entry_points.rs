@@ -155,8 +155,12 @@ fn check_for_deps() -> FailResult<()> {
 // -------------------------------------------------------------------------------------
 // Some commonly used CLI args.
 
-// Configuration YAML obtained from CLI args.
+// Configuration YAML obtained from CLI args, for an initial run.
 struct ConfigArgs(ConfigSources);
+
+// Configuration YAML obtained from CLI args, for future runs.
+// (disables the requirement for having at least one)
+struct ConfigOverrideArgs(Option<ConfigSources>);
 
 impl CliDeserialize for ConfigArgs {
     fn _augment_clap_app<'a, 'b>(app: clap::App<'a, 'b>) -> clap::App<'a, 'b> {
@@ -165,10 +169,26 @@ impl CliDeserialize for ConfigArgs {
         ])
     }
 
-
     fn _resolve_args(m: &clap::ArgMatches) -> FailResult<Self>
     { ConfigSources::resolve_from_args(m.expect_values_of("config")).map(ConfigArgs) }
 }
+
+impl CliDeserialize for ConfigOverrideArgs {
+    fn _augment_clap_app<'a, 'b>(app: clap::App<'a, 'b>) -> clap::App<'a, 'b> {
+        app.args(&[
+            arg!(?config [-c][--config]=CONFIG... ::ui::cfg_merging::CONFIG_OVERRIDE_HELP_STR),
+        ])
+    }
+
+    fn _resolve_args(m: &clap::ArgMatches) -> FailResult<Self> {
+        if let Some(args) = m.values_of("config") {
+            Ok(ConfigOverrideArgs(Some(ConfigSources::resolve_from_args(args)?)))
+        } else {
+            Ok(ConfigOverrideArgs(None))
+        }
+    }
+}
+
 
 impl CliDeserialize for NewTrialDirArgs {
     fn _augment_clap_app<'a, 'b>(app: clap::App<'a, 'b>) -> clap::App<'a, 'b> {
@@ -274,10 +294,10 @@ fn _rsp2_acgsd(
         let input = PathAbs::new(matches.expect_value_of("input"))?;
         let filetype = OptionalFileType::or_guess(filetype, &input);
 
-        let trial = TrialDir::create_new(dir_args)?;
+        let mut trial = TrialDir::create_new(dir_args)?;
         logfile.start(PathFile::new(trial.new_logfile_path()?)?)?;
 
-        let settings = trial.read_settings()?;
+        let settings = trial.read_base_settings()?;
         trial.run_relax_with_eigenvectors(mpi_on_demand, &settings, filetype, &input, stop_after_dynmat)
     });
 }
@@ -293,17 +313,24 @@ pub fn after_diagonalization(bin_name: &str, version: VersionInfo) -> ! {
                 ])
         });
         let matches = app.get_matches();
-        let () = de.resolve_args(&matches)?;
+        let ConfigOverrideArgs(overrides) = de.resolve_args(&matches)?;
 
         let dir = PathDir::new(matches.expect_value_of("dir"))?;
-        let trial = TrialDir::from_existing(&dir)?;
+        let mut trial = TrialDir::from_existing(&dir)?;
 
         // Make sure the run is valid before making a logfile
         let iteration = trial.find_iteration_for_ev_chase()?;
 
         logfile.start(PathFile::new(trial.new_logfile_path()?)?)?;
 
-        let settings = trial.read_settings()?;
+        let settings = match overrides {
+            Some(overrides) => {
+                let save_path = trial.modified_settings_path(iteration);
+                trial.read_modified_settings(overrides, Some(&save_path))?
+            },
+            None => trial.read_base_settings()?,
+        };
+
         let DidEvChasing(chased) = trial.run_after_diagonalization(
             mpi_on_demand, &settings, iteration,
         )?;
@@ -328,10 +355,10 @@ pub fn shear_plot(bin_name: &str, version: VersionInfo) -> ! {
 
         let input = PathDir::new(matches.expect_value_of("input"))?;
 
-        let trial = TrialDir::create_new(dir_args)?;
+        let mut trial = TrialDir::create_new(dir_args)?;
         logfile.start(PathFile::new(trial.new_logfile_path()?)?)?;
 
-        let settings = trial.read_settings()?;
+        let settings = trial.read_base_settings()?;
         trial.run_energy_surface(mpi_on_demand, &settings, &input)
     });
 }
@@ -349,10 +376,10 @@ pub fn save_bands_after_the_fact(bin_name: &str, version: VersionInfo) -> ! {
         let () = de.resolve_args(&matches)?;
 
         let trial = PathDir::new(matches.expect_value_of("trial_dir"))?;
-        let trial = TrialDir::from_existing(&trial)?;
+        let mut trial = TrialDir::from_existing(&trial)?;
         logfile.start(PathFile::new(trial.new_logfile_path()?)?)?;
 
-        let settings = trial.read_settings()?;
+        let settings = trial.read_base_settings()?;
         trial.run_save_bands_after_the_fact(mpi_on_demand, &settings)
     });
 }
@@ -370,11 +397,11 @@ pub fn rerun_analysis(bin_name: &str, version: VersionInfo) -> ! {
         let () = de.resolve_args(&matches)?;
 
         let dir = PathDir::new(matches.expect_value_of("dir"))?;
-        let (trial, structure) = ::cmd::resolve_trial_or_structure_path(&dir, "final.structure")?;
+        let (mut trial, structure) = ::cmd::resolve_trial_or_structure_path(&dir, "final.structure")?;
 
         logfile.start(PathFile::new(trial.new_logfile_path()?)?)?;
 
-        let settings = trial.read_settings()?;
+        let settings = trial.read_base_settings()?;
         trial.rerun_ev_analysis(mpi_on_demand, &settings, structure)
     });
 }
