@@ -40,7 +40,7 @@ impl PotentialBuilder<CommonMeta> for KolmogorovCrespiZ {
     fn initialize_bond_diff_fn(&self, coords: &Coords, meta: CommonMeta) -> FailResult<Option<Box<dyn BondDiffFn<CommonMeta>>>>
     {
         fn fn_body(me: &KolmogorovCrespiZ, coords: &Coords, meta: CommonMeta) -> FailResult<Option<Box<dyn BondDiffFn<CommonMeta>>>> {
-            let cfg::PotentialKolmogorovCrespiZNew { cutoff_begin, cutoff_transition_dist, skin_depth } = me.0;
+            let cfg::PotentialKolmogorovCrespiZNew { cutoff_begin, cutoff_transition_dist, skin_depth, skin_check_frequency } = me.0;
             let mut params = crespi_imp::Params::default();
             if let Some(cutoff_begin) = cutoff_begin {
                 params.cutoff_begin = cutoff_begin;
@@ -61,7 +61,7 @@ impl PotentialBuilder<CommonMeta> for KolmogorovCrespiZ {
             let layers = me.find_layers(coords, &meta).by_atom();
 
             let interaction_radius = params.cutoff_end() * (1.0 + 1e-7);
-            let bonds = FracBondsWithSkin::new(
+            let mut bonds = FracBondsWithSkin::new(
                 Box::new(move |&(elem_a, layer_a): &BondMeta, &(elem_b, layer_b): &BondMeta| {
                     match (elem_a, elem_b) {
                         (CARBON, CARBON) => match i32::abs(layer_a as i32 - layer_b as i32) {
@@ -73,6 +73,7 @@ impl PotentialBuilder<CommonMeta> for KolmogorovCrespiZ {
                 }) as Box<dyn Fn(&_, &_) -> _>,
                 skin_depth,
             );
+            bonds.set_check_frequency(skin_check_frequency);
 
             Ok(Some(Box::new(Diff { params, bonds, layers })))
         }

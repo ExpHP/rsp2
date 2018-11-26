@@ -156,6 +156,8 @@ pub struct Settings {
 }
 derive_yaml_read!{Settings}
 
+fn _settings__update_large_neighbor_lists() -> bool { true }
+
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
@@ -471,8 +473,24 @@ pub struct PotentialKolmogorovCrespiZNew {
     /// performance depending on the application.
     #[serde(default = "_potential_kolmogorov_crespi_z_new__skin_depth")]
     pub skin_depth: f64,
+
+    // FIXME: hack
+    /// Perform a skin check every `n` computations (`0` = never) rather than every computation.
+    ///
+    /// Even though it may give slightly incorrect results, this is provided because in some cases,
+    /// states speculatively observed by an algorithm (such as conjugate gradient with built-in
+    /// param optimization) may have a large tendency to briefly violate the skin check.  For such
+    /// purposes it is expected that the (stronger) forces from REBO will quickly discourage CG from
+    /// actually selecting states with drastically modified neighbor lists, and that the initial
+    /// bond list should remain sufficient for all states actually visited by CG.
+    ///
+    /// Because various parts of the code may call the potential any arbitrary number of times,
+    /// the frequency here does not necessarily correspond to anything meaningful.
+    #[serde(default = "_potential_kolmogorov_crespi_z_new__skin_check_frequency")]
+    pub skin_check_frequency: u64,
 }
 fn _potential_kolmogorov_crespi_z_new__skin_depth() -> f64 { 1.0 }
+fn _potential_kolmogorov_crespi_z_new__skin_check_frequency() -> u64 { 1 }
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]

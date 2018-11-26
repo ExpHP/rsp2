@@ -29,6 +29,10 @@ pub struct FracBondsWithSkin<M, F: ?Sized> {
     // NOTE: (the reason we need to support dynamic polymorphism is because that is currently
     //        the only substitute for existential types outside of function return types.)
     meta_range: Box<F>,
+
+    // HACK
+    num_calls: u64,
+    check_frequency: u64,
 }
 
 struct Cache<M> {
@@ -48,7 +52,13 @@ where
 {
     pub fn new(meta_range: Box<F>, skin_distance: f64) -> Self {
         let last = None;
-        Self { last, meta_range, skin_distance }
+        let num_calls = 0;
+        let check_frequency = 1;
+        Self { last, meta_range, skin_distance, num_calls, check_frequency }
+    }
+
+    pub fn set_check_frequency(&mut self, check_frequency: u64) {
+        self.check_frequency = check_frequency;
     }
 
     /// Compute the `FracBonds` for a given structure, possibly reusing results cached from a
@@ -64,16 +74,28 @@ where
     ) -> FailResult<&FracBonds> {
         let meta = meta.into_exact_size_clone_iterator();
 
-        match self.cache_status(coords, meta.clone()) {
-            CacheStatus::Invalidated => {
-                self.last = Some(Cache {
-                    input_lattice: coords.lattice().clone(),
-                    input_carts: coords.to_carts(),
-                    input_meta: meta.clone().collect(),
-                    output: self.force_compute(coords, meta)?,
-                });
-            },
-            CacheStatus::Applicable => {},
+        let replace_cache = {
+            match (self.num_calls, self.check_frequency) {
+                (0, _) => true, // first call
+                (_, 0) => false, // infinite delay
+                (a, b) if a % b == 0 => {
+                    match self.cache_status(coords, meta.clone()) {
+                        CacheStatus::Invalidated => true,
+                        CacheStatus::Applicable => false,
+                    }
+                },
+                (_, _) => false,
+            }
+        };
+        self.num_calls += 1;
+
+        if replace_cache {
+            self.last = Some(Cache {
+                input_lattice: coords.lattice().clone(),
+                input_carts: coords.to_carts(),
+                input_meta: meta.clone().collect(),
+                output: self.force_compute(coords, meta)?,
+            });
         }
         Ok(&self.last.as_ref().unwrap().output)
     }
