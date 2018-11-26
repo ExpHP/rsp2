@@ -457,8 +457,18 @@ pub struct PotentialKolmogorovCrespiZNew {
     /// Cutoff radius (Angstrom?)
     #[serde(rename = "cutoff")]
     pub cutoff_begin: Option<f64>,
+
+    /// Thickness of the "smooth cutoff" shell.
+    ///
+    /// `None` uses a default value.
+    ///
+    /// NOTE: If a value of 0.0 is used, the value is offset to maintain C0 continuity.
+    /// (This makes it effectively identical to LAMMPS)
     #[serde(rename = "cutoff-length")]
     pub cutoff_transition_dist: Option<f64>,
+
+    /// Skin depth for neighbor searches.  Adjusting this may wildly improve (or hurt!)
+    /// performance depending on the application.
     #[serde(default = "_potential_kolmogorov_crespi_z_new__skin_depth")]
     pub skin_depth: f64,
 }

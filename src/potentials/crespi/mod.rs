@@ -54,7 +54,10 @@ pub struct Params {
     pub cutoff_begin: f64,
     /// How far it takes for the Kolmogorov-Crespi to switch to zero after the cutoff distance.
     /// Units are Angstroms.
-    pub cutoff_transition_dist: f64,
+    ///
+    /// A value of `None` can be used to simulate Lammps' behavior of a sharp cutoff.
+    /// In this case, the value will be offset slightly for C0 continuity.
+    pub cutoff_transition_dist: Option<f64>,
 }
 
 impl Default for Params {
@@ -71,7 +74,7 @@ impl Default for Params {
             C: 3.030e-3, // eV
             C2N: [15.71e-3, 12.29e-3, 4.933e-3], // eV
             cutoff_begin: 11.0,
-            cutoff_transition_dist: 2.0,
+            cutoff_transition_dist: Some(2.0),
         }
     }
 }
@@ -110,7 +113,7 @@ impl Params {
         debug_assert_close!(1.0, normal_i.sqnorm());
         debug_assert_close!(1.0, normal_j.sqnorm());
         debug_assert!(self.cutoff_begin >= 0.0);
-        debug_assert!(self.cutoff_transition_dist >= 0.0);
+        debug_assert!(self.cutoff_transition_dist.unwrap_or(0.0) >= 0.0);
 
         compute(self, r_ij, normal_i, normal_j)
     }
@@ -131,8 +134,26 @@ impl Params {
 impl Params {
     /// Distance after which the Kolmogorov-Crespi potential is always zero.
     pub fn cutoff_end(&self) -> f64 {
-        debug_assert!(self.cutoff_transition_dist >= 0.0);
-        self.cutoff_begin + self.cutoff_transition_dist
+        debug_assert!(self.cutoff_transition_dist.unwrap_or(0.0) >= 0.0);
+        self.cutoff_begin + self.cutoff_transition_dist.unwrap_or(0.0)
+    }
+
+    /// Offset added to value for C0 continuity at the cutoff.
+    ///
+    /// This is zero if a smooth cutoff is enabled (`cutoff_transition_dist`).
+    pub fn value_offset(&self) -> f64 {
+        match self.cutoff_transition_dist {
+            None => {
+                // FIXME: we should precompute this, but then we need to do away with the public
+                //        fields in Param's API...
+                let r = self.cutoff_end();
+                let beta = self.z0 / r;
+                let beta3 = beta*beta*beta;
+                let beta6 = beta3*beta3;
+                self.A * beta6
+            },
+            Some(_) => 0.0,
+        }
     }
 
     /// Produce a randomly oriented vector whose magnitude is most likely
@@ -156,7 +177,7 @@ impl Params {
 fn compute(params: &Params, rij: V3, ni: V3, nj: V3) -> Output {
     // first check if we are too far away to care
     let distsq = rij.sqnorm();
-    let cutoff_end = params.cutoff_begin + params.cutoff_transition_dist;
+    let cutoff_end = params.cutoff_end();
     if distsq > cutoff_end * cutoff_end {
         return Output::zero();
     }
@@ -188,7 +209,7 @@ fn compute(params: &Params, rij: V3, ni: V3, nj: V3) -> Output {
 
     // lastly, take into account the cutoff function and its derivative
     Output {
-        value: cutoff * value,
+        value: cutoff * value + params.value_offset(),
         grad_rij: cutoff * d_r + cutoff_d_dist * dist_d_rij * value,
         grad_ni: cutoff * d_ni,
         grad_nj: cutoff * d_nj,
@@ -504,10 +525,8 @@ mod input_tests {
     }
 
     fn single(name: &str) -> FailResult<()> {
-
-        // Set this to false to let tests capture stdout
         let ref mut params = Params::default();
-        params.cutoff_transition_dist = 0.0; // Lammps has no smooth cutoff
+        params.cutoff_transition_dist = None; // Lammps has no smooth cutoff
         params.cutoff_begin = 14.0;
 
         let in_path = Path::new(RESOURCE_DIR).join("structure").join(name).join("structure.vasp.xz");
@@ -542,10 +561,7 @@ mod input_tests {
             grad[frac_bond.to] += bond_d_rij;
         }
 
-        // Lammps offsets the potential to make it C0 continuous. We make it C1 continuous with
-        // a smooth cutoff, so the values cannot be compared.
-        let _ = (value, expected.value);
-
+        assert_close!(abs=1e-7, rel=1e-6, value, expected.value, "in file: {}", name);
         assert_close!(abs=1e-7, rel=1e-6, grad.unvee(), expected.grad.unvee(), "in file: {}", name);
         Ok(())
     }

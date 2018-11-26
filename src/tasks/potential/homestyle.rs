@@ -45,8 +45,17 @@ impl PotentialBuilder<CommonMeta> for KolmogorovCrespiZ {
             if let Some(cutoff_begin) = cutoff_begin {
                 params.cutoff_begin = cutoff_begin;
             }
+            // (note: these are both Option<f64> but the meaning of None is different;
+            //        in the settings, it means the value wasn't provided;
+            //        in the params, it means to use a sharp cutoff)
             if let Some(cutoff_transition_dist) = cutoff_transition_dist {
-                params.cutoff_transition_dist = cutoff_transition_dist;
+                if cutoff_transition_dist == 0.0 {
+                    params.cutoff_transition_dist = None;
+                } else {
+                    params.cutoff_transition_dist = Some(cutoff_transition_dist);
+                }
+            } else {
+                // use value from Params::default()
             }
 
             let layers = me.find_layers(coords, &meta).by_atom();
