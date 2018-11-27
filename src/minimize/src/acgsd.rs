@@ -395,9 +395,8 @@ pub mod hager_beta {
     }
 }
 
-pub trait DiffFn<E>: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E> { }
-impl<E, F> DiffFn<E> for F
-where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E> { }
+//==================================================================================================
+// Errors
 
 use ::linesearch::LinesearchError;
 #[derive(Debug, Fail)]
@@ -453,59 +452,8 @@ impl<E: fmt::Display> fmt::Display for Failure<E> {
     { self.error.fmt(f) }
 }
 
-#[derive(Serialize, Deserialize)]
-#[derive(Debug, Clone)]
-pub struct Output {
-    pub iterations: u64,
-    pub position: Vec<f64>,
-    pub gradient: Vec<f64>,
-    pub value: f64,
-    // ensures addition of new fields is backwards compatible
-    #[serde(skip)]
-    #[allow(non_snake_case)]
-    __no_full_destructure: (),
-}
-
-// These *could* be declared inside acgsd()
-// but I think the function is quite long enough.
-pub(crate) mod internal_types {
-
-    #[derive(Debug, Clone)]
-    pub(crate) struct Point {
-        pub(crate) position: Vec<f64>,
-        pub(crate) gradient: Vec<f64>,
-        pub(crate) value: f64,
-    }
-
-    #[derive(Debug, Clone)]
-    pub(crate) struct Saved {
-        pub(crate) alpha: f64,
-        pub(crate) position: Vec<f64>,
-        pub(crate) gradient: Vec<f64>,
-        pub(crate) value: f64,
-    }
-
-    impl Saved {
-        pub(crate) fn into_point(self) -> Point {
-            let Saved { position, gradient, value, .. } = self;
-            Point { position, gradient, value }
-        }
-        pub(crate) fn to_point(&self) -> Point { self.clone().into_point() }
-    }
-
-    #[derive(Debug, Clone)]
-    pub(crate) struct Last {
-        pub(crate) direction: Vec<f64>, // direction searched (normalized)
-
-        // NOTE: These next three are all zero when linesearch has failed.
-        //       This can be a problem for d_value in particular.
-        pub(crate) d_value: f64,          // change in value
-        pub(crate) d_position: Vec<f64>,  // change in position
-        pub(crate) d_gradient: Vec<f64>,  // change in gradient
-
-        pub(crate) ls_failed: bool,       // linesearch failed?
-    }
-}
+//==================================================================================================
+// Builder API
 
 // For configuration performed by the code that uses CG, but which we don't necessarily
 // want to be available to be set in the config file.
@@ -543,7 +491,6 @@ impl Clone for Builder {
     }
 }
 
-
 impl Default for Builder {
     fn default() -> Self {
         Builder {
@@ -551,6 +498,9 @@ impl Default for Builder {
         }
     }
 }
+
+//==================================================================================================
+// closures in builder API
 
 #[derive(Debug, Clone)]
 pub struct AlgorithmState<'a> {
@@ -644,7 +594,24 @@ pub fn get_basic_output_fn(
 }
 
 //==================================================================================================
-// pub functions for starting the run
+// Primary public API
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone)]
+pub struct Output {
+    pub iterations: u64,
+    pub position: Vec<f64>,
+    pub gradient: Vec<f64>,
+    pub value: f64,
+    // ensures addition of new fields is backwards compatible
+    #[serde(skip)]
+    #[allow(non_snake_case)]
+    __no_full_destructure: (),
+}
+
+pub trait DiffFn<E>: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E> { }
+impl<E, F> DiffFn<E> for F
+where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E> { }
 
 impl Builder {
     pub fn run<E, F: DiffFn<E>>(
@@ -666,6 +633,45 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
 { _acgsd(&Default::default(), settings, initial_position, compute) }
 
 //==================================================================================================
+
+// Types used inside the implementation of acgsd.
+pub(crate) mod internal_types {
+    #[derive(Debug, Clone)]
+    pub(crate) struct Point {
+        pub(crate) position: Vec<f64>,
+        pub(crate) gradient: Vec<f64>,
+        pub(crate) value: f64,
+    }
+
+    #[derive(Debug, Clone)]
+    pub(crate) struct Saved {
+        pub(crate) alpha: f64,
+        pub(crate) position: Vec<f64>,
+        pub(crate) gradient: Vec<f64>,
+        pub(crate) value: f64,
+    }
+
+    impl Saved {
+        pub(crate) fn into_point(self) -> Point {
+            let Saved { position, gradient, value, .. } = self;
+            Point { position, gradient, value }
+        }
+        pub(crate) fn to_point(&self) -> Point { self.clone().into_point() }
+    }
+
+    #[derive(Debug, Clone)]
+    pub(crate) struct Last {
+        pub(crate) direction: Vec<f64>, // direction searched (normalized)
+
+        // NOTE: These next three are all zero when linesearch has failed.
+        //       This can be a problem for d_value in particular.
+        pub(crate) d_value: f64,          // change in value
+        pub(crate) d_position: Vec<f64>,  // change in position
+        pub(crate) d_gradient: Vec<f64>,  // change in gradient
+
+        pub(crate) ls_failed: bool,       // linesearch failed?
+    }
+}
 
 #[inline(never)]
 fn _acgsd<E, F: DiffFn<E>>(
@@ -1015,33 +1021,32 @@ mod tests {
 
     // For some point `P`, get a potential function of the form `V(X) = (X - P).(X - P)`.
     // This is a macro pending stabilization of `impl Trait`
-    macro_rules! quadratic_test_fn {
-        ($target: expr) => {{
-            use ::test::one_dee::prelude::*;
-            use ::test::one_dee::Polynomial;
+    fn quadratic_test_fn(
+        target: &[f64],
+    ) -> impl FnMut(&[f64]) -> Result<(f64, Vec<f64>), Never> {
+        use ::test::one_dee::prelude::*;
+        use ::test::one_dee::Polynomial;
 
-            let target = {$target}.to_vec();
-            let polys = target.iter().map(|&x| Polynomial::x_n(2).recenter(-x)).collect_vec();
-            let derivs = polys.iter().map(|p| p.derivative()).collect_vec();
-            move |x: &[f64]| Ok::<_, Never>((
-                izip!(x, polys.clone()).map(|(&x, p)| p.evaluate(x)).sum(),
-                izip!(x, derivs.clone()).map(|(&x, d)| d.evaluate(x)).collect(),
-            ))
-        }};
+        let target = target.to_vec();
+        let polys = target.iter().map(|&x| Polynomial::x_n(2).recenter(-x)).collect_vec();
+        let derivs = polys.iter().map(|p| p.derivative()).collect_vec();
+        move |x: &[f64]| Ok::<_, Never>((
+            izip!(x, polys.clone()).map(|(&x, p)| p.evaluate(x)).sum(),
+            izip!(x, derivs.clone()).map(|(&x, d)| d.evaluate(x)).collect(),
+        ))
     }
 
-    macro_rules! scale_y {
-        ($scale: expr, $f: expr) => {{
-            let scale = $scale;
-            let f = $f;
-            move |x: &[f64]| {
-                let (value, gradient): (f64, Vec<f64>) = f(x)?;
-                Ok::<_, Never>((
-                    scale * value,
-                    gradient.into_iter().map(|x| x * scale).collect_vec(),
-                ))
-            }
-        }}
+    fn scale_y<E>(
+        scale: f64,
+        mut f: impl FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>,
+    ) -> impl FnMut(&[f64]) -> Result<(f64, Vec<f64>), E> {
+        move |x: &[f64]| {
+            let (value, gradient): (f64, Vec<f64>) = f(x)?;
+            Ok((
+                scale * value,
+                gradient.into_iter().map(|x| x * scale).collect_vec(),
+            ))
+        }
     }
 
     // A high-level "it works" test.
@@ -1052,7 +1057,7 @@ mod tests {
         let target = uniform_n(15, -10.0, 10.0);
         let initial_point = uniform_n(15, -10.0, 10.0);
         let settings: Settings = from_json!({"stop-condition": {"grad-max": 1e-11}});
-        let result = super::acgsd(&settings, &initial_point, quadratic_test_fn!(&target)).unwrap();
+        let result = super::acgsd(&settings, &initial_point, quadratic_test_fn(&target)).unwrap();
         assert_close!(result.position, target);
     }
 
@@ -1067,10 +1072,10 @@ mod tests {
         let target = uniform_n(18, -10.0, 10.0);
 
         let s = from_json!({"stop-condition": {"grad-max": 1e20}});
-        assert_eq!(super::acgsd(&s, &point, quadratic_test_fn!(&target)).unwrap().iterations, 0);
+        assert_eq!(super::acgsd(&s, &point, quadratic_test_fn(&target)).unwrap().iterations, 0);
 
         let s = from_json!({"stop-condition": {"grad-norm": 1e20}});
-        assert_eq!(super::acgsd(&s, &point, quadratic_test_fn!(&target)).unwrap().iterations, 0);
+        assert_eq!(super::acgsd(&s, &point, quadratic_test_fn(&target)).unwrap().iterations, 0);
 
         // note: value-delta can only be tested after at least one iteration
         let s = from_json!({
@@ -1081,7 +1086,7 @@ mod tests {
                 }
             }
         });
-        assert_eq!(super::acgsd(&s, &point, quadratic_test_fn!(&target)).unwrap().iterations, 2);
+        assert_eq!(super::acgsd(&s, &point, quadratic_test_fn(&target)).unwrap().iterations, 2);
     }
 
     // A test to make sure some physicist doesn't stick an ill-conceived
@@ -1100,7 +1105,7 @@ mod tests {
         // Scale the "simple_quadratic" test by uniform scale factors
 
         let settings = from_json!({"stop-condition": {"grad-max": 1e-50}});
-        let potential = scale_y!(1e-40, quadratic_test_fn!(&target));
+        let potential = scale_y(1e-40, quadratic_test_fn(&target));
         let result = super::acgsd(&settings, &start, potential).unwrap();
         for (&from, x, &targ) in izip!(&start, result.position, &target) {
             assert_ne!(from, x);
@@ -1108,7 +1113,7 @@ mod tests {
         }
 
         let settings = from_json!({"stop-condition": {"grad-max": 1e+30}});
-        let potential = scale_y!(1e+40, quadratic_test_fn!(&target));
+        let potential = scale_y(1e+40, quadratic_test_fn(&target));
         let result = super::acgsd(&settings, &start, potential).unwrap();
         for (&from, x, &targ) in izip!(&start, result.position, &target) {
             assert_ne!(from, x);
@@ -1140,13 +1145,13 @@ mod tests {
 
         // interations: 0 should cause no change in position despite not being at the minimum
         let settings = from_json!({"stop-condition": {"iterations": 0}});
-        let result = super::acgsd(&settings, &start, quadratic_test_fn!(&target)).unwrap();
+        let result = super::acgsd(&settings, &start, quadratic_test_fn(&target)).unwrap();
         assert_eq!(result.iterations, 0);
         assert_eq!(result.position, start);
 
         // interations: 1 should cause a change in position
         let settings = from_json!({"stop-condition": {"iterations": 1}});
-        let result = super::acgsd(&settings, &start, quadratic_test_fn!(&target)).unwrap();
+        let result = super::acgsd(&settings, &start, quadratic_test_fn(&target)).unwrap();
         assert_eq!(result.iterations, 1);
         assert_ne!(result.position, start);
     }

@@ -18,7 +18,7 @@ pub mod prelude {
 /// Generic trait for stop conditions.
 ///
 /// It is expected that little code should depend on this for generic types;
-/// it's raison d'etre is to provide a bound on `Rpn`.
+/// its raison d'etre is to provide a bound on `Rpn`.
 pub trait ShouldStop<T> {
     fn should_stop(&self, x: &T) -> bool;
 }
@@ -28,8 +28,8 @@ pub trait ShouldStop<T> {
 /// Where `(T)` stands in for a valid JSON representation of `T`,
 /// the accepted forms of `LogicalExpressions<T>` are as follows:
 ///
-///  - `{'any': [(T), ...]}` - a logical-or of 0 or more expressions
-///  - `{'all': [(T), ...]}` - a logical-and of 0 or more expressions
+///  - `{"any": [(T), ...]}` - a logical-or of 0 or more expressions
+///  - `{"all": [(T), ...]}` - a logical-and of 0 or more expressions
 ///
 /// This is often used through the `Cereal` struct, where these
 /// variants will appear untagged alongside valid representations of `T`.
@@ -46,12 +46,13 @@ pub enum LogicalExpression<T> {
 /// Type that stop condition config can deserialize directly into.
 ///
 /// This extends a simple predicate type (represented as an object
-/// with a single kv pair) with 'all' and 'any' variants.
+/// with a single kv pair) with `"all"`, `"any"`, `true`, and `false` variants.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[derive(Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Cereal<P> {
     Simple(P),
+    Const(bool),
     Logical(LogicalExpression<Cereal<P>>),
 }
 
@@ -75,6 +76,9 @@ impl<P: Clone> Rpn<P> {
     pub fn from_cereal(cereal: &Cereal<P>) -> Self {
         fn append_actions<Q: Clone>(out: &mut Vec<Action<Q>>, cereal: &Cereal<Q>) {
             match cereal {
+                Cereal::Const(x) => {
+                    out.push(Action::Constant(*x));
+                },
                 Cereal::Simple(x) => {
                     out.push(Action::Predicate(x.clone()));
                 },
@@ -88,10 +92,10 @@ impl<P: Clone> Rpn<P> {
         }
 
         fn append_fold<Q: Clone>(
-                out: &mut Vec<Action<Q>>,
-                seq: &[Cereal<Q>],
-                identity: Action<Q>,
-                operator: Action<Q>,
+            out: &mut Vec<Action<Q>>,
+            seq: &[Cereal<Q>],
+            identity: Action<Q>,
+            operator: Action<Q>,
         ) {
             out.push(identity);
             for x in seq {
