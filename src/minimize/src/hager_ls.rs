@@ -32,57 +32,48 @@ fn linterp(bisection_point: f64, (a, b): (f64, f64)) -> f64 {
 #[derive(Debug,Clone,PartialEq,PartialOrd)]
 #[serde(rename_all="kebab-case")]
 pub struct Settings {
-    /// Coefficient for the armijo condition.
-    /// 'delta' in the paper.
-    #[serde(default="defaults::armijo_coeff")]
-    armijo_coeff: f64,
+    /// Coefficient for the armijo condition. `delta` in the paper.
+    pub armijo_coeff: f64,
 
-    /// Coefficient for the curvature condition.
-    /// 'sigma' in the paper.
-    #[serde(default="defaults::curvature_coeff")]
-    curvature_coeff: f64,
+    /// Coefficient for the curvature condition. `sigma` in the paper.
+    pub curvature_coeff: f64,
 
-    /// Estimate of relative error in value.
+    /// Estimate of relative error in the computed value of the objective function.
     ///
     /// Should be a fair bit larger than machine epsilon if the value
     /// is computed from a sum of many terms.
-    #[serde(default="defaults::value_epsilon")]
-    value_epsilon: f64,
+    pub value_epsilon: f64,
 
-    /// Want to bisect somewhere other than 0.5? Be our guest.
-    /// 'theta' in the paper.
-    #[serde(default="defaults::bisection_point")]
-    bisection_point: f64,
+    /// Want to bisect somewhere other than 0.5? Be our guest. `theta` in the paper.
+    pub bisection_point: f64,
 
-    /// Minimal interval size reduction per complete loop.
-    /// 'gamma' in the paper.
-    #[serde(default="defaults::min_reduction")]
-    min_reduction: f64,
+    /// Minimal interval size reduction per complete loop. `gamma` in the paper.
+    pub min_reduction: f64,
 
-    /// Interval width growth factor during expansion phase.
-    /// Not from the paper.
-    #[serde(default="defaults::expansion_growth_factor")]
-    expansion_growth_factor: f64,
+    /// Interval width growth factor during expansion phase. Not from the paper.
+    pub expansion_growth_factor: f64,
 }
 
-mod defaults {
-    pub fn armijo_coeff() -> f64 { 0.1 }
-    pub fn curvature_coeff() -> f64 { 0.9 }
-    pub fn value_epsilon() -> f64 { 1e-10 }
-    pub fn bisection_point() -> f64 { 0.5 }
-    pub fn min_reduction() -> f64 { 2.0/3.0 }
-    pub fn expansion_growth_factor() -> f64 { (1.0 + 5f64.sqrt()) / 2.0 }
+impl Default for Settings {
+    fn default() -> Self {
+        Settings {
+            armijo_coeff: 0.1,
+            curvature_coeff: 0.9,
+            value_epsilon: 1e-10,
+            bisection_point: 0.5,
+            min_reduction: 2.0/3.0,
+            expansion_growth_factor: (1.0 + 5f64.sqrt()) / 2.0,
+        }
+    }
 }
 
 impl Settings { pub fn new() -> Settings { Default::default() } }
-impl Default for Settings { fn default() -> Settings { from_json!({}) } }
-
-#[test] fn test_settings_default() { Settings::default(); }
-
 impl Settings {
     pub fn validate(&self) {
-        let Settings { armijo_coeff, curvature_coeff, value_epsilon,
-            bisection_point, min_reduction, expansion_growth_factor } = *self;
+        let Settings {
+            armijo_coeff, curvature_coeff, value_epsilon,
+            bisection_point, min_reduction, expansion_growth_factor,
+        } = *self;
         assert!(0.0 < armijo_coeff && armijo_coeff < 0.5); // delta
         assert!(armijo_coeff <= curvature_coeff && curvature_coeff < 1.0);
         assert!(0.0 <= value_epsilon);

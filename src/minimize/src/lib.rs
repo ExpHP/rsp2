@@ -35,7 +35,7 @@ pub(crate) mod stop_condition;
 pub mod acgsd;
 pub(crate) mod linesearch;
 pub(crate) mod hager_ls;
-pub use ::acgsd::acgsd;
+pub use ::acgsd::cg_descent;
 pub use ::hager_ls::linesearch;
 pub mod exact_ls;
 pub use ::exact_ls::linesearch as exact_ls;

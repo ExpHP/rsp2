@@ -11,8 +11,6 @@
 
 // HERE BE DRAGONS
 
-use ::stop_condition::prelude::*;
-
 use ::std::fmt::Write;
 use ::std::collections::VecDeque;
 use ::std::fmt;
@@ -20,50 +18,18 @@ use ::std::fmt;
 use ::either::{Either, Left, Right};
 use ::rsp2_slice_math::{vnorm, vdot, V, v, vnormalize};
 
-pub use self::settings::Settings;
 pub mod settings {
     //! Please do not manually construct anything in here.
     //! None of this is future-safe.
     //!
     //! Deserialize from a JSON literal instead.
 
-    pub use super::stop_condition::Cereal as StopCondition;
+    pub use super::StopCondition;
 
-    #[derive(Serialize, Deserialize)]
     #[derive(Debug, Clone, PartialEq)]
-    #[serde(rename_all="kebab-case")]
-    pub struct Settings {
-        #[serde()] pub(super) stop_condition: StopCondition,
-        #[serde(default)] pub(super) beta: Beta,
-        #[serde(default)] pub(super) linesearch: Linesearch,
-        #[serde(default)] pub(super) on_ls_failure: OnLsFailure,
-        #[serde(default="defaults::alpha_guess_first")]
-        pub(super) alpha_guess_first: f64,
-        #[serde(default)] pub(super) alpha_guess_max: Option<f64>,
-    }
-
-    /// Behavior when a linesearch along the steepest descent direction fails.
-    /// (this is phenomenally rare for the Hager linesearch method, and when it
-    ///  does occur it may very well be due to exceptionally good convergence,
-    ///  rather than any sort of actual failure)
-    #[derive(Serialize, Deserialize)]
-    #[derive(Debug, Clone, PartialEq)]
-    #[serde(rename_all="kebab-case")]
-    pub enum OnLsFailure {
-        /// Treat a second linesearch failure as a successful stop condition.
-        Succeed,
-        /// Succeed, but log a warning.
-        Warn,
-        Fail,
-    }
-
-    #[derive(Serialize, Deserialize)]
-    #[derive(Debug, Clone, PartialEq)]
-    #[serde(rename_all="kebab-case")]
     pub enum Beta {
         Acgsd {
             /// The direction searched will always point at least this much downhill.
-            #[serde(default="defaults::beta__acgsd__downhill_min")]
             downhill_min: f64,
         },
 
@@ -71,17 +37,42 @@ pub mod settings {
             // NOTE: This seems to play a role similar to Acgsd.downhill_min
             //        but it isn't *quite* the same...
             /// This... I'm not sure what this does.
-            #[serde(default="defaults::beta__hager__eta")]
             eta: f64,
         },
     }
 
-    #[derive(Serialize, Deserialize)]
+    impl Beta {
+        pub fn new_acgsd() -> Self {
+            Beta::Acgsd {
+                downhill_min: 1e-3,
+            }
+        }
+
+        pub fn new_hager() -> Self {
+            Beta::Hager {
+                eta: 1e-2,
+            }
+        }
+    }
+
     #[derive(Debug, Clone, PartialEq)]
-    #[serde(rename_all="kebab-case")]
     pub enum Linesearch {
         Acgsd(::linesearch::Settings),
         Hager(::hager_ls::Settings),
+    }
+
+    /// Behavior when a linesearch along the steepest descent direction fails.
+    /// (this is phenomenally rare for the Hager linesearch method, and when it
+    ///  does occur it may very well be due to exceptionally good convergence,
+    ///  rather than any sort of actual failure)
+    #[derive(Debug, Clone, PartialEq)]
+    pub enum OnLsFailure {
+        /// Treat a second linesearch failure as a successful stop condition.
+        Succeed,
+        /// Succeed, but log a warning.
+        Warn,
+        /// Return `Err(_)`.
+        Fail,
     }
 
     impl Beta {
@@ -104,30 +95,6 @@ pub mod settings {
                 Linesearch::Hager(settings) => settings.validate(),
             }
         }
-    }
-
-    impl Default for Beta {
-        fn default() -> Self { from_json!({"hager": {}}) }
-    }
-
-    impl Default for Linesearch {
-        fn default() -> Self { from_json!({"hager": {}}) }
-    }
-
-    // test for errors in our json
-    #[test] fn test_beta_default() { Beta::default(); }
-    #[test] fn test_linesearch_default() { Linesearch::default(); }
-
-    impl Default for OnLsFailure {
-        fn default() -> Self { OnLsFailure::Warn }
-    }
-
-    // Default functions, since literals aren't supported (serde gh #368)
-    mod defaults {
-        #![allow(non_snake_case)]
-        pub(crate) fn alpha_guess_first() -> f64 { 1.0 }
-        pub(crate) fn beta__acgsd__downhill_min() -> f64 { 1e-3 }
-        pub(crate) fn beta__hager__eta() -> f64 { 1e-2 }
     }
 }
 
@@ -254,26 +221,18 @@ $$
 
 */
 
-pub use self::stop_condition::Rpn as StopCondition;
-
-pub(crate) use self::stop_condition::Objectives;
-
+pub use self::stop_condition::StopCondition;
 pub mod stop_condition {
+    use super::*;
     use ::stop_condition::prelude::*;
 
     #[derive(Debug, Clone, PartialEq)]
     pub(crate) struct Objectives<'a> {
         /// All computed values so far.
         pub values: &'a [f64],
-        /// Max atomic force for the current structure.
         pub grad_max: f64,
-        /// Norm of force for the current structure.
-        /// (This scales with sqrt(N), which makes it pretty useless actually.
-        ///  we should fix that...)
         pub grad_norm: f64,
-        /// Norm of force, rescaled as an intensive property.
         pub grad_rms: f64,
-        /// The number of full iterations that have occurred.
         pub iterations: u64,
     }
 
@@ -293,9 +252,14 @@ pub mod stop_condition {
             #[serde(rename = "rel-greater-than")] delta: f64,
             #[serde(rename =        "steps-ago")] steps_ago: u32,
         },
+        /// Max absolute value of grad.
         #[serde(rename =    "grad-max")] GradientMax(f64),
+        /// Norm of grad for the current structure.
+        /// (Beware, this scales with sqrt(N)...)
         #[serde(rename =   "grad-norm")] GradientNorm(f64),
+        /// Norm of grad, rescaled as an intensive property.
         #[serde(rename =    "grad-rms")] GradientRms(f64),
+        /// The number of full iterations that have occurred.
         #[serde(rename =  "iterations")] Iterations(u64),
     }
 
@@ -327,8 +291,37 @@ pub mod stop_condition {
         }
     }
 
-    pub type Cereal = ::stop_condition::Cereal<Simple>;
-    pub type Rpn = ::stop_condition::Rpn<Simple>;
+    /// Configuration for the built-in implementation of stop conditions.
+    ///
+    /// The recommended method for constructing one of these is to deserialize it from JSON.  The
+    /// set of basic conditions is documented in `#[serde]` annotations on [`Simple`], and there
+    /// are additionally `"all"` and `"any"` meta-conditions that are provided by
+    /// [`::stop_condition::Cereal`].
+    ///
+    /// If this doesn't fit your needs, you can use CG's Builder API to define your own arbitrary
+    /// stop conditions as functions of [`AlgorithmState`].
+    pub type StopCondition = ::stop_condition::Cereal<Simple>;
+
+    impl StopCondition {
+        /// Convert to the more general form accepted by the Builder API.
+        pub fn to_function(&self) -> impl Clone + FnMut(AlgorithmState<'_>) -> bool {
+            let mut value_history = vec![];
+            let rpn = crate::stop_condition::Rpn::from_cereal(self);
+
+            move |state: AlgorithmState<'_>| {
+                value_history.push(state.value);
+
+                let gnorm = vnorm(&state.gradient);
+                rpn.should_stop(&Objectives {
+                    grad_norm: gnorm,
+                    grad_rms: gnorm / (state.gradient.len() as f64).sqrt(),
+                    grad_max: max_norm(&state.gradient),
+                    values: &value_history[..],
+                    iterations: state.iterations,
+                })
+            }
+        }
+    }
 
     mod tests {
         #[test]
@@ -350,11 +343,11 @@ pub mod stop_condition {
 }
 
 pub mod hager_beta {
-    pub struct Input<'a, 'b, 'c> {
+    pub struct Input<'a> {
         pub eta: f64,
         pub last_direction: &'a [f64],
-        pub last_d_gradient: &'b [f64],
-        pub from_gradient: &'c [f64],
+        pub last_d_gradient: &'a [f64],
+        pub from_gradient: &'a [f64],
     }
 
     pub fn compute(input: Input) -> f64 {
@@ -393,6 +386,16 @@ pub mod hager_beta {
 
         beta_k.max(eta_k)
     }
+}
+
+/// calculate beta (ACGSD)
+fn calc_beta_acgsd(gradient: &[f64], delta_x: &[f64], delta_g: &[f64]) -> f64 {
+    // inner products needed for beta
+    let dg_dx = vdot(delta_g, delta_x); // dg.dx
+    let g_dg = vdot(gradient, delta_g); // g.dg
+    let g_dx = vdot(gradient, delta_x); // g.dx
+
+    (g_dg / dg_dx) * (1.0 - g_dx / dg_dx)
 }
 
 //==================================================================================================
@@ -455,46 +458,107 @@ impl<E: fmt::Display> fmt::Display for Failure<E> {
 //==================================================================================================
 // Builder API
 
-// For configuration performed by the code that uses CG, but which we don't necessarily
-// want to be available to be set in the config file.
-// (FIXME: rsp2_tasks_config probably should not be directly deserializing this crate's
-//         Settings structs in the first place!)
+// Alias to indicate that the reason for a field having type Option is that it has no default.
+// (it must be supplied)
+type Required<T> = Option<T>;
+
+/// Provides a significantly greater level of customization for performing conjugate gradient.
+///
+/// NOTE: A freshly-constructed `Builder` has no stop condition; you must call
+/// [`Builder::stop_condition`] before calling [`Builder::run`].
 #[must_use]
 pub struct Builder {
-//    stop_condition: Box<dyn AlgorithmStateFn<Output=bool>>,
-    build_output_fn: Box<dyn BuildAlgorithmStateFn<Output=()>>,
+    build_stop_condition: Required<Box<dyn BuildAlgorithmStateFn<Output=bool>>>,
+    beta: Required<settings::Beta>,
+    linesearch: Required<settings::Linesearch>,
+    on_ls_failure: settings::OnLsFailure,
+    alpha_guess_first: f64,
+    alpha_guess_max: f64,
+    build_output_fns: Vec<Box<dyn BuildAlgorithmStateFn<Output=()>>>,
 }
 
 impl Builder {
+    fn new() -> Self {
+        Builder {
+            build_stop_condition: None,
+            beta: None,
+            linesearch: None,
+            on_ls_failure: settings::OnLsFailure::Fail,
+            alpha_guess_first: 1.0,
+            alpha_guess_max: std::f64::INFINITY,
+            build_output_fns: vec![],
+        }
+    }
+
+    /// Perform conjugate gradient using the default configuration for CG-DESCENT, and with a stop
+    /// condition that can be deserialized from JSON.
+    ///
+    /// CG-DESCENT is a flavor of CG brought forth by William Hager that is robust to cases where
+    /// rounding errors in the value can exceed the expected change over a linestep, which may be true
+    /// for extremely large systems.  This method puts more faith in the gradient than the value, and
+    /// so the value will sometimes increase over a step.
+    pub fn new_acgsd() -> Self {
+        let mut me = Self::new();
+        me.beta = Some(settings::Beta::new_acgsd());
+        me.linesearch = Some(settings::Linesearch::Acgsd(Default::default()));
+        me
+    }
+
+    /// Perform conjugate gradient using the default configuration for ACGSD, and with a stop condition
+    /// that can be deserialized from JSON.
+    ///
+    /// This was the first flavor of CG implemented in RSP2.  It is based off of earlier code written by
+    /// Colin Daniels, which is presumably an implementation of Neculai Andrei's ACGSD.  Conceptually,
+    /// it is far, far simpler than `cg_descent`.
+    pub fn new_hager() -> Self {
+        let mut me = Self::new();
+        me.beta = Some(settings::Beta::new_hager());
+        me.linesearch = Some(settings::Linesearch::Hager(Default::default()));
+        me
+    }
+
+    pub fn beta(mut self, value: settings::Beta) -> Self {
+        self.beta = Some(value); self
+    }
+
+    pub fn linesearch(mut self, value: settings::Linesearch) -> Self {
+        self.linesearch = Some(value); self
+    }
+
+    pub fn on_ls_failure(mut self, value: settings::OnLsFailure) -> Self {
+        self.on_ls_failure = value; self
+    }
+
     /// Set up an arbitrary function for logging output each iteration.
     ///
-    /// This clobbers any existing output function.
+    /// This will exist alongside any previously existing output functions.
     pub fn output_fn(&mut self, f: impl BuildAlgorithmStateFn<Output=()> + 'static) -> &mut Self {
-        self.build_output_fn = Box::new(f);
-        self
+        self.build_output_fns.push(Box::new(f));self
     }
 
     /// Set up a "standard" output function that writes some formatted lines on each iteration.
     /// The output format may change.
     ///
-    /// This clobbers any existing output function.
+    /// This will exist alongside any previously existing output functions.
     pub fn basic_output_fn(&mut self, emit: impl Clone + FnMut(fmt::Arguments<'_>) + 'static) -> &mut Self {
         self.output_fn(get_basic_output_fn(emit))
+    }
+
+    pub fn stop_condition(&mut self, f: impl BuildAlgorithmStateFn<Output=bool> + 'static) -> &mut Self {
+        self.build_stop_condition = Some(Box::new(f)); self
     }
 }
 
 impl Clone for Builder {
     fn clone(&self) -> Self {
         Builder {
-            build_output_fn: objekt::clone_box(&*self.build_output_fn),
-        }
-    }
-}
-
-impl Default for Builder {
-    fn default() -> Self {
-        Builder {
-            build_output_fn: Box::new(|_: AlgorithmState<'_>| {}),
+            build_output_fns: self.build_output_fns.iter().map(|x| objekt::clone_box(&**x)).collect(),
+            beta: self.beta.clone(),
+            linesearch: self.linesearch.clone(),
+            on_ls_failure: self.on_ls_failure.clone(),
+            alpha_guess_first: self.alpha_guess_first.clone(),
+            alpha_guess_max: self.alpha_guess_max.clone(),
+            build_stop_condition: self.build_stop_condition.as_ref().map(|x| objekt::clone_box(&**x)),
         }
     }
 }
@@ -616,21 +680,44 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E> { }
 impl Builder {
     pub fn run<E, F: DiffFn<E>>(
         &self,
-        settings: &Settings,
         initial_position: &[f64],
         compute: F,
     ) -> Result<Output, Failure<E>>
     where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
-    { _acgsd(self, settings, initial_position, compute) }
+    { cg(self, initial_position, compute) }
 }
 
-pub fn acgsd<E, F: DiffFn<E>>(
-    settings: &Settings,
+/// Perform conjugate gradient using the default configuration for CG-DESCENT, and with a
+/// stop condition that can be deserialized from JSON.
+///
+/// See [`Builder::new_hager()`] for more information.
+pub fn cg_descent<E, F: DiffFn<E>>(
+    stop_condition: &StopCondition,
     initial_position: &[f64],
     compute: F,
 ) -> Result<Output, Failure<E>>
 where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
-{ _acgsd(&Default::default(), settings, initial_position, compute) }
+{
+    Builder::new_hager()
+        .stop_condition(stop_condition.to_function())
+        .run(initial_position, compute)
+}
+
+/// Perform conjugate gradient using the default configuration for ACGSD, and with a stop condition
+/// that can be deserialized from JSON.
+///
+/// See [`Builder::new_acgsd()`] for more information.
+pub fn acgsd<E, F: DiffFn<E>>(
+    stop_condition: &StopCondition,
+    initial_position: &[f64],
+    compute: F,
+) -> Result<Output, Failure<E>>
+    where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
+{
+    Builder::new_acgsd()
+        .stop_condition(stop_condition.to_function())
+        .run(initial_position, compute)
+}
 
 //==================================================================================================
 
@@ -674,9 +761,8 @@ pub(crate) mod internal_types {
 }
 
 #[inline(never)]
-fn _acgsd<E, F: DiffFn<E>>(
+fn cg<E, F: DiffFn<E>>(
     builder: &Builder,
-    settings: &Settings,
     initial_position: &[f64],
     mut compute: F,
 ) -> Result<Output, Failure<E>>
@@ -684,8 +770,16 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
 {
     use self::internal_types::{Point, Saved, Last};
 
-    let stop_condition = self::stop_condition::Rpn::from_cereal(&settings.stop_condition);
-    let mut output_function = builder.build_output_fn.build();
+    let mut stop_condition = match builder.build_stop_condition {
+        Some(ref f) => f.build(),
+        None => panic!("'stop_condition' was not supplied to the CG Builder!"),
+    };
+    let beta_settings = builder.beta.clone().expect("'beta' was not supplied to the CG Builder!");
+    let ls_settings = builder.linesearch.clone().expect("'linesearch' was not supplied to the CG Builder!");
+
+    let mut output_functions: Vec<_> = {
+        builder.build_output_fns.iter().map(|x| x.build()).collect()
+    };
 
     let mut compute_point = |position: &[f64]| {
         let position = position.to_vec();
@@ -701,7 +795,7 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
     let mut last_saved = {
         let point = compute_point(initial_position)?;
         let Point { position, value, gradient } = point;
-        Saved { alpha: settings.alpha_guess_first, position, value, gradient }
+        Saved { alpha: builder.alpha_guess_first, position, value, gradient }
     };
 
     // Remembers all values.
@@ -758,7 +852,7 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
         };
 
 // /////////////////////////////////////////////////////////////////////////////
-// Per-iteration output                                                       //
+// Per-iteration output & evaluate exit conditions                            //
 // /////////////////////////////////////////////////////////////////////////////
 
         {
@@ -771,29 +865,18 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
                 alpha: saved.alpha,
                 __no_full_destructure: (),
             };
-            output_function(state);
-        }
 
-// /////////////////////////////////////////////////////////////////////////////
-// Evaluate exit conditions                                                   //
-// /////////////////////////////////////////////////////////////////////////////
+            for f in &mut output_functions {
+                f(state.clone());
+            }
 
-        { // scope
-            let gnorm = vnorm(&saved.gradient);
-            let objectives = Objectives {
-                grad_norm: gnorm,
-                grad_rms: gnorm / (saved.gradient.len() as f64).sqrt(),
-                grad_max: max_norm(&saved.gradient),
-                values: &value_history[..],
-                iterations,
-            };
-
-            if stop_condition.should_stop(&objectives) {
+            if stop_condition(state) {
+                // FIXME this no longer belongs here, but...
                 info!("ACGSD Finished.");
-                info!("Iterations: {}", objectives.iterations);
+                info!("Iterations: {}", iterations);
                 info!("     Value: {}", saved.value);
-                info!(" Grad Norm: {:e}", objectives.grad_norm);
-                info!("  Grad Max: {:e}", objectives.grad_max);
+                info!(" Grad Norm: {:e}", vnorm(&saved.gradient));
+                info!("  Grad Max: {:e}", saved.gradient.iter().cloned().map(f64::abs).fold(0.0, f64::max));
 
                 return success(saved.to_point());
             }
@@ -823,7 +906,7 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
 
                 // FIXME messy garbage, these two methods are probably far more
                 //       similar than the current code makes them appear
-                match settings.beta {
+                match beta_settings {
                     settings::Beta::Hager { eta } => {
                         use self::hager_beta::Input;
 
@@ -907,28 +990,18 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
 
             // NOTE: Under our scheme where direction is normalized,
             //       the previous alpha itself is a suitable guess.
-            let guess_alpha =
-                saved.alpha
-                .min(settings.alpha_guess_max.unwrap_or(::std::f64::INFINITY));
+            let guess_alpha = saved.alpha.min(builder.alpha_guess_max);
 
-            match &settings.linesearch {
+            match &ls_settings {
                 settings::Linesearch::Acgsd(settings) => {
-                    match ::linesearch::linesearch(
-                        settings,
-                        guess_alpha,
-                        &mut *memoized,
-                    ) {
+                    match ::linesearch::linesearch(settings, guess_alpha, &mut *memoized) {
                         Ok(x) => x,
                         Err(Left(e)) => Err(AcgsdError::from(e))?,
                         Err(Right(e)) => Err(e)?,
                     }
                 },
                 settings::Linesearch::Hager(settings) => {
-                    ::hager_ls::linesearch(
-                        settings,
-                        guess_alpha,
-                        &mut *memoized,
-                    )?
+                    ::hager_ls::linesearch(settings, guess_alpha, &mut *memoized)?
                 },
             }
 
@@ -943,7 +1016,7 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
         let ls_failed = next_alpha == 0.0;
         if ls_failed {
             if let Some(Last { ls_failed: true, .. }) = last {
-                match settings.on_ls_failure {
+                match builder.on_ls_failure {
                     settings::OnLsFailure::Succeed => {
                         return success(saved.to_point());
                     },
@@ -993,17 +1066,6 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
     panic!("too many iterations")
 }
 
-/// calculate beta (ACGSD)
-fn calc_beta_acgsd(gradient: &[f64], delta_x: &[f64], delta_g: &[f64]) -> f64
-{
-    // inner products needed for beta
-    let dg_dx = vdot(delta_g, delta_x); // dg.dx
-    let g_dg = vdot(gradient, delta_g); // g.dg
-    let g_dx = vdot(gradient, delta_x); // g.dx
-
-    (g_dg / dg_dx) * (1.0 - g_dx / dg_dx)
-}
-
 fn max_norm(v: &[f64]) -> f64 {
     let mut acc = 0f64;
     for x in v { acc = acc.max(x.abs()); }
@@ -1012,10 +1074,8 @@ fn max_norm(v: &[f64]) -> f64 {
 
 #[cfg(test)]
 mod tests {
-
     use ::util::Never;
     use ::itertools::Itertools;
-    use super::Settings;
 
     type NoFailResult = Result<(f64, Vec<f64>), Never>;
 
@@ -1056,8 +1116,8 @@ mod tests {
 
         let target = uniform_n(15, -10.0, 10.0);
         let initial_point = uniform_n(15, -10.0, 10.0);
-        let settings: Settings = from_json!({"stop-condition": {"grad-max": 1e-11}});
-        let result = super::acgsd(&settings, &initial_point, quadratic_test_fn(&target)).unwrap();
+        let stop_condition = from_json!({"grad-max": 1e-11});
+        let result = super::cg_descent(&stop_condition, &initial_point, quadratic_test_fn(&target)).unwrap();
         assert_close!(result.position, target);
     }
 
@@ -1071,22 +1131,20 @@ mod tests {
         let point = uniform_n(18, -10.0, 10.0);
         let target = uniform_n(18, -10.0, 10.0);
 
-        let s = from_json!({"stop-condition": {"grad-max": 1e20}});
-        assert_eq!(super::acgsd(&s, &point, quadratic_test_fn(&target)).unwrap().iterations, 0);
+        let s = from_json!({"grad-max": 1e20});
+        assert_eq!(super::cg_descent(&s, &point, quadratic_test_fn(&target)).unwrap().iterations, 0);
 
-        let s = from_json!({"stop-condition": {"grad-norm": 1e20}});
-        assert_eq!(super::acgsd(&s, &point, quadratic_test_fn(&target)).unwrap().iterations, 0);
+        let s = from_json!({"grad-norm": 1e20});
+        assert_eq!(super::cg_descent(&s, &point, quadratic_test_fn(&target)).unwrap().iterations, 0);
 
         // note: value-delta can only be tested after at least one iteration
         let s = from_json!({
-            "stop-condition": {
-                "value-delta": {
-                    "rel-greater-than": -1e100,
-                    "steps-ago": 2,
-                }
+            "value-delta": {
+                "rel-greater-than": -1e100,
+                "steps-ago": 2,
             }
         });
-        assert_eq!(super::acgsd(&s, &point, quadratic_test_fn(&target)).unwrap().iterations, 2);
+        assert_eq!(super::cg_descent(&s, &point, quadratic_test_fn(&target)).unwrap().iterations, 2);
     }
 
     // A test to make sure some physicist doesn't stick an ill-conceived
@@ -1104,17 +1162,17 @@ mod tests {
 
         // Scale the "simple_quadratic" test by uniform scale factors
 
-        let settings = from_json!({"stop-condition": {"grad-max": 1e-50}});
+        let stop_condition = from_json!({"grad-max": 1e-50});
         let potential = scale_y(1e-40, quadratic_test_fn(&target));
-        let result = super::acgsd(&settings, &start, potential).unwrap();
+        let result = super::cg_descent(&stop_condition, &start, potential).unwrap();
         for (&from, x, &targ) in izip!(&start, result.position, &target) {
             assert_ne!(from, x);
             assert_close!(abs=0.0, rel=1e-9, x, targ);
         }
 
-        let settings = from_json!({"stop-condition": {"grad-max": 1e+30}});
+        let stop_condition = from_json!({"grad-max": 1e+30});
         let potential = scale_y(1e+40, quadratic_test_fn(&target));
-        let result = super::acgsd(&settings, &start, potential).unwrap();
+        let result = super::cg_descent(&stop_condition, &start, potential).unwrap();
         for (&from, x, &targ) in izip!(&start, result.position, &target) {
             assert_ne!(from, x);
             assert_close!(abs=0.0, rel=1e-9, x, targ);
@@ -1133,8 +1191,8 @@ mod tests {
 
         // zero force can be an edge case for numerical stability;
         // check that the position hasn't become NaN.
-        let settings = from_json!({"stop-condition": {"iterations": 1}});
-        assert_eq!(super::acgsd(&settings, &point, potential).unwrap().position, point);
+        let stop_condition = from_json!({"iterations": 1});
+        assert_eq!(super::cg_descent(&stop_condition, &point, potential).unwrap().position, point);
     }
 
     #[test]
@@ -1144,14 +1202,14 @@ mod tests {
         let start = uniform_n(15, -10.0, 10.0);
 
         // interations: 0 should cause no change in position despite not being at the minimum
-        let settings = from_json!({"stop-condition": {"iterations": 0}});
-        let result = super::acgsd(&settings, &start, quadratic_test_fn(&target)).unwrap();
+        let stop_condition = from_json!({"iterations": 0});
+        let result = super::cg_descent(&stop_condition, &start, quadratic_test_fn(&target)).unwrap();
         assert_eq!(result.iterations, 0);
         assert_eq!(result.position, start);
 
         // interations: 1 should cause a change in position
-        let settings = from_json!({"stop-condition": {"iterations": 1}});
-        let result = super::acgsd(&settings, &start, quadratic_test_fn(&target)).unwrap();
+        let stop_condition = from_json!({"iterations": 1});
+        let result = super::cg_descent(&stop_condition, &start, quadratic_test_fn(&target)).unwrap();
         assert_eq!(result.iterations, 1);
         assert_ne!(result.position, start);
     }
@@ -1163,8 +1221,8 @@ mod tests {
         let d = 10;
         for _ in 0..10 {
             let max_coord = (d*d) as f64;
-            let output = super::acgsd(
-                &from_json!({"stop-condition": {"grad-rms": 1e-8}}),
+            let output = super::cg_descent(
+                &from_json!({"grad-rms": 1e-8}),
                 &uniform_n(d, -max_coord, max_coord),
                 |p| Ok::<_,Never>(Trid(d).diff(p))
             ).unwrap();
@@ -1200,8 +1258,8 @@ mod tests {
 
             // a point somewhere in the box whose corners are the atoms
             let start = urand::uniform_box(&point_1, &point_2);
-            let settings = from_json!({"stop-condition": {"grad-rms": 1e-10}});
-            let output = super::acgsd(&settings, &start, |p| Ok::<_,Never>(diff.diff(p))).unwrap();
+            let stop_condition = from_json!({"grad-rms": 1e-10});
+            let output = super::cg_descent(&stop_condition, &start, |p| Ok::<_,Never>(diff.diff(p))).unwrap();
 
             assert_close!(rel=1e-12, output.value, -20.0);
         }

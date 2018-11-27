@@ -138,9 +138,10 @@ mod tests {
     #[test]
     fn test_stop_condition() {
         use ::stop_condition::prelude::*;
+        use ::acgsd::stop_condition::Objectives;
 
         // (value that has at least one of each logical expression type)
-        let cereal: ::acgsd::stop_condition::Cereal = from_json!(
+        let cereal: ::acgsd::stop_condition::StopCondition = from_json!(
             {"any": [
                 {"all": [
                     {"grad-max": 1.0},
@@ -151,11 +152,11 @@ mod tests {
         );
 
         // conversion...
-        let pred = ::acgsd::StopCondition::from_cereal(&cereal);
+        let pred = super::Rpn::from_cereal(&cereal);
 
         // execution...
         // (base input which fails all conditions)
-        let base = ::acgsd::Objectives {
+        let base = Objectives {
             grad_max: 2.0,
             grad_norm: 2.0,
             grad_rms: 2.0,
@@ -164,19 +165,19 @@ mod tests {
         };
 
         // (F && T) || F
-        let objs = ::acgsd::Objectives { grad_rms: 0.5, ..base };
+        let objs = Objectives { grad_rms: 0.5, ..base };
         assert!(!pred.should_stop(&objs));
 
         // (T && F) || F
-        let objs = ::acgsd::Objectives { grad_max: 0.5, ..base };
+        let objs = Objectives { grad_max: 0.5, ..base };
         assert!(!pred.should_stop(&objs));
 
         // (T && T) || F
-        let objs = ::acgsd::Objectives { grad_rms: 0.5, grad_max: 0.5, ..base };
+        let objs = Objectives { grad_rms: 0.5, grad_max: 0.5, ..base };
         assert!( pred.should_stop(&objs));
 
         // (F && F) || T
-        let objs = ::acgsd::Objectives { iterations: 200, ..base };
+        let objs = Objectives { iterations: 200, ..base };
         assert!( pred.should_stop(&objs));
     }
 }

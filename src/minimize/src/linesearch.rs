@@ -12,26 +12,23 @@
 use ::either::{Either, Left, Right};
 
 #[derive(Debug, Clone, PartialEq)]
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all="kebab-case")]
 pub struct Settings {
-    #[serde(default = "defaults::iteration_limit")]
     pub iteration_limit: u32,
-    #[serde(default = "defaults::armijo_coeff")]
     pub armijo_coeff: f64,
-    #[serde(default = "defaults::curvature_coeff")]
     pub curvature_coeff: f64,
 }
 
-mod defaults {
-    pub fn iteration_limit() -> u32 { 8 }
-    pub fn armijo_coeff() -> f64 { 1e-4 }
-    pub fn curvature_coeff() -> f64 { 1e-1 }
+impl Default for Settings {
+    fn default() -> Self {
+        Settings {
+            iteration_limit: 8,
+            armijo_coeff: 1e-4,
+            curvature_coeff: 1e-1,
+        }
+    }
 }
 
 impl Settings { pub fn new() -> Settings { Default::default() } }
-impl Default for Settings { fn default() -> Settings { from_json!({}) } }
-#[test] fn test_settings_default() { Settings::default(); }
 
 impl Settings { pub fn validate(&self) { /* TODO */ } }
 
@@ -206,30 +203,22 @@ mod tests {
     #[derive(Debug,Copy,Clone,Hash,PartialEq,Eq,PartialOrd,Ord)]
     enum Never {}
 
-    // Macro as HOF
-    //  Input:   Differential1d
-    //  Output:  Fn(f64) -> Result<(f64, f64), Never>
-    macro_rules! diff_fn {
-        ($f:expr) => {{
-            let f = $f.clone();
-            let deriv = f.derivative();
-            move |x| Ok::<_,Never>((f.evaluate(x), deriv.evaluate(x)))
-        }};
+    fn diff_fn(
+        f: impl Differentiable1d,
+    ) -> impl Fn(f64) -> Result<(f64, f64), Never> {
+        let deriv = f.derivative();
+        move |x| Ok::<_,Never>((f.evaluate(x), deriv.evaluate(x)))
     }
 
-    // Macro as HOF
-    //  Input:   Differential1d
-    //  Output:  Fn(f64) -> Bound
-    macro_rules! bound_fn {
-        ($f:expr) => {{
-            let f = $f.clone();
-            let deriv = f.derivative();
-            move |x| Bound {
-                alpha: x,
-                value: f.evaluate(x),
-                slope: deriv.evaluate(x),
-            }
-        }};
+    fn bound_fn(
+        f: impl Differentiable1d,
+    ) -> impl Fn(f64) -> Bound {
+        let deriv = f.derivative();
+        move |x| Bound {
+            alpha: x,
+            value: f.evaluate(x),
+            slope: deriv.evaluate(x),
+        }
     }
 
     #[test]
@@ -243,21 +232,21 @@ mod tests {
             assert_close!(abs=1e-8, poly.derivative().evaluate(root2), 0.0);
 
             // simple; facing towards minimum.
-            let get_bound = bound_fn!(poly);
+            let get_bound = bound_fn(poly.clone());
             assert_close!(root1, super::cubic_min(get_bound(0.0), get_bound(1.0)));
             // low.alpha not equal to 0, d_alpha not equal to 1
             assert_close!(root1, super::cubic_min(get_bound(4.5), get_bound(1.25)));
 
             // flipping x, so that minimum is the lesser root
-            let get_bound = bound_fn!(poly.scale_x(-1.0));
+            let get_bound = bound_fn(poly.scale_x(-1.0));
             assert_close!(-root1, super::cubic_min(get_bound(0.0), get_bound(1.0)));
 
             // both extrema in same direction from x=0
-            let get_bound = bound_fn!(poly.recenter(-20.0));
+            let get_bound = bound_fn(poly.recenter(-20.0));
             assert_close!(20.0 + root1, super::cubic_min(get_bound(0.0), get_bound(1.0)));
 
             // Third coefficient negative, second coefficient negative
-            let get_bound = bound_fn!(poly.scale_y(-1.0));
+            let get_bound = bound_fn(poly.scale_y(-1.0));
             assert_close!(root2, super::cubic_min(get_bound(0.0), get_bound(1.0)));
         }
 
@@ -269,11 +258,11 @@ mod tests {
             assert_close!(abs=1e-10, poly.derivative().evaluate(root2), 0.0);
 
             // Third coefficient negative, second coefficient positive
-            let get_bound = bound_fn!(poly);
+            let get_bound = bound_fn(poly.clone());
             assert_close!(root1, super::cubic_min(get_bound(0.0), get_bound(1.0)));
 
             // Third coefficient positive, second coefficient negative
-            let get_bound = bound_fn!(poly.scale_y(-1.0));
+            let get_bound = bound_fn(poly.scale_y(-1.0));
             assert_close!(root2, super::cubic_min(get_bound(0.0), get_bound(1.0)));
         }
     }
@@ -285,7 +274,7 @@ mod tests {
         assert_close!(abs=1e-10, poly.derivative().evaluate(root), 0.0);
 
         // simple
-        let get_bound = bound_fn!(poly);
+        let get_bound = bound_fn(poly);
         assert_close!(root, super::quadratic_min(get_bound(0.0), get_bound(1.0)));
         // low.alpha not equal to 0, d_alpha not equal to 1
         assert_close!(root, super::quadratic_min(get_bound(4.5), get_bound(1.25)));
@@ -314,7 +303,7 @@ mod tests {
                 }
             }
             let poly = Polynomial::from_coeffs(&coeffs);
-            let get_bound = bound_fn!(poly);
+            let get_bound = bound_fn(poly.clone());
             let guess = super::guess_min(get_bound(0.0), get_bound(1.0));
 
             // looks minimal?
@@ -322,12 +311,12 @@ mod tests {
             assert!(false
                 || poly.evaluate(guess) <= poly.evaluate(guess * (1.0 - 1e-2))
                 || poly.evaluate(guess) <= poly.evaluate(guess * (1.0 - 1e-5))
-                , "{:?}", poly
+                , "{:?}", poly,
                 );
             assert!(false
                 || poly.evaluate(guess) <= poly.evaluate(guess * (1.0 + 1e-2))
                 || poly.evaluate(guess) <= poly.evaluate(guess * (1.0 + 1e-5))
-                , "{:?}", poly
+                , "{:?}", poly,
                 );
         }
     }
@@ -360,7 +349,7 @@ mod tests {
         // This is where a quadratic-only approximation would fail miserably.
         let poly = Polynomial::from_coeffs(&[0.0, 0.0, -1.0, 0.0, 1.0]);
         // it shouldn't produce an error
-        let out = linesearch(&Settings::default(), 0.125, diff_fn!(poly)).unwrap();
+        let out = linesearch(&Settings::default(), 0.125, diff_fn(poly.clone())).unwrap();
         assert!(!out.is_nan());
         // it should be able to find at least one point better than those we gave it
         assert!(poly.evaluate(out) < poly.evaluate(0.125));
