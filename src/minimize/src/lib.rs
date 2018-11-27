@@ -24,6 +24,7 @@ extern crate either;
 #[macro_use] extern crate log;
 #[cfg_attr(test, macro_use)] extern crate itertools;
 extern crate rand;
+extern crate objekt;
 extern crate ordered_float;
 #[cfg(test)] extern crate env_logger;
 
@@ -38,5 +39,4 @@ pub use ::acgsd::acgsd;
 pub use ::hager_ls::linesearch;
 pub mod exact_ls;
 pub use ::exact_ls::linesearch as exact_ls;
-pub(crate) mod reporting;
 pub mod numerical;

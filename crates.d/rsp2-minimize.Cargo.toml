@@ -14,6 +14,7 @@ description = "Function minimization algorithms, even in multiple dimensions."
 !!serde-derive
 !!serde-json
 !!either
+!!objekt
 
 !!rsp2-array-utils
 !!rsp2-assert-close

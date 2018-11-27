@@ -13,8 +13,6 @@
 
 use ::stop_condition::prelude::*;
 
-use ::itertools::Itertools;
-use ::ordered_float::NotNan;
 use ::std::fmt::Write;
 use ::std::collections::VecDeque;
 use ::std::fmt;
@@ -276,7 +274,7 @@ pub mod stop_condition {
         /// Norm of force, rescaled as an intensive property.
         pub grad_rms: f64,
         /// The number of full iterations that have occurred.
-        pub iterations: u32,
+        pub iterations: u64,
     }
 
     #[derive(Serialize, Deserialize)]
@@ -298,7 +296,7 @@ pub mod stop_condition {
         #[serde(rename =    "grad-max")] GradientMax(f64),
         #[serde(rename =   "grad-norm")] GradientNorm(f64),
         #[serde(rename =    "grad-rms")] GradientRms(f64),
-        #[serde(rename =  "iterations")] Iterations(u32),
+        #[serde(rename =  "iterations")] Iterations(u64),
     }
 
     // Relative difference.
@@ -458,7 +456,7 @@ impl<E: fmt::Display> fmt::Display for Failure<E> {
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone)]
 pub struct Output {
-    pub iterations: i64,
+    pub iterations: u64,
     pub position: Vec<f64>,
     pub gradient: Vec<f64>,
     pub value: f64,
@@ -513,67 +511,142 @@ pub(crate) mod internal_types {
 // want to be available to be set in the config file.
 // (FIXME: rsp2_tasks_config probably should not be directly deserializing this crate's
 //         Settings structs in the first place!)
-#[derive(Debug, Clone, Default)]
 #[must_use]
 pub struct Builder {
-    drift_spec: Option<DriftSpec>,
-}
-
-#[derive(Debug, Clone, Default)]
-struct DriftSpec {
-    spec: Vec<Option<usize>>,
-    num_groups: usize,
-}
-
-impl DriftSpec {
-    fn new(spec: &[Option<usize>]) -> Self {
-        use ::std::collections::{HashMap};
-        // Renumber the spec so that it uses sequential integers starting from 0.
-        let mut spec = spec.to_vec();
-        let mut map = HashMap::new();
-        let mut unused_numbers = 0..;
-        for x in &mut spec {
-            if let Some(x) = x {
-                *x = {
-                    map.entry(*x)
-                        .or_insert_with(|| unused_numbers.next().expect("overflow in drift spec"))
-                        .clone()
-                };
-            }
-        }
-        DriftSpec {
-            spec,
-            num_groups: unused_numbers.next().expect("overflow in drift spec"),
-        }
-    }
-
-    fn apply(&self, mut vector: Vec<f64>) -> Vec<f64> {
-        let mut first_values = vec![None; self.num_groups];
-        for (&group, x) in zip_eq!(&self.spec, &mut vector) {
-            if let Some(group) = group {
-                let first_value = *first_values[group].get_or_insert(*x);
-                *x -= first_value;
-            }
-        }
-        vector
-    }
+//    stop_condition: Box<dyn AlgorithmStateFn<Output=bool>>,
+    build_output_fn: Box<dyn BuildAlgorithmStateFn<Output=()>>,
 }
 
 impl Builder {
-    /// Automatically cancel drift from the direction vector so that the max step size
-    /// isn't applied unnecessarily harshly.
+    /// Set up an arbitrary function for logging output each iteration.
     ///
-    /// For each unique integer that appears in here, the first element with that number
-    /// is subtracted from the whole group (so that the first number is always zero).
-    /// For example, to fix the first position in a set of 3-dimensional coordinates
-    /// (ordered as `x1 y1 z1 x2 y2 z2 ...`), a suitable `drift_spec` would be the vector
-    ///
-    /// ```text
-    /// [Some(0), Some(1), Some(2), Some(0), Some(1), Some(2), ...]
-    /// ```
-    pub fn drift_spec(mut self, spec: Option<&[Option<usize>]>) -> Self
-    { self.drift_spec = spec.map(DriftSpec::new); self }
+    /// This clobbers any existing output function.
+    pub fn output_fn(&mut self, f: impl BuildAlgorithmStateFn<Output=()> + 'static) -> &mut Self {
+        self.build_output_fn = Box::new(f);
+        self
+    }
 
+    /// Set up a "standard" output function that writes some formatted lines on each iteration.
+    /// The output format may change.
+    ///
+    /// This clobbers any existing output function.
+    pub fn basic_output_fn(&mut self, emit: impl Clone + FnMut(fmt::Arguments<'_>) + 'static) -> &mut Self {
+        self.output_fn(get_basic_output_fn(emit))
+    }
+}
+
+impl Clone for Builder {
+    fn clone(&self) -> Self {
+        Builder {
+            build_output_fn: objekt::clone_box(&*self.build_output_fn),
+        }
+    }
+}
+
+
+impl Default for Builder {
+    fn default() -> Self {
+        Builder {
+            build_output_fn: Box::new(|_: AlgorithmState<'_>| {}),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct AlgorithmState<'a> {
+    /// Complete iterations *so far.*  The first call will be with `iterations: 0`,
+    /// and the potential will have been computed once (but no linesearch will have
+    /// been performed).
+    pub iterations: u64,
+    pub position: &'a [f64],
+    pub gradient: &'a [f64],
+    pub value: f64,
+    /// The initial guess for line step size in the upcoming line search.
+    ///
+    /// (for iterations after the first iteration, this is equal to the step size taken in the
+    ///  previous iteration)
+    pub alpha: f64,
+    /// Direction traveled last iteration. `None` on the first iteration.
+    pub direction: Option<&'a [f64]>,
+    // ensures addition of new fields is backwards compatible
+    #[allow(non_snake_case)]
+    __no_full_destructure: (),
+}
+
+/// Trait for producing fresh instances of an `AlgorithmStateFn`.
+///
+/// Don't worry too much about this; this trait exists simply so that a single Builder can be cloned
+/// or used for multiple `acgsd` calls.
+///
+/// As a convenience, this is implemented for all cloneable `AlgorithmStateFn`s, so in general any
+/// closure that takes `AlgorithmState` will do. (as long as calls to a clone of the closure do not
+/// affect the "freshness" of the original closure; i.e. don't track prior inputs in an
+/// `Rc<RefCell<_>>`, or at least don't use them in a manner which affects the output!)
+pub trait BuildAlgorithmStateFn: objekt::Clone {
+    type Output;
+
+    /// Produce a fresh instance of the AlgorithmStateFn, with no history of calls made to it yet.
+    fn build(&self) -> Box<dyn FnMut(AlgorithmState<'_>) -> Self::Output>;
+}
+
+impl<F, B> BuildAlgorithmStateFn for F
+where
+    F: FnMut(AlgorithmState<'_>) -> B,
+    F: Clone + 'static,
+{
+    type Output = B;
+
+    fn build(&self) -> Box<dyn FnMut(AlgorithmState<'_>) -> B> { Box::new(self.clone()) }
+}
+
+pub fn get_basic_output_fn(
+    mut emit: impl Clone + FnMut(fmt::Arguments<'_>),
+) -> impl Clone + FnMut(AlgorithmState<'_>) {
+    let mut last_value = None;
+    let mut past_directions = VecDeque::<Vec<_>>::new();
+
+    move |state: AlgorithmState<'_>| {
+        let d_value = last_value.as_ref().map(|prev| state.value - prev).unwrap_or(0.0);
+        let grad_mag = vnorm(&state.gradient);
+        emit(format_args!(" i: {i:>6}  v: {v:18.14} dv: {dv:+8.2e}  g: {g:>12.7e}  {cos:<24}",
+               i = state.iterations,
+               v = state.value,
+               dv = d_value,
+               g = grad_mag,
+               cos = {
+                   let mut s = String::new();
+                   if !past_directions.is_empty() {
+                       write!(&mut s, "cos:").unwrap();
+                       let latest = state.direction.expect("(BUG)");
+                       for other in &past_directions {
+                           write!(&mut s, " {:>+5.2}", vdot(latest, other)).unwrap();
+                       }
+                   }
+                   s
+               },
+        ));
+
+        // Record data for next call.
+        last_value = Some(state.value);
+
+        if let Some(direction) = state.direction {
+            let max_cosines = 3;
+            let mut buf = match past_directions.len().cmp(&max_cosines) {
+                std::cmp::Ordering::Less => vec![],
+                std::cmp::Ordering::Equal => past_directions.pop_back().unwrap(),
+                std::cmp::Ordering::Greater => unreachable!(),
+            };
+            buf.clear();
+            buf.extend(direction.iter().cloned());
+            past_directions.push_front(buf);
+        }
+    }
+}
+
+//==================================================================================================
+// pub functions for starting the run
+
+impl Builder {
     pub fn run<E, F: DiffFn<E>>(
         &self,
         settings: &Settings,
@@ -584,7 +657,6 @@ impl Builder {
     { _acgsd(self, settings, initial_position, compute) }
 }
 
-#[inline(never)]
 pub fn acgsd<E, F: DiffFn<E>>(
     settings: &Settings,
     initial_position: &[f64],
@@ -592,6 +664,8 @@ pub fn acgsd<E, F: DiffFn<E>>(
 ) -> Result<Output, Failure<E>>
 where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
 { _acgsd(&Default::default(), settings, initial_position, compute) }
+
+//==================================================================================================
 
 #[inline(never)]
 fn _acgsd<E, F: DiffFn<E>>(
@@ -605,6 +679,7 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
     use self::internal_types::{Point, Saved, Last};
 
     let stop_condition = self::stop_condition::Rpn::from_cereal(&settings.stop_condition);
+    let mut output_function = builder.build_output_fn.build();
 
     let mut compute_point = |position: &[f64]| {
         let position = position.to_vec();
@@ -681,38 +756,16 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
 // /////////////////////////////////////////////////////////////////////////////
 
         {
-            let d_value = last.as_ref().map(|l| l.d_value).unwrap_or(0.0);
-            let grad_mag = vnorm(&saved.gradient);
-            trace!(" i: {i:>6}  v: {v:18.14} dv: {dv:+8.2e}  g: {g:>12.7e}  {cos:<24} {distrib}",
-                i = iterations,
-                v = saved.value,
-                dv = d_value,
-                g = grad_mag,
-                cos = {
-                    let mut s = String::new();
-                    let mut dirs = past_directions.iter();
-                    if dirs.len() >= 2 {
-                        write!(&mut s, "cos:").unwrap();
-                        let latest = dirs.next().unwrap();
-                        for other in dirs {
-                            write!(&mut s, " {:>+5.2}", vdot(latest, other)).unwrap();
-                        }
-                    }
-                    s
-                },
-                distrib = {
-                    use ::reporting::Bins;
-                    let grad_data = saved.gradient.iter().map(|&x| NotNan::new(x.abs()).unwrap()).collect_vec();
-                    let &grad_max = grad_data.iter().max().unwrap();
-                    let grad_fracs = {
-                        if grad_max == NotNan::new(0.0).unwrap() { grad_data }
-                        else { grad_data.iter().map(|&x| x / grad_max).collect() }
-                    };
-                    let divs = vec![0.0, 0.05, 0.50, 1.0].into_iter().map(|x| NotNan::new(x).unwrap()).collect_vec();
-                    let bins = Bins::from_iter(divs, grad_fracs);
-                    format!(" {:20} {}", bins.display(), *bins.as_counts().last().unwrap())
-                }
-            );
+            let state = AlgorithmState {
+                iterations,
+                value: saved.value,
+                gradient: &saved.gradient,
+                position: &saved.position,
+                direction: last.as_ref().map(|last| &last.direction[..]),
+                alpha: saved.alpha,
+                __no_full_destructure: (),
+            };
+            output_function(state);
         }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -726,7 +779,7 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
                 grad_rms: gnorm / (saved.gradient.len() as f64).sqrt(),
                 grad_max: max_norm(&saved.gradient),
                 values: &value_history[..],
-                iterations: iterations as u32, // FIXME remove cast?
+                iterations,
             };
 
             if stop_condition.should_stop(&objectives) {
@@ -794,17 +847,6 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
             let V(direction) = -v(&saved.gradient);
             direction
         }}; // 'use_dir: loop { break { ... } }
-
-        // Cancel drift.
-        // NOTE: I'm not sure when the best time to do this is.
-        //       Doing it before or after normalization likely has different
-        //       effects on how the linesearch initial step size evolves,
-        //       but I haven't thought too hard about which option leads to
-        //       a better outcome.
-        let mut direction = direction;
-        if let Some(drift_spec) = &builder.drift_spec {
-            direction = drift_spec.apply(direction);
-        }
 
         // NOTE: The original source scaled alpha instead of normalizing
         //       direction, which seems to be a fruitless optimization

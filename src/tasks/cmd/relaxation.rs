@@ -296,11 +296,12 @@ fn do_cg_relax(
 ) -> FailResult<Coords>
 {Ok({
     let mut flat_diff_fn = pot.parallel(true).initialize_flat_diff_fn(&coords, meta.sift())?;
-    let relaxed_flat = ::rsp2_minimize::acgsd(
-        cg_settings,
-        coords.to_carts().flat(),
-        &mut *flat_diff_fn,
-    ).unwrap().position;
+    let relaxed_flat = {
+        ::rsp2_minimize::acgsd::Builder::default()
+            .basic_output_fn(|args| trace!(target: "rsp2_minimize::acgsd", "{}", args))
+            .run(cg_settings, coords.to_carts().flat(), &mut *flat_diff_fn)
+            .unwrap().position
+    };
     coords.with_carts(relaxed_flat.nest().to_vec())
 })}
 
@@ -342,16 +343,20 @@ fn do_cg_relax_with_param_optimization(
     };
     trace!("Incorporating parameter optimization into relaxation");
     let helper = RelaxationOptimizationHelper::new(parameters, coords.lattice());
-    let relaxed_flat = ::rsp2_minimize::acgsd(
-        cg_settings,
-        &helper.flatten_coords(&coords),
-        |flat_coords| {
-            let ref coords = helper.unflatten_coords(flat_coords);
-            let (value, bond_grads) = bond_diff_fn.compute(coords, meta.clone())?;
-            let flat_grad = helper.flatten_grad(flat_coords, &bond_grads);
-            FailOk((value, flat_grad))
-        },
-    ).unwrap().position;
+    let relaxed_flat = {
+        ::rsp2_minimize::acgsd::Builder::default()
+            .basic_output_fn(|args| trace!(target: "rsp2_minimize::acgsd", "{}", args))
+            .run(
+                cg_settings,
+                &helper.flatten_coords(&coords),
+                |flat_coords| {
+                    let ref coords = helper.unflatten_coords(flat_coords);
+                    let (value, bond_grads) = bond_diff_fn.compute(coords, meta.clone())?;
+                    let flat_grad = helper.flatten_grad(flat_coords, &bond_grads);
+                    FailOk((value, flat_grad))
+                },
+            ).unwrap().position
+    };
     Some(helper.unflatten_coords(&relaxed_flat))
 })}
 
@@ -407,11 +412,15 @@ fn _do_cg_along_evecs(
     let init_pos = coords.to_carts();
 
     let mut flat_diff_fn = pot.parallel(true).initialize_flat_diff_fn(&coords, meta.sift())?;
-    let relaxed_coeffs = ::rsp2_minimize::acgsd(
-        cg_settings,
-        &vec![0.0; evecs.len()],
-        &mut *constrained_diff_fn(&mut *flat_diff_fn, init_pos.flat(), &flat_evecs),
-    ).unwrap().position;
+    let relaxed_coeffs = {
+        ::rsp2_minimize::acgsd::Builder::default()
+            .basic_output_fn(|args| trace!(target: "rsp2_minimize::acgsd", "{}", args))
+            .run(
+                cg_settings,
+                &vec![0.0; evecs.len()],
+                &mut *constrained_diff_fn(&mut *flat_diff_fn, init_pos.flat(), &flat_evecs),
+            ).unwrap().position
+    };
 
     let final_flat_pos = flat_constrained_position(init_pos.flat(), &relaxed_coeffs, &flat_evecs);
     coords.with_carts(final_flat_pos.nest().to_vec())

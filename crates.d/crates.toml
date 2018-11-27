@@ -112,6 +112,7 @@ walkdir = "2"
 vergen = "2"
 stack = "0.3"
 xz2 = "0.1.6"
+objekt = "0.1.1"
 
 #--------------------------------------------
 # Always optimize some crates when they appear as dependencies.
