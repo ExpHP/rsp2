@@ -31,6 +31,7 @@ use slice_of_array::prelude::*;
 use rsp2_slice_math::{v, V, vdot};
 use rsp2_array_types::{V3};
 use rsp2_structure::{Coords};
+use rsp2_minimize::{cg};
 
 pub trait EvLoopDiagonalizer {
     type ExtraOut;
@@ -287,9 +288,45 @@ impl EvLoopFsm {
 
 //-----------------------------------------------------------------------------
 
+fn cg_builder_from_config(
+    cg_settings: &cfg::Cg,
+) -> cg::Builder {
+    let cfg::Cg {
+        ref stop_condition, ref flavor, ref on_ls_failure,
+        alpha_guess_first, alpha_guess_max,
+    } = *cg_settings;
+
+    let mut builder = match *flavor {
+        cfg::CgFlavor::Acgsd { ls_iteration_limit } => {
+            let mut builder = cg::Builder::new_acgsd();
+            let mut ls_settings = rsp2_minimize::strong_ls::Settings::new();
+            if let Some(value) = ls_iteration_limit {
+                ls_settings.iteration_limit = value;
+            }
+            builder.linesearch(cg::settings::Linesearch::Acgsd(ls_settings));
+            builder
+        },
+        cfg::CgFlavor::Hager {} => cg::Builder::new_hager(),
+    };
+    if let Some(x) = alpha_guess_first { builder.alpha_guess_first(x); }
+    if let Some(x) = alpha_guess_max { builder.alpha_guess_max(x); }
+
+    // FIXME XXX should not be a responsibility of the builder
+    builder.on_ls_failure(match on_ls_failure {
+        cfg::CgOnLsFailure::Succeed => cg::settings::OnLsFailure::Succeed,
+        cfg::CgOnLsFailure::Fail => cg::settings::OnLsFailure::Fail,
+        cfg::CgOnLsFailure::Warn => cg::settings::OnLsFailure::Warn,
+    });
+
+    // FIXME: Do something different when parameters are optimized
+    builder.basic_output_fn(|args| trace!(target: "rsp2_minimize::acgsd", "{}", args));
+    builder.stop_condition(stop_condition.to_function());
+    builder
+}
+
 fn do_cg_relax(
     pot: &PotentialBuilder,
-    cg_settings: &cfg::Acgsd,
+    cg_settings: &cfg::Cg,
     // NOTE: takes ownership of coords because it is likely an accident to reuse them
     coords: Coords,
     meta: potential::CommonMeta,
@@ -297,9 +334,8 @@ fn do_cg_relax(
 {Ok({
     let mut flat_diff_fn = pot.parallel(true).initialize_flat_diff_fn(&coords, meta.sift())?;
     let relaxed_flat = {
-        ::rsp2_minimize::acgsd::Builder::default()
-            .basic_output_fn(|args| trace!(target: "rsp2_minimize::acgsd", "{}", args))
-            .run(cg_settings, coords.to_carts().flat(), &mut *flat_diff_fn)
+        cg_builder_from_config(cg_settings)
+            .run(coords.to_carts().flat(), &mut *flat_diff_fn)
             .unwrap().position
     };
     coords.with_carts(relaxed_flat.nest().to_vec())
@@ -309,7 +345,7 @@ fn do_cg_relax(
 
 fn do_cg_relax_with_param_optimization_if_supported(
     pot: &PotentialBuilder,
-    cg_settings: &cfg::Acgsd,
+    cg_settings: &cfg::Cg,
     parameters: Option<&cfg::Parameters>,
     // NOTE: takes ownership of coords because it is likely an accident to reuse them
     coords: Coords,
@@ -331,7 +367,7 @@ fn do_cg_relax_with_param_optimization_if_supported(
 /// Returns Ok(None) if the potential does not support this method.
 fn do_cg_relax_with_param_optimization(
     pot: &PotentialBuilder,
-    cg_settings: &cfg::Acgsd,
+    cg_settings: &cfg::Cg,
     parameters: &cfg::Parameters,
     coords: &Coords,
     meta: potential::CommonMeta,
@@ -344,20 +380,17 @@ fn do_cg_relax_with_param_optimization(
     trace!("Incorporating parameter optimization into relaxation");
     let helper = RelaxationOptimizationHelper::new(parameters, coords.lattice());
     let relaxed_flat = {
-        ::rsp2_minimize::acgsd::Builder::default()
-            .basic_output_fn(|args| trace!(target: "rsp2_minimize::acgsd", "{}", args))
-            .run(
-                cg_settings,
-                &helper.flatten_coords(&coords),
-                |flat_coords| {
-                    let ref coords = helper.unflatten_coords(flat_coords);
-                    let (value, bond_grads) = bond_diff_fn.compute(coords, meta.clone())?;
-                    let flat_grad = helper.flatten_grad(flat_coords, &bond_grads);
-                    FailOk((value, flat_grad))
-                },
-            ).unwrap().position
+        cg_builder_from_config(cg_settings).run(
+            &helper.flatten_coords(&coords),
+            |flat_coords| {
+                let ref coords = helper.unflatten_coords(flat_coords);
+                let (value, bond_grads) = bond_diff_fn.compute(coords, meta.clone())?;
+                let flat_grad = helper.flatten_grad(flat_coords, &bond_grads);
+                FailOk((value, flat_grad))
+            },
+        ).unwrap().position
     };
-    Some(helper.unflatten_coords(&relaxed_flat))
+    Some(helper.unflatten_coords(&relaxed_flat[..]))
 })}
 
 //------------------
@@ -381,7 +414,7 @@ fn do_eigenvector_chase(
             }
             coords
         },
-        cfg::EigenvectorChase::Acgsd(cg_settings) => {
+        cfg::EigenvectorChase::Cg(cg_settings) => {
             let bad_directions = bad_directions.iter().map(|(_, dir)| dir.clone());
             do_cg_along_evecs(pot, cg_settings, coords, meta.sift(), bad_directions)?
         },
@@ -390,7 +423,7 @@ fn do_eigenvector_chase(
 
 fn do_cg_along_evecs(
     pot: &PotentialBuilder,
-    cg_settings: &cfg::Acgsd,
+    cg_settings: &cfg::Cg,
     coords: Coords,
     meta: potential::CommonMeta,
     directions: impl IntoIterator<Item=EvDirection>,
@@ -402,7 +435,7 @@ fn do_cg_along_evecs(
 
 fn _do_cg_along_evecs(
     pot: &PotentialBuilder,
-    cg_settings: &cfg::Acgsd,
+    cg_settings: &cfg::Cg,
     coords: Coords,
     meta: potential::CommonMeta,
     evecs: &[EvDirection],
@@ -413,13 +446,10 @@ fn _do_cg_along_evecs(
 
     let mut flat_diff_fn = pot.parallel(true).initialize_flat_diff_fn(&coords, meta.sift())?;
     let relaxed_coeffs = {
-        ::rsp2_minimize::acgsd::Builder::default()
-            .basic_output_fn(|args| trace!(target: "rsp2_minimize::acgsd", "{}", args))
-            .run(
-                cg_settings,
-                &vec![0.0; evecs.len()],
-                &mut *constrained_diff_fn(&mut *flat_diff_fn, init_pos.flat(), &flat_evecs),
-            ).unwrap().position
+        cg_builder_from_config(cg_settings).run(
+            &vec![0.0; evecs.len()],
+            &mut *constrained_diff_fn(&mut *flat_diff_fn, init_pos.flat(), &flat_evecs),
+        ).unwrap().position
     };
 
     let final_flat_pos = flat_constrained_position(init_pos.flat(), &relaxed_coeffs, &flat_evecs);

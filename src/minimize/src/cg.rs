@@ -57,7 +57,7 @@ pub mod settings {
 
     #[derive(Debug, Clone, PartialEq)]
     pub enum Linesearch {
-        Acgsd(::linesearch::Settings),
+        Acgsd(::strong_ls::Settings),
         Hager(::hager_ls::Settings),
     }
 
@@ -401,7 +401,7 @@ fn calc_beta_acgsd(gradient: &[f64], delta_x: &[f64], delta_g: &[f64]) -> f64 {
 //==================================================================================================
 // Errors
 
-use ::linesearch::LinesearchError;
+use ::strong_ls::LinesearchError;
 #[derive(Debug, Fail)]
 pub enum AcgsdError {
     #[fail(display = "Linesearch failed: {}", _0)]
@@ -517,16 +517,24 @@ impl Builder {
         me
     }
 
-    pub fn beta(mut self, value: settings::Beta) -> Self {
+    pub fn beta(&mut self, value: settings::Beta) -> &mut Self {
         self.beta = Some(value); self
     }
 
-    pub fn linesearch(mut self, value: settings::Linesearch) -> Self {
+    pub fn linesearch(&mut self, value: settings::Linesearch) -> &mut Self {
         self.linesearch = Some(value); self
     }
 
-    pub fn on_ls_failure(mut self, value: settings::OnLsFailure) -> Self {
+    pub fn on_ls_failure(&mut self, value: settings::OnLsFailure) -> &mut Self {
         self.on_ls_failure = value; self
+    }
+
+    pub fn alpha_guess_first(&mut self, value: f64) -> &mut Self {
+        self.alpha_guess_first = value; self
+    }
+
+    pub fn alpha_guess_max(&mut self, value: f64) -> &mut Self {
+        self.alpha_guess_max = value; self
     }
 
     /// Set up an arbitrary function for logging output each iteration.
@@ -994,7 +1002,7 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
 
             match &ls_settings {
                 settings::Linesearch::Acgsd(settings) => {
-                    match ::linesearch::linesearch(settings, guess_alpha, &mut *memoized) {
+                    match ::strong_ls::linesearch(settings, guess_alpha, &mut *memoized) {
                         Ok(x) => x,
                         Err(Left(e)) => Err(AcgsdError::from(e))?,
                         Err(Right(e)) => Err(e)?,

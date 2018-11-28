@@ -138,10 +138,10 @@ mod tests {
     #[test]
     fn test_stop_condition() {
         use ::stop_condition::prelude::*;
-        use ::acgsd::stop_condition::Objectives;
+        use ::cg::stop_condition::Objectives;
 
         // (value that has at least one of each logical expression type)
-        let cereal: ::acgsd::stop_condition::StopCondition = from_json!(
+        let cereal: ::cg::stop_condition::StopCondition = from_json!(
             {"any": [
                 {"all": [
                     {"grad-max": 1.0},

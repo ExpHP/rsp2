@@ -41,7 +41,6 @@ extern crate log;
 use ::std::io::Read;
 use ::std::collections::HashMap;
 use ::failure::Error;
-pub use ::rsp2_minimize::acgsd::Settings as Acgsd;
 
 /// Provides an alternative to serde_yaml::from_reader where all of the
 /// expensive codegen has already been performed in this crate.
@@ -102,6 +101,13 @@ macro_rules! derive_yaml_read {
 
 derive_yaml_read!{::serde_yaml::Value}
 
+/// Alias used for `Option<T>` to indicate that this field has a default which is implemented
+/// outside of this module. (e.g. in the implementation of `Default` or `new` for a builder
+/// somewhere)
+pub type OrDefault<T> = Option<T>;
+/// Alias used for `Option<T>` to indicate that omitting this field has special meaning.
+pub type Nullable<T> = Option<T>;
+
 // (this also exists solely for codegen reasons)
 fn value_from_str(r: &str) -> Result<::serde_yaml::Value, Error>
 { ::serde_yaml::from_str(r).map_err(Into::into) }
@@ -120,12 +126,12 @@ pub struct Settings {
     pub scale_ranges: ScaleRanges,
 
     #[serde(default)]
-    pub parameters: Option<Parameters>,
+    pub parameters: Nullable<Parameters>,
 
     #[serde(default)]
     pub acoustic_search: AcousticSearch,
 
-    pub cg: Acgsd,
+    pub cg: Cg,
 
     pub phonons: Phonons,
 
@@ -134,17 +140,17 @@ pub struct Settings {
     /// `None` disables layer search.
     /// (layer_search is also ignored if layers.yaml is provided)
     #[serde(default)]
-    pub layer_search: Option<LayerSearch>,
+    pub layer_search: Nullable<LayerSearch>,
 
     /// `None` disables bond graph.
     #[serde(default)]
-    pub bond_radius: Option<f64>,
+    pub bond_radius: Nullable<f64>,
 
     // FIXME move
     pub layer_gamma_threshold: f64,
 
     #[serde(default)]
-    pub masses: Option<Masses>,
+    pub masses: Nullable<Masses>,
 
     #[serde(default)]
     pub ev_loop: EvLoop,
@@ -174,14 +180,14 @@ pub struct ScaleRanges {
     /// the edge of the search window (relative to the search window size),
     /// which likely indicates that the search window was not big enough.
     #[serde(default="_scale_ranges__warn_threshold")]
-    pub warn_threshold: Option<f64>,
+    pub warn_threshold: Nullable<f64>,
 
     /// Panic on violations of `warn_threshold`.
     #[serde(default="_scale_ranges__fail")]
     pub fail: bool,
 }
 fn _scale_ranges__repeat_count() -> u32 { 1 }
-fn _scale_ranges__warn_threshold() -> Option<f64> { Some(0.01) }
+fn _scale_ranges__warn_threshold() -> Nullable<f64> { Some(0.01) }
 fn _scale_ranges__fail() -> bool { false }
 
 // Require "scalables" if "scale-ranges" is provided, but allow it to be defaulted to
@@ -324,12 +330,65 @@ pub enum ScalableRange {
         /// A "reasonable value" that might be used while another
         ///  parameter is optimized.
         #[serde(default)]
-        guess: Option<f64>,
+        guess: OrDefault<f64>,
     },
     #[serde(rename_all = "kebab-case")]
     Exact {
         value: f64,
     },
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
+#[serde(rename_all="kebab-case")]
+pub struct Cg {
+    #[serde()]
+    pub stop_condition: CgStopCondition,
+    #[serde(default)]
+    pub flavor: CgFlavor,
+    #[serde(default)]
+    pub on_ls_failure: CgOnLsFailure,
+    #[serde(default)]
+    pub alpha_guess_first: OrDefault<f64>,
+    #[serde(default)]
+    pub alpha_guess_max: OrDefault<f64>,
+}
+
+pub type CgStopCondition = rsp2_minimize::cg::StopCondition;
+
+/// Behavior when a linesearch along the steepest descent direction fails.
+/// (this is phenomenally rare for the Hager linesearch method, and when it
+///  does occur it may very well be due to exceptionally good convergence,
+///  rather than any sort of actual failure)
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
+#[serde(rename_all="kebab-case")]
+pub enum CgOnLsFailure {
+    /// Treat a second linesearch failure as a successful stop condition.
+    Succeed,
+    /// Succeed, but log a warning.
+    Warn,
+    /// Complain loudly and exit with a nonzero exit code.
+    Fail,
+}
+impl Default for CgOnLsFailure {
+    fn default() -> Self { CgOnLsFailure::Succeed }
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
+#[serde(rename_all="kebab-case")]
+pub enum CgFlavor {
+    #[serde(rename_all="kebab-case")]
+    Acgsd {
+        #[serde(rename="iteration-limit")] // for compatibility
+        ls_iteration_limit: OrDefault<u32>,
+    },
+    #[serde(rename_all="kebab-case")]
+    Hager {},
+}
+impl Default for CgFlavor {
+    fn default() -> Self { CgFlavor::Hager {} }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -352,7 +411,7 @@ pub struct LayerSearch {
     /// Expected number of layers, for a sanity check.
     /// (rsp2 will fail if this is provided and does not match the count found)
     #[serde(default)]
-    pub count: Option<u32>,
+    pub count: Nullable<u32>,
 }
 derive_yaml_read!{LayerSearch}
 
@@ -415,18 +474,18 @@ pub enum PotentialKind {
 #[serde(rename_all = "kebab-case")]
 pub struct PotentialAirebo {
     /// Cutoff radius (x3.4A)
-    pub lj_sigma: Option<f64>,
+    pub lj_sigma: OrDefault<f64>,
     // (I'm too lazy to make an ADT for this)
-    pub lj_enabled: Option<bool>,
-    pub torsion_enabled: Option<bool>,
-    pub omp: Option<bool>,
+    pub lj_enabled: OrDefault<bool>,
+    pub torsion_enabled: OrDefault<bool>,
+    pub omp: OrDefault<bool>,
 }
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub struct PotentialRebo {
-    pub omp: Option<bool>,
+    pub omp: OrDefault<bool>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -438,15 +497,15 @@ pub struct PotentialKolmogorovCrespiZ {
     #[serde(default = "_potential_kolmogorov_crespi_z__rebo")]
     pub rebo: bool,
     /// Cutoff radius (Angstrom?)
-    pub cutoff: Option<f64>,
+    pub cutoff: OrDefault<f64>,
     /// Separations larger than this are regarded as vacuum and do not interact. (Angstrom)
-    pub max_layer_sep: Option<f64>,
+    pub max_layer_sep: OrDefault<f64>,
 
     /// Enable a smooth cutoff starting at `r = cutoff - cutoff_interval` and ending at
     /// `r = cutoff`.
     ///
     /// NOTE: This requires a patched lammps.
-    pub cutoff_interval: Option<f64>,
+    pub cutoff_interval: Nullable<f64>,
 }
 fn _potential_kolmogorov_crespi_z__rebo() -> bool { true }
 
@@ -458,16 +517,14 @@ pub struct PotentialKolmogorovCrespiZNew {
     //       which depends on this crate
     /// Cutoff radius (Angstrom?)
     #[serde(rename = "cutoff")]
-    pub cutoff_begin: Option<f64>,
+    pub cutoff_begin: OrDefault<f64>,
 
     /// Thickness of the "smooth cutoff" shell.
-    ///
-    /// `None` uses a default value.
     ///
     /// NOTE: If a value of 0.0 is used, the value is offset to maintain C0 continuity.
     /// (This makes it effectively identical to LAMMPS)
     #[serde(rename = "cutoff-length")]
-    pub cutoff_transition_dist: Option<f64>,
+    pub cutoff_transition_dist: OrDefault<f64>,
 
     /// Skin depth for neighbor searches.  Adjusting this may wildly improve (or hurt!)
     /// performance depending on the application.
@@ -513,8 +570,7 @@ pub enum PotentialReboNewParams {
 #[serde(rename_all = "kebab-case")]
 pub enum EigenvectorChase {
     OneByOne,
-    #[serde(rename = "cg")]
-    Acgsd(Acgsd),
+    Cg(Cg),
 }
 
 #[derive(Serialize, Deserialize)]
@@ -671,7 +727,7 @@ impl Default for LammpsUpdateStyle {
 pub struct AcousticSearch {
     /// Known number of non-translational acoustic modes.
     #[serde(default)]
-    pub expected_non_translations: Option<usize>,
+    pub expected_non_translations: Nullable<usize>,
 
     /// Displacement to use for checking changes in force along the mode.
     #[serde(default = "_acoustic_search__displacement_distance")]

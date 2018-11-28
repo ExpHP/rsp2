@@ -226,19 +226,20 @@ mod tests {
         let start = Coords::new(lattice.clone(), start_coords.clone());
 
         let diff_fn = ConvergeTowards::new(target);
-        let cg_settings = &from_json!{{
-                "stop-condition": {"grad-max": 1e-10},
-                "alpha-guess-first": 0.1,
-            }};
+
+        let cg = {
+            let mut cg = ::rsp2_minimize::cg::Builder::new_hager();
+            cg.alpha_guess_first(0.1);
+
+            let cond: ::rsp2_minimize::cg::StopCondition = from_json!{{"grad-max": 1e-10}};
+            cg.stop_condition(cond.to_function());
+            cg
+        };
 
         let mut flat_diff_fn = diff_fn.initialize_flat_diff_fn(&start, ()).unwrap();
         let flat_diff_fn = &mut *flat_diff_fn;
 
-        let data = ::rsp2_minimize::acgsd(
-            cg_settings,
-            start.to_carts().flat(),
-            &mut *flat_diff_fn,
-        ).unwrap();
+        let data = cg.run(start.to_carts().flat(), &mut *flat_diff_fn).unwrap();
         println!("DerpG: {:?}", flat_diff_fn(start.to_carts().flat()).unwrap().1);
         println!("NumrG: {:?}", ::rsp2_minimize::numerical::try_gradient(
             1e-7, None,

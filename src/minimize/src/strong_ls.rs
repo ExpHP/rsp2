@@ -9,6 +9,11 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
+//! A simple-ish linesearch for a point that satisfies the strong Wolfe conditions.
+//!
+//! Based on code originally written by Colin Daniels.  I can't recall if that
+//! in turn was based off of anything.
+
 use ::either::{Either, Left, Right};
 
 #[derive(Debug, Clone, PartialEq)]
