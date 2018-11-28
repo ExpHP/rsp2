@@ -400,9 +400,16 @@ fn do_cg_relax_with_param_optimization(
                 ..
             } = state;
 
-            let (d_carts, _) = helper.unflatten_grad(position, gradient);
-            let gradient = d_carts.flat();
+            //
+            let (d_carts, d_params) = helper.unflatten_grad(position, gradient);
+            let mut gradient = d_carts.flat().to_vec();
+            // FIXME HACK: include the parameter forces in the list so that they are checked
+            //             by a "max-grad" constraint.
+            // The proper solution is to make a new replacement for
+            // rsp2_minimize::cg::stop_condition::Simple that has a "stress-max" variant.
+            gradient.extend(d_params);
 
+            let gradient = &gradient[..];
             imp(cg::AlgorithmState {
                 iterations, value, position, gradient, direction, alpha,
                 // HACK: To make matters even worse, we can't just replace the `gradient` field
