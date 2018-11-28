@@ -9,15 +9,15 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::failure::Error;
+use failure::Error;
 use crate::{Coords, Lattice};
-use ::rsp2_soa_ops::{Permute, Perm, Part, Partition};
+use rsp2_soa_ops::{Permute, Perm, Part, Partition};
 
-use ::std::mem;
-use ::itertools::Itertools;
-use ::ordered_float::NotNan;
+use std::mem;
+use itertools::Itertools;
+use ordered_float::NotNan;
 
-use ::rsp2_array_types::{V3, dot};
+use rsp2_array_types::{V3, dot};
 
 /// Return type of `find_layers`.
 #[derive(Debug, PartialEq, Clone)]
@@ -536,7 +536,7 @@ impl LayersPerUnitCell {
                     .map(|w| fracs[w[1]][axis] - fracs[w[0]][axis])
                     .collect::<Vec<_>>()
             };
-            use ::std::f64::INFINITY;
+            use std::f64::INFINITY;
             let min_diff = diffs.iter().cloned().fold(INFINITY, f64::min);
             let min_diff_pos = diffs.iter().position(|&x| x == min_diff).unwrap();
 
@@ -571,8 +571,8 @@ impl LayersPerUnitCell {
 mod tests {
     use super::*;
     use crate::CoordsKind;
-    use ::rsp2_soa_ops::{Permute, Perm};
-    use ::rsp2_array_types::Envee;
+    use rsp2_soa_ops::{Permute, Perm};
+    use rsp2_array_types::Envee;
 
     fn shuffle<T: Clone>(xs: &[T]) -> (Vec<T>, Perm)
     {
@@ -636,7 +636,7 @@ mod tests {
         let cart_tol    = 0.11 * ylen;  // produces 2 layers
         let smaller_tol = 0.09 * ylen;  // makes all atoms look separate
 
-        const IR2: f64 = ::std::f64::consts::FRAC_1_SQRT_2;
+        const IR2: f64 = std::f64::consts::FRAC_1_SQRT_2;
         let lattice = Lattice::from(&[
             [ ylen * IR2, ylen *  IR2,  0.0],
             [ ylen * IR2, ylen * -IR2,  0.0], // (axis we're using)

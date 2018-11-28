@@ -140,7 +140,7 @@ pub mod one_dee {
 
 // N-dimensional test functions for e.g. conjugate gradient
 pub mod n_dee {
-    use ::rsp2_slice_math::{vdot,v,V,vsqnorm};
+    use rsp2_slice_math::{vdot,v,V,vsqnorm};
 
     /// NOTE: Default implementations are mutually recursive.
     /// You must define either both `value()` and `gradient()`, or just `diff()`.
@@ -372,7 +372,7 @@ pub mod n_dee {
 
         impl RefinementMode {
             pub fn densities(&self) -> impl Iterator<Item=usize> {
-                use ::itertools::iterate;
+                use itertools::iterate;
                 match *self {
                     RefinementMode::Double => Box::new(iterate(1usize, |x| 2 * x)) as Box<dyn Iterator<Item=_>>,
                     RefinementMode::Linear => Box::new(0usize..) as Box<dyn Iterator<Item=_>>,
@@ -389,7 +389,7 @@ pub mod n_dee {
             pub fn end(&self) -> Vec<f64> { self.0.last().expect("").clone() }
 
             pub fn with_density(&self, density: usize) -> Vec<Vec<f64>> {
-                use ::std::iter::once;
+                use std::iter::once;
 
                 assert_ne!(density, 0);
                 assert!(self.0.len() > 0);
@@ -412,8 +412,8 @@ pub mod n_dee {
         pub fn compute_work_along_path<D>(mut diff: D, path: &[Vec<f64>]) -> f64
         where D: OnceDifferentiable,
         {
-            use ::itertools::Itertools;
-            use ::rsp2_slice_math::{v,V,vdot};
+            use itertools::Itertools;
+            use rsp2_slice_math::{v,V,vdot};
             path.iter().tuple_windows().map(|(cur, prev)| {
                 let V(mid) = (v(cur) + v(prev)) / 2.0;
                 let V(displacement) = v(cur) - v(prev);
@@ -443,7 +443,7 @@ pub mod n_dee {
             mut diff: D,
         ) where D: super::OnceDifferentiable
         {
-            use ::std::fmt::Write;
+            use std::fmt::Write;
 
             let path = path.generate_closed();
 
@@ -475,7 +475,7 @@ pub mod n_dee {
             mut diff: D,
         ) where D: super::OnceDifferentiable
         {
-            use ::std::fmt::Write;
+            use std::fmt::Write;
             let path = path.generate();
             if path.is_closed() {
                 warn!{"\
@@ -550,7 +550,7 @@ pub mod n_dee {
 
         #[test]
         fn lj_minimum() {
-            use ::rsp2_slice_math::{v, V};
+            use rsp2_slice_math::{v, V};
 
             let ndim = 10;
             let min_value = -40.0;

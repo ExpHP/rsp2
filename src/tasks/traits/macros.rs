@@ -53,7 +53,7 @@ macro_rules! impl_dirlike_boilerplate {
             -> FailResult<$Type<PathBuf>>
             {Ok({
                 // (use something that supports cross-filesystem moves)
-                ::rsp2_fs_util::mv(self.path(), path.as_path())?;
+                rsp2_fs_util::mv(self.path(), path.as_path())?;
 
                 self.map_dir(|old| {
                     // forget the TempDir

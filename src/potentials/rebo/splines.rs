@@ -16,11 +16,11 @@
 
 use crate::FailResult;
 #[allow(unused)] // https://github.com/rust-lang/rust/issues/45268
-use ::slice_of_array::prelude::*;
-use ::std::ops::RangeInclusive;
+use slice_of_array::prelude::*;
+use std::ops::RangeInclusive;
 #[allow(unused)] // https://github.com/rust-lang/rust/issues/45268
-use ::std::borrow::Borrow;
-use ::rsp2_array_types::{V2, V3};
+use std::borrow::Borrow;
+use rsp2_array_types::{V2, V3};
 
 pub mod P {
     use super::*;
@@ -593,7 +593,7 @@ def format_lmp_div(xdiv):
         print(x)
 
 def format_lmp(curve):
-    for region in curve[:, ::-1].tolist():
+    for region in curve[:, -1].tolist():
         for x in region:
             print(x)
 
@@ -1029,10 +1029,10 @@ pub mod tricubic {
         #[cfg(test)]
         pub fn random() -> Self {
             Input {
-                value: ::rand::random(),
-                di: ::rand::random(),
-                dj: ::rand::random(),
-                dk: ::rand::random(),
+                value: rand::random(),
+                di: rand::random(),
+                dj: rand::random(),
+                dk: rand::random(),
             }.ensure_clipping_is_valid()
         }
     }
@@ -1092,7 +1092,7 @@ pub mod tricubic {
 
     #[test]
     fn test_integer_values() -> FailResult<()> {
-        use ::rsp2_array_utils::arr_from_fn;
+        use rsp2_array_utils::arr_from_fn;
 
         let input = Input::random();
         let spline = input.solve()?;
@@ -1218,9 +1218,9 @@ pub mod bicubic {
         #[cfg(test)]
         pub fn random() -> Self {
             Input {
-                value: ::rand::random(),
-                di: ::rand::random(),
-                dj: ::rand::random(),
+                value: rand::random(),
+                di: rand::random(),
+                dj: rand::random(),
             }.ensure_clipping_is_valid()
         }
     }
@@ -1277,7 +1277,7 @@ pub mod bicubic {
 
     #[test]
     fn test_integer_values() -> FailResult<()> {
-        use ::rsp2_array_utils::arr_from_fn;
+        use rsp2_array_utils::arr_from_fn;
 
         let input = Input::random();
         let spline = input.solve()?;

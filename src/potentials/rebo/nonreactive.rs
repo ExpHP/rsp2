@@ -148,7 +148,7 @@ impl AtomType {
     }
 
     pub fn from_element(elem: rsp2_structure::Element) -> FailResult<Self> {
-        use ::rsp2_structure::consts;
+        use rsp2_structure::consts;
         match elem {
             consts::CARBON => Ok(AtomType::Carbon),
             consts::HYDROGEN => Ok(AtomType::Hydrogen),
@@ -157,7 +157,7 @@ impl AtomType {
     }
 
     pub fn iter_all() -> impl Iterator<Item=AtomType> {
-        ::std::iter::once(AtomType::Carbon).chain(::std::iter::once(AtomType::Hydrogen))
+        std::iter::once(AtomType::Carbon).chain(::std::iter::once(AtomType::Hydrogen))
     }
 }
 type TypeMap<T> = EnumMap<AtomType, T>;
@@ -533,7 +533,7 @@ mod interactions {
             &mut data.raw[self.site_bond_range(site)]
         }
 
-        pub fn site_bond_range(&self, site: SiteI) -> ::std::ops::Range<usize> {
+        pub fn site_bond_range(&self, site: SiteI) -> std::ops::Range<usize> {
             self.bond_div[site].0..self.bond_div[site.next()].0
         }
 
@@ -2466,7 +2466,7 @@ fn boole(cond: bool) -> f64 {
 mod reactive_warnings {
     use super::*;
 
-    use ::std::sync::RwLock;
+    use std::sync::RwLock;
 
     struct Records {
         worst_nonbonded_alpha: Option<f64>,
@@ -2548,7 +2548,7 @@ fn sbvec_scaled<T: ops::MulAssign<f64>>(f: f64, mut xs: SiteBondVec<T>) -> SiteB
 
 #[inline(always)] // elide large stack-to-stack copies
 fn sbvec_filled<T: Clone>(fill: T, len: usize) -> SiteBondVec<T>
-{ ::std::iter::repeat(fill).take(len).collect() }
+{ std::iter::repeat(fill).take(len).collect() }
 
 #[inline(always)] // elide large stack-to-stack copies
 fn axpy_mut<T: Copy>(a: &mut [T], alpha: f64, b: &[T])
@@ -2564,7 +2564,7 @@ where
 fn scaled<T: ops::MulAssign<f64>>(f: f64, mut xs: Vec<T>) -> Vec<T>
 { scale_mut(f, &mut xs); xs }
 
-fn scale_mut<T: ::std::ops::MulAssign<f64>>(factor: f64, xs: &mut [T]) {
+fn scale_mut<T: std::ops::MulAssign<f64>>(factor: f64, xs: &mut [T]) {
     for x in xs {
         *x *= factor;
     }
@@ -2637,9 +2637,9 @@ mod input_tests {
     }
 
     fn single(name: &str) -> FailResult<()> {
-        use ::std::{path, fs::File};
-        use ::rsp2_structure_io::Poscar;
-        use ::rsp2_array_types::Unvee;
+        use std::{path, fs::File};
+        use rsp2_structure_io::Poscar;
+        use rsp2_array_types::Unvee;
 
         // Set this to false to let tests capture stdout
         let use_rayon = false; // FIXME: revert to true
@@ -2648,7 +2648,7 @@ mod input_tests {
         let in_path = Path::new(RESOURCE_DIR).join("structure").join(name).join("structure.vasp.xz");
         let out_path = Path::new(RESOURCE_DIR).join("rebo").join(name.to_string() + ".lmp.json.xz");
 
-        let expected: ForceFile = ::serde_json::from_reader(open_xz(out_path)?)?;
+        let expected: ForceFile = serde_json::from_reader(open_xz(out_path)?)?;
         let Poscar { ref coords, ref elements, .. } = Poscar::from_reader(open_xz(in_path)?)?;
         let ref interactions = find_all_interactions(params, coords, elements)?;
 

@@ -10,9 +10,9 @@
 ** ************************************************************************ */
 
 use crate::{Coords, CoordsKind, Lattice};
-use ::std::fmt;
+use std::fmt;
 
-use ::rsp2_array_types::{V3, M33, mat};
+use rsp2_array_types::{V3, M33, mat};
 
 // NOTE: This API is in flux. Some (possibly incorrect) notes:
 //
@@ -216,7 +216,7 @@ impl IntRot {
     { other.then(self) }
 }
 
-impl ::std::ops::Mul<V3<i32>> for IntRot {
+impl std::ops::Mul<V3<i32>> for IntRot {
     type Output = V3<i32>;
 
     fn mul(self, v: V3<i32>) -> Self::Output
@@ -319,8 +319,8 @@ impl CartOp {
 #[cfg(feature = "serde")]
 mod serde_impls {
     use super::*;
-    use ::serde::{Serialize, Serializer, Deserialize, Deserializer};
-    use ::serde::de::Error;
+    use serde::{Serialize, Serializer, Deserialize, Deserializer};
+    use serde::de::Error;
 
     #[derive(Serialize, Deserialize)]
     pub struct RawCartOp {
@@ -361,10 +361,10 @@ mod serde_impls {
 
     #[cfg(test)]
     fn check_round_trip<T>(x: &T)
-    where T: ::std::fmt::Debug + PartialEq + Serialize + for<'de> Deserialize<'de>,
+    where T: std::fmt::Debug + PartialEq + Serialize + for<'de> Deserialize<'de>,
     {
-        let ser = ::serde_json::to_string(&x).unwrap();
-        let de: T = ::serde_json::from_str(&ser).unwrap();
+        let ser = serde_json::to_string(&x).unwrap();
+        let de: T = serde_json::from_str(&ser).unwrap();
         assert_eq!(x, &de);
     }
 
@@ -385,7 +385,7 @@ mod serde_impls {
     #[test]
     #[should_panic(expected = "unimodular")]
     fn bad_rot() {
-        let _: IntRot = ::serde_json::from_str("[[-1, 1, 0], [-2, 0, 0], [0, 0, 1]]").unwrap();
+        let _: IntRot = serde_json::from_str("[[-1, 1, 0], [-2, 0, 0], [0, 0, 1]]").unwrap();
     }
 }
 
@@ -393,7 +393,7 @@ mod serde_impls {
 #[deny(unused)]
 mod tests {
     use super::*;
-    use ::rsp2_array_types::{mat, Unvee, Envee};
+    use rsp2_array_types::{mat, Unvee, Envee};
     use crate::CoordsKind;
 
     pub(super) fn graphene_lattice() -> Lattice {

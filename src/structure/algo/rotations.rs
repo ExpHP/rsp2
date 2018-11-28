@@ -10,10 +10,10 @@
 ** ************************************************************************ */
 
 use crate::{Lattice, CoordsKind};
-use ::rsp2_array_utils::{map_arr};
+use rsp2_array_utils::{map_arr};
 use super::reduction::LatticeReduction;
 
-use ::rsp2_array_types::{M33, M3, V3, Unvee, dot};
+use rsp2_array_types::{M33, M3, V3, Unvee, dot};
 
 pub fn lattice_point_group(
     reduction: &LatticeReduction,

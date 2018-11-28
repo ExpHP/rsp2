@@ -9,9 +9,9 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::std::path::{Path, PathBuf};
-use ::std::fs::{self, File};
-use ::std::io::{BufReader};
+use std::path::{Path, PathBuf};
+use std::fs::{self, File};
+use std::io::{BufReader};
 
 pub use crate::cp_mv::{cp_a, mv, Copy, Move};
 mod cp_mv;
@@ -22,9 +22,9 @@ mod tempdir;
 #[macro_use] extern crate failure;
 #[macro_use] extern crate log;
 
-use ::failure::ResultExt;
+use failure::ResultExt;
 
-pub type FailResult<T> = Result<T, ::failure::Error>;
+pub type FailResult<T> = Result<T, failure::Error>;
 
 /// Wrapper around `File::open` that adds context.
 pub fn open(path: impl AsRef<Path>) -> FailResult<File>
@@ -139,7 +139,7 @@ pub fn hard_link(src: impl AsRef<Path>, dest: impl AsRef<Path>) -> FailResult<()
 /// * Does **not** follow symbolic links.
 pub fn rm_rf(path: impl AsRef<Path>) -> FailResult<()>
 {
-    use ::std::io::ErrorKind;
+    use std::io::ErrorKind;
 
     let path = path.as_ref();
 

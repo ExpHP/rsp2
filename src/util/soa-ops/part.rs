@@ -10,9 +10,9 @@
 ** ************************************************************************ */
 
 use crate::{Perm, Permute};
-use ::std::iter::FusedIterator;
+use std::iter::FusedIterator;
 #[cfg(feature = "frunk")]
-use ::frunk::{HNil, HCons};
+use frunk::{HNil, HCons};
 
 /// Type of "a thing that has been partitioned."
 ///
@@ -108,7 +108,7 @@ impl<L> Part<L> {
         L: Ord,
         Ls: IntoIterator<Item=L>,
     {
-        let mut map = ::std::collections::BTreeMap::new();
+        let mut map = std::collections::BTreeMap::new();
         for (i, key) in labels.into_iter().enumerate() {
             map.entry(key)
                 .or_insert_with(Vec::new)
@@ -122,7 +122,7 @@ impl<L> Part<L> {
 
     pub fn key_vec(&self) -> Vec<&L>
     {
-        use ::std::mem;
+        use std::mem;
 
         let mut temp = vec![None; self.index_limit];
         for (label, indices) in &self.part {
@@ -176,7 +176,7 @@ impl<L> Part<L> {
 
 impl<L> IntoIterator for Part<L> {
     type Item = (L, Vec<usize>);
-    type IntoIter = ::std::vec::IntoIter<(L, Vec<usize>)>;
+    type IntoIter = std::vec::IntoIter<(L, Vec<usize>)>;
     fn into_iter(self) -> Self::IntoIter
     { self.part.into_iter() }
 }
@@ -257,7 +257,7 @@ pub fn composite_perm_for_part_lifo<L>(part: &Part<L>) -> crate::Perm
             sort_keys[i] = int_key;
         }
     }
-    debug_assert!(sort_keys.iter().all(|&x| x != ::std::usize::MAX));
+    debug_assert!(sort_keys.iter().all(|&x| x != std::usize::MAX));
     Perm::argsort(&sort_keys)
 }
 
@@ -274,7 +274,7 @@ where T: Partition<'iter>,
         // (over each item)
         .map(|x| x.into_unlabeled_partitions(part))
         .fold(
-            ::std::iter::repeat_with(|| vec![])
+            std::iter::repeat_with(|| vec![])
                 .take(part.region_keys().len())
                 .collect(),
             |mut output: Vec<Vec<T>>, item_partitions| {
@@ -326,7 +326,7 @@ where
 #[deny(dead_code)]
 mod tests {
     use super::*;
-    use ::rand::Rng;
+    use rand::Rng;
 
     // FIXME: I don't see any tests where two labels have the same value...
 
@@ -455,7 +455,7 @@ mod tests {
         while !remaining.is_empty() {
             let label = part.len();
 
-            let n = ::rand::thread_rng().gen_range(0, usize::min(4, remaining.len() + 1));
+            let n = rand::thread_rng().gen_range(0, usize::min(4, remaining.len() + 1));
             let start = remaining.len() - n;
             part.push((label, remaining.drain(start..).collect()))
         }

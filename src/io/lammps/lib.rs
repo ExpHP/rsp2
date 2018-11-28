@@ -39,18 +39,18 @@ use crate::low_level::{LowLevelApi, ComputeStyle, Skews, LammpsOwner};
 #[cfg(feature = "mpi")]
 use crate::low_level::mpi::{MpiLammpsOwner, LammpsOnDemand as LammpsOnDemandImpl, LammpsDispatch};
 
-use ::std::path::{Path, PathBuf};
-use ::std::sync::{Mutex, MutexGuard};
-use ::std::fmt;
-use ::std::fs;
-use ::std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard};
+use std::fmt;
+use std::fs;
+use std::io::Write;
 
-use ::log::Level;
-use ::slice_of_array::prelude::*;
-use ::rsp2_structure::{Coords, Lattice};
-use ::rsp2_array_types::{V3, Unvee, Envee};
+use log::Level;
+use slice_of_array::prelude::*;
+use rsp2_structure::{Coords, Lattice};
+use rsp2_array_types::{V3, Unvee, Envee};
 
-pub type FailResult<T> = Result<T, ::failure::Error>;
+pub type FailResult<T> = Result<T, failure::Error>;
 
 pub use crate::pub_types::*;
 mod pub_types;
@@ -86,7 +86,7 @@ pub struct Lammps<P: Potential> {
     /// - Be careful providing methods that borrow `&self` and take a callback.
     ///
     /// (NOTE: I'm not entirely sure if this is correct.)
-    ptr: ::std::cell::RefCell<Box<dyn LowLevelApi>>,
+    ptr: std::cell::RefCell<Box<dyn LowLevelApi>>,
 
     /// This is stored to help convert metadata to/from AtomTypes.
     potential: P,
@@ -516,7 +516,7 @@ impl LammpsOnDemand {
     /// *after* allowing the panic implementation to unwind back out.
     ///
     /// This will be completely ineffective if the panic implementation does not unwind.
-    pub fn with_mpi_abort_on_unwind<R>(func: impl ::std::panic::UnwindSafe + FnOnce() -> R) -> R {
+    pub fn with_mpi_abort_on_unwind<R>(func: impl std::panic::UnwindSafe + FnOnce() -> R) -> R {
         crate::low_level::mpi_helper::with_mpi_abort_on_unwind(func)
     }
 }
@@ -535,7 +535,7 @@ impl<P: Potential> Lammps<P>
 
         let ptr = Self::_from_builder(builder, &original_init_info, &coords, &original_atom_types)?;
         Lammps {
-            ptr: ::std::cell::RefCell::new(ptr),
+            ptr: std::cell::RefCell::new(ptr),
             structure: MaybeDirty::new_dirty((coords, meta)),
             potential,
             original_init_info,
@@ -556,7 +556,7 @@ impl<P: Potential> Lammps<P>
         atom_types: &[AtomType],
     ) -> FailResult<Box<dyn LowLevelApi>>
     {Ok({
-        use ::std::io::prelude::*;
+        use std::io::prelude::*;
 
         let mut lmp = {
             let mut argv = vec![
@@ -581,7 +581,7 @@ impl<P: Potential> Lammps<P>
         //       anyways over the course of this function.
         append_logfile_nonessential(builder.append_log.as_ref(), |mut f| {
             let _ = writeln!(f, "---------------------------------------------");
-            let _ = writeln!(f, "---- Begin run at {}", ::chrono::Local::now());
+            let _ = writeln!(f, "---- Begin run at {}", chrono::Local::now());
             let _ = writeln!(f, "---------------------------------------------");
         });
 
@@ -678,7 +678,7 @@ fn append_logfile_nonessential(
 ) {
     if let Some(path) = path {
         let log = {
-            ::std::fs::OpenOptions::new()
+            std::fs::OpenOptions::new()
                 .write(true)
                 .create(true)
                 .append(true)
@@ -940,7 +940,7 @@ fn auto_adjust_lattice(diag: &mut [f64; 3], skews: &mut Skews) {
         if 2.0 * s.abs() > d.abs() {
             // that wasn't enough?
             // then increase diag by 1 ULP
-            *d = d.signum() * next_after(d.abs(), ::std::f64::INFINITY);
+            *d = d.signum() * next_after(d.abs(), std::f64::INFINITY);
         }
     }
 
@@ -950,7 +950,7 @@ fn auto_adjust_lattice(diag: &mut [f64; 3], skews: &mut Skews) {
     do_element(&mut diag[1], &mut skews.yz);
 }
 
-use ::std::os::raw::c_double;
+use std::os::raw::c_double;
 #[link_name = "m"]
 extern {
     fn nextafter(from: c_double, to: c_double) -> c_double;
@@ -1105,7 +1105,7 @@ mod tests {
     // get a fresh Lammps instance on which arbitrary functions can be called.
     fn arbitrary_initialized_lammps() -> Lammps<potential::None>
     {
-        use ::rsp2_structure::CoordsKind;
+        use rsp2_structure::CoordsKind;
         let coords = Coords::new(
             Lattice::eye(),
             CoordsKind::Fracs(vec![V3([0.0; 3])]),

@@ -17,16 +17,16 @@ macro_rules! zip_eq {
         crate::util::zip_eq($a, $b)
     };
     ($a:expr, $b:expr, $c:expr $(,)*) => {
-        ::util::zip_eq(::util::zip_eq($a, $b), $c)
+        util::zip_eq(::util::zip_eq($a, $b), $c)
             .map(|((a, b), c)| (a, b, c))
     };
     ($a:expr, $b:expr, $c:expr, $d:expr $(,)*) => {
-        ::util::zip_eq(::util::zip_eq(::util::zip_eq($a, $b), $c), $d)
+        util::zip_eq(::util::zip_eq(::util::zip_eq($a, $b), $c), $d)
             .map(|(((a, b), c), d)| (a, b, c, d))
     };
 }
 
-pub fn zip_eq<As, Bs>(a: As, b: Bs) -> ::std::iter::Zip<As::IntoIter, Bs::IntoIter>
+pub fn zip_eq<As, Bs>(a: As, b: Bs) -> std::iter::Zip<As::IntoIter, Bs::IntoIter>
 where
     As: IntoIterator, As::IntoIter: ExactSizeIterator,
     Bs: IntoIterator, Bs::IntoIter: ExactSizeIterator,
@@ -38,9 +38,9 @@ where
 
 macro_rules! impl_newtype_debug {
     ($Type:ident) => {
-        impl ::std::fmt::Debug for $Type {
-            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-                ::std::fmt::Debug::fmt(&self.0, f)
+        impl std::fmt::Debug for $Type {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                std::fmt::Debug::fmt(&self.0, f)
             }
         }
     };

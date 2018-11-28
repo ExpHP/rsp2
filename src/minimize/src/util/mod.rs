@@ -24,7 +24,7 @@ pub(crate) mod cache;
 #[allow(dead_code)]
 pub(crate) mod random {
     pub(crate) fn uniform(a: f64, b: f64) -> f64 {
-        a + ::rand::random::<f64>() * (b - a)
+        a + rand::random::<f64>() * (b - a)
     }
 
     pub(crate) fn uniform_n(ndim: usize, a: f64, b: f64) -> Vec<f64> {
@@ -37,10 +37,10 @@ pub(crate) mod random {
     }
 
     pub(crate) fn direction(ndim: usize) -> Vec<f64> {
-        use ::rand::distributions::normal::StandardNormal;
-        use ::rsp2_slice_math::vnormalize;
+        use rand::distributions::normal::StandardNormal;
+        use rsp2_slice_math::vnormalize;
 
-        let vec: Vec<_> = (0..ndim).map(|_| ::rand::random::<StandardNormal>().0).collect();
+        let vec: Vec<_> = (0..ndim).map(|_| rand::random::<StandardNormal>().0).collect();
         vnormalize(&vec).map(|x| x.0).unwrap_or_else(|_| direction(ndim))
     }
 }

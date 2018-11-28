@@ -80,7 +80,7 @@ pub trait MetaSift<Targets, Indices> {
 impl<List, Targets, Indices> MetaSift<Targets, Indices> for List
 where
     List: Clone,
-    List: ::frunk::hlist::Sculptor<Targets, Indices>,
+    List: frunk::hlist::Sculptor<Targets, Indices>,
 {
     fn sift(&self) -> Targets
     { self.clone().sculpt().0 }
@@ -97,7 +97,7 @@ pub trait MetaPick<Target, Index> {
 
 impl<List, Target, Index> MetaPick<Target, Index> for List
 where
-    Self: ::frunk::hlist::Selector<Target, Index>,
+    Self: frunk::hlist::Selector<Target, Index>,
     Target: Clone,
 {
     fn pick(&self) -> Target
@@ -115,7 +115,7 @@ pub trait MetaSendable: Sized + Clone {
     fn sendable<'a>(&'a self) -> Box<dyn Fn() -> Self + Send + Sync + 'a>;
 }
 
-impl<T: Clone + Sync> MetaSendable for ::std::rc::Rc<[T]> {
+impl<T: Clone + Sync> MetaSendable for std::rc::Rc<[T]> {
     fn sendable<'a>(&'a self) -> Box<dyn Fn() -> Self + Send + Sync + 'a> {
         let send = &self[..];
         Box::new(move || send.into())
@@ -136,7 +136,7 @@ impl<V: MetaSendable> MetaSendable for Option<V> {
     }
 }
 
-impl<A, B> MetaSendable for ::frunk::HCons<A, B>
+impl<A, B> MetaSendable for frunk::HCons<A, B>
 where
     A: MetaSendable,
     B: MetaSendable,
@@ -148,9 +148,9 @@ where
     }
 }
 
-impl MetaSendable for ::frunk::HNil {
+impl MetaSendable for frunk::HNil {
     fn sendable<'a>(&'a self) -> Box<dyn Fn() -> Self + Send + Sync + 'a> {
-        Box::new(|| ::frunk::HNil)
+        Box::new(|| frunk::HNil)
     }
 }
 

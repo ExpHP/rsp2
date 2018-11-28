@@ -233,7 +233,7 @@ impl ConfigSources {
         //        get a Read, which is required to have value paths appear in error messages),
         //        from which it will be parsed back into a Value in rsp2-tasks-config, etc...)
         let value = self.into_effective_yaml();
-        let s = ::serde_yaml::to_string(&value)?;
+        let s = serde_yaml::to_string(&value)?;
         YamlRead::from_reader(s.as_bytes())
     }
 }

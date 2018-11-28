@@ -10,11 +10,11 @@
 ** ************************************************************************ */
 
 use crate::FailResult;
-use ::std::io::prelude::*;
+use std::io::prelude::*;
 
-use ::rsp2_structure::{Element};
+use rsp2_structure::{Element};
 
-use ::rsp2_array_types::V3;
+use rsp2_array_types::V3;
 
 //--------------------------------------------------------------------------------------
 // public API

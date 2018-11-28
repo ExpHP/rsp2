@@ -13,7 +13,7 @@
 //!  We're just going to call a python script.)
 
 use crate::FailResult;
-use ::std::path::Path;
+use std::path::Path;
 use crate::traits::AsPath;
 
 use super::{call_script_and_communicate, Script};

@@ -9,8 +9,8 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::std::cell::RefCell;
-use ::std::fmt::Debug;
+use std::cell::RefCell;
+use std::fmt::Debug;
 
 /// Pushes an element to a vector when dropped.
 ///
@@ -28,7 +28,7 @@ impl<'a, T: Debug> PushDrop<'a, T> {
     pub(crate) fn into_inner(mut self) -> T
     {
         let x = self.0.take().unwrap();
-        ::std::mem::forget(self);
+        std::mem::forget(self);
         x
     }
 }

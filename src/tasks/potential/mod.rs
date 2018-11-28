@@ -15,13 +15,13 @@
 use crate::FailResult;
 use crate::hlist_aliases::*;
 use crate::meta;
-use ::rsp2_structure::{Coords};
-use ::rsp2_tasks_config as cfg;
-use ::rsp2_array_types::{V3, Unvee};
-use ::slice_of_array::prelude::*;
-use ::std::collections::BTreeMap;
+use rsp2_structure::{Coords};
+use rsp2_tasks_config as cfg;
+use rsp2_array_types::{V3, Unvee};
+use slice_of_array::prelude::*;
+use std::collections::BTreeMap;
 use crate::cmd::trial::TrialDir;
-use ::rsp2_lammps_wrap::LammpsOnDemand;
+use rsp2_lammps_wrap::LammpsOnDemand;
 
 /// Metadata type shared by all potentials usable in the main code.
 ///
@@ -515,7 +515,7 @@ pub struct Rsp2MinimizeDiffFnShim {
     pub diff_fn: Box<DynFlatDiffFn<'static>>
 }
 
-impl<'a> ::rsp2_minimize::test::n_dee::OnceDifferentiable for Rsp2MinimizeDiffFnShim {
+impl<'a> rsp2_minimize::test::n_dee::OnceDifferentiable for Rsp2MinimizeDiffFnShim {
     fn ndim(&self) -> usize
     { self.ndim }
 

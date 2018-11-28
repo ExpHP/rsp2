@@ -1,5 +1,5 @@
 pub mod version {
-    use ::rsp2_tasks::VersionInfo;
+    use rsp2_tasks::VersionInfo;
 
     pub fn get() -> VersionInfo {
         VersionInfo {

@@ -23,13 +23,13 @@ use crate::ui::cli_deserialize::CliDeserialize;
 use crate::util::ext_traits::{ArgMatchesExt};
 use crate::filetypes::{StoredStructure, Eigensols};
 
-use ::rsp2_lammps_wrap::LammpsOnDemand;
+use rsp2_lammps_wrap::LammpsOnDemand;
 
-use ::clap;
-use ::path_abs::{PathDir, PathFile, PathAbs};
-use ::std::ffi::OsStr;
-use ::std::panic::UnwindSafe;
-use ::std::process::exit;
+use clap;
+use path_abs::{PathDir, PathFile, PathAbs};
+use std::ffi::OsStr;
+use std::panic::UnwindSafe;
+use std::process::exit;
 
 // -------------------------------------------------------------------------------------
 // Initialization common to all entry points
@@ -47,7 +47,7 @@ where
             check_for_deps()?;
             log_thread_info()?;
 
-            let _pp_guard = ::rsp2_python::add_to_python_path()?;
+            let _pp_guard = rsp2_python::add_to_python_path()?;
 
             main(logfile, on_demand)
         })();
@@ -69,9 +69,9 @@ where
 // The closure runs on only one process.
 fn wrap_main_with_lammps_on_demand(continuation: impl UnwindSafe + FnOnce(Option<LammpsOnDemand>)) -> ! {
     #[cfg(feature = "mpi")] {
-        let required = ::mpi::Threading::Serialized;
+        let required = mpi::Threading::Serialized;
         let (_universe, actual) = {
-            ::mpi::initialize_with_threading(required).expect("Could not initialize MPI!")
+            mpi::initialize_with_threading(required).expect("Could not initialize MPI!")
         };
 
         // 'actual >= required' would be nicer, but I don't think MPI specifies comparison ordering
@@ -117,16 +117,16 @@ fn log_thread_info() -> FailResult<()> {
         crate::env::max_omp_num_threads()?,
         crate::env::MAX_OMP_NUM_THREADS,
     );
-    info!("  rayon: {} thread(s) on the root process", ::rayon::current_num_threads());
+    info!("  rayon: {} thread(s) on the root process", rayon::current_num_threads());
     Ok(())
 }
 
-fn show_errors(e: ::failure::Error) {
+fn show_errors(e: failure::Error) {
     for cause in e.iter_chain() {
         error!("{}", cause);
     }
 
-    if ::std::env::var_os("RUST_BACKTRACE") == Some(OsStr::new("1").to_owned()) {
+    if std::env::var_os("RUST_BACKTRACE") == Some(OsStr::new("1").to_owned()) {
         error!("{}", e.backtrace());
     } else {
         // When the only user is also the only dev, there isn't much point to wrapping
@@ -145,7 +145,7 @@ fn show_errors(e: ::failure::Error) {
 fn check_for_deps() -> FailResult<()> {
     crate::cmd::python::check_availability()?;
 
-    if ::std::env::var_os("LAMMPS_POTENTIALS").is_none() {
+    if std::env::var_os("LAMMPS_POTENTIALS").is_none() {
         bail!("rsp2 requires you to set the LAMMPS_POTENTIALS environment variable.");
     }
 
@@ -282,7 +282,7 @@ fn _rsp2_acgsd(
 ) -> ! {
     wrap_main(version, |logfile, mpi_on_demand| {
         let (app, de) = CliDeserialize::augment_clap_app({
-            ::clap::App::new(bin_name)
+            clap::App::new(bin_name)
                 .about("runs the full eigenvector loop of rsp2")
                 .args(&[
                     arg!( input=STRUCTURE "input file for structure"),
@@ -306,7 +306,7 @@ fn _rsp2_acgsd(
 pub fn after_diagonalization(bin_name: &str, version: VersionInfo) -> ! {
     wrap_main(version, |logfile, mpi_on_demand| {
         let (app, de) = CliDeserialize::augment_clap_app({
-            ::clap::App::new(bin_name)
+            clap::App::new(bin_name)
                 .about("The next step after rsp2-acgsd-and-dynmat and the negative_modes py script")
                 .args(&[
                     arg!( dir=DIR "existing trial directory"),
@@ -345,7 +345,7 @@ pub fn after_diagonalization(bin_name: &str, version: VersionInfo) -> ! {
 pub fn shear_plot(bin_name: &str, version: VersionInfo) -> ! {
     wrap_main(version, |logfile, mpi_on_demand| {
         let (app, de) = CliDeserialize::augment_clap_app({
-            ::clap::App::new(bin_name)
+            clap::App::new(bin_name)
                 .args(&[
                     arg!( input=FORCES_DIR "phonopy forces dir (try --save-bands in main script)"),
                 ])
@@ -367,7 +367,7 @@ pub fn shear_plot(bin_name: &str, version: VersionInfo) -> ! {
 pub fn save_bands_after_the_fact(bin_name: &str, version: VersionInfo) -> ! {
     wrap_main(version, |logfile, mpi_on_demand| {
         let (app, de) = CliDeserialize::augment_clap_app({
-            ::clap::App::new(bin_name)
+            clap::App::new(bin_name)
                 .args(&[
                     arg!( trial_dir=TRIAL_DIR "existing trial directory"),
                 ])
@@ -388,7 +388,7 @@ pub fn save_bands_after_the_fact(bin_name: &str, version: VersionInfo) -> ! {
 pub fn rerun_analysis(bin_name: &str, version: VersionInfo) -> ! {
     wrap_main(version, |logfile, mpi_on_demand| {
         let (app, de) = CliDeserialize::augment_clap_app({
-            ::clap::App::new(bin_name)
+            clap::App::new(bin_name)
                 .args(&[
                     arg!( dir=DIR "existing trial directory, or a structure directory within one"),
                 ])
@@ -414,7 +414,7 @@ pub fn rerun_analysis(bin_name: &str, version: VersionInfo) -> ! {
 pub fn sparse_analysis(bin_name: &str, version: VersionInfo) -> ! {
     wrap_main(version, |logfile, _mpi_on_demand| {
         let (app, de) = CliDeserialize::augment_clap_app({
-            ::clap::App::new(bin_name)
+            clap::App::new(bin_name)
                 .args(&[
                     arg!( dir=DIR "structure in directory format"),
                     arg!( eigensols=EIGENSOLS "eigensolutions file"),
@@ -451,7 +451,7 @@ pub fn sparse_analysis(bin_name: &str, version: VersionInfo) -> ! {
 pub fn bond_test(bin_name: &str, version: VersionInfo) -> ! {
     wrap_main(version, |logfile, _mpi_on_demand| {
         let (app, de) = CliDeserialize::augment_clap_app({
-            ::clap::App::new(bin_name)
+            clap::App::new(bin_name)
                 .args(&[
                     arg!( input=STRUCTURE ""),
                     arg!( cart [--cart] "output CartBonds instead of FracBonds")
@@ -470,8 +470,8 @@ pub fn bond_test(bin_name: &str, version: VersionInfo) -> ! {
 
         let bonds = rsp2_structure::bonds::FracBonds::from_brute_force(&coords, 1.8)?;
         match matches.is_present("cart") {
-            true => ::serde_json::to_writer(::std::io::stdout(), &bonds.to_cart_bonds(&coords))?,
-            false => ::serde_json::to_writer(::std::io::stdout(), &bonds)?,
+            true => serde_json::to_writer(::std::io::stdout(), &bonds.to_cart_bonds(&coords))?,
+            false => serde_json::to_writer(::std::io::stdout(), &bonds)?,
         }
 
         println!(); // flush, dammit
@@ -483,7 +483,7 @@ pub fn bond_test(bin_name: &str, version: VersionInfo) -> ! {
 pub fn dynmat_test(bin_name: &str, version: VersionInfo) -> ! {
     wrap_main(version, |logfile, _mpi_on_demand| {
         let (app, de) = CliDeserialize::augment_clap_app({
-            ::clap::App::new(bin_name)
+            clap::App::new(bin_name)
                 .args(&[
                     arg!( input=PHONOPY_DIR ""),
                 ])
@@ -502,7 +502,7 @@ pub fn dynmat_test(bin_name: &str, version: VersionInfo) -> ! {
 pub fn plot_vdw(bin_name: &str, version: VersionInfo) -> ! {
     wrap_main(version, |logfile, mpi_on_demand| {
         let (app, de) = CliDeserialize::augment_clap_app({
-            ::clap::App::new(bin_name)
+            clap::App::new(bin_name)
                 .args(&[
                     arg!(*z [-z]=ZSEP "z separation"),
                     arg!( r_min [--r-min]=RMIN ""),
@@ -533,7 +533,7 @@ pub fn plot_vdw(bin_name: &str, version: VersionInfo) -> ! {
 pub fn converge_vdw(bin_name: &str, version: VersionInfo) -> ! {
     wrap_main(version, |logfile, mpi_on_demand| {
         let (app, de) = CliDeserialize::augment_clap_app({
-            ::clap::App::new(bin_name)
+            clap::App::new(bin_name)
                 .args(&[
                     arg!(*z [-z]=ZSEP "z separation"),
                     arg!( r_min [--r-min]=RMIN ""),
@@ -557,7 +557,7 @@ pub fn converge_vdw(bin_name: &str, version: VersionInfo) -> ! {
 // %% CRATES: binary: rsp2-library-paths %%
 pub fn print_library_paths(bin_name: &str, _version: VersionInfo) -> ! {
     let app = {
-        ::clap::App::new(bin_name)
+        clap::App::new(bin_name)
             .about("\
                 prints the value of LD_LIBRARY_PATH supplied by cargo at compilation time, \
                 to assist in running binaries directly from target/.
@@ -565,6 +565,6 @@ pub fn print_library_paths(bin_name: &str, _version: VersionInfo) -> ! {
     };
     let _ = app.get_matches();
 
-    println!("{}", ::std::env::var("LD_LIBRARY_PATH").unwrap());
+    println!("{}", std::env::var("LD_LIBRARY_PATH").unwrap());
     exit(0);
 }

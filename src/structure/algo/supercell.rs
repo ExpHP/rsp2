@@ -11,9 +11,9 @@
 
 use crate::{Lattice, CoordsKind, Coords};
 
-use ::rsp2_soa_ops::{Perm};
-use ::rsp2_array_utils::{arr_from_fn, try_arr_from_fn};
-use ::rsp2_array_types::{V3};
+use rsp2_soa_ops::{Perm};
+use rsp2_array_utils::{arr_from_fn, try_arr_from_fn};
+use rsp2_array_types::{V3};
 
 
 // ---------------------------------------------------------------
@@ -141,11 +141,11 @@ pub struct SupercellToken {
 #[derive(Debug, Fail)]
 #[fail(display = "Suspiciously large movement between supercell images: {:e}", magnitude)]
 pub struct BigDisplacement {
-    backtrace: ::failure::Backtrace,
+    backtrace: failure::Backtrace,
     magnitude: f64,
 }
 
-pub type OwnedMetas<'a, T> = ::std::vec::Drain<'a, T>;
+pub type OwnedMetas<'a, T> = std::vec::Drain<'a, T>;
 
 impl SupercellToken {
     #[inline]
@@ -245,11 +245,11 @@ impl SupercellToken {
                 out_carts.push(V3(try_arr_from_fn(|k| {
                     let this_axis = || image_carts.iter().map(|v| v[k]);
 
-                    let inf = ::std::f64::INFINITY;
+                    let inf = std::f64::INFINITY;
                     let min = this_axis().fold(inf, |a, b| a.min(b));
                     let max = this_axis().fold(-inf, |a, b| a.max(b));
                     if max - min > 2.0 * validation_radius {
-                        let backtrace = ::failure::Backtrace::new();
+                        let backtrace = failure::Backtrace::new();
                         let magnitude = max - min;
                         return Err(BigDisplacement { backtrace, magnitude });
                     }
@@ -370,7 +370,7 @@ impl SupercellToken {
     // !!! This function affects the supercell convention !!! (SUPERCELL-CONV)
     // When modifying it, you must modify all functions that have this label.
     pub fn atom_from_cell_unchecked(&self, prim: usize, cell: [u32; 3]) -> usize {
-        use ::rsp2_array_types::dot;
+        use rsp2_array_types::dot;
         let [len_a, len_b, len_c] = self.periods;
         let stride_c = 1;
         let stride_b = stride_c * len_c as usize;
@@ -467,11 +467,11 @@ fn image_lattice_vecs(periods: [u32; 3], offset: V3<i32>, lattice: &Lattice) -> 
 #[cfg(test)]
 #[deny(unused)]
 mod tests {
-    use ::rsp2_soa_ops::{Permute, Perm};
+    use rsp2_soa_ops::{Permute, Perm};
     use crate::{Coords, CoordsKind, Lattice};
-    use ::rsp2_array_types::{V3, Envee};
+    use rsp2_array_types::{V3, Envee};
 
-    use ::rand::Rng;
+    use rand::Rng;
 
     #[test]
     fn diagonal_supercell_smoke_test() {
@@ -564,17 +564,17 @@ mod tests {
         let sc_token = crate::supercell::diagonal([2, 5, 3]).into_sc_token(7);
         let lattice_points = sc_token.atom_lattice_points();
         let cells = sc_token.atom_cells();
-        ::itertools::assert_equal(
+        itertools::assert_equal(
             lattice_points.iter().cloned(),
             cells.iter().map(|&v| sc_token.lattice_point_from_cell(v)),
         );
-        ::itertools::assert_equal(
+        itertools::assert_equal(
             cells.iter().cloned(),
             lattice_points.iter().map(|&v| sc_token.cell_from_lattice_point(v)),
         );
         // lattice points are automatically wrapped
         let offset = V3([-6, 35, 9]); // a supercell lattice point
-        ::itertools::assert_equal(
+        itertools::assert_equal(
             cells.iter().cloned(),
             lattice_points.iter().map(|&v| sc_token.cell_from_lattice_point(v + offset)),
         );
@@ -607,7 +607,7 @@ mod tests {
 
         for _ in 0..10 {
             let lattice_point = {
-                use ::rand::{thread_rng, Rng};
+                use rand::{thread_rng, Rng};
                 V3::from_fn(|_| thread_rng().gen_range(-15, 15))
             };
 
@@ -646,7 +646,7 @@ mod tests {
 
     #[test]
     fn conversion_methods_are_consistent() {
-        let mut rng = ::rand::thread_rng();
+        let mut rng = rand::thread_rng();
         for trial in 0..10 {
             let num_prim = rng.gen_range(1, 9 + 1);
             let lattice = Lattice::eye();

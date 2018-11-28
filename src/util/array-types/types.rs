@@ -9,8 +9,8 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::std::ops::{Deref, DerefMut};
-use ::std::fmt;
+use std::ops::{Deref, DerefMut};
+use std::fmt;
 
 // ---------------------------------------------------------------------------
 
@@ -56,8 +56,8 @@ pub type M44<X=f64> = M4<V4<X>>;
 // ---------------------------------------------------------------------------
 // All types behave generally like their backing array type.
 
-pub type Iter<'a, X> = ::std::slice::Iter<'a, X>;
-pub type IterMut<'a, X> = ::std::slice::IterMut<'a, X>;
+pub type Iter<'a, X> = std::slice::Iter<'a, X>;
+pub type IterMut<'a, X> = std::slice::IterMut<'a, X>;
 
 gen_each!{
     [

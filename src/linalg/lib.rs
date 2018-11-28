@@ -14,8 +14,8 @@
 #[macro_use] extern crate failure;
 #[macro_use] extern crate ndarray;
 
-use ::failure::{Error};
-use ::ndarray::{Array, Array2, ArrayView2, ArrayBase, Ix2, Axis};
+use failure::{Error};
+use ndarray::{Array, Array2, ArrayView2, ArrayBase, Ix2, Axis};
 
 #[derive(Debug, Fail)]
 #[fail(display = "matrix was perfectly degenerate")]
@@ -28,8 +28,8 @@ where A: ndarray::linalg::Dot<B>
 pub use self::c_matrix::CMatrix;
 mod c_matrix {
     use super::*;
-    use ::slice_of_array::IsSliceomorphic;
-    use ::slice_of_array::prelude::*;
+    use slice_of_array::IsSliceomorphic;
+    use slice_of_array::prelude::*;
 
     /// Owned, contiguous, C-order matrix data.
     ///
@@ -50,7 +50,7 @@ mod c_matrix {
         pub fn stride(&self) -> usize { self.cols() }
     }
 
-    impl<A> ::std::ops::Deref for CMatrix<A> {
+    impl<A> std::ops::Deref for CMatrix<A> {
         type Target = Array2<A>;
 
         fn deref(&self) -> &Self::Target { &self.0 }
@@ -191,7 +191,7 @@ pub fn lapacke_linear_solve(mut square: CMatrix, mut rhs: CMatrix) -> Result<CMa
     assert!(square.is_square());
     assert_eq!(square.cols(), rhs.rows());
 
-    let layout = ::lapacke::Layout::RowMajor;
+    let layout = lapacke::Layout::RowMajor;
 
     let n = rhs.rows() as i32;
     let nrhs = rhs.cols() as i32;
@@ -213,7 +213,7 @@ pub fn lapacke_linear_solve(mut square: CMatrix, mut rhs: CMatrix) -> Result<CMa
         let ipiv = &mut ipiv;
         assert!(ipiv.len() > 0);
 
-        match unsafe { ::lapacke::dgesv(layout, n, nrhs, a, lda, ipiv, b, ldb) } {
+        match unsafe { lapacke::dgesv(layout, n, nrhs, a, lda, ipiv, b, ldb) } {
             0 => { /* okey dokey */ },
             info if info < 0 => panic!("bad arg number {} to dgesv", -info),
             _info => return Err(DegenerateMatrixError),
@@ -227,7 +227,7 @@ pub fn lapacke_linear_solve(mut square: CMatrix, mut rhs: CMatrix) -> Result<CMa
 pub fn lapacke_least_squares_svd(mut matrix: CMatrix, mut rhs: CMatrix) -> Result<Array2<f64>, Error> {
     assert!(matrix.cols() <= rhs.rows());
 
-    let layout = ::lapacke::Layout::RowMajor;
+    let layout = lapacke::Layout::RowMajor;
 
     let m = matrix.rows() as i32;
     let n = matrix.cols() as i32;
@@ -250,7 +250,7 @@ pub fn lapacke_least_squares_svd(mut matrix: CMatrix, mut rhs: CMatrix) -> Resul
         let mut rank = 0;
         let rank = &mut rank;
 
-        match unsafe { ::lapacke::dgelss(layout, m, n, nrhs, a, lda, b, ldb, s, rcond, rank) } {
+        match unsafe { lapacke::dgelss(layout, m, n, nrhs, a, lda, b, ldb, s, rcond, rank) } {
             0 => { /* okey dokey */ },
             info if info < 0 => panic!("bad arg number {} to dgelss", -info),
             info => bail!("error during SVD ({} non-converging elements)", info),
@@ -262,11 +262,11 @@ pub fn lapacke_least_squares_svd(mut matrix: CMatrix, mut rhs: CMatrix) -> Resul
 
 #[test]
 fn test_pseudoinverse() {
-    use ::rand::Rng;
+    use rand::Rng;
 
 //    for _ in 0.. { // stress test
     for _ in 0..100 {
-        let mut rng = ::rand::thread_rng();
+        let mut rng = rand::thread_rng();
         // Produce an overdetermined or well-determined problem to solve.
         let r = rng.gen_range(1, 20);
         let c = rng.gen_range(1, r + 1);

@@ -105,7 +105,7 @@ impl<'a, M> DiffFn<M> for &'a ConvergeTowards {
         //
         // This is a periodic function with a minimum at each image of the target point,
         // and derivatives that are continuous everywhere.
-        use ::std::f64::consts::PI;
+        use std::f64::consts::PI;
 
         let cur_fracs = input_coords.to_fracs();
         let target_fracs = self.target.to_fracs();
@@ -188,9 +188,9 @@ impl_dyn_clone_detail!{
 mod tests {
     use super::*;
     use crate::FailOk;
-    use ::rsp2_structure::{Lattice, CoordsKind};
-    use ::rsp2_array_types::{Envee, Unvee};
-    use ::slice_of_array::prelude::*;
+    use rsp2_structure::{Lattice, CoordsKind};
+    use rsp2_array_types::{Envee, Unvee};
+    use slice_of_array::prelude::*;
 
     #[test]
     fn converge_towards() {
@@ -228,10 +228,10 @@ mod tests {
         let diff_fn = ConvergeTowards::new(target);
 
         let cg = {
-            let mut cg = ::rsp2_minimize::cg::Builder::new_hager();
+            let mut cg = rsp2_minimize::cg::Builder::new_hager();
             cg.alpha_guess_first(0.1);
 
-            let cond: ::rsp2_minimize::cg::StopCondition = from_json!{{"grad-max": 1e-10}};
+            let cond: rsp2_minimize::cg::StopCondition = from_json!{{"grad-max": 1e-10}};
             cg.stop_condition(cond.to_function());
             cg
         };
@@ -241,13 +241,13 @@ mod tests {
 
         let data = cg.run(start.to_carts().flat(), &mut *flat_diff_fn).unwrap();
         println!("DerpG: {:?}", flat_diff_fn(start.to_carts().flat()).unwrap().1);
-        println!("NumrG: {:?}", ::rsp2_minimize::numerical::try_gradient(
+        println!("NumrG: {:?}", rsp2_minimize::numerical::try_gradient(
             1e-7, None,
             start.to_carts().flat(),
             |p| FailOk(flat_diff_fn(p)?.0),
         ).unwrap());
         println!(" Grad: {:?}", data.gradient);
-        println!("Numer: {:?}", ::rsp2_minimize::numerical::try_gradient(
+        println!("Numer: {:?}", rsp2_minimize::numerical::try_gradient(
             1e-7, None,
             &data.position,
             |p| FailOk(flat_diff_fn(p)?.0),

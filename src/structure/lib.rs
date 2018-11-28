@@ -29,7 +29,7 @@ macro_rules! throw {
 #[derive(Debug, Fail)]
 #[fail(display = "Not nearly an integer: {}", value)]
 pub struct IntPrecisionError {
-    backtrace: ::failure::Backtrace,
+    backtrace: failure::Backtrace,
     value: f64,
 }
 
@@ -69,8 +69,8 @@ pub mod miller {
     //! that point in the same direction as the "primitive" Miller index but with `1/n` times the
     //! spacing. (i.e. more densely packed)
 
-    use ::rsp2_array_types::V3;
-    use ::num_integer::Integer;
+    use rsp2_array_types::V3;
+    use num_integer::Integer;
 
     /// Compute the greatest common divisor of a Miller index, as a non-negative integer.
     ///
@@ -90,7 +90,7 @@ pub mod miller {
 
     #[cfg(test)]
     pub(crate) fn random_nonzero(max: i32) -> V3<i32> {
-        use ::rand::{thread_rng, Rng};
+        use rand::{thread_rng, Rng};
 
         assert!(max > 0);
         loop {

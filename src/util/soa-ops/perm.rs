@@ -9,9 +9,9 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::std::fmt;
+use std::fmt;
 #[cfg(feature = "frunk")]
-use ::frunk::{HCons, HNil};
+use frunk::{HCons, HNil};
 
 /// Represents a reordering operation on atoms.
 ///
@@ -105,10 +105,10 @@ impl Perm {
 
     pub fn random(n: usize) -> Perm
     {
-        use ::rand::Rng;
+        use rand::Rng;
 
         let mut inv: Vec<_> = (0..n).collect();
-        ::rand::thread_rng().shuffle(&mut inv);
+        rand::thread_rng().shuffle(&mut inv);
         Perm { inv: PermVec(inv) }
     }
 
@@ -145,7 +145,7 @@ impl Perm {
     pub fn shift_signed(self, n: isize) -> Self
     {
         if n < 0 {
-            assert_ne!(n, ::std::isize::MIN, "(exasperated sigh)");
+            assert_ne!(n, std::isize::MIN, "(exasperated sigh)");
             self.shift_left((-n) as usize)
         } else {
             self.shift_right(n as usize)
@@ -198,7 +198,7 @@ impl Perm {
 
     pub fn pow_signed(&self, exp: i64) -> Perm {
         if exp < 0 {
-            assert_ne!(exp, ::std::i64::MIN, "(exasperated sigh)");
+            assert_ne!(exp, std::i64::MIN, "(exasperated sigh)");
             self.inverted().pow_unsigned((-exp) as u64)
         } else {
             self.pow_unsigned(exp as u64)
@@ -414,7 +414,7 @@ mod unsafe_impls {
     }
 
     pub(super) fn inv_permute_to_mut_vec<T>(mut vec: Vec<T>, inv: &PermVec, out: &mut Vec<T>) {
-        use ::std::ptr;
+        use std::ptr;
 
         assert_eq!(
             vec.len(), inv.0.len(),
@@ -491,7 +491,7 @@ where
 }
 
 // rsp2-tasks needs this
-impl<T: Clone> Permute for ::std::rc::Rc<[T]> {
+impl<T: Clone> Permute for std::rc::Rc<[T]> {
     fn permuted_by(self, perm: &Perm) -> Self
     {
         // this could be done with less copying...
@@ -503,7 +503,7 @@ impl<T: Clone> Permute for ::std::rc::Rc<[T]> {
     }
 }
 
-impl<T: Permute + Clone> Permute for ::std::rc::Rc<T> {
+impl<T: Permute + Clone> Permute for std::rc::Rc<T> {
     fn permuted_by(self, perm: &Perm) -> Self {
         Box::new((*self).clone().permuted_by(perm)).into()
     }
@@ -570,11 +570,11 @@ mod tests {
     #[test]
     fn argsort_is_stable()
     {
-        use ::rand::Rng;
+        use rand::Rng;
 
         // a long vector of only two unique values; a prime target for stability checks
         let n = 300;
-        let values: Vec<_> = (0..n).map(|_| ::rand::thread_rng().gen_range(0, 2)).collect();
+        let values: Vec<_> = (0..n).map(|_| rand::thread_rng().gen_range(0, 2)).collect();
 
         let perm = Perm::argsort(&values);
         let permuted_indices = (0..n).collect::<Vec<_>>().permuted_by(&perm);
@@ -610,9 +610,9 @@ mod tests {
         );
 
         for _ in 0..10 {
-            use ::rand::Rng;
+            use rand::Rng;
 
-            let mut rng = ::rand::thread_rng();
+            let mut rng = rand::thread_rng();
             let n = rng.gen_range(10, 20);
             let s = b"abcdefghijklmnopqrstuvwxyz"[..n].to_vec();
             let a = Perm::random(n);

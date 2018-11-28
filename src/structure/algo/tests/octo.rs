@@ -39,9 +39,9 @@
 //!   See https://github.com/ExpHP/rsp2/issues/1#issuecomment-340279243
 
 use crate::IntRot;
-use ::rsp2_soa_ops::{Perm};
+use rsp2_soa_ops::{Perm};
 
-use ::rsp2_array_types::{V3, vee, Envee};
+use rsp2_array_types::{V3, vee, Envee};
 
 /// Type of positions being acted upon.
 type X = Vec<V3>;
@@ -224,17 +224,17 @@ lazy_static! {
 mod tests {
     use super::*;
     use crate::algo::group::generate_finite_group;
-    use ::rsp2_soa_ops::Permute;
+    use rsp2_soa_ops::Permute;
 
-    use ::std::fmt::Debug;
-    use ::std::hash::Hash;
-    use ::std::collections::HashSet;
+    use std::fmt::Debug;
+    use std::hash::Hash;
+    use std::collections::HashSet;
 
     fn random_x() -> X
     {
-        use ::rand::Rng;
+        use rand::Rng;
         let mut verts = INIT_X.clone();
-        ::rand::thread_rng().shuffle(&mut verts);
+        rand::thread_rng().shuffle(&mut verts);
         verts
     }
 
@@ -243,7 +243,7 @@ mod tests {
         H: Eq + Clone + Debug,
         G: Eq + Clone + Debug + Hash,
     {
-        use ::std::collections::HashMap;
+        use std::collections::HashMap;
 
         let gs = gdata.members.clone();
         let hs = hdata.members.clone();

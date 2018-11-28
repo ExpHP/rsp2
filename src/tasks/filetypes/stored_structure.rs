@@ -13,11 +13,11 @@ use crate::FailResult;
 use crate::meta;
 use crate::traits::{Save, Load, AsPath};
 use crate::hlist_aliases::*;
-use ::rsp2_structure_io::Poscar;
-use ::rsp2_structure::Coords;
+use rsp2_structure_io::Poscar;
+use rsp2_structure::Coords;
 use crate::traits::save::Json;
 
-use ::path_abs::PathDir;
+use path_abs::PathDir;
 
 const FNAME_STRUCTURE: &'static str = "POSCAR";
 const FNAME_META: &'static str = "meta.json";
@@ -78,7 +78,7 @@ impl Save for StoredStructure {
         if let Some(frac_bonds) = frac_bonds {
             Json(frac_bonds).save(dir.join(FNAME_FRAC_BONDS))?;
         } else if dir.join(FNAME_FRAC_BONDS).exists() {
-            let _ = ::std::fs::remove_file(dir.join(FNAME_FRAC_BONDS));
+            let _ = std::fs::remove_file(dir.join(FNAME_FRAC_BONDS));
         }
 
         Ok(())

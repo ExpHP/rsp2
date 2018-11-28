@@ -9,7 +9,7 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::std::hash::Hash;
+use std::hash::Hash;
 
 // NOTE: Currently there is no "group" trait, for a couple of reasons:
 //
@@ -47,7 +47,7 @@ impl<G> GroupTree<G>
         // we cannot construct the identity without any generators
         assert!(members.len() > 0, "empty groups do not exist!");
 
-        let indices: ::std::collections::HashMap<G, usize> =
+        let indices: std::collections::HashMap<G, usize> =
             members.iter().cloned()
             .enumerate().map(|(i, x)| (x, i))
             .collect();
@@ -121,7 +121,7 @@ pub fn generate_finite_group<G>(
 ) -> Vec<G>
 where G: Hash + Eq + Clone,
 {
-    use ::std::collections::{HashSet, VecDeque};
+    use std::collections::{HashSet, VecDeque};
     assert!(generators.len() > 0, "empty groups do not exist!");
 
     let mut seen = HashSet::new();

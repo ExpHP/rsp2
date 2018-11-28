@@ -64,16 +64,16 @@ mod env;
 
 pub mod entry_points;
 
-pub type FailResult<T> = Result<T, ::failure::Error>;
+pub type FailResult<T> = Result<T, failure::Error>;
 #[allow(bad_style)]
 pub fn FailOk<T>(x: T) -> FailResult<T> { Ok(x) }
-pub use ::std::io::Result as IoResult;
+pub use std::io::Result as IoResult;
 
 mod errors {
     use std::fmt;
 
     #[derive(Debug, Clone)]
-    pub struct DisplayPathArcNice(pub ::path_abs::PathArc);
+    pub struct DisplayPathArcNice(pub path_abs::PathArc);
     impl fmt::Display for DisplayPathArcNice {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             use crate::util::ext_traits::PathNiceExt;
@@ -87,8 +87,8 @@ mod errors {
 /// It marks a child process's stdout.
 mod stdout {
     use crate::FailResult;
-    use ::std::{process::ChildStdout, thread, io::{BufReader, BufRead}};
-    use ::log::Level;
+    use std::{process::ChildStdout, thread, io::{BufReader, BufRead}};
+    use log::Level;
 
     const LEVEL: Level = Level::Info;
 
@@ -113,8 +113,8 @@ mod stdout {
 /// It marks a child process's stderr.
 mod stderr {
     use crate::FailResult;
-    use ::std::{process::ChildStderr, thread, io::{BufReader, BufRead}};
-    use ::log::Level;
+    use std::{process::ChildStderr, thread, io::{BufReader, BufRead}};
+    use log::Level;
 
     const LEVEL: Level = Level::Warn;
 
@@ -137,7 +137,7 @@ mod stderr {
 mod common {
     use crate::FailResult;
     use crate::meta::{Element, Mass};
-    use ::rsp2_structure::{consts};
+    use rsp2_structure::{consts};
 
     pub fn default_element_mass(elem: Element) -> FailResult<Mass>
     {Ok(Mass({
@@ -153,7 +153,7 @@ mod common {
 // with recent versions of the plugin painting large swathes of code in red syntax errors.
 #[allow(unused)]
 mod hlist_aliases {
-    use ::frunk::{HNil, HCons};
+    use frunk::{HNil, HCons};
     pub type HList0 = HNil;
     pub type HList1<A> = HCons<A, HList0<>>;
     pub type HList2<A, B> = HCons<A, HList1<B>>;
@@ -202,7 +202,7 @@ mod threading {
         { match self {
             Threading::Parallel => f(),
             Threading::Serial => {
-                ::rayon::ThreadPoolBuilder::new()
+                rayon::ThreadPoolBuilder::new()
                     .num_threads(1)
                     .build()
                     .unwrap()

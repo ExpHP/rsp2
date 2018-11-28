@@ -14,9 +14,9 @@
 
 use crate::FailResult;
 
-use ::std::os::raw::{c_int};
-use ::std::fmt;
-use ::failure::Backtrace;
+use std::os::raw::{c_int};
+use std::fmt;
+use failure::Backtrace;
 
 macro_rules! api_trace {
     ($($t:tt)*) => { log!(target: crate::API_TRACE_TARGET, crate::API_TRACE_LEVEL, $($t)*) };

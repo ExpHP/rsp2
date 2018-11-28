@@ -9,11 +9,11 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::std::sync::atomic::AtomicUsize;
-use ::std::sync::atomic::Ordering::SeqCst;
-use ::std::sync::Arc;
-use ::std::fmt;
-use ::rsp2_array_types::{V3};
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering::SeqCst;
+use std::sync::Arc;
+use std::fmt;
+use rsp2_array_types::{V3};
 
 pub use self::rayon_cond::CondIterator;
 mod rayon_cond;
@@ -76,9 +76,9 @@ pub(crate) fn index_of_shortest(carts: &[V3], tol: f64) -> Option<usize>
 pub(crate) use self::lockfile::{LockfilePath, LockfileGuard};
 mod lockfile {
     use crate::FailResult;
-    use ::std::fs::{OpenOptions};
-    use ::std::io;
-    use ::path_abs::{PathArc, PathFile, FileWrite};
+    use std::fs::{OpenOptions};
+    use std::io;
+    use path_abs::{PathArc, PathFile, FileWrite};
 
     /// Handle with methods for creating a lockfile without race conditions.
     #[derive(Debug, Clone)]
@@ -111,14 +111,14 @@ mod lockfile {
         pub fn lock(&self) -> FailResult<Option<LockfileGuard>> {
             let mut lock = self.try_lock()?;
             while lock.is_none() {
-                ::std::thread::sleep(Default::default());
+                std::thread::sleep(Default::default());
                 lock = self.try_lock()?;
             }
             Ok(lock)
         }
     }
 
-    impl ::std::ops::Deref for LockfilePath {
+    impl std::ops::Deref for LockfilePath {
         type Target = PathArc;
         fn deref(&self) -> &PathArc { &self.0 }
     }
@@ -144,19 +144,19 @@ mod lockfile {
 
 //--------------------------------------------------------
 
-pub trait VeclikeIterator: Iterator + ExactSizeIterator + DoubleEndedIterator + ::std::iter::FusedIterator {}
+pub trait VeclikeIterator: Iterator + ExactSizeIterator + DoubleEndedIterator + std::iter::FusedIterator {}
 impl<I> VeclikeIterator for I
-    where I: Iterator + ExactSizeIterator + DoubleEndedIterator + ::std::iter::FusedIterator {}
+    where I: Iterator + ExactSizeIterator + DoubleEndedIterator + std::iter::FusedIterator {}
 
 //--------------------------------------------------------
 
 pub mod ext_traits {
-    use ::path_abs::PathDir;
-    use ::std::path::Path;
-    use ::std::fmt;
+    use path_abs::PathDir;
+    use std::path::Path;
+    use std::fmt;
 
     extension_trait!{
-        <'a> pub ArgMatchesExt<'a> for ::clap::ArgMatches<'a> {
+        <'a> pub ArgMatchesExt<'a> for clap::ArgMatches<'a> {
             // For when the value ought to exist because it was 'required(true)'
             // (and therefore clap would have panicked if it were missing)
             fn expect_value_of(&self, s: &str) -> String

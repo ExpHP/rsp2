@@ -9,21 +9,21 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::std::ops::Deref;
-use ::std::path::Path;
-use ::std::io::prelude::*;
-use ::itertools::Itertools;
-use ::std::collections::{BTreeSet, BTreeMap};
+use std::ops::Deref;
+use std::path::Path;
+use std::io::prelude::*;
+use itertools::Itertools;
+use std::collections::{BTreeSet, BTreeMap};
 
 use crate::util;
 
 use crate::CheckFile;
 
-pub use ::failure::Error;
+pub use failure::Error;
 
-use ::path_abs::{FileRead, FileWrite};
-use ::rsp2_structure::{Coords, CartOp};
-use ::rsp2_array_types::{V3, M33, Unvee};
+use path_abs::{FileRead, FileWrite};
+use rsp2_structure::{Coords, CartOp};
+use rsp2_array_types::{V3, M33, Unvee};
 
 #[macro_export]
 macro_rules! impl_json {
@@ -186,13 +186,13 @@ impl Dynmat {
     #[allow(unused)]
     pub fn load(path: impl AsRef<::std::path::Path>) -> Result<Self, Error> {
         // we can't read NPZ in rust
-        let _guard = ::rsp2_python::add_to_python_path();
+        let _guard = rsp2_python::add_to_python_path();
         let _tmp = crate::fsx::TempDir::new("rsp2")?;
         let json_path = _tmp.path().join("tmp.json");
         // FIXME awkward as heck to be using process::Command for this, should the rust wrapper
         //       maybe be public in rsp2_python rather than private in rsp2_tasks?
         assert!({ // FIXME: Error instead of panic?
-            ::std::process::Command::new("python3")
+            std::process::Command::new("python3")
                 .arg("-m").arg("rsp2.cli.convert_dynmat")
                 .arg("--keep")
                 .arg(path.as_ref())
@@ -208,14 +208,14 @@ impl Dynmat {
     #[allow(unused)]
     pub fn save(&self, path: impl AsRef<::std::path::Path>) -> Result<(), Error> {
         // we can't write NPZ in rust
-        let _guard = ::rsp2_python::add_to_python_path();
+        let _guard = rsp2_python::add_to_python_path();
 
         let _tmp = crate::fsx::TempDir::new("rsp2")?;
         let json_path = _tmp.path().join("tmp.json");
         save_json(&json_path, self)?;
 
         assert!({ // FIXME: Error instead of panic?
-            ::std::process::Command::new("python3")
+            std::process::Command::new("python3")
                 .arg("-m").arg("rsp2.cli.convert_dynmat")
                 .arg(json_path)
                 .arg("--output").arg(path.as_ref())
@@ -289,17 +289,17 @@ impl CheckFile for Dynmat {
 // ----------------------------------------------------------------------------------------------
 
 pub fn load_json<T>(path: impl AsRef<Path>) -> Result<T, Error>
-where T: ::serde::de::DeserializeOwned,
+where T: serde::de::DeserializeOwned,
 {
     let file = FileRead::read(path)?;
     Ok(::serde_json::from_reader(file)?)
 }
 
 pub fn save_json<T>(path: impl AsRef<Path>, obj: &T) -> Result<(), Error>
-where T: ::serde::Serialize,
+where T: serde::Serialize,
 {
     let mut file = FileWrite::create(path)?;
-    ::serde_json::to_writer(&mut file, obj)?;
+    serde_json::to_writer(&mut file, obj)?;
     writeln!(file)?;
     Ok(())
 }

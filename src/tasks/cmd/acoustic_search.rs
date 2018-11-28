@@ -13,18 +13,18 @@ use crate::FailResult;
 use crate::potential::{PotentialBuilder};
 
 use crate::meta::{self, prelude::*};
-use ::rsp2_tasks_config as cfg;
+use rsp2_tasks_config as cfg;
 
 use crate::math::basis::{Basis3, EvDirections};
 
-use ::rsp2_slice_math::{v, V, vdot, vnormalize, BadNorm};
+use rsp2_slice_math::{v, V, vdot, vnormalize, BadNorm};
 
-use ::slice_of_array::prelude::*;
-use ::rsp2_structure::{Coords};
+use slice_of_array::prelude::*;
+use rsp2_structure::{Coords};
 use crate::hlist_aliases::*;
 
-use ::std::fmt;
-use ::std::rc::Rc;
+use std::fmt;
+use std::rc::Rc;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum ModeKind {
@@ -74,11 +74,11 @@ impl fmt::Display for ModeKind {
 impl fmt::Display for Colorful {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let color = match self.0 {
-            ModeKind::Translational => ::ansi_term::Colour::Yellow.bold(),
-            ModeKind::Rotational    => ::ansi_term::Colour::Purple.bold(),
-            ModeKind::Imaginary     => ::ansi_term::Colour::Red.bold(),
-            ModeKind::OtherAcoustic => ::ansi_term::Colour::Green.bold(),
-            ModeKind::Vibrational   => ::ansi_term::Colour::White.normal(),
+            ModeKind::Translational => ansi_term::Colour::Yellow.bold(),
+            ModeKind::Rotational    => ansi_term::Colour::Purple.bold(),
+            ModeKind::Imaginary     => ansi_term::Colour::Red.bold(),
+            ModeKind::OtherAcoustic => ansi_term::Colour::Green.bold(),
+            ModeKind::Vibrational   => ansi_term::Colour::White.normal(),
         };
         write!(f, "{}", crate::ui::color::gpaint(color, self.0))
     }

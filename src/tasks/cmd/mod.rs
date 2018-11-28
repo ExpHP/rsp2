@@ -35,10 +35,10 @@ mod param_optimization;
 pub(crate) mod python;
 
 use crate::{FailResult, FailOk};
-use ::rsp2_tasks_config::{self as cfg, Settings, NormalizationMode, SupercellSpec};
+use rsp2_tasks_config::{self as cfg, Settings, NormalizationMode, SupercellSpec};
 use crate::traits::{AsPath, Load, Save};
 use crate::phonopy::{DirWithBands, DirWithDisps, DirWithForces};
-use ::rsp2_lammps_wrap::LammpsOnDemand;
+use rsp2_lammps_wrap::LammpsOnDemand;
 
 use crate::meta::{self, prelude::*};
 use crate::util::ext_traits::{OptionResultExt, PathNiceExt};
@@ -49,23 +49,23 @@ use crate::math::{
 };
 use self::acoustic_search::ModeKind;
 
-use ::path_abs::{PathAbs, PathArc, PathFile, PathDir};
-use ::rsp2_structure::consts::CARBON;
-use ::rsp2_slice_math::{vnorm};
+use path_abs::{PathAbs, PathArc, PathFile, PathDir};
+use rsp2_structure::consts::CARBON;
+use rsp2_slice_math::{vnorm};
 
-use ::slice_of_array::prelude::*;
-use ::rsp2_array_utils::arr_from_fn;
-use ::rsp2_array_types::{V3, Unvee};
-use ::rsp2_structure::{Coords, Lattice};
-use ::rsp2_structure::{
+use slice_of_array::prelude::*;
+use rsp2_array_utils::arr_from_fn;
+use rsp2_array_types::{V3, Unvee};
+use rsp2_structure::{Coords, Lattice};
+use rsp2_structure::{
     layer::LayersPerUnitCell,
     bonds::FracBonds,
 };
 use crate::phonopy::Builder as PhonopyBuilder;
 
-use ::rsp2_fs_util::{rm_rf, hard_link};
+use rsp2_fs_util::{rm_rf, hard_link};
 
-use ::std::{
+use std::{
     path::{PathBuf},
     io::{Write},
     ffi::{OsStr, OsString},
@@ -74,7 +74,7 @@ use ::std::{
     fmt,
 };
 
-use ::itertools::Itertools;
+use itertools::Itertools;
 use crate::hlist_aliases::*;
 use crate::potential::{PotentialBuilder, DiffFn, CommonMeta};
 use crate::traits::save::Json;
@@ -239,7 +239,7 @@ pub(crate) fn write_ev_analysis_output_files(
             backscatter: Vec<f64>,
         }
         use crate::math::bond_polarizability::LightPolarization::*;
-        ::serde_json::to_writer(FileWrite::create(dir.join("raman.json"))?, &Output {
+        serde_json::to_writer(FileWrite::create(dir.join("raman.json"))?, &Output {
             frequency: frequency.0.to_vec(),
             average_3d: raman.0.iter().map(|t| t.integrate_intensity(&Average)).collect(),
             backscatter: raman.0.iter().map(|t| t.integrate_intensity(&BackscatterZ)).collect(),
@@ -255,7 +255,7 @@ pub(crate) fn write_ev_analysis_output_files(
             layer_ev_q_probs: Vec<Vec<Vec<f64>>>,
         }
 
-        ::serde_json::to_writer(FileWrite::create(dir.join("unfold.json"))?, &Output {
+        serde_json::to_writer(FileWrite::create(dir.join("unfold.json"))?, &Output {
             layer_sc_dims: sc_mats.iter().map(|m| m.periods).collect(),
             layer_q_indices: {
                 unfold_probs.layer_unfolders.iter()
@@ -428,7 +428,7 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
         > = stored.meta().sift();
 
         let compute_deperms = |coords: &_, cart_ops: &_| {
-            ::rsp2_structure::find_perm::spacegroup_deperms(
+            rsp2_structure::find_perm::spacegroup_deperms(
                 coords,
                 cart_ops,
                 // larger than SYMPREC because the coords we see may may be slightly
@@ -466,7 +466,7 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
                 use self::python::SpgDataset;
 
                 let sc_dim = settings.phonons.supercell.dim_for_unitcell(prim_coords.lattice());
-                let (super_coords, sc) = ::rsp2_structure::supercell::diagonal(sc_dim).build(prim_coords);
+                let (super_coords, sc) = rsp2_structure::supercell::diagonal(sc_dim).build(prim_coords);
 
                 trace!("Computing symmetry");
                 let cart_ops = {
@@ -542,7 +542,7 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
         trace!("Computing deperms in supercell");
         let super_deperms = compute_deperms(&super_coords, &cart_ops)?;
 
-        if log_enabled!(target: "rsp2_tasks::special::visualize_sparse_forces", ::log::Level::Trace) {
+        if log_enabled!(target: "rsp2_tasks::special::visualize_sparse_forces", log::Level::Trace) {
             visualize_sparse_force_sets(
                 &_trial,
                 &super_coords,
@@ -623,8 +623,8 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
 #[fail(display = "stopped after dynmat.  THIS IS NOT AN ACTUAL ERROR. THIS IS A DUMB HACK.")]
 pub(crate) struct StoppedAfterDynmat;
 
-use ::rsp2_soa_ops::{Perm, Permute};
-use ::rsp2_structure::CartOp;
+use rsp2_soa_ops::{Perm, Permute};
+use rsp2_structure::CartOp;
 // FIXME incorrect for nontrivial supercells. Should use primitive stars and translate
 //       the displaced atom to the correct image after rotation. (this would be easiest to
 //       do using the functionality in the ForceConstants code)
@@ -637,8 +637,8 @@ fn visualize_sparse_force_sets(
     force_sets: &[BTreeMap<usize, V3>],
 ) -> FailResult<()>
 {Ok({
-    use ::rsp2_structure::consts;
-    use ::rsp2_structure_io::Poscar;
+    use rsp2_structure::consts;
+    use rsp2_structure_io::Poscar;
 
     let subdir = trial.join("visualize-forces");
     if let Ok(dir) = PathDir::new(&subdir) {
@@ -781,12 +781,12 @@ impl TrialDir {
             let before_ev_chasing = f(EvLoopStructureKind::PreEvChase(Iteration(1)))?;
 
             let cereal = EnergyPerAtom { initial, final_, before_ev_chasing };
-            let value = ::serde_yaml::to_value(&cereal)?;
+            let value = serde_yaml::to_value(&cereal)?;
             make_nested_mapping(&["energy-per-atom"], value)
         });
 
         let summary = out.into_iter().fold(no_summary(), merge_summaries);
-        ::serde_yaml::to_writer(self.create_file("summary.yaml")?, &summary)?;
+        serde_yaml::to_writer(self.create_file("summary.yaml")?, &summary)?;
     })}
 }
 
@@ -812,7 +812,7 @@ fn do_force_sets_at_disps_for_phonopy<P: AsPath + Send + Sync>(
     disp_dir: &DirWithDisps<P>,
 ) -> FailResult<Vec<Vec<V3>>>
 {Ok({
-    use ::std::io::prelude::*;
+    use std::io::prelude::*;
 
     trace!("Computing forces at displacements");
 
@@ -829,7 +829,7 @@ fn do_force_sets_at_disps_for_phonopy<P: AsPath + Send + Sync>(
         move |diff_fn: &mut dyn DiffFn<_>, meta, coords: Coords| FailOk({
             let i = counter.inc();
             eprint!("\rdisp {} of {}", i + 1, num_displacements);
-            ::std::io::stderr().flush().unwrap();
+            std::io::stderr().flush().unwrap();
 
             diff_fn.compute_force(&coords, meta)?
         }),
@@ -847,7 +847,7 @@ fn do_force_sets_at_disps_for_sparse(
     meta: CommonMeta,
 ) -> FailResult<Vec<BTreeMap<usize, V3>>>
 {Ok({
-    use ::std::io::prelude::*;
+    use std::io::prelude::*;
 
     trace!("Computing forces at displacements");
 
@@ -860,7 +860,7 @@ fn do_force_sets_at_disps_for_sparse(
             .enumerate()
             .map(|(i, &disp)| {
                 eprint!("\rdisp {} of {}", i + 1, displacements.len());
-                ::std::io::stderr().flush().unwrap();
+                std::io::stderr().flush().unwrap();
 
                 disp_fn.compute_sparse_force_delta(disp)
             })
@@ -886,11 +886,11 @@ where
     Input: Send,
     Output: Send,
     Inputs: IntoIterator<Item=Input>,
-    Inputs: ::rayon::iter::IntoParallelIterator<Item=Input>,
+    Inputs: rayon::iter::IntoParallelIterator<Item=Input>,
     F: Fn(&mut dyn DiffFn<CommonMeta>, CommonMeta, Input) -> FailResult<Output> + Sync + Send,
 { match threading {
     Threading::Parallel => {
-        use ::rayon::prelude::*;
+        use rayon::prelude::*;
         let get_meta = meta.sendable();
         inputs.into_par_iter()
             .map(|x| compute(&mut pot.one_off(), get_meta(), x))
@@ -948,7 +948,7 @@ impl TrialDir {
         let (evals, evecs) = bands_dir.eigensystem_at(Q_GAMMA)?;
 
         let plot_ev_indices = {
-            use ::rsp2_tasks_config::EnergyPlotEvIndices::*;
+            use rsp2_tasks_config::EnergyPlotEvIndices::*;
 
             let (i, j) = match settings.ev_indices {
                 Shear => {
@@ -989,7 +989,7 @@ impl TrialDir {
                 (xmin..xmax, ymin..ymax),
                 (&get_real_ev(plot_ev_indices.0), &get_real_ev(plot_ev_indices.1)),
                 {
-                    use ::std::sync::atomic::{AtomicUsize, Ordering};
+                    use std::sync::atomic::{AtomicUsize, Ordering};
                     let counter = AtomicUsize::new(0);
                     let get_meta = meta.sendable();
 
@@ -1010,7 +1010,7 @@ impl TrialDir {
         eprintln!();
 
         let chunked: Vec<_> = data.chunks(w).collect();
-        ::serde_json::to_writer_pretty(self.create_file("out.json")?, &chunked)?;
+        serde_json::to_writer_pretty(self.create_file("out.json")?, &chunked)?;
     })}
 }
 
@@ -1217,7 +1217,7 @@ pub(crate) fn run_plot_vdw(
     rs: &[f64],
 ) -> FailResult<()>
 {Ok({
-    use ::rsp2_structure::{CoordsKind};
+    use rsp2_structure::{CoordsKind};
     let threading = cfg::Threading::Lammps;
 
     let lammps_update_style = cfg::LammpsUpdateStyle::Fast { sync_positions_every: 1 };
@@ -1268,7 +1268,7 @@ pub(crate) fn run_converge_vdw(
     (r_min, r_max): (f64, f64),
 ) -> FailResult<()>
 {Ok({
-    use ::rsp2_structure::{CoordsKind};
+    use rsp2_structure::{CoordsKind};
     let threading = cfg::Threading::Lammps;
 
     let lammps_update_style = cfg::LammpsUpdateStyle::Fast { sync_positions_every: 1 };
@@ -1299,7 +1299,7 @@ pub(crate) fn run_converge_vdw(
     let value_2 = diff_fn.compute_value(&get_coords(r_max), meta.sift())?;
     let d_value = value_2 - value_1;
 
-    use ::rsp2_minimize::test::n_dee::{work};
+    use rsp2_minimize::test::n_dee::{work};
     let path = work::PathConfig::Fixed(vec![
         get_coords(r_min).to_carts().flat().to_vec(),
         get_coords(r_max).to_carts().flat().to_vec(),
@@ -1333,7 +1333,7 @@ pub(crate) fn run_dynmat_test(phonopy_dir: &PathDir) -> FailResult<()>
     let space_group = disp_dir.symmetry()?;
 
     let space_group_deperms: Vec<_> = {
-        ::rsp2_structure::find_perm::spacegroup_deperms(
+        rsp2_structure::find_perm::spacegroup_deperms(
             &super_coords,
             &space_group,
             1e-1, // FIXME should be slightly larger than configured tol,
@@ -1406,8 +1406,8 @@ pub(crate) fn run_dynmat_test(phonopy_dir: &PathDir) -> FailResult<()>
 //     outdir: &AsRef<Path>,
 // ) -> Result<()>
 // {ok({
-//     use ::rsp2_structure_io::poscar;
-//     use ::std::io::BufReader;
+//     use rsp2_structure_io::poscar;
+//     use std::io::BufReader;
 
 //     let potential = panic!("TODO: potential in make_force_sets");
 //     unreachable!();
@@ -1549,7 +1549,7 @@ pub(crate) fn read_optimizable_structure(
     let out_sc_mats: Option<meta::LayerScMatrices>;
     match file_format {
         StructureFileType::Poscar => {
-            use ::rsp2_structure_io::Poscar;
+            use rsp2_structure_io::Poscar;
 
             let Poscar { coords, elements, .. } = Load::load(input.as_path())?;
             out_elements = elements.into();
@@ -1570,8 +1570,8 @@ pub(crate) fn read_optimizable_structure(
             }
         },
         StructureFileType::LayersYaml => {
-            use ::rsp2_structure_io::layers_yaml::load;
-            use ::rsp2_structure_io::layers_yaml::load_layer_sc_info;
+            use rsp2_structure_io::layers_yaml::load;
+            use rsp2_structure_io::layers_yaml::load_layer_sc_info;
 
             let layer_builder = load(PathFile::new(input)?.read()?)?;
 
@@ -1632,7 +1632,7 @@ pub(crate) fn perform_layer_search(
     } = cfg;
 
     let layers = {
-        ::rsp2_structure::layer::find_layers(coords, V3(normal), threshold)?
+        rsp2_structure::layer::find_layers(coords, V3(normal), threshold)?
             .per_unit_cell()
             .expect("Structure is not layered?")
     };

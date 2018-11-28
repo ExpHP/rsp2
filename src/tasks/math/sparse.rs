@@ -22,10 +22,10 @@
 //! operations.
 
 use crate::FailResult;
-use ::std::collections::BTreeMap;
-use ::std::ops::{Range, Add, AddAssign};
-use ::num_traits::Zero;
-use ::rsp2_newtype_indices::{Idx, Indexed};
+use std::collections::BTreeMap;
+use std::ops::{Range, Add, AddAssign};
+use num_traits::Zero;
+use rsp2_newtype_indices::{Idx, Indexed};
 
 //=============================================================================================
 

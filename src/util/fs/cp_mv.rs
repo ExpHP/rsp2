@@ -10,9 +10,9 @@
 ** ************************************************************************ */
 
 use crate::FailResult;
-use ::std::ffi::OsStr;
-use ::std::process::{Command, Stdio};
-use ::std::io::Read;
+use std::ffi::OsStr;
+use std::process::{Command, Stdio};
+use std::io::Read;
 
 /// Move a file or directory, possibly across filesystems.
 ///

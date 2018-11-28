@@ -9,15 +9,15 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::rsp2_structure::{CoordsKind, Lattice, Coords};
-use ::rsp2_kets::{Ket, KetRef, Rect};
-use ::rsp2_array_utils::{arr_from_fn};
-use ::rsp2_array_types::{V3, M33, dot, inv};
+use rsp2_structure::{CoordsKind, Lattice, Coords};
+use rsp2_kets::{Ket, KetRef, Rect};
+use rsp2_array_utils::{arr_from_fn};
+use rsp2_array_types::{V3, M33, dot, inv};
 use crate::threading::Threading;
 
-use ::rayon::prelude::*;
-use ::std::f64::consts::PI;
-use ::itertools::Itertools;
+use rayon::prelude::*;
+use std::f64::consts::PI;
+use itertools::Itertools;
 
 //---------------------------
 // NOTE: (2018-02-16) (gamma-point)
@@ -326,9 +326,9 @@ type PrimFracQ = V3;
 #[deny(dead_code)]
 mod tests {
     use super::*;
-    use ::slice_of_array::prelude::*;
-    use ::rsp2_structure::{CoordsKind, Lattice};
-    use ::rsp2_array_types::{Envee, mat};
+    use slice_of_array::prelude::*;
+    use rsp2_structure::{CoordsKind, Lattice};
+    use rsp2_array_types::{Envee, mat};
 
     #[test]
     fn simple_unfold() {

@@ -7,10 +7,10 @@ fn main() -> Result<(), failure::Error> {
     let coords = CoordsKind::Fracs(vec![V3([0.5; 3])]);
     let coords = Coords::new(Lattice::eye(), coords);
     let value = {
-        ::rsp2_lammps_wrap::Builder::new()
+        rsp2_lammps_wrap::Builder::new()
             .build(
-                ::rsp2_lammps_wrap::INSTANCE_LOCK.lock().unwrap(),
-                ::rsp2_lammps_wrap::potential::None,
+                rsp2_lammps_wrap::INSTANCE_LOCK.lock().unwrap(),
+                rsp2_lammps_wrap::potential::None,
                 coords,
                 (),
             ).unwrap()

@@ -105,7 +105,7 @@ gen_each!{
 //       Does this cause repeated compilation of the same code in
 //       downstream crates? :/
 pub(crate) mod internal {
-    use ::std::ops::{Add, Sub, Mul, Div, Neg};
+    use std::ops::{Add, Sub, Mul, Div, Neg};
 
     macro_rules! markers {
         ($( $name:ident[$($bound:tt)+]; )+)
@@ -132,10 +132,10 @@ pub(crate) mod internal {
         + PartialEq + PartialOrd
         + SelfAdd + RefAdd
         + SelfMul + RefMul
-        + ::num_traits::Zero
-        + ::num_traits::One
-        + ::std::iter::Sum
-        + ::std::iter::Product
+        + num_traits::Zero
+        + num_traits::One
+        + std::iter::Sum
+        + std::iter::Product
     {
         fn from_uint(u: u8) -> Self;
         #[inline(always)] fn two() -> Self { Self::from_uint(2) }

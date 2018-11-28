@@ -9,7 +9,7 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-pub(crate) fn zip_eq<As, Bs>(a: As, b: Bs) -> ::std::iter::Zip<As::IntoIter, Bs::IntoIter>
+pub(crate) fn zip_eq<As, Bs>(a: As, b: Bs) -> std::iter::Zip<As::IntoIter, Bs::IntoIter>
 where
     As: IntoIterator, As::IntoIter: ExactSizeIterator,
     Bs: IntoIterator, Bs::IntoIter: ExactSizeIterator,
@@ -23,8 +23,8 @@ where
 pub(crate) use self::drop_pusher::DropPusher;
 #[cfg(test)]
 mod drop_pusher {
-    use ::std::rc::Rc;
-    use ::std::cell::RefCell;
+    use std::rc::Rc;
+    use std::cell::RefCell;
 
     pub(crate) struct DropPusher<T: Copy>(Rc<RefCell<Vec<T>>>, T);
 

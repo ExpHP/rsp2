@@ -9,8 +9,8 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::std::fmt;
-use ::ansi_term::Style;
+use std::fmt;
+use ansi_term::Style;
 
 macro_rules! each_fmt_trait {
     ($mac:ident!)
@@ -53,7 +53,7 @@ impl<T> ColorByRange<T> {
     // pub fn paint<'a, U>(&self, x: U) -> Wrapper<U, T>
     // where
     //     T: PartialOrd + 'a,
-    //     U: ::std::borrow::Borrow<T> + 'a,
+    //     U: std::borrow::Borrow<T> + 'a,
     // { gpaint(self.style_of(x.borrow()), x) }
 }
 
@@ -76,13 +76,13 @@ impl<D, C> PaintAs<D, C> for NullPainter
 
 // hack for type inference issues
 pub fn paint<T>(
-    style: ::ansi_term::Style,
+    style: ansi_term::Style,
     value: T,
 ) -> Wrapper<T, T>
 { gpaint(style, value) }
 
 pub fn gpaint<U, T>(
-    style: ::ansi_term::Style,
+    style: ansi_term::Style,
     value: U,
 ) -> Wrapper<U, T>
 { Wrapper { style, value, _target: Default::default() } }
@@ -94,9 +94,9 @@ pub fn gpaint<U, T>(
 ///  return one of these from a function)
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct Wrapper<U, T=U> {
-    style: ::ansi_term::Style,
+    style: ansi_term::Style,
     value: U,
-    _target: ::std::marker::PhantomData<T>,
+    _target: std::marker::PhantomData<T>,
 }
 
 macro_rules! derive_fmt_impl {
@@ -104,7 +104,7 @@ macro_rules! derive_fmt_impl {
     => {
         impl<U, T> $Trait for Wrapper<U, T>
         where
-            U: ::std::borrow::Borrow<T>,
+            U: std::borrow::Borrow<T>,
             T: $Trait,
         {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

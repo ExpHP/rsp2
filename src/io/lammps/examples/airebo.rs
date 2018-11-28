@@ -26,8 +26,8 @@ fn main() -> Result<(), failure::Error> {
     let super_meta = sc.replicate(&unit_meta);
 
     let value = {
-        let lock = ::rsp2_lammps_wrap::INSTANCE_LOCK.lock().unwrap();
-        ::rsp2_lammps_wrap::Builder::new()
+        let lock = rsp2_lammps_wrap::INSTANCE_LOCK.lock().unwrap();
+        rsp2_lammps_wrap::Builder::new()
             .build(lock, Airebo, super_coords, super_meta).unwrap()
             .compute_value()?
     };

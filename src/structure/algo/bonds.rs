@@ -122,9 +122,9 @@ impl FracBond {
     ///  such as directly constructing one or by using `join`)
     pub fn is_canonical(&self) -> bool {
         match self.from.cmp(&self.to) {
-            ::std::cmp::Ordering::Less => true,
-            ::std::cmp::Ordering::Greater => false,
-            ::std::cmp::Ordering::Equal => {
+            std::cmp::Ordering::Less => true,
+            std::cmp::Ordering::Greater => false,
+            std::cmp::Ordering::Equal => {
                 for &x in &self.image_diff.0 {
                     if x != 0 {
                         return x > 0;
@@ -1018,7 +1018,7 @@ impl fmt::Display for ComponentLabel {
 impl ComponentLabel {
     fn wrap_vec_with_newtype(vec: Vec<usize>) -> Vec<ComponentLabel> {
         unsafe {
-            ::std::mem::transmute::<
+            std::mem::transmute::<
                 Vec<usize>,
                 Vec<ComponentLabel>,
             >(vec)

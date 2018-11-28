@@ -33,13 +33,13 @@ use rsp2_minimize; // FIXME: cargo fix artifact ???
 #[macro_use]
 extern crate log;
 
-use ::std::io::Read;
-use ::std::collections::HashMap;
-use ::failure::Error;
+use std::io::Read;
+use std::collections::HashMap;
+use failure::Error;
 
 /// Provides an alternative to serde_yaml::from_reader where all of the
 /// expensive codegen has already been performed in this crate.
-pub trait YamlRead: for <'de> ::serde::Deserialize<'de> {
+pub trait YamlRead: for <'de> serde::Deserialize<'de> {
     fn from_reader(mut r: impl Read) -> Result<Self, Error>
     { YamlRead::from_dyn_reader(&mut r) }
 
@@ -72,22 +72,22 @@ pub trait YamlRead: for <'de> ::serde::Deserialize<'de> {
 
     // trait-provided function definitions seem to be lazily monomorphized, so we
     // must put the meat of what we need monomorphized directly into the impls
-    fn __serde_ignored__from_value(value: ::serde_yaml::Value) -> Result<Self, Error>;
+    fn __serde_ignored__from_value(value: serde_yaml::Value) -> Result<Self, Error>;
     fn __serde_yaml__from_str(s: &str) -> Result<Self, Error>;
 }
 
 macro_rules! derive_yaml_read {
     ($Type:ty) => {
         impl YamlRead for $Type {
-            fn __serde_ignored__from_value(value: ::serde_yaml::Value) -> Result<$Type, Error> {
-                ::serde_ignored::deserialize(
+            fn __serde_ignored__from_value(value: serde_yaml::Value) -> Result<$Type, Error> {
+                serde_ignored::deserialize(
                     value,
                     |path| warn!("Unused config item (possible typo?): {}", path),
                 ).map_err(Into::into)
             }
 
             fn __serde_yaml__from_str(s: &str) -> Result<$Type, Error> {
-                ::serde_yaml::from_str(s)
+                serde_yaml::from_str(s)
                     .map_err(Into::into)
             }
         }
@@ -105,7 +105,7 @@ pub type Nullable<T> = Option<T>;
 
 // (this also exists solely for codegen reasons)
 fn value_from_str(r: &str) -> Result<::serde_yaml::Value, Error>
-{ ::serde_yaml::from_str(r).map_err(Into::into) }
+{ serde_yaml::from_str(r).map_err(Into::into) }
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
@@ -813,8 +813,8 @@ fn test_defaults()
     let _ = AcousticSearch::default();
 }
 
-fn from_empty_mapping<T: for<'de> ::serde::Deserialize<'de>>() -> ::serde_yaml::Result<T> {
-    use ::serde_yaml::{from_value, Value, Mapping};
+fn from_empty_mapping<T: for<'de> serde::Deserialize<'de>>() -> serde_yaml::Result<T> {
+    use serde_yaml::{from_value, Value, Mapping};
     from_value(Value::Mapping(Mapping::new()))
 }
 

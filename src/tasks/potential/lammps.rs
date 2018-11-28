@@ -25,20 +25,20 @@ use crate::FailResult;
 #[allow(unused)] // rustc bug
 use crate::meta::{self, prelude::*};
 #[allow(unused)] // rustc bug
-use ::rsp2_soa_ops::{Part, Partition};
-use ::rsp2_structure::{Coords, consts};
-use ::rsp2_structure::layer::Layers;
-use ::rsp2_tasks_config as cfg;
-use ::rsp2_array_types::{V3};
-use ::std::collections::BTreeMap;
+use rsp2_soa_ops::{Part, Partition};
+use rsp2_structure::{Coords, consts};
+use rsp2_structure::layer::Layers;
+use rsp2_tasks_config as cfg;
+use rsp2_array_types::{V3};
+use std::collections::BTreeMap;
 use crate::cmd::trial::TrialDir;
 
-use ::rsp2_lammps_wrap::{InitInfo, AtomType, PairStyle, PairCoeff};
-use ::rsp2_lammps_wrap::Builder as InnerBuilder;
-use ::rsp2_lammps_wrap::Potential as LammpsPotential;
-use ::rsp2_lammps_wrap::UpdateStyle;
-use ::rsp2_lammps_wrap::LammpsOnDemand;
-use ::rsp2_lammps_wrap::INSTANCE_LOCK;
+use rsp2_lammps_wrap::{InitInfo, AtomType, PairStyle, PairCoeff};
+use rsp2_lammps_wrap::Builder as InnerBuilder;
+use rsp2_lammps_wrap::Potential as LammpsPotential;
+use rsp2_lammps_wrap::UpdateStyle;
+use rsp2_lammps_wrap::LammpsOnDemand;
+use rsp2_lammps_wrap::INSTANCE_LOCK;
 
 const DEFAULT_KC_Z_CUTOFF: f64 = 14.0; // (Angstrom?)
 const DEFAULT_KC_Z_MAX_LAYER_SEP: f64 = 4.5; // Angstrom
@@ -97,7 +97,7 @@ impl<P: Clone> Builder<P>
         if let Some(on_demand) = on_demand {
             inner.on_demand(on_demand);
         }
-        if log_enabled!(target: "rsp2_tasks::special::lammps_data_trace", ::log::Level::Trace) {
+        if log_enabled!(target: "rsp2_tasks::special::lammps_data_trace", log::Level::Trace) {
             inner.data_trace_dir(Some({
                 trial_dir.map(|t| t.as_path().to_owned())
                     .unwrap_or(::std::env::current_dir().unwrap())
@@ -123,7 +123,7 @@ impl<P: Clone> Builder<P>
     }
 
     pub(crate) fn parallel(&self, parallel: bool) -> Self {
-        use ::rsp2_array_utils::map_arr;
+        use rsp2_array_utils::map_arr;
 
         let processors = match parallel {
             true => map_arr(self.processor_axis_mask, |flag| if flag { None } else { Some(1) }),
@@ -304,7 +304,7 @@ mod overlay {
         /// Inserts a `pair_coeff i j none` command to erase all previously added
         /// interactions between the given atom types.
         pub fn set_none<I, J>(&mut self, i: I, j: J) -> &mut Self
-        where ::rsp2_lammps_wrap::AtomTypeRange: From<I> + From<J>
+        where rsp2_lammps_wrap::AtomTypeRange: From<I> + From<J>
         {
             self.indices.push(None); // "pair_coeff i j none" never uses disambiguation indices
             self.items.push(Item {
@@ -554,7 +554,7 @@ mod kc_z {
         //       it is expensive enough to be a real cause for concern.
         fn find_layers(&self, coords: &Coords, meta: &CommonMeta) -> Layers
         {
-            use ::rsp2_structure::layer;
+            use rsp2_structure::layer;
 
             let bonds: Option<meta::FracBonds> = meta.pick();
             let result = match bonds {

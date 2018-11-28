@@ -94,9 +94,9 @@ gen_each!{
 mod envee_generic_impls {
     use super::*;
 
-    use ::std::rc::{Rc, Weak as RcWeak};
-    use ::std::sync::{Arc, Weak as ArcWeak};
-    use ::std::cell::RefCell;
+    use std::rc::{Rc, Weak as RcWeak};
+    use std::sync::{Arc, Weak as ArcWeak};
+    use std::cell::RefCell;
 
     gen_each!{
         [ {Envee En} {Unvee Un} ]

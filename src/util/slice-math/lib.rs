@@ -42,7 +42,7 @@ impl<'a> AllowedV for &'a mut [f64] {}
 //------------------------
 // Math ops
 
-use ::std::ops::{ Add, Sub, Mul, Div, Rem, Neg, Deref, DerefMut };
+use std::ops::{ Add, Sub, Mul, Div, Rem, Neg, Deref, DerefMut };
 
 macro_rules! impl_binary {
     ($Op:ident::$op:ident, $OpAssign:ident::$op_assign:ident)
@@ -178,7 +178,7 @@ impl<'a> DerefMut for VMut<'a> {
 
 // override some functionality of VOwn to behave more like Vec than slices
 impl IntoIterator for VOwn {
-    type IntoIter = ::std::vec::IntoIter<f64>;
+    type IntoIter = std::vec::IntoIter<f64>;
     type Item = f64;
     fn into_iter(self) -> Self::IntoIter { self.0.into_iter() }
 }

@@ -17,9 +17,9 @@
 #[macro_use] extern crate serde_derive;
 use vasp_poscar; // FIXME: ????
 
-pub type FailResult<T> = Result<T, ::failure::Error>;
+pub type FailResult<T> = Result<T, failure::Error>;
 #[allow(bad_style)]
-pub fn FailOk<T>(x: T) -> Result<T, ::failure::Error> { Ok(x) }
+pub fn FailOk<T>(x: T) -> Result<T, failure::Error> { Ok(x) }
 
 pub use crate::poscar::Poscar;
 mod poscar;

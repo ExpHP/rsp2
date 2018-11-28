@@ -9,9 +9,9 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::std::ops::{Add, Sub, AddAssign, SubAssign, Neg};
-use ::std::ops::{Mul, Div, MulAssign, DivAssign};
-use ::std::fmt;
+use std::ops::{Add, Sub, AddAssign, SubAssign, Neg};
+use std::ops::{Mul, Div, MulAssign, DivAssign};
+use std::fmt;
 use crate::traits::{Semiring, Ring, Field};
 use crate::traits::internal::{PrimitiveSemiring, PrimitiveRing, PrimitiveFloat};
 

@@ -10,8 +10,8 @@
 ** ************************************************************************ */
 
 use crate::Idx;
-use ::std::marker::PhantomData;
-use ::std::mem;
+use std::marker::PhantomData;
+use std::mem;
 
 enum Void {}
 pub struct KeepIt(Void);
@@ -108,8 +108,8 @@ mod basic {
 
 mod collections {
     use super::*;
-    use ::std::collections::{HashMap, BTreeMap};
-    use ::std::collections::{HashSet, BTreeSet};
+    use std::collections::{HashMap, BTreeMap};
+    use std::collections::{HashSet, BTreeSet};
 
     // The safety of these relies on:
     // * IndexCast being an unsafe trait that requires Self and Result to have identical
@@ -159,7 +159,7 @@ fn test_it() {
 #[allow(unused)] // compiletest
 fn holy_shnozballs_it_even_works_in_generic_contexts<I: Idx, J: Idx>()
 {
-    use ::std::collections::BTreeMap;
+    use std::collections::BTreeMap;
     newtype_index!(B);
 
     let x: &[(f64, Vec<(B, BTreeMap<usize, I>, f64)>)] = &[];

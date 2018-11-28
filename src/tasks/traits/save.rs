@@ -13,16 +13,16 @@ use crate::FailResult;
 use crate::traits::AsPath;
 use crate::meta::Element;
 
-use ::rsp2_structure::Coords;
-use ::rsp2_structure_io::Poscar;
-use ::path_abs::{FileRead, FileWrite};
-use ::std::borrow::Borrow;
-use ::std::io::BufReader;
+use rsp2_structure::Coords;
+use rsp2_structure_io::Poscar;
+use path_abs::{FileRead, FileWrite};
+use std::borrow::Borrow;
+use std::io::BufReader;
 
 /// Uniform-ish "load a file" API for use by the highest level code (cmd).
 /// Kinda technical debt now.
 ///
-/// The idea here was to clean up ::cmd and phonopy::cmd by providing a
+/// The idea here was to clean up cmd and phonopy::cmd by providing a
 /// simple single-function interface for reading a value from a filepath
 /// (i.e. the 90% use case for opening a file from the filesystem),
 /// to hide away all of the (largely repetitive) details for composing all of the
@@ -52,23 +52,23 @@ pub struct Json<T: ?Sized>(pub T);
 pub struct Yaml<T: ?Sized>(pub T);
 
 
-impl<T> Load for Json<T> where T: for<'de> ::serde::Deserialize<'de> {
+impl<T> Load for Json<T> where T: for<'de> serde::Deserialize<'de> {
     fn load(path: impl AsPath) -> FailResult<Json<T>>
     {Ok(::serde_json::from_reader(FileRead::read(path.as_path())?)?).map(Json)}
 }
 
 // Direct parsing of yaml must be done in extreme moderation due to compile times.
-// impl<T> Load for Yaml<T> where T: for<'de> ::serde::Deserialize<'de> {
+// impl<T> Load for Yaml<T> where T: for<'de> serde::Deserialize<'de> {
 //     fn load<P: AsPath>(path: P) -> FailResult<Yaml<T>>
 //     {Ok(::serde_yaml::from_reader(open(path.as_path())?)?).map(Yaml)}
 // }
 
-impl<T> Save for Json<T> where T: ::serde::Serialize {
+impl<T> Save for Json<T> where T: serde::Serialize {
     fn save(&self, path: impl AsPath) -> FailResult<()>
     {Ok(::serde_json::to_writer(FileWrite::create(path.as_path())?, &self.0)?)}
 }
 
-impl<T> Save for Yaml<T> where T: ::serde::Serialize {
+impl<T> Save for Yaml<T> where T: serde::Serialize {
     fn save(&self, path: impl AsPath) -> FailResult<()>
     {Ok(::serde_yaml::to_writer(FileWrite::create(path.as_path())?, &self.0)?)}
 }

@@ -11,14 +11,14 @@
 
 use crate::FailResult;
 
-use ::std::io::prelude::*;
-use ::std::borrow::Borrow;
-use ::itertools::Itertools;
+use std::io::prelude::*;
+use std::borrow::Borrow;
+use itertools::Itertools;
 
-use ::rsp2_structure::{Element, Coords as Coords, Lattice, CoordsKind};
-use ::rsp2_array_types::{Envee, Unvee};
+use rsp2_structure::{Element, Coords as Coords, Lattice, CoordsKind};
+use rsp2_array_types::{Envee, Unvee};
 
-use ::vasp_poscar as imp;
+use vasp_poscar as imp;
 
 //--------------------------------------------------------------------------------------
 // public API
@@ -52,14 +52,14 @@ impl Poscar {
     ///
     /// This forcibly reads to EOF because it must construct a BufReader.
     pub fn from_reader(mut f: impl Read) -> FailResult<Self> {
-        let out = load_txt(&mut ::std::io::BufReader::new(&mut f))?;
+        let out = load_txt(&mut std::io::BufReader::new(&mut f))?;
         f.read_to_end(&mut vec![])?;
         Ok(out)
     }
 
     /// Reads a POSCAR from an open file.
     pub fn from_buf_reader(f: impl BufRead) -> FailResult<Self> {
-        load_txt(&mut ::std::io::BufReader::new(f))
+        load_txt(&mut std::io::BufReader::new(f))
     }
 }
 
@@ -87,13 +87,13 @@ fn dump(
         comment: title.into(),
         scale: imp::ScaleLine::Factor(1.0),
         lattice_vectors: coords.lattice().matrix().into_array(),
-        positions: ::vasp_poscar::Coords::Cart(coords.to_carts().unvee()),
+        positions: vasp_poscar::Coords::Cart(coords.to_carts().unvee()),
         group_symbols: Some(group_symbols),
         group_counts,
         velocities: None,
         dynamics: None,
     }.validate().map_err(|e| {
-        let e: ::vasp_poscar::failure::Error = e.into(); e.compat()
+        let e: vasp_poscar::failure::Error = e.into(); e.compat()
     })?;
 
     write!(w, "{}", poscar)?;
@@ -142,7 +142,7 @@ fn load_txt(f: &mut dyn BufRead) -> FailResult<Poscar>
 
     // FIXME use Poscar method once available
     let elements = izip!(group_counts, group_elems)
-        .flat_map(|(c, elem)| ::std::iter::repeat(elem).take(c))
+        .flat_map(|(c, elem)| std::iter::repeat(elem).take(c))
         .collect::<Vec<_>>();
 
     assert_eq!(elements.len(), coords.len());

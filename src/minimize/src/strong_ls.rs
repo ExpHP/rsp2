@@ -14,7 +14,7 @@
 //! Based on code originally written by Colin Daniels.  I can't recall if that
 //! in turn was based off of anything.
 
-use ::either::{Either, Left, Right};
+use either::{Either, Left, Right};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Settings {
@@ -49,7 +49,7 @@ where F: FnMut(f64) -> Result<(f64, f64), E> { }
 #[derive(Debug, Fail)]
 #[fail(display = "{}", kind)]
 pub struct LinesearchError {
-    backtrace: ::failure::Backtrace,
+    backtrace: failure::Backtrace,
     kind: ErrorKind,
 }
 
@@ -65,7 +65,7 @@ pub enum ErrorKind {
 
 impl From<ErrorKind> for LinesearchError {
     fn from(kind: ErrorKind) -> Self {
-        let backtrace = ::failure::Backtrace::new();
+        let backtrace = failure::Backtrace::new();
         LinesearchError { backtrace, kind }
     }
 }
@@ -202,7 +202,7 @@ mod tests {
     use crate::test::one_dee::Polynomial;
 
     fn init_logger() {
-        let _ = ::env_logger::try_init();
+        let _ = env_logger::try_init();
     }
 
     #[derive(Debug,Copy,Clone,Hash,PartialEq,Eq,PartialOrd,Ord)]
@@ -296,7 +296,7 @@ mod tests {
             let coeffs: [f64; 4];
             loop {
                 let adjust = |x| 10.0 * (x - 0.5); // transform [0.0, 1.0] into [-5.0, 5.0]
-                let (c0,c1,c2,c3) = ::rand::random::<(f64, f64, f64, f64)>();
+                let (c0,c1,c2,c3) = rand::random::<(f64, f64, f64, f64)>();
                 let (c0,c1,c2,c3) = (adjust(c0), adjust(c1), adjust(c2), adjust(c3));
                 // reduce spurious failures
                 if c1.abs() < 1e-3 { continue; }

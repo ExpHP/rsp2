@@ -17,10 +17,10 @@ use crate::util::{LockfilePath, LockfileGuard};
 use crate::util::ext_traits::PathNiceExt;
 use crate::ui::cfg_merging::ConfigSources;
 
-use ::std::path::{Path};
-use ::path_abs::{PathArc, PathDir, PathFile, FileRead, FileWrite};
-use ::rsp2_tasks_config::YamlRead;
-use ::rsp2_fs_util::rm_rf;
+use std::path::{Path};
+use path_abs::{PathArc, PathDir, PathFile, FileRead, FileWrite};
+use rsp2_tasks_config::YamlRead;
+use rsp2_fs_util::rm_rf;
 
 pub struct TrialDir {
     path: PathDir,
@@ -72,7 +72,7 @@ impl TrialDir {
         // Make some files that detail as much information as possible about how
         // rsp2 was invoked, solely for the user's benefit.
         {
-            let args_file: Vec<_> = ::std::env::args().collect();
+            let args_file: Vec<_> = std::env::args().collect();
             Json(args_file).save(trial_dir.join("input-cli-args.json"))?;
         }
 
@@ -121,7 +121,7 @@ impl TrialDir {
     pub fn new_logfile_path(&self) -> FailResult<PathArc>
     {
         let paths = {
-            ::std::iter::once("rsp2.log".into())
+            std::iter::once("rsp2.log".into())
                 .chain((0..).map(|i| format!("rsp2.{}.log", i)))
                 .map(|s| self.join(s))
         };
@@ -188,12 +188,12 @@ impl TrialDir {
         }
 
         // (better error messages for type errors if we reparse from a string)
-        let s = ::serde_yaml::to_string(&yaml)?;
+        let s = serde_yaml::to_string(&yaml)?;
         YamlRead::from_reader(s.as_bytes())
     }
 }
 
-impl ::std::ops::Deref for TrialDir {
+impl std::ops::Deref for TrialDir {
     type Target = PathDir;
     fn deref(&self) -> &PathDir { &self.path }
 }

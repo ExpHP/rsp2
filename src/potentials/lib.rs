@@ -24,7 +24,7 @@ pub mod crespi;
 pub mod rebo;
 pub(crate) mod util;
 
-pub type FailResult<T> = Result<T, ::failure::Error>;
+pub type FailResult<T> = Result<T, failure::Error>;
 #[allow(bad_style)]
 pub fn FailOk<T>(x: T) -> FailResult<T> { Ok(x) }
-pub use ::std::io::Result as IoResult;
+pub use std::io::Result as IoResult;

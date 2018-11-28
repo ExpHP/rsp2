@@ -13,10 +13,10 @@ use crate::{Lattice, Coords, CoordsKind};
 use crate::{CartOp};
 use super::group::GroupTree;
 
-use ::rsp2_array_types::V3;
-use ::rsp2_soa_ops::{Perm, Permute};
+use rsp2_array_types::V3;
+use rsp2_soa_ops::{Perm, Permute};
 
-use ::failure::{Backtrace, Error};
+use failure::{Backtrace, Error};
 
 /// Compute copermutations for all operators in a spacegroup.
 ///
@@ -219,7 +219,7 @@ fn fracs_sorted_by_lattice_distance<M: Ord>(
     coords: CoordsKind<impl AsRef<[V3]>>,
     meta: &[M],
 ) -> (Perm, Vec<V3>) {
-    use ::ordered_float::NotNan;
+    use ordered_float::NotNan;
 
     let mut fracs = coords.to_fracs(lattice);
     for v in &mut fracs {
@@ -290,7 +290,7 @@ fn brute_force_near_identity(
     assert_eq!(from_fracs.len(), to_fracs.len());
     let n = from_fracs.len();
 
-    const UNSET: usize = ::std::usize::MAX;
+    const UNSET: usize = std::usize::MAX;
     assert!(n < UNSET);
 
     let mut perm = vec![UNSET; from_fracs.len()];
@@ -399,13 +399,13 @@ mod tests {
     use crate::Lattice;
     use super::*;
 
-    use ::rand::{Rand, Rng};
+    use rand::{Rand, Rng};
 
-    use ::rsp2_array_types::Envee;
-    use ::slice_of_array::prelude::*;
+    use rsp2_array_types::Envee;
+    use slice_of_array::prelude::*;
 
     fn random_vec<T: Rand>(n: usize) -> Vec<T>
-    { (0..n).map(|_| ::rand::random()).collect() }
+    { (0..n).map(|_| rand::random()).collect() }
 
     fn random_problem(n: usize) -> (Vec<V3>, Perm, Vec<V3>)
     {
@@ -461,8 +461,8 @@ mod tests {
                 [ 0.0,     0.0, 1.0],
             ]);
 
-            for x in ::std::iter::empty().chain(original.flat_mut()).chain(permuted.flat_mut()) {
-                *x += ::rand::thread_rng().gen_range::<i32>(-5, 5+1) as f64;
+            for x in std::iter::empty().chain(original.flat_mut()).chain(permuted.flat_mut()) {
+                *x += rand::thread_rng().gen_range::<i32>(-5, 5+1) as f64;
             }
 
             let output = super::brute_force_with_sort_trick(
@@ -493,7 +493,7 @@ mod tests {
     fn random_index_subset(n: usize, r: usize) -> Vec<usize> {
         let mut mask = vec![false; n];
         for _ in 0..r {
-            let u = ::rand::random::<usize>() % mask.len();
+            let u = rand::random::<usize>() % mask.len();
             mask[u] = true;
         }
         mask.iter().enumerate().filter(|(_, &x)| x).map(|(i, _)| i).collect()

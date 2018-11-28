@@ -10,11 +10,11 @@
 ** ************************************************************************ */
 
 use crate::FailResult;
-use ::std::path::Path;
-use ::std::io::Result as IoResult;
-use ::std::path::PathBuf;
-use ::rsp2_fs_util::TempDir;
-use ::path_abs::{FileRead, FileWrite};
+use std::path::Path;
+use std::io::Result as IoResult;
+use std::path::PathBuf;
+use rsp2_fs_util::TempDir;
+use path_abs::{FileRead, FileWrite};
 
 /// AsRef<Path> with more general impls on smart pointer types.
 ///
@@ -81,25 +81,25 @@ macro_rules! as_path_impl {
 }
 
 as_path_impl!{
-    (by AsRef) [] ::std::path::Path;
-    (by Deref) [] ::std::path::PathBuf;
-    (by AsRef) [] ::rsp2_fs_util::ActualTempDir;
-    (by AsRef) [] ::rsp2_fs_util::TempDir;
-    (by AsRef) [] ::std::ffi::OsString;
-    (by AsRef) [] ::std::ffi::OsStr;
+    (by AsRef) [] std::path::Path;
+    (by Deref) [] std::path::PathBuf;
+    (by AsRef) [] rsp2_fs_util::ActualTempDir;
+    (by AsRef) [] rsp2_fs_util::TempDir;
+    (by AsRef) [] std::ffi::OsString;
+    (by AsRef) [] std::ffi::OsStr;
     (by AsRef) [] str;
     (by AsRef) [] String;
-    (by AsRef) ['a] ::std::path::Iter<'a>;
-    (by AsRef) ['a] ::std::path::Components<'a>;
+    (by AsRef) ['a] std::path::Iter<'a>;
+    (by AsRef) ['a] std::path::Components<'a>;
     (by Deref) ['p, P: AsPath + ?Sized] &'p mut P;
     (by Deref) [P: AsPath + ?Sized] Box<P>;
-    (by Deref) [P: AsPath + ?Sized] ::std::rc::Rc<P>;
-    (by Deref) [P: AsPath + ?Sized] ::std::sync::Arc<P>;
-    (by Deref) ['p, P: AsPath + ToOwned + ?Sized] ::std::borrow::Cow<'p, P>;
-    (by Deref) [] ::path_abs::PathArc;
-    (by Deref) [] ::path_abs::PathAbs;
-    (by Deref) [] ::path_abs::PathFile;
-    (by Deref) [] ::path_abs::PathDir;
+    (by Deref) [P: AsPath + ?Sized] std::rc::Rc<P>;
+    (by Deref) [P: AsPath + ?Sized] std::sync::Arc<P>;
+    (by Deref) ['p, P: AsPath + ToOwned + ?Sized] std::borrow::Cow<'p, P>;
+    (by Deref) [] path_abs::PathArc;
+    (by Deref) [] path_abs::PathAbs;
+    (by Deref) [] path_abs::PathFile;
+    (by Deref) [] path_abs::PathDir;
 }
 
 impl<'p, P: AsPath + ?Sized> AsPath for &'p P
@@ -149,8 +149,8 @@ mod tests {
     #[test]
     #[should_panic(expected = "compiletest")]
     fn things_expected_to_impl_aspath() {
-        use ::std::rc::Rc;
-        use ::std::sync::Arc;
+        use std::rc::Rc;
+        use std::sync::Arc;
 
         (|| panic!("This is a compiletest"))();
 

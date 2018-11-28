@@ -163,7 +163,7 @@ impl Params {
     fn random_r(&self) -> V3 {
         use crate::util::uniform;
 
-        match ::rand::random::<f64>() {
+        match rand::random::<f64>() {
             p if p < 0.10 => (self.cutoff_end() + uniform(0.0, 3.0)) * V3::random_unit(),
             p if p < 0.40 => uniform(3.0, self.cutoff_begin) * V3::random_unit(),
             _ => uniform(self.cutoff_begin, self.cutoff_end()) * V3::random_unit(),
@@ -533,8 +533,8 @@ mod input_tests {
         let layers_path = Path::new(RESOURCE_DIR).join("structure").join(name).join("layers.json.xz");
         let out_path = Path::new(RESOURCE_DIR).join("crespi").join(name.to_string() + ".lmp.json.xz");
 
-        let expected: ForceFile = ::serde_json::from_reader(open_xz(out_path)?)?;
-        let ref layers: Vec<i32> = ::serde_json::from_reader(open_xz(layers_path)?)?;
+        let expected: ForceFile = serde_json::from_reader(open_xz(out_path)?)?;
+        let ref layers: Vec<i32> = serde_json::from_reader(open_xz(layers_path)?)?;
         let Poscar { ref mut coords, ref elements, .. } = Poscar::from_reader(open_xz(in_path)?)?;
 
         let bonds = FracBonds::from_brute_force_with_meta(

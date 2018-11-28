@@ -162,7 +162,7 @@ impl RamanTensor {
         //  = 1 / 4
         //
 
-        let sq_sum_submatrix = |range: ::std::ops::Range<usize>| {
+        let sq_sum_submatrix = |range: std::ops::Range<usize>| {
             let mut sum = 0.0;
             for i in range.clone() {
                 for j in range.clone() {

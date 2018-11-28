@@ -15,10 +15,10 @@
 #![allow(unused_parens)]
 
 use crate::FailResult;
-use ::rsp2_kets::Basis;
-use ::nom::*;
-use ::std::io::Read;
-use ::std::mem::size_of;
+use rsp2_kets::Basis;
+use nom::*;
+use std::io::Read;
+use std::mem::size_of;
 
 pub fn read_eigenvector_npy(mut r: impl Read) -> FailResult<Vec<Basis>> {
     let bytes = {
@@ -52,13 +52,13 @@ macro_rules! expr { ($i:expr, $e:expr) => { expr_opt!($i, Some($e)) }; }
 //  of a do_parse! chain.
 macro_rules! expr_ires { ($i:expr, $e:expr) => { expr_res!($i, $e.to_full_result()) }; }
 
-fn chunk_evenly<T>(slice: &[T], size: usize) -> ::std::slice::Chunks<'_, T> {
+fn chunk_evenly<T>(slice: &[T], size: usize) -> std::slice::Chunks<'_, T> {
     assert_eq!(slice.len() % size, 0);
     slice.chunks(size)
 }
 
-use ::nom::digit;
-named!(digits<&str>, map_res!(digit, ::std::str::from_utf8));
+use nom::digit;
+named!(digits<&str>, map_res!(digit, std::str::from_utf8));
 named!(integer<usize>, map_res!(digits, str::parse::<usize>));
 
 mod parse_eigenvector_npy {
@@ -251,7 +251,7 @@ mod parse_eigenvalue_npy {
 fn read_f64v_le(dst: &mut [f64], src: &[u8]) {
     let mut u64s = vec![0u64; dst.len()];
 
-    ::byte_tools::read_u64v_le(&mut u64s, src);
+    byte_tools::read_u64v_le(&mut u64s, src);
 
     for (f, i) in dst.iter_mut().zip(u64s) {
         *f = f64::from_bits(i);

@@ -557,7 +557,7 @@ fn do_minimize_along_evec(
         let V(pos) = v(from_pos.flat()) + alpha * v(direction.flat());
         pos
     };
-    let alpha = ::rsp2_minimize::exact_ls(0.0, 1e-4, |alpha| {
+    let alpha = rsp2_minimize::exact_ls(0.0, 1e-4, |alpha| {
         let gradient = diff_fn(&pos_at_alpha(alpha))?.1;
         let slope = vdot(&gradient[..], direction.flat());
         FailOk(::rsp2_minimize::exact_ls::Slope(slope))

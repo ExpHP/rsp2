@@ -11,12 +11,12 @@
 
 // HERE BE DRAGONS
 
-use ::std::fmt::Write;
-use ::std::collections::VecDeque;
-use ::std::fmt;
+use std::fmt::Write;
+use std::collections::VecDeque;
+use std::fmt;
 
-use ::either::{Either, Left, Right};
-use ::rsp2_slice_math::{vnorm, vdot, V, v, vnormalize};
+use either::{Either, Left, Right};
+use rsp2_slice_math::{vnorm, vdot, V, v, vnormalize};
 
 pub mod settings {
     //! Please do not manually construct anything in here.
@@ -329,7 +329,7 @@ pub mod stop_condition {
             use super::Simple::Iterations;
             use crate::stop_condition::Cereal::{Simple,Logical};
             use crate::stop_condition::LogicalExpression::All;
-            use ::serde_json::to_value;
+            use serde_json::to_value;
             assert_eq!(
                 to_value(Simple(Iterations(5))).unwrap(),
                 json!({"iterations": 5}),
@@ -1033,7 +1033,7 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
             //         and ought not to be the caller's concern)
             let mut memoized: Box<dyn FnMut(f64) -> Result<(f64, f64), ComputeError<E>>>
                 = crate::util::cache::hash_memoize_result_by_key(
-                    |&alpha| ::ordered_float::NotNan::new(alpha).unwrap(),
+                    |&alpha| ordered_float::NotNan::new(alpha).unwrap(),
                     |alpha| {
                         let point = compute_in_dir(alpha, &direction)?;
                         let slope = vdot(&point.gradient, &direction);
@@ -1137,7 +1137,7 @@ fn max_norm(v: &[f64]) -> f64 {
 #[cfg(test)]
 mod tests {
     use crate::util::Never;
-    use ::itertools::Itertools;
+    use itertools::Itertools;
 
     type NoFailResult = Result<(f64, Vec<f64>), Never>;
 
@@ -1296,7 +1296,7 @@ mod tests {
 
     #[test]
     fn lj() {
-        use ::rsp2_slice_math::{v, V};
+        use rsp2_slice_math::{v, V};
         use crate::test::n_dee::{HyperLennardJones, OnceDifferentiable, Sum};
         use crate::util::random as urand;
         let d = 10;

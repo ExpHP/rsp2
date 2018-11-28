@@ -9,11 +9,11 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-pub use ::tempdir::TempDir as ActualTempDir;
+pub use tempdir::TempDir as ActualTempDir;
 
-use ::std::io::Result as IoResult;
-use ::std::path::{Path, PathBuf};
-use ::std::ffi::{OsStr, OsString};
+use std::io::Result as IoResult;
+use std::path::{Path, PathBuf};
+use std::ffi::{OsStr, OsString};
 
 /// Wrapper around `tempdir::TempDir` that does not destroy the directory on unwind.
 #[derive(Debug)]
@@ -62,7 +62,7 @@ impl AsRef<Path> for TempDir {
 /// Leaks the inner TempDir if we are unwinding.
 impl Drop for TempDir {
     fn drop(&mut self) {
-        if ::std::thread::panicking() {
+        if std::thread::panicking() {
             self._recover();
         }
     }
@@ -87,7 +87,7 @@ impl TempDir {
                 info!("successfully leaked tempdir at {}", temp.display());
                 return;
             },
-            Some(env_dest) => match ::std::env::current_dir() {
+            Some(env_dest) => match std::env::current_dir() {
                 Err(e) => {
                     warn!("could not read current directory during panic: {}", e);
                     return; // avoid double-panic
@@ -106,7 +106,7 @@ impl TempDir {
         };
 
         // create $RSP2_SAVETEMP if it doesn't exist yet.
-        if let Err(e) = ::std::fs::create_dir(dest) {
+        if let Err(e) = std::fs::create_dir(dest) {
             if !dest.exists() {
                 warn!("failed to create '{}' during panic: {}", dest.display(), e);
                 return;
@@ -124,7 +124,7 @@ impl TempDir {
 }
 
 fn non_empty_env(key: impl AsRef<OsStr>) -> Option<OsString> {
-    match ::std::env::var_os(key) {
+    match std::env::var_os(key) {
         None => None,
         Some(s) => match s.is_empty() {
             true => None,

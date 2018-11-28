@@ -14,10 +14,10 @@
 //      of element database. However, currently, it's not
 //      large enough to justify the effort.
 
-use ::std::collections::HashMap;
-use ::std::fmt;
-use ::std::str;
-use ::failure::Backtrace;
+use std::collections::HashMap;
+use std::fmt;
+use std::str;
+use failure::Backtrace;
 
 // member is private because I'm hoping there's some way
 // (possibly insane) to get the nonzero optimization for

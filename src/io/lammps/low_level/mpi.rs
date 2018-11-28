@@ -62,7 +62,7 @@
 
 use crate::mpi;
 use crate::FailResult;
-use ::std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex};
 use crate::low_level::{LammpsOwner, Skews, ComputeStyle, LowLevelApi};
 use crate::low_level::mpi_helper::{
     MpiOnDemand, Broadcast, DispatchMultiProcess, this_process_is_root,

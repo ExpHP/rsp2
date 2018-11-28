@@ -21,7 +21,7 @@ use crate::traits::internal::{PrimitiveSemiring, PrimitiveRing, PrimitiveFloat};
 use crate::vee;
 use crate::types::*;
 use crate::{Unvee, Envee};
-use ::num_traits::{Zero, One};
+use num_traits::{Zero, One};
 
 // ---------------------------------------------------------------------------
 // ------------------------------ PUBLIC API ---------------------------------
@@ -178,13 +178,13 @@ gen_each!{
             #[inline(always)]
             pub fn try_map<E, B, F>(self, mut f: F) -> Result<$Mr<$Vc<B>>, E>
             where F: FnMut(X) -> Result<B, E>,
-            { ::rsp2_array_utils::try_map_arr(self.0, |row| row.try_map(&mut f)).map($Mr) }
+            { rsp2_array_utils::try_map_arr(self.0, |row| row.try_map(&mut f)).map($Mr) }
 
             /// Apply a fallible function to each scalar element, with short-circuiting.
             #[inline(always)]
             pub fn opt_map<B, F>(self, mut f: F) -> Option<$Mr<$Vc<B>>>
             where F: FnMut(X) -> Option<B>,
-            { ::rsp2_array_utils::opt_map_arr(self.0, |row| row.opt_map(&mut f)).map($Mr) }
+            { rsp2_array_utils::opt_map_arr(self.0, |row| row.opt_map(&mut f)).map($Mr) }
         }
     }
 }

@@ -20,4 +20,4 @@ pub use self::filetypes::force_sets::{self, ForceSets};
 mod filetypes;
 pub mod npy;
 
-pub type FailResult<T> = Result<T, ::failure::Error>;
+pub type FailResult<T> = Result<T, failure::Error>;

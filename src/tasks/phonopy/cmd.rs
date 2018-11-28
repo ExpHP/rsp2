@@ -35,25 +35,25 @@ use crate::math::basis::Basis3;
 use crate::meta::{self, prelude::*};
 use crate::hlist_aliases::*;
 
-use ::std::io::prelude::*;
-use ::std::rc::Rc;
-use ::std::process::Command;
-use ::std::path::{Path, PathBuf};
-use ::rsp2_fs_util::{TempDir};
+use std::io::prelude::*;
+use std::rc::Rc;
+use std::process::Command;
+use std::path::{Path, PathBuf};
+use rsp2_fs_util::{TempDir};
 
-use ::rsp2_fs_util::{open, create, copy, hard_link};
-use ::rsp2_structure::{Coords, CartOp};
-use ::rsp2_structure::supercell::{SupercellToken};
-use ::rsp2_soa_ops::{Permute, Perm};
+use rsp2_fs_util::{open, create, copy, hard_link};
+use rsp2_structure::{Coords, CartOp};
+use rsp2_structure::supercell::{SupercellToken};
+use rsp2_soa_ops::{Permute, Perm};
 
-use ::rsp2_structure_io::Poscar;
-use ::rsp2_phonopy_io::npy;
+use rsp2_structure_io::Poscar;
+use rsp2_phonopy_io::npy;
 
-use ::rsp2_array_types::{V3, Unvee};
+use rsp2_array_types::{V3, Unvee};
 
-use ::slice_of_array::prelude::*;
-use ::itertools::Itertools;
-use ::failure::ResultExt;
+use slice_of_array::prelude::*;
+use itertools::Itertools;
+use failure::ResultExt;
 
 const THZ_TO_WAVENUMBER: f64 = 33.35641;
 
@@ -122,7 +122,7 @@ impl Builder {
     pub fn conf_from_file(self, file: impl BufRead) -> FailResult<Self>
     {Ok({
         let mut me = self;
-        for (key, value) in ::rsp2_phonopy_io::conf::read(file)? {
+        for (key, value) in rsp2_phonopy_io::conf::read(file)? {
             me = me.conf(key, value);
         }
         me
@@ -192,10 +192,10 @@ impl Builder {
 
             {
                 use std::os::unix::fs::OpenOptionsExt;
-                use ::failure::ResultExt;
+                use failure::ResultExt;
                 use crate::util::ext_traits::PathNiceExt;
                 let path = dir.join(FNAME_HELPER_SCRIPT);
-                ::std::fs::OpenOptions::new()
+                std::fs::OpenOptions::new()
                     .create(true)
                     .write(true)
                     .mode(0o777)
@@ -354,7 +354,7 @@ impl<P: AsPath> DirWithDisps<P> {
     // forces on said structure.
     pub fn displaced_coord_sets<'a>(&'a self) -> impl Iterator<Item=Coords> + 'a
     { Box::new({
-        use ::rsp2_phonopy_io::disp_yaml::apply_displacement;
+        use rsp2_phonopy_io::disp_yaml::apply_displacement;
         self.displacements
             .iter()
             .map(move |&disp| apply_displacement(&self.super_coords, disp))
@@ -411,7 +411,7 @@ impl<P: AsPath> DirWithDisps<P> {
         let _ = copy(disp_dir.join(FNAME_HELPER_SCRIPT), path.join(FNAME_HELPER_SCRIPT));
 
         trace!("Writing FORCE_SETS...");
-        ::rsp2_phonopy_io::force_sets::write(
+        rsp2_phonopy_io::force_sets::write(
             create(path.join("FORCE_SETS"))?,
             &self.displacements,
             forces,
@@ -499,7 +499,7 @@ impl<P: AsPath> DirWithDisps<P> {
             get_sc_dim(&conf)?.ok_or_else(|| format_err!("DIM is required"))?
         };
 
-        let (our_super_coords, sc) = ::rsp2_structure::supercell::diagonal(sc_dims).build(&prim_coords);
+        let (our_super_coords, sc) = rsp2_structure::supercell::diagonal(sc_dims).build(&prim_coords);
         let our_super_meta = prim_meta.map(hlist![
             |x: Rc<[_]>| -> Rc<[_]> { sc.replicate(&x[..]).into() },
             |x: Rc<[_]>| -> Rc<[_]> { sc.replicate(&x[..]).into() },
@@ -650,7 +650,7 @@ pub struct BandsBuilder<'moveck, 'p, P: AsPath> {
     dir_with_forces: &'p DirWithForces<P>,
     eigenvectors: bool,
     // Part of a trick to simulate "moving" a value with a `&mut self` function
-    _move: ::std::marker::PhantomData<&'moveck ()>,
+    _move: std::marker::PhantomData<&'moveck ()>,
 }
 
 impl<'moveck, 'p, P: AsPath> BandsBuilder<'moveck, 'p, P> {
@@ -824,7 +824,7 @@ impl<P: AsPath> DirWithBands<P> {
 
     pub fn eigenvalues(&self) -> FailResult<Vec<Vec<f64>>>
     {Ok({
-        use ::rsp2_slice_math::{v};
+        use rsp2_slice_math::{v};
         trace!("Reading eigenvectors...");
         let file = open(self.path().join("eigenvalue.npy"))?;
         npy::read_eigenvalue_npy(file)?
@@ -916,11 +916,11 @@ fn fortran_bool(b: bool) -> &'static str {
 }
 
 pub(crate) fn log_stdio_and_wait(
-    mut cmd: ::std::process::Command,
+    mut cmd: std::process::Command,
     stdin: Option<String>,
 ) -> FailResult<()>
 {Ok({
-    use ::std::process::Stdio;
+    use std::process::Stdio;
 
     if stdin.is_some() {
         cmd.stdin(Stdio::piped());
@@ -946,11 +946,11 @@ pub(crate) fn log_stdio_and_wait(
     let _ = stderr_worker.join();
 })}
 
-fn check_status(status: ::std::process::ExitStatus) -> Result<(), PhonopyFailed>
+fn check_status(status: std::process::ExitStatus) -> Result<(), PhonopyFailed>
 {
     if status.success() { Ok(()) }
     else {
-        let backtrace = ::failure::Backtrace::new();
+        let backtrace = failure::Backtrace::new();
         Err(PhonopyFailed { backtrace, status })
     }
 }

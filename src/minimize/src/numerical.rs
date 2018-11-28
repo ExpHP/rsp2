@@ -176,7 +176,7 @@ fn num_diff() {
         for _ in 0..10 {
             // n-point stencil is exact for polynomials up to order n-1
             let poly = {
-                ::std::iter::repeat_with(|| uniform(-2.0, 2.0))
+                std::iter::repeat_with(|| uniform(-2.0, 2.0))
                     .take(n as usize) // order n-1 means n coeffs
                     .collect::<Vec<_>>()
             };
@@ -193,7 +193,7 @@ fn num_diff() {
 }
 
 #[cfg(test)]
-fn uniform(a: f64, b: f64) -> f64 { ::rand::random::<f64>() * (b - a) + a }
+fn uniform(a: f64, b: f64) -> f64 { rand::random::<f64>() * (b - a) + a }
 
 #[cfg(test)]
 fn polyder_dec(

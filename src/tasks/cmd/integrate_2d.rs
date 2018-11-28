@@ -10,13 +10,13 @@
 ** ************************************************************************ */
 
 pub type Point = (usize, usize);
-use ::std::ops::Range;
-use ::std::hash::Hash;
-use ::std::collections::HashSet;
+use std::ops::Range;
+use std::hash::Hash;
+use std::collections::HashSet;
 
-use ::slice_of_array::prelude::*;
-use ::rsp2_slice_math::{v, V, vdot};
-use ::rsp2_array_types::{V3};
+use slice_of_array::prelude::*;
+use rsp2_slice_math::{v, V, vdot};
+use rsp2_array_types::{V3};
 
 pub fn integrate_two_eigenvectors<E, F>(
     dims: (usize, usize),
@@ -71,9 +71,9 @@ fn random_tree<V>(
 ) -> Tree<V>
 where V: Clone + Hash + Eq,
 {
-    use ::rand::Rng;
+    use rand::Rng;
 
-    let mut rng = ::rand::thread_rng();
+    let mut rng = rand::thread_rng();
 
     // Begin at a random node
     let vertices: Vec<_> = vertices.into_iter().collect();
@@ -117,7 +117,7 @@ pub fn integrate_grid_random<M, E>(
 ) -> Result<Vec<f64>, E>
 where M: Send, E: Send,
 {Ok({
-    use ::rayon::prelude::*;
+    use rayon::prelude::*;
 
     let vertices = (0..n_x).flat_map(|x| (0..n_y).map(move |y| (x, y))).collect::<Vec<_>>();
     let out_edges = |(x, y)| {

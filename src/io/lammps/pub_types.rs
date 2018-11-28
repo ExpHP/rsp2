@@ -85,12 +85,12 @@ impl From<AtomType> for AtomTypeRange {
 }
 
 impl From<::std::ops::RangeFull> for AtomTypeRange {
-    fn from(_: ::std::ops::RangeFull) -> Self
+    fn from(_: std::ops::RangeFull) -> Self
     { AtomTypeRange(None, None) }
 }
 
 impl From<::std::ops::Range<AtomType>> for AtomTypeRange {
-    fn from(r: ::std::ops::Range<AtomType>) -> Self {
+    fn from(r: std::ops::Range<AtomType>) -> Self {
         // (adjust because we take half-inclusive, but store doubly-inclusive)
         AtomTypeRange(Some(r.start.value()), Some(r.end.value() - 1))
     }

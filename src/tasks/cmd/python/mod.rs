@@ -16,11 +16,11 @@ pub mod convert;
 
 //---------------------------------------------------------
 use crate::{FailResult, FailOk};
-use ::std::process;
-use ::std::io::prelude::*;
-use ::std::path::{Path, PathBuf};
+use std::process;
+use std::io::prelude::*;
+use std::path::{Path, PathBuf};
 
-use ::rsp2_fs_util as fsx;
+use rsp2_fs_util as fsx;
 
 const PY_NOOP: Script = Script::String(indoc!(r#"
     #!/usr/bin/env python3
@@ -44,12 +44,12 @@ pub fn check_availability() -> FailResult<()> {
     Ok(())
 }
 
-fn call_script_and_check_success<E: ::failure::Fail>(
+fn call_script_and_check_success<E: failure::Fail>(
     script: Script,
     error: E,
 ) -> FailResult<()>
 {Ok({
-    use ::std::process::Stdio;
+    use std::process::Stdio;
 
     let tmp = fsx::TempDir::new("rsp2")?;
     let script = ReifiedScript::new(script, tmp.path().join("script.py"))?;
@@ -89,10 +89,10 @@ fn call_script_and_communicate<In, Out>(
     stdin_data: In,
 ) -> FailResult<Out>
 where
-    In: ::serde::Serialize,
-    Out: for<'de> ::serde::Deserialize<'de>,
+    In: serde::Serialize,
+    Out: for<'de> serde::Deserialize<'de>,
 {Ok({
-    use ::std::process::Stdio;
+    use std::process::Stdio;
 
     let tmp = fsx::TempDir::new("rsp2")?;
     tmp.try_with_recovery(|tmp| FailOk({
@@ -117,7 +117,7 @@ where
 
         let stderr_worker = crate::stderr::spawn_log_worker(child_stderr);
 
-        ::serde_json::to_writer(child_stdin, &stdin_data)?;
+        serde_json::to_writer(child_stdin, &stdin_data)?;
 
         let stdout = {
             let mut buf = String::new();
@@ -125,8 +125,8 @@ where
             buf
         };
         // for debugging
-        ::std::fs::write(tmp.path().join("_py_stdout"), &stdout)?;
-        let value = ::serde_json::from_str(&stdout[..])?;
+        std::fs::write(tmp.path().join("_py_stdout"), &stdout)?;
+        let value = serde_json::from_str(&stdout[..])?;
 
         if !child.wait()?.success() {
             let extra = match crate::stderr::is_log_enabled() {

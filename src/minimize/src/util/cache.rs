@@ -89,11 +89,11 @@ pub fn hash_memoize_by_key<'a, Key, In, Out, KeyFunc, F>(
 ) -> Box<dyn FnMut(In) -> Out + 'a>
 where
     Out: Clone + 'a,
-    Key: ::std::hash::Hash + Eq + 'a,
+    Key: std::hash::Hash + Eq + 'a,
     KeyFunc: FnMut(&In) -> Key + 'a,
     F: FnMut(In) -> Out + 'a,
 {
-    let mut cache = ::std::collections::HashMap::new();
+    let mut cache = std::collections::HashMap::new();
     Box::new(move |input|
         cache.entry(key_func(&input))
             .or_insert_with(|| compute(input))
@@ -116,11 +116,11 @@ pub fn hash_memoize_result_by_key<'a, Key, In, Out, KeyFunc, E, F>(
 ) -> Box<dyn FnMut(In) -> Result<Out, E> + 'a>
 where
     Out: Clone + 'a,
-    Key: ::std::hash::Hash + Eq + 'a,
+    Key: std::hash::Hash + Eq + 'a,
     KeyFunc: FnMut(&In) -> Key + 'a,
     F: FnMut(In) -> Result<Out, E> + 'a,
 {
-    use ::std::collections::hash_map::{HashMap, Entry};
+    use std::collections::hash_map::{HashMap, Entry};
 
     let mut cache = HashMap::new();
     Box::new(move |input| -> Result<Out, E> {

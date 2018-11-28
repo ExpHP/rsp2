@@ -13,8 +13,8 @@
 //!  We're just going to call a python script.)
 
 use crate::FailResult;
-use ::rsp2_array_types::{V3, M33};
-use ::rsp2_structure::{Coords, Lattice, IntRot, CartOp};
+use rsp2_array_types::{V3, M33};
+use rsp2_structure::{Coords, Lattice, IntRot, CartOp};
 
 use super::{call_script_and_communicate, Script};
 

@@ -137,7 +137,7 @@ impl_dyn_clone_detail!{
 impl KolmogorovCrespiZ {
     fn find_layers(&self, coords: &Coords, meta: &CommonMeta) -> Layers
     {
-        use ::rsp2_structure::layer;
+        use rsp2_structure::layer;
 
         let bonds: Option<meta::FracBonds> = meta.pick();
         let result = match bonds {
@@ -229,11 +229,11 @@ impl_dyn_clone_detail!{
 #[cfg(not_now)]
 #[test]
 fn test_rebo_diff() -> FailResult<()> {
-    use ::rsp2_structure::{Lattice, CoordsKind, bonds::FracBonds};
-    use ::rsp2_array_types::{Envee};
-    use ::rsp2_minimize::numerical;
-    use ::slice_of_array::prelude::*;
-    use ::meta::{self, prelude::*};
+    use rsp2_structure::{Lattice, CoordsKind, bonds::FracBonds};
+    use rsp2_array_types::{Envee};
+    use rsp2_minimize::numerical;
+    use slice_of_array::prelude::*;
+    use meta::{self, prelude::*};
 
     let mut coords = Coords::new(
         Lattice::from([
@@ -260,7 +260,7 @@ fn test_rebo_diff() -> FailResult<()> {
     }};
     let elements: meta::SiteElements = vec![CARBON; 2].into();
     let masses: meta::SiteMasses = vec![meta::Mass(12.0107); 2].into();
-    let bonds: meta::FracBonds = ::std::rc::Rc::new(FracBonds::from_brute_force(&coords, 2.0)?);
+    let bonds: meta::FracBonds = std::rc::Rc::new(FracBonds::from_brute_force(&coords, 2.0)?);
     let meta = hlist![elements, masses, Some(bonds)];
 
 //    let pot_lmp = PotentialBuilder::from_config_parts(None, None, &cfg::Threading::Serial, &cfg::LammpsUpdateStyle::Safe, &[true; 3], &cfg_lmp).allow_blocking(true);
@@ -282,9 +282,9 @@ fn test_rebo_diff() -> FailResult<()> {
 #[cfg(not_now)]
 #[test]
 fn test_rebo_value() -> FailResult<()> {
-    use ::rsp2_structure::{Lattice, CoordsKind, bonds::FracBonds};
-    use ::rsp2_array_types::{Envee, Unvee};
-    use ::meta::{self, prelude::*};
+    use rsp2_structure::{Lattice, CoordsKind, bonds::FracBonds};
+    use rsp2_array_types::{Envee, Unvee};
+    use meta::{self, prelude::*};
 
     let mut coords = Coords::new(
         Lattice::from([
@@ -313,7 +313,7 @@ fn test_rebo_value() -> FailResult<()> {
 
     let elements: meta::SiteElements = vec![CARBON; 2].into();
     let masses: meta::SiteMasses = vec![meta::Mass(12.0107); 2].into();
-    let bonds: meta::FracBonds = ::std::rc::Rc::new(FracBonds::from_brute_force(&coords, 2.0)?);
+    let bonds: meta::FracBonds = std::rc::Rc::new(FracBonds::from_brute_force(&coords, 2.0)?);
     println!("{:?}", bonds);
     let meta = hlist![elements, masses, Some(bonds)];
 

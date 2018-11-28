@@ -31,8 +31,8 @@
 //! a more scalable design if I *did* need it.
 
 use crate::mpi;
-use ::std::sync::Arc;
-use ::slice_of_array::prelude::*;
+use std::sync::Arc;
+use slice_of_array::prelude::*;
 
 /// A multi-process entry point for MpiOnDemand.
 ///
@@ -183,11 +183,11 @@ impl<D: DispatchMultiProcess> MpiOnDemand<D> {
 /// *after* allowing the panic implementation to unwind back out.
 ///
 /// This will be completely ineffective if the panic implementation does not unwind.
-pub fn with_mpi_abort_on_unwind<R>(func: impl ::std::panic::UnwindSafe + FnOnce() -> R) -> R {
+pub fn with_mpi_abort_on_unwind<R>(func: impl std::panic::UnwindSafe + FnOnce() -> R) -> R {
     use crate::mpi::{AsCommunicator, Communicator};
 
     with_default_root(|root| {
-        let res = ::std::panic::catch_unwind(func);
+        let res = std::panic::catch_unwind(func);
         match res {
             Ok(r) => return r,
             Err(_payload) => {
@@ -267,8 +267,8 @@ impl<D: DispatchMultiProcess> MpiOnDemandInner<D> {
         while root.immediate_probe().is_none() {
             // NOTE: Because the root process communicates with the others one-by-one,
             //       the total time taken to resume N processes may be as large as `N * interval`.
-            let interval = ::std::time::Duration::from_secs(1);
-            ::std::thread::sleep(interval);
+            let interval = std::time::Duration::from_secs(1);
+            std::thread::sleep(interval);
         }
 
         match root.receive().0 {
@@ -412,7 +412,7 @@ where
     R: mpi::AsCommunicator + mpi::Root,
     T: Default,
 {
-    let value = ::std::mem::replace(buf, Default::default());
+    let value = std::mem::replace(buf, Default::default());
     let value = broadcast(root, Some(value));
     *buf = value;
 }

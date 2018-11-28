@@ -12,11 +12,11 @@
 // FIXME kill these once there's utilities that support these
 //       operations on variable length slices/vecs
 #[cfg(test)]
-use ::ordered_float::NotNan;
+use ordered_float::NotNan;
 
 use crate::IntPrecisionError;
 
-use ::rsp2_array_types::{V3, M33, M3};
+use rsp2_array_types::{V3, M33, M3};
 
 pub(crate) fn translate_mut_n3_3(coords: &mut [V3], t: &V3)
 {
@@ -34,10 +34,10 @@ pub(crate) fn translate_mut_n3_n3(coords: &mut [V3], by: &[V3])
 #[cfg(test)]
 pub(crate) fn not_nan_n3(coords: Vec<V3>) -> Vec<V3<NotNan<f64>>> {
     // still a newtype?
-    assert_eq!(::std::mem::size_of::<f64>(), ::std::mem::size_of::<NotNan<f64>>());
+    assert_eq!(::std::mem::size_of::<f64>(), std::mem::size_of::<NotNan<f64>>());
     // (NotNan has undefined behavior for NaN so we must check)
     assert!(coords.iter().flat_map(|v| v).all(|x| !x.is_nan()));
-    unsafe { ::std::mem::transmute(coords) }
+    unsafe { std::mem::transmute(coords) }
 }
 
 #[cfg(test)]
@@ -58,7 +58,7 @@ impl Tol {
         let r = x.round();
         if (r - x).abs() > self.0 {
             return Err(IntPrecisionError {
-                backtrace: ::failure::Backtrace::new(),
+                backtrace: failure::Backtrace::new(),
                 value: x,
             });
         }
@@ -69,7 +69,7 @@ impl Tol {
     { v.try_map(|x| self.unfloat(x)) }
 
     pub(crate) fn unfloat_m33(&self, m: &M33) -> Result<M33<i32>, IntPrecisionError>
-    { ::rsp2_array_utils::try_map_arr(m.0, |v| self.unfloat_v3(&v)).map(M3) }
+    { rsp2_array_utils::try_map_arr(m.0, |v| self.unfloat_v3(&v)).map(M3) }
 }
 
 #[inline(always)] // hopefully encourage LLVM to do crazy bit math for constant moduli

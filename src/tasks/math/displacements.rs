@@ -11,12 +11,12 @@
 
 use crate::math::stars::Stars;
 
-use ::rsp2_tasks_config as cfg;
+use rsp2_tasks_config as cfg;
 
-use ::rsp2_newtype_indices::{Idx, Indexed, IndexVec};
-use ::rsp2_array_types::{V3, M3};
-use ::rsp2_structure::{Coords, Lattice, IntRot};
-use ::rsp2_soa_ops::{Perm, Permute};
+use rsp2_newtype_indices::{Idx, Indexed, IndexVec};
+use rsp2_array_types::{V3, M3};
+use rsp2_structure::{Coords, Lattice, IntRot};
+use rsp2_soa_ops::{Perm, Permute};
 
 lazy_static! {
     /// Comparable to Phonopy with `DIAG = .False.`.
@@ -33,8 +33,8 @@ lazy_static! {
 
 #[allow(unused)] // useful for debugging
 struct FmtDisp(V3<i32>);
-impl ::std::fmt::Display for FmtDisp {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+impl std::fmt::Display for FmtDisp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let sign = |x: i32| if x < 0 { "-" } else { " " };
         macro_rules! fmt { ($e:expr) => (format_args!("{}{}", sign($e), $e.abs())); }
         let [a, b, c] = *self.0;

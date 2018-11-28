@@ -14,7 +14,7 @@ use crate::traits::internal::{PrimitiveSemiring, PrimitiveRing, PrimitiveFloat};
 
 use super::types::*;
 
-use ::num_traits::Zero;
+use num_traits::Zero;
 
 // ---------------------------------------------------------------------------
 // ------------------------------ PUBLIC API ---------------------------------
@@ -156,13 +156,13 @@ gen_each!{
             #[inline(always)]
             pub fn try_map<E, B, F>(self, f: F) -> Result<$Vn<B>, E>
             where F: FnMut(X) -> Result<B, E>,
-            { ::rsp2_array_utils::try_map_arr(self.0, f).map($Vn) }
+            { rsp2_array_utils::try_map_arr(self.0, f).map($Vn) }
 
             /// Apply a fallible function to each element, with short-circuiting.
             #[inline(always)]
             pub fn opt_map<B, F>(self, f: F) -> Option<$Vn<B>>
             where F: FnMut(X) -> Option<B>,
-            { ::rsp2_array_utils::opt_map_arr(self.0, f).map($Vn) }
+            { rsp2_array_utils::opt_map_arr(self.0, f).map($Vn) }
         }
     }
 }
@@ -348,7 +348,7 @@ impl<X: Field> RandomUnit for V3<X>
 gen_each!{
     @{Vn_n}
     for_each!( {$Vn:ident $n:tt} ) => {
-        unsafe impl<X> ::slice_of_array::IsSliceomorphic for $Vn<X> {
+        unsafe impl<X> slice_of_array::IsSliceomorphic for $Vn<X> {
             type Element = X;
             const LEN: usize = $n;
         }

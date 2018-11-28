@@ -10,17 +10,17 @@
 ** ************************************************************************ */
 
 use crate::FailResult;
-use ::std::fmt;
-use ::std::time;
-use ::log::{Log, Record};
-use ::path_abs::{FileWrite, PathFile};
-use ::fern::colors;
+use std::fmt;
+use std::time;
+use log::{Log, Record};
+use path_abs::{FileWrite, PathFile};
+use fern::colors;
 
 pub use self::loggers::{CapturableStderr, DelayedLogFile, GLOBAL_LOGFILE};
 mod loggers {
     use super::*;
-    use ::std::sync::RwLock;
-    use ::std::io::prelude::*;
+    use std::sync::RwLock;
+    use std::io::prelude::*;
 
     /// Logger that uses `eprintln!`.
     ///
@@ -161,7 +161,7 @@ pub fn init_global_logger() -> FailResult<SetGlobalLogfile>
     // env_logger::filter does not expose a list of targets and level filters, so this
     // is our only option at the moment.
     let env_filter = {
-        ::env_logger::filter::Builder::new()
+        env_logger::filter::Builder::new()
             .parse("debug")
             .parse("rsp2_tasks=trace")
             .parse("rsp2_tasks::ev_analysis=debug")
@@ -178,7 +178,7 @@ pub fn init_global_logger() -> FailResult<SetGlobalLogfile>
     };
 
     let start = time::Instant::now();
-    let fern = ::fern::Dispatch::new()
+    let fern = fern::Dispatch::new()
         .format(move |out, message, record| {
             let message = fmt_log_message_lines(message, &colors, record, start.elapsed(), log_mod_setting);
 
@@ -214,13 +214,13 @@ pub struct SetGlobalLogfile(());
 impl SetGlobalLogfile {
     pub fn start(self, path: PathFile) -> FailResult<()> {
         let result = GLOBAL_LOGFILE.start(path).map_err(Into::into);
-        ::std::mem::forget(self);
+        std::mem::forget(self);
         result
     }
 
     pub fn disable(self) {
         GLOBAL_LOGFILE.disable();
-        ::std::mem::forget(self);
+        std::mem::forget(self);
     }
 }
 

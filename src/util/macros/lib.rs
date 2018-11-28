@@ -24,7 +24,7 @@ macro_rules! collect {
 /// already quite certain that it is valid!
 #[macro_export]
 macro_rules! from_json {
-    ($($arg:tt)*) => { ::serde_json::from_value(json!($($arg)*)).unwrap() };
+    ($($arg:tt)*) => { serde_json::from_value(json!($($arg)*)).unwrap() };
 }
 
 #[macro_export]
@@ -47,7 +47,7 @@ macro_rules! zip_eq {
     };
 }
 
-pub fn zip_eq<As, Bs>(a: As, b: Bs) -> ::std::iter::Zip<As::IntoIter, Bs::IntoIter>
+pub fn zip_eq<As, Bs>(a: As, b: Bs) -> std::iter::Zip<As::IntoIter, Bs::IntoIter>
 where
     As: IntoIterator, As::IntoIter: ExactSizeIterator,
     Bs: IntoIterator, Bs::IntoIter: ExactSizeIterator,

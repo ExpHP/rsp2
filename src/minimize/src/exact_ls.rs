@@ -9,7 +9,7 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::failure::Backtrace;
+use failure::Backtrace;
 
 #[derive(Debug, Fail)]
 #[fail(display = "{}", kind)]
@@ -219,7 +219,7 @@ pub mod golden {
                 use super::Simple::Iterations;
                 use crate::stop_condition::Cereal::{Simple,Logical};
                 use crate::stop_condition::LogicalExpression::All;
-                use ::serde_json::to_value;
+                use serde_json::to_value;
                 assert_eq!(
                     to_value(Simple(Iterations(5))).unwrap(),
                     json!({"iterations": 5}),

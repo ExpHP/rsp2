@@ -11,8 +11,8 @@
 
 use crate::traits::{IsArray, WithElement};
 
-use ::std::mem::{ManuallyDrop, uninitialized};
-use ::std::ptr;
+use std::mem::{ManuallyDrop, uninitialized};
+use std::ptr;
 
 /// Map an array by value.
 ///
@@ -157,7 +157,7 @@ where Brother!{Self, usize}: ArrayMapExt<Self::Element>,
     {
         let p = &INDICES[0..Self::array_len()];
         let p = p as *const [usize] as *const Brother!{Self, usize};
-        unsafe { ::std::ptr::read(p) }
+        unsafe { std::ptr::read(p) }
     }
 
     #[inline(always)]
@@ -204,7 +204,7 @@ mod tests {
             |i| Ok(PushDrop::new(i as i32, &vec))
         );
         assert_eq!(*vec.borrow(), vec![3, 4, 2]);
-        ::std::mem::forget(arr);
+        std::mem::forget(arr);
 
         // Interrupt construction with an Err.
         // The successfully added elements should be dropped in reverse.
@@ -234,7 +234,7 @@ mod tests {
             try_map_arr(arr, |x| Ok(PushDrop::new(x.into_inner() + 10, &vec)));
 
         assert_eq!(*vec.borrow(), vec![]);
-        ::std::mem::forget(_arr);
+        std::mem::forget(_arr);
 
         // Interrupt construction with an Err.
         // Both the unmapped elements and the successfully mapped

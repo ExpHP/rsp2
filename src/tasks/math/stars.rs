@@ -11,10 +11,10 @@
 
 use crate::util::VeclikeIterator;
 
-use ::rsp2_newtype_indices::{Idx, Indexed, IndexVec};
-use ::rsp2_soa_ops::{Perm};
+use rsp2_newtype_indices::{Idx, Indexed, IndexVec};
+use rsp2_soa_ops::{Perm};
 
-use ::std::collections::BTreeMap;
+use std::collections::BTreeMap;
 
 /// Compute stars from the depermutations of a group.
 ///
@@ -100,7 +100,7 @@ impl<SiteI: Idx, OperI: Idx, StarI: Idx> Stars<SiteI, OperI, StarI> {
     { &self.assignments }
 }
 
-impl<SiteI: Idx, OperI: Idx, StarI: Idx> ::std::ops::Deref for Stars<SiteI, OperI, StarI> {
+impl<SiteI: Idx, OperI: Idx, StarI: Idx> std::ops::Deref for Stars<SiteI, OperI, StarI> {
     type Target = Indexed<StarI, [StarInfo<SiteI, OperI>]>;
 
     fn deref(&self) -> &Self::Target { &self.stars }

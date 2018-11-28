@@ -9,7 +9,7 @@ mod airebo;
 use crate::airebo::Airebo;
 
 fn main() -> Result<(), failure::Error> {
-    let _universe = ::mpi::initialize().expect("failed to initialize MPI");
+    let _universe = mpi::initialize().expect("failed to initialize MPI");
 
     let unit_coords = Coords::new(
         Lattice::orthorhombic(4.2, 4.2, 2.5579182965),
@@ -28,9 +28,9 @@ fn main() -> Result<(), failure::Error> {
     let super_meta = sc.replicate(&unit_meta);
 
     let result = {
-        let lock = ::rsp2_lammps_wrap::INSTANCE_LOCK.lock().unwrap();
-        ::rsp2_lammps_wrap::LammpsOnDemand::install(|on_demand| {
-            ::rsp2_lammps_wrap::Builder::new()
+        let lock = rsp2_lammps_wrap::INSTANCE_LOCK.lock().unwrap();
+        rsp2_lammps_wrap::LammpsOnDemand::install(|on_demand| {
+            rsp2_lammps_wrap::Builder::new()
                 .on_demand(on_demand)
                 .stdout(true)
                 .build(lock, Airebo, super_coords, super_meta).unwrap()

@@ -11,12 +11,12 @@
 
 use crate::FailResult;
 use crate::meta;
-use ::rsp2_array_types::{V3, M33, M3};
-use ::rsp2_soa_ops::{Perm, Permute};
-use ::rsp2_structure::supercell::SupercellToken;
-use ::rsp2_newtype_indices::{Idx, Indexed, index_cast};
-use ::std::collections::BTreeMap;
-use ::slice_of_array::prelude::*;
+use rsp2_array_types::{V3, M33, M3};
+use rsp2_soa_ops::{Perm, Permute};
+use rsp2_structure::supercell::SupercellToken;
+use rsp2_newtype_indices::{Idx, Indexed, index_cast};
+use std::collections::BTreeMap;
+use slice_of_array::prelude::*;
 use crate::math::sparse::{self, RawCoo, RawCsr};
 
 use crate::util::ext_traits::OptionExpectNoneExt;
@@ -708,7 +708,7 @@ mod complex_33 {
     #[derive(Serialize, Deserialize)]
     pub struct Complex33(pub M33, pub M33);
 
-    impl ::num_traits::Zero for Complex33 {
+    impl num_traits::Zero for Complex33 {
         fn zero() -> Self { Complex33(M33::zero(), M33::zero()) }
         fn is_zero(&self) -> bool { self.0.is_zero() && self.1.is_zero() }
     }
@@ -718,28 +718,28 @@ mod complex_33 {
         { Complex33(self.0.t(), -self.1.t()) }
     }
 
-    impl ::std::ops::Add for Complex33 {
+    impl std::ops::Add for Complex33 {
         type Output = Complex33;
 
         fn add(mut self, rhs: Complex33) -> Self::Output
         { self += rhs; self }
     }
 
-    impl ::std::ops::Sub for Complex33 {
+    impl std::ops::Sub for Complex33 {
         type Output = Complex33;
 
         fn sub(self, rhs: Complex33) -> Self::Output
         { self + -rhs }
     }
 
-    impl ::std::ops::Neg for Complex33 {
+    impl std::ops::Neg for Complex33 {
         type Output = Complex33;
 
         fn neg(self: Complex33) -> Self::Output
         { Complex33(-self.0, -self.1) }
     }
 
-    impl ::std::ops::AddAssign for Complex33 {
+    impl std::ops::AddAssign for Complex33 {
         fn add_assign(&mut self, Complex33(real, imag): Complex33) {
             self.0 += real;
             self.1 += imag;

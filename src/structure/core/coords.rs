@@ -10,10 +10,10 @@
 ** ************************************************************************ */
 
 use crate::Lattice;
-use ::rsp2_soa_ops::{Perm, Permute};
-use ::rsp2_soa_ops::{Part, Partition, Unlabeled};
+use rsp2_soa_ops::{Perm, Permute};
+use rsp2_soa_ops::{Part, Partition, Unlabeled};
 
-use ::rsp2_array_types::{V3, M33};
+use rsp2_array_types::{V3, M33};
 
 /// Wrapper type for coordinates used as input to some APIs.
 ///
@@ -205,7 +205,7 @@ mod tests {
     use crate::Lattice;
     use crate::CoordsKind::{Fracs, Carts};
 
-    use ::rsp2_array_types::Envee;
+    use rsp2_array_types::Envee;
 
     // make sure the library correctly chooses whether to use the
     // regular matrix, the inverse matrix, or no matrix

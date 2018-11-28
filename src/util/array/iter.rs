@@ -11,9 +11,9 @@
 
 use crate::traits::IsArray;
 
-use ::std::ptr;
-use ::std::ops::Range;
-use ::std::mem::ManuallyDrop;
+use std::ptr;
+use std::ops::Range;
+use std::mem::ManuallyDrop;
 
 pub trait ArrayMoveIterExt: IsArray {
     /// A true `into_iter()` for arrays.
@@ -74,7 +74,7 @@ impl<A: IsArray> DoubleEndedIterator for MoveIter<A> {
     }
 }
 
-impl<A: IsArray> ::std::iter::FusedIterator for MoveIter<A> { }
+impl<A: IsArray> std::iter::FusedIterator for MoveIter<A> { }
 
 macro_rules! impl_iter_move {
     ($n:expr) => {
@@ -93,7 +93,7 @@ each_array_size!{ impl_iter_move!{0...32} }
 mod tests {
     use crate::test_util::PushDrop;
 
-    use ::std::cell::RefCell;
+    use std::cell::RefCell;
     use super::*;
 
     // FIXME there ought to be tests of panic safety, using catch_unwind

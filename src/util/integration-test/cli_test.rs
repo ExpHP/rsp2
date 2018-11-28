@@ -12,15 +12,15 @@
 // NOTE: This draws heavily off of assert-cli (MIT 2.0/Apache)
 
 use crate::fsx::TempDir;
-use ::path_abs::{PathDir, FileWrite, FileRead};
-use ::failure::Error;
+use path_abs::{PathDir, FileWrite, FileRead};
+use failure::Error;
 
-use ::std::fmt::Debug;
-use ::std::fs::File;
-use ::std::path::Path;
-use ::std::ffi::{OsStr, OsString};
-use ::std::process::Command;
-pub type Result<T> = ::std::result::Result<T, Error>;
+use std::fmt::Debug;
+use std::fs::File;
+use std::path::Path;
+use std::ffi::{OsStr, OsString};
+use std::process::Command;
+pub type Result<T> = std::result::Result<T, Error>;
 
 #[must_use]
 pub struct CliTest {
@@ -176,10 +176,10 @@ impl CliTest {
     }
 }
 
-pub trait CheckFile: Sized + Debug + PartialEq + ::std::panic::RefUnwindSafe {
+pub trait CheckFile: Sized + Debug + PartialEq + std::panic::RefUnwindSafe {
     // (Clone because checkers are Fn (can't dynamically call FnOnce) and the
     //  standard checker needs it)
-    type OtherArgs: ::std::panic::UnwindSafe + Clone + 'static;
+    type OtherArgs: std::panic::UnwindSafe + Clone + 'static;
 
     fn read_file(path: &Path) -> Result<Self>;
     fn check_against(&self, expected: &Self, other_args: Self::OtherArgs);
@@ -188,13 +188,13 @@ pub trait CheckFile: Sized + Debug + PartialEq + ::std::panic::RefUnwindSafe {
 #[cfg(feature = "test-diff")]
 fn check_against_with_diff<T: CheckFile>(a: &T, b: &T, other: T::OtherArgs) {
     // Let check_against use things like `assert_close!` that might panic.
-    let result = ::std::panic::catch_unwind(move || a.check_against(b, other));
+    let result = std::panic::catch_unwind(move || a.check_against(b, other));
 
     // If it did panic, throw that panic away and get a colorful character diff
     // on the Debug output from pretty_assertions.  This can help one get a quick
     // overview of how many decimal places are accurate throughout the entire file.
     if let Err(_) = result {
-        let mention_save_tmp = match ::std::env::var("RSP2_SAVETEMP") {
+        let mention_save_tmp = match std::env::var("RSP2_SAVETEMP") {
             Err(::std::env::VarError::NotPresent) => {
                 "  If the change looks reasonable, use RSP2_SAVETEMP=some-location \
                 to recover the failed tempdir and copy the new file over into tests/resources."

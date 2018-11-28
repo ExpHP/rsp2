@@ -10,11 +10,11 @@
 ** ************************************************************************ */
 
 use crate::FailResult;
-use ::std::io::prelude::*;
-use ::std::collections::HashMap;
+use std::io::prelude::*;
+use std::collections::HashMap;
 
-use ::rsp2_structure::{Coords, Element};
-use ::rsp2_array_types::{V3, M33};
+use rsp2_structure::{Coords, Element};
+use rsp2_array_types::{V3, M33};
 
 // why is this pub(crate)? I don't remember...
 pub(crate) type Displacements = Vec<(usize, V3)>;
@@ -73,10 +73,10 @@ pub mod disp_yaml {
     // Monomorphic to ensure that all the yaml parsing code is generated inside this crate
     pub fn _read(r: &mut dyn Read) -> FailResult<DispYaml>
     {
-        use ::rsp2_structure::{CoordsKind, Lattice};
+        use rsp2_structure::{CoordsKind, Lattice};
         use self::cereal::{Point, Displacement, DispYaml as RawDispYaml};
 
-        let RawDispYaml { displacements, lattice, points } = ::serde_yaml::from_reader(r)?;
+        let RawDispYaml { displacements, lattice, points } = serde_yaml::from_reader(r)?;
 
         let (mut fracs, mut elements, mut masses) = (vec![], vec![], vec![]);
         for Point { symbol, coordinates, mass } in points {
@@ -182,7 +182,7 @@ pub mod symmetry_yaml {
 
     // Monomorphic to ensure that all the yaml parsing code is generated inside this crate
     pub fn _read(r: &mut dyn Read) -> FailResult<SymmetryYaml>
-    {Ok({ ::serde_yaml::from_reader(r)? })}
+    {Ok({ serde_yaml::from_reader(r)? })}
 }
 
 pub mod force_sets {

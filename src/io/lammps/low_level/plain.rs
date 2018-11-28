@@ -15,7 +15,7 @@
 #[cfg(feature = "mpi")]
 use crate::mpi;
 use crate::FailResult;
-use ::std::os::raw::{c_int, c_void, c_double, c_char};
+use std::os::raw::{c_int, c_void, c_double, c_char};
 use crate::low_level::{ComputeStyle, ComputeType, Skews, LowLevelApi, Severity, ScatterGatherDatatype};
 
 // Lammps exposes no API to obtain the error message length so we have to guess.
@@ -63,10 +63,10 @@ impl LammpsOwner {
     pub(in crate::low_level) unsafe fn with_mpi<C: mpi::Communicator>(comm: &C, argv: &[&str]) -> FailResult<Self>
     {Ok({
         let mut argv = CArgv::from_strs(argv);
-        let mut ptr: *mut c_void = ::std::ptr::null_mut();
+        let mut ptr: *mut c_void = std::ptr::null_mut();
 
         unsafe {
-            ::lammps_sys::lammps_open(
+            lammps_sys::lammps_open(
                 argv.len().try_to_c_int()?,
                 argv.as_argv_ptr(),
                 mpi::AsRaw::as_raw(comm),
@@ -96,10 +96,10 @@ impl LammpsOwner {
     pub(crate) unsafe fn new(argv: &[&str]) -> FailResult<Self>
     {Ok({
         let mut argv = CArgv::from_strs(&argv);
-        let mut ptr: *mut c_void = ::std::ptr::null_mut();
+        let mut ptr: *mut c_void = std::ptr::null_mut();
 
         unsafe {
-            ::lammps_sys::lammps_open_no_mpi(
+            lammps_sys::lammps_open_no_mpi(
                 argv.len().try_to_c_int()?,
                 argv.as_argv_ptr(),
                 &mut ptr,
@@ -118,7 +118,7 @@ impl LammpsOwner {
 impl Drop for LammpsOwner {
     fn drop(&mut self) {
         // NOTE: not lammps_free!
-        unsafe { ::lammps_sys::lammps_close(self.ptr); }
+        unsafe { lammps_sys::lammps_close(self.ptr); }
     }
 }
 
@@ -138,7 +138,7 @@ impl LowLevelApi for LammpsOwner {
         //        forcefully thrust into it).  But I'm not sure.  - ML
         let ret = unsafe {
             with_temporary_c_str(cmd, |cmd| {
-                ::lammps_sys::lammps_command(self.ptr, cmd)
+                lammps_sys::lammps_command(self.ptr, cmd)
             })
         };
 
@@ -151,7 +151,7 @@ impl LowLevelApi for LammpsOwner {
 
     fn get_natoms(&mut self) -> usize {
         api_trace!("lammps_get_natoms({:p})", self.ptr);
-        let out = unsafe { ::lammps_sys::lammps_get_natoms(self.ptr) } as usize;
+        let out = unsafe { lammps_sys::lammps_get_natoms(self.ptr) } as usize;
         self.assert_no_error();
         out
     }
@@ -169,7 +169,7 @@ impl LowLevelApi for LammpsOwner {
             self.ptr, low, high, xy, yz, xz,
         );
 
-        ::lammps_sys::lammps_reset_box(
+        lammps_sys::lammps_reset_box(
             self.ptr,
             low.as_mut_ptr(),
             high.as_mut_ptr(),
@@ -183,19 +183,19 @@ impl LowLevelApi for LammpsOwner {
 
     fn init_atoms(&mut self, carts: Vec<[f64; 3]>, types: Vec<i64>) -> FailResult<()>
     {Ok({
-        use ::slice_of_array::prelude::*;
+        use slice_of_array::prelude::*;
 
         let mut carts = carts.flat().iter().map(|&x| x as c_double).collect::<Vec<_>>();
         let mut types = types.iter().map(|&x| x.try_to_c_int()).collect::<FailResult<Vec<_>>>()?;
         unsafe {
-            ::lammps_sys::lammps_create_atoms(
+            lammps_sys::lammps_create_atoms(
                 self.ptr,
                 types.len().try_to_c_int()?, // int n
-                ::std::ptr::null_mut(), // tagint *id
+                std::ptr::null_mut(), // tagint *id
                 types.as_mut_ptr(), // int *type
                 carts.as_mut_ptr(), // double *x
-                ::std::ptr::null_mut(), // double *v
-                ::std::ptr::null_mut(), // imageint *image
+                std::ptr::null_mut(), // double *v
+                std::ptr::null_mut(), // imageint *image
                 1, // int shrinkexceed
             );
         }
@@ -238,7 +238,7 @@ impl LammpsOwner {
         match self.pop_error() {
             None => Ok(()),
             Some((severity, message)) => {
-                let backtrace = ::failure::Backtrace::new();
+                let backtrace = failure::Backtrace::new();
                 Err(crate::LammpsError { severity, message, backtrace })
             },
         }
@@ -256,7 +256,7 @@ impl LammpsOwner {
     // (This removes the error, so that a second call will produce None.)
     pub(in crate::low_level) fn pop_error(&mut self) -> Option<(Severity, String)>
     {
-        use ::lammps_sys::{lammps_get_last_error_message, lammps_has_error};
+        use lammps_sys::{lammps_get_last_error_message, lammps_has_error};
 
         api_trace!("lammps_has_error({:p})", self.ptr);
         let has_error = unsafe { lammps_has_error(self.ptr) } != 0;
@@ -359,7 +359,7 @@ impl LammpsOwner {
         api_trace!("lammps_gather_atoms({:p}, {}, {}, {}, (out))", self.ptr, name, ty, count);
 
         with_temporary_c_str(name, |name| {
-            ::lammps_sys::lammps_gather_atoms(
+            lammps_sys::lammps_gather_atoms(
                 self.ptr, name, ty, count,
                 buf.as_mut_ptr() as *mut c_void,
             );
@@ -433,7 +433,7 @@ impl LammpsOwner {
         api_trace!("lammps_scatter_atoms({:p}, {}, {}, {}, (data))", self.ptr, name, ty, count);
 
         with_temporary_c_str(name, |name| {
-            ::lammps_sys::lammps_scatter_atoms(
+            lammps_sys::lammps_scatter_atoms(
                 self.ptr, name, ty, count,
                 data.as_mut_ptr() as *mut c_void,
             );
@@ -446,7 +446,7 @@ impl LammpsOwner {
 }
 
 // FIXME: remove once TryInto is stable
-trait ToCInt: Sized + ::std::fmt::Display + Ord {
+trait ToCInt: Sized + std::fmt::Display + Ord {
     fn max_value() -> u64;
     fn cast_to_c_int(self) -> c_int;
     fn cast_from_c_int(x: c_int) -> Self;
@@ -533,7 +533,7 @@ impl LammpsOwner {
         assert_ne!(len, 0); // because extract_compute_any_d returns &T
         let p = self.__extract_compute_any_d(name, style, ComputeType::Vector)?;
 
-        ::std::slice::from_raw_parts(p, len)
+        std::slice::from_raw_parts(p, len)
             .iter().map(|&c| c as f64).collect()
     })}
 
@@ -556,7 +556,7 @@ impl LammpsOwner {
         );
 
         let out_ptr = with_temporary_c_str(name, |name| {
-            unsafe { ::lammps_sys::lammps_extract_compute(self.ptr, name, style, ty)}
+            unsafe { lammps_sys::lammps_extract_compute(self.ptr, name, style, ty)}
         }) as *mut c_double;
 
 

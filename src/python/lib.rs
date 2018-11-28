@@ -30,7 +30,7 @@ pub struct Guard(TempDir);
 
 /// Writes rsp2 python modules to a temporary directory and adds it to the `PYTHONPATH` environment
 /// variable until the returned RAII guard is dropped.
-pub fn add_to_python_path() -> Result<Guard, ::failure::Error> {
+pub fn add_to_python_path() -> Result<Guard, failure::Error> {
     let temp_dir = TempDir::new("rsp2")?;
     let py_package_dir = temp_dir.path().join("rsp2");
 
@@ -78,7 +78,7 @@ impl Drop for Guard {
 fn modify_path_env(
     key: impl AsRef<OsStr>,
     func: impl FnOnce(&mut Vec<PathBuf>),
-) -> Result<(), ::failure::Error> {
+) -> Result<(), failure::Error> {
     let key = key.as_ref();
     let mut paths = match env::var_os(key) {
         Some(s) => env::split_paths(&s).collect(),
@@ -92,7 +92,7 @@ fn modify_path_env(
     Ok(())
 }
 
-fn write_dir_contents(dir: &Dir<'_>, dest: &Path) -> Result<(), ::failure::Error> {
+fn write_dir_contents(dir: &Dir<'_>, dest: &Path) -> Result<(), failure::Error> {
     for file in dir.files() {
         write_file(file, &dest.join(file.path().file_name().unwrap()))?;
     }
@@ -104,8 +104,8 @@ fn write_dir_contents(dir: &Dir<'_>, dest: &Path) -> Result<(), ::failure::Error
     Ok(())
 }
 
-fn write_file(file: &File<'_>, dest: &Path) -> Result<(), ::failure::Error> {
-    use ::std::io::Write;
+fn write_file(file: &File<'_>, dest: &Path) -> Result<(), failure::Error> {
+    use std::io::Write;
 
     fsx::create(dest)?.write_all(file.contents())?;
     Ok(())

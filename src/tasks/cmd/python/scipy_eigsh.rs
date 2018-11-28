@@ -47,7 +47,7 @@ use crate::FailResult;
 use crate::math::basis::{Basis3};
 
 #[allow(unused)] // rustc bug
-use ::slice_of_array::prelude::*;
+use slice_of_array::prelude::*;
 use super::{call_script_and_communicate, Script};
 
 pub(super) const PY_CHECK_SCIPY_AVAILABILITY: Script = Script::String(indoc!(r#"

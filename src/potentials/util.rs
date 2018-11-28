@@ -15,7 +15,7 @@ use rsp2_array_types::V3;
 use slice_of_array::prelude::*;
 
 #[cfg(test)]
-pub(crate) fn uniform(a: f64, b: f64) -> f64 { ::rand::random::<f64>() * (b - a) + a }
+pub(crate) fn uniform(a: f64, b: f64) -> f64 { rand::random::<f64>() * (b - a) + a }
 
 #[allow(dead_code)] // used in method calls that are normally commented out
 pub(crate) fn try_num_grad_v3<E>(

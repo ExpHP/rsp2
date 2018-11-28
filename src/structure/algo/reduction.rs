@@ -24,10 +24,10 @@
 
 use crate::{Lattice};
 
-use ::rsp2_array_utils::{arr_from_fn};
-use ::rsp2_array_types::{V3, M33, Envee, Unvee, dot, mat, inv};
+use rsp2_array_utils::{arr_from_fn};
+use rsp2_array_types::{V3, M33, Envee, Unvee, dot, mat, inv};
 
-use ::std::cmp::Ordering;
+use std::cmp::Ordering;
 
 // TODO:
 // * Finish writing tests like those in Kuntsleve

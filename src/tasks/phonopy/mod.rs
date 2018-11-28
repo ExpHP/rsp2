@@ -14,12 +14,12 @@ use crate::traits::{Save, Load, AsPath};
 use crate::traits::save::Json;
 use crate::errors::DisplayPathArcNice;
 
-use ::rsp2_phonopy_io::{symmetry_yaml, disp_yaml, conf, force_sets};
-use ::std::io::BufReader;
-use ::std::io::prelude::*;
-use ::path_abs::{FileRead, FileWrite};
-use ::rsp2_array_types::V3;
-use ::failure::Backtrace;
+use rsp2_phonopy_io::{symmetry_yaml, disp_yaml, conf, force_sets};
+use std::io::BufReader;
+use std::io::prelude::*;
+use path_abs::{FileRead, FileWrite};
+use rsp2_array_types::V3;
+use failure::Backtrace;
 
 mod cmd;
 pub use self::cmd::*;
@@ -39,7 +39,7 @@ pub(crate) struct MissingFileError {
 #[fail(display = "phonopy failed with status {}", status)]
 pub(crate) struct PhonopyFailed {
     backtrace: Backtrace,
-    pub status: ::std::process::ExitStatus,
+    pub status: std::process::ExitStatus,
 }
 
 impl MissingFileError {
@@ -78,7 +78,7 @@ impl Load for ForceSets {
 
 // this is a type alias so we wrap it
 #[derive(Debug, Clone, Default)]
-pub struct Conf(pub ::rsp2_phonopy_io::Conf);
+pub struct Conf(pub rsp2_phonopy_io::Conf);
 impl Load for Conf {
     fn load(path: impl AsPath) -> FailResult<Self>
     { Ok(conf::read(open_text(path.as_path())?).map(Conf)?) }
@@ -111,12 +111,12 @@ where
 impl Load for Args {
     fn load(path: impl AsPath) -> FailResult<Self>
     {
-        use ::path_abs::FileRead;
+        use path_abs::FileRead;
         use crate::util::ext_traits::PathNiceExt;
         let path = path.as_path();
 
         let text = FileRead::read(path)?.read_string()?;
-        if let Some(args) = ::shlex::split(&text) {
+        if let Some(args) = shlex::split(&text) {
             Ok(Args(args))
         } else {
             bail!("Bad args at {}", path.nice())
@@ -127,10 +127,10 @@ impl Load for Args {
 impl Save for Args {
     fn save(&self, path: impl AsPath) -> FailResult<()>
     {
-        use ::path_abs::FileWrite;
+        use path_abs::FileWrite;
         let mut file = FileWrite::create(path.as_path())?;
         for arg in &self.0 {
-            writeln!(file, "{}", ::shlex::quote(arg))?;
+            writeln!(file, "{}", shlex::quote(arg))?;
         }
         Ok(())
     }

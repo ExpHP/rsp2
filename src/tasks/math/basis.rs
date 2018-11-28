@@ -9,14 +9,14 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::rsp2_kets::{Ket, Basis, AsKetRef};
-use ::rsp2_soa_ops::{Perm, Permute};
-use ::rsp2_soa_ops::{Part, Partition, Unlabeled, helper::partition_each_item};
+use rsp2_kets::{Ket, Basis, AsKetRef};
+use rsp2_soa_ops::{Perm, Permute};
+use rsp2_soa_ops::{Part, Partition, Unlabeled, helper::partition_each_item};
 
 use crate::hlist_aliases::*;
 use crate::meta::{self, Mass, prelude::*};
-use ::rsp2_array_types::V3;
-use ::slice_of_array::prelude::*;
+use rsp2_array_types::V3;
+use slice_of_array::prelude::*;
 
 // alternative types to those in rsp2_kets which are defined in terms of 3-vectors
 // and for which we can implement Permute and Partition, etc.
@@ -148,7 +148,7 @@ impl EvDirections {
     { EvDirections(self.0.iter().map(EvDirection::normalized).collect()) }
 }
 
-impl ::std::ops::Deref for EvDirection {
+impl std::ops::Deref for EvDirection {
     type Target = Ket3;
 
     fn deref(&self) -> &Ket3

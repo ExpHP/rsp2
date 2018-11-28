@@ -10,10 +10,10 @@
 ** ************************************************************************ */
 
 use crate::{Lattice, CoordsKind, Missing};
-use ::rsp2_soa_ops::{Perm, Permute};
-use ::rsp2_soa_ops::{Part, Partition, Unlabeled};
-use ::rsp2_array_types::{M33, V3, Unvee};
-pub use ::failure::Error as Error;
+use rsp2_soa_ops::{Perm, Permute};
+use rsp2_soa_ops::{Part, Partition, Unlabeled};
+use rsp2_array_types::{M33, V3, Unvee};
+pub use failure::Error as Error;
 
 /// Pairs [`CoordsKind`] together with their [`Lattice`].
 ///
@@ -183,7 +183,7 @@ impl Coords {
     #[inline] // hopefully elide branches in as_xxx_cached()
     fn ensure_only_carts(&mut self) {
         let dummy = CoordsKind::Carts(vec![]);
-        let coords = ::std::mem::replace(&mut self.coords, dummy);
+        let coords = std::mem::replace(&mut self.coords, dummy);
         self.coords = CoordsKind::Carts(coords.into_carts(&self.lattice));
     }
 
@@ -194,7 +194,7 @@ impl Coords {
     #[inline] // hopefully elide branches in as_xxx_cached()
     fn ensure_only_fracs(&mut self) {
         let dummy = CoordsKind::Carts(vec![]);
-        let coords = ::std::mem::replace(&mut self.coords, dummy);
+        let coords = std::mem::replace(&mut self.coords, dummy);
         self.coords = CoordsKind::Fracs(coords.into_fracs(&self.lattice));
     }
 }
@@ -239,7 +239,7 @@ impl Coords {
 #[fail(display = "The new lattice is not equivalent to the original. (A B^-1 = {:?})", a_binv)]
 pub struct NonEquivalentLattice {
     a_binv: [[f64; 3]; 3],
-    backtrace: ::failure::Backtrace,
+    backtrace: failure::Backtrace,
 }
 
 /// # Transformations between equivalent cells
@@ -288,7 +288,7 @@ impl Coords {
                 Ok(m) => m,
                 Err(_) => {
                     throw!(NonEquivalentLattice {
-                        backtrace: ::failure::Backtrace::new(),
+                        backtrace: failure::Backtrace::new(),
                         a_binv: unimodular.matrix().into_array(),
                     })
                 },
@@ -300,7 +300,7 @@ impl Coords {
     /// Reduces all fractional coordinates into `[0.0, 1.0)`.
     pub fn reduce_positions(&mut self)
     {
-        use ::slice_of_array::prelude::*;
+        use slice_of_array::prelude::*;
         for x in self.fracs_mut().unvee().flat_mut() {
             *x -= x.floor(); // into `[0.0, 1.0]`
             *x -= x.trunc(); // into `[0.0, 1.0)`
@@ -470,7 +470,7 @@ impl<'iter> Partition<'iter> for Coords {
 #[cfg(test)]
 mod compiletest {
     use super::*;
-    use ::rsp2_array_types::Envee;
+    use rsp2_array_types::Envee;
 
     fn assert_send_sync<S: Send + Sync>() {}
 
@@ -544,7 +544,7 @@ mod compiletest {
 
     #[test]
     fn serde() {
-        let de: Coords = ::serde_json::from_str(r#"{
+        let de: Coords = serde_json::from_str(r#"{
             "lattice": [[2.4192432809928756, 0.0, 0.0],
                         [-1.2096216404964375, 2.095126139274645, 0.0],
                         [0, 0, 10]],

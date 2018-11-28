@@ -11,11 +11,11 @@
 
 use crate::{FailResult};
 
-use ::rsp2_structure::{CoordsKind, Lattice, Coords};
+use rsp2_structure::{CoordsKind, Lattice, Coords};
 
-use ::rsp2_soa_ops::{Part, Perm, Permute};
-use ::rsp2_array_utils::map_arr;
-use ::rsp2_array_types::{M33, V3, dot};
+use rsp2_soa_ops::{Part, Perm, Permute};
+use rsp2_array_utils::map_arr;
+use rsp2_array_types::{M33, V3, dot};
 
 /// A partially assembled structure for which
 /// some parameters are still configurable
@@ -60,7 +60,7 @@ impl Assemble {
 
     pub fn atom_layers(&self) -> Vec<usize>
     {
-        use ::std::iter::repeat;
+        use std::iter::repeat;
         let mut vec = vec![];
         for (layer, data) in self.fracs_in_plane.iter().enumerate() {
             vec.extend(repeat(layer).take(data.len()));
@@ -233,7 +233,7 @@ impl Assemble {
                 }
             }
 
-            use ::std::f64::INFINITY;
+            use std::f64::INFINITY;
             let min = v.iter().cloned().fold(INFINITY, f64::min);
             let max = v.iter().cloned().fold(-INFINITY, f64::max);
             let center = 0.5 * (min + max);

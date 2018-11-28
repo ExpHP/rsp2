@@ -11,7 +11,7 @@
 
 use crate::FailResult;
 use crate::math::basis::{Ket3, Basis3};
-use ::slice_of_array::prelude::*;
+use slice_of_array::prelude::*;
 use crate::traits::{Load, AsPath, save::Json};
 
 // Conversion factor phonopy uses to scale the eigenvalues to THz angular momentum.

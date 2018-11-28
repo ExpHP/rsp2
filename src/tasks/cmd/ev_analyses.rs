@@ -15,16 +15,16 @@ use crate::ui::cfg_merging::{no_summary, merge_summaries, make_nested_mapping};
 use crate::math::basis::{Basis3, EvDirections};
 use crate::math::bands::{GammaUnfolder};
 #[allow(unused)] // compiler bug
-use ::itertools::Itertools;
-use ::rsp2_tasks_config::Settings;
+use itertools::Itertools;
+use rsp2_tasks_config::Settings;
 
 #[allow(unused)] // compiler bug
-use ::rsp2_soa_ops::{Part, Partition};
+use rsp2_soa_ops::{Part, Partition};
 
-use ::std::fmt;
-use ::serde_yaml::Value as YamlValue;
+use std::fmt;
+use serde_yaml::Value as YamlValue;
 #[allow(unused)] // compiler bug
-use ::frunk::hlist::Sculptor;
+use frunk::hlist::Sculptor;
 use crate::threading::Threading;
 
 use super::acoustic_search;
@@ -36,7 +36,7 @@ use super::acoustic_search;
 // NOTE: Since a lot of the wrapped types are just vectors, the naming convention
 //       is to prefix the name with each thing they are indexed over (in order)
 // FIXME: Y'know, we DO have `Indexed` now...
-pub use ::rsp2_structure::Coords as SiteCoordinates;
+pub use rsp2_structure::Coords as SiteCoordinates;
 pub use crate::meta::SiteLayers;
 pub use crate::meta::SiteElements;
 pub use crate::meta::SiteMasses;
@@ -214,7 +214,7 @@ macro_rules! wrap_maybe_compute {
 pub use self::ev_acousticness::EvAcousticness;
 pub mod ev_acousticness {
     use super::*;
-    use ::frunk::hlist::{HCons, HNil};
+    use frunk::hlist::{HCons, HNil};
 
     pub struct EvAcousticness(pub Vec<f64>);
 
@@ -487,7 +487,7 @@ impl GammaSystemAnalysis {
                 };
                 let painter: Box<dyn PaintAs<_, f64>> = match mode {
                     ColumnsMode::ForHumans => Box::new({
-                        use ::ansi_term::Colour::*;
+                        use ansi_term::Colour::*;
                         ColorByRange::new(vec![
                             ( 1e-0, Cyan.bold()),
                             ( 1e-1, Cyan.normal()),
@@ -651,17 +651,17 @@ impl GammaSystemAnalysis {
         let mut out = vec![];
 
         if let Some(freqs) = select(&is_acoustic, &frequency) {
-            let value = ::serde_yaml::to_value(freqs).unwrap();
+            let value = serde_yaml::to_value(freqs).unwrap();
             out.push(make_nested_mapping(&["acoustic"], value));
         }
 
         if let Some(freqs) = select(&is_shear, &frequency) {
-            let value = ::serde_yaml::to_value(freqs).unwrap();
+            let value = serde_yaml::to_value(freqs).unwrap();
             out.push(make_nested_mapping(&["shear"], value));
         }
 
         if let Some(freqs) = select(&is_layer_breathing, &frequency) {
-            let value = ::serde_yaml::to_value(freqs).unwrap();
+            let value = serde_yaml::to_value(freqs).unwrap();
             out.push(make_nested_mapping(&["layer-breathing"], value));
         }
 
@@ -684,7 +684,7 @@ impl GammaSystemAnalysis {
                 let items = tuples.into_iter().map(|(index, &(frequency, probability))| {
                     Item { index, frequency, probability }
                 }).collect_vec();
-                let value = ::serde_yaml::to_value(&items).unwrap();
+                let value = serde_yaml::to_value(&items).unwrap();
                 out.push(make_nested_mapping(&["layer-gammas", &layer_key], value));
             }
         });
@@ -701,7 +701,7 @@ impl GammaSystemAnalysis {
 
 // Color range used by most columns that contain probabilities in [0, 1]
 fn default_prob_color_range() -> ColorByRange<f64> {
-    use ::ansi_term::Colour::*;
+    use ansi_term::Colour::*;
     ColorByRange::new(vec![
         (0.999, Cyan.bold()),
         (0.9,   Cyan.normal()),
@@ -756,7 +756,7 @@ impl fmt::Display for ShortExp {
 pub struct DisplayProb(f64);
 impl fmt::Display for DisplayProb {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let log10_1p = |x: f64| x.ln_1p() / ::std::f64::consts::LN_10;
+        let log10_1p = |x: f64| x.ln_1p() / std::f64::consts::LN_10;
 
         // NOTE: This used to deliberately reject values precisely equal to zero,
         //       but I could not recall why, so I loosened the restriction.
@@ -795,7 +795,7 @@ mod columns {
     }
 
     impl<T: fmt::Display> IntoIterator for Columns<T> {
-        type IntoIter = Chain<Once<String>, ::std::vec::IntoIter<String>>;
+        type IntoIter = Chain<Once<String>, std::vec::IntoIter<String>>;
         type Item = String;
 
         fn into_iter(self) -> Self::IntoIter
@@ -867,7 +867,7 @@ mod columns {
                 0 => {},
                 n => {
                     let new = padding_source[..n].to_string();
-                    let old = ::std::mem::replace(s, new);
+                    let old = std::mem::replace(s, new);
                     *s += &old;
                 },
             }

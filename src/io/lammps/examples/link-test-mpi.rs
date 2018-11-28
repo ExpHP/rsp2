@@ -13,5 +13,5 @@
 ** ********************************************************************** */
 
 fn main() {
-    ::rsp2_lammps_wrap::mpi_link_test().unwrap();
+    rsp2_lammps_wrap::mpi_link_test().unwrap();
 }

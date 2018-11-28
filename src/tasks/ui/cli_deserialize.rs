@@ -9,7 +9,7 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::clap;
+use clap;
 use crate::FailResult;
 
 /// Trait used to factor out code for adding arguments to a binary and parsing them,

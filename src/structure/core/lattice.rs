@@ -9,14 +9,14 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::rsp2_array_utils::{map_arr};
-use ::std::ops::{Mul, Div};
-use ::std::sync::Arc;
+use rsp2_array_utils::{map_arr};
+use std::ops::{Mul, Div};
+use std::sync::Arc;
 #[cfg(feature = "serde")]
-use ::serde::{Serialize, Serializer, Deserialize, Deserializer};
+use serde::{Serialize, Serializer, Deserialize, Deserializer};
 
-use ::rsp2_array_types::{V3, M33, M3, mat, inv};
-use ::rsp2_assert_close::{CheckClose, Tolerances, CheckCloseError};
+use rsp2_array_types::{V3, M33, M3, mat, inv};
+use rsp2_assert_close::{CheckClose, Tolerances, CheckCloseError};
 
 /// Defines a vector basis for periodic boundary conditions in three dimensions.
 ///
@@ -251,7 +251,7 @@ impl Lattice {
     /// (symmetry in particular is poorly represented)
     #[cfg(test)]
     pub fn random_uniform(max: f64) -> Self {
-        use ::slice_of_array::prelude::*;
+        use slice_of_array::prelude::*;
 
         Lattice::from(
             (0..9)
@@ -349,7 +349,7 @@ impl CheckClose for Lattice {
     type Scalar = f64;
 
     fn check_close(&self, other: &Lattice, tol: Tolerances) -> Result<(), CheckCloseError> {
-        use ::rsp2_array_types::Unvee;
+        use rsp2_array_types::Unvee;
         self.matrix().unvee().check_close(&other.matrix().unvee(), tol)
     }
 }
@@ -373,7 +373,7 @@ impl<'de> Deserialize<'de> for Lattice {
 #[deny(unused)]
 mod tests {
     use super::*;
-    use ::rsp2_array_types::Unvee;
+    use rsp2_array_types::Unvee;
 
     #[test]
     fn get_inverse() {
@@ -429,7 +429,7 @@ mod tests {
 
     #[test]
     fn planes() {
-        use ::rand::Rng;
+        use rand::Rng;
 
         // check the normals of some arbitrary planes
         for _ in 0..20 {
@@ -451,7 +451,7 @@ mod tests {
         for _ in 0..20 {
             let lattice = Lattice::random_uniform(20.0);
 
-            let n = ::rand::thread_rng().gen_range(1, 10+1);
+            let n = rand::thread_rng().gen_range(1, 10+1);
             let miller = V3([0, 0, n]);
 
             let [a, b, c] = lattice.vectors();

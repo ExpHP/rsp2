@@ -13,11 +13,11 @@
 ** ********************************************************************** */
 
 use crate::FailResult;
-use ::std::env;
+use std::env;
 use crate::util::ext_traits::OptionResultExt;
 
 fn var(key: &str) -> FailResult<Option<String>>
-{ match ::std::env::var(key) {
+{ match std::env::var(key) {
     Ok(s) => Ok(Some(s)),
     Err(env::VarError::NotPresent) => Ok(None),
     Err(env::VarError::NotUnicode(s)) => bail!("env var not unicode: {}={:?}", key, s),
@@ -71,8 +71,8 @@ pub fn max_omp_num_threads() -> FailResult<u32>
 
 #[cfg(feature = "mpi")]
 pub fn num_mpi_processes() -> u32 {
-    use ::mpi::traits::Communicator;
+    use mpi::traits::Communicator;
 
-    let world = ::mpi::topology::SystemCommunicator::world();
+    let world = mpi::topology::SystemCommunicator::world();
     world.size() as _
 }

@@ -11,14 +11,14 @@
 
 // Original author: Josh Stone:
 
-use ::either::Either;
-use ::itertools::Itertools;
-use ::rayon::prelude::*;
-use ::std::cmp::Ordering;
+use either::Either;
+use itertools::Itertools;
+use rayon::prelude::*;
+use std::cmp::Ordering;
 
-use ::itertools::structs as it;
-use ::rayon::iter as ri;
-use ::std::iter as si;
+use itertools::structs as it;
+use rayon::iter as ri;
+use std::iter as si;
 
 use self::EitherIterator::*;
 
