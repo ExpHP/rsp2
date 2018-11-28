@@ -12,8 +12,6 @@
 ** parts of it are licensed under more permissive terms.                  **
 ** ********************************************************************** */
 
-extern crate rsp2_lammps_wrap;
-
 fn main() {
     ::rsp2_lammps_wrap::mpi_link_test().unwrap();
 }

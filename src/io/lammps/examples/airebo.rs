@@ -1,9 +1,5 @@
-extern crate rsp2_lammps_wrap;
-extern crate rsp2_structure;
-extern crate rsp2_array_types;
-extern crate failure;
-#[macro_use]
-extern crate rsp2_assert_close;
+use failure; // FIXME artefact of cargo fix ???
+#[macro_use] extern crate rsp2_assert_close;
 
 use rsp2_structure::{supercell, Coords, CoordsKind, Lattice};
 use rsp2_array_types::V3;

@@ -86,7 +86,7 @@ where
 pub fn hash_memoize_by_key<'a, Key, In, Out, KeyFunc, F>(
     mut key_func: KeyFunc,
     mut compute: F,
-) -> Box<FnMut(In) -> Out + 'a>
+) -> Box<dyn FnMut(In) -> Out + 'a>
 where
     Out: Clone + 'a,
     Key: ::std::hash::Hash + Eq + 'a,
@@ -113,7 +113,7 @@ where
 pub fn hash_memoize_result_by_key<'a, Key, In, Out, KeyFunc, E, F>(
     mut key_func: KeyFunc,
     mut compute: F,
-) -> Box<FnMut(In) -> Result<Out, E> + 'a>
+) -> Box<dyn FnMut(In) -> Result<Out, E> + 'a>
 where
     Out: Clone + 'a,
     Key: ::std::hash::Hash + Eq + 'a,

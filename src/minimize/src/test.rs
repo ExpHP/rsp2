@@ -374,8 +374,8 @@ pub mod n_dee {
             pub fn densities(&self) -> impl Iterator<Item=usize> {
                 use ::itertools::iterate;
                 match *self {
-                    RefinementMode::Double => Box::new(iterate(1usize, |x| 2 * x)) as Box<Iterator<Item=_>>,
-                    RefinementMode::Linear => Box::new(0usize..) as Box<Iterator<Item=_>>,
+                    RefinementMode::Double => Box::new(iterate(1usize, |x| 2 * x)) as Box<dyn Iterator<Item=_>>,
+                    RefinementMode::Linear => Box::new(0usize..) as Box<dyn Iterator<Item=_>>,
                 }
             }
         }

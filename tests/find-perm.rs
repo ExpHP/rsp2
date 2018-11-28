@@ -1,14 +1,8 @@
-#[macro_use]
-extern crate rsp2_util_macros;
+#[macro_use] extern crate rsp2_util_macros;
 
 use rsp2_soa_ops::Permute;
-extern crate rsp2_soa_ops;
-
 use rsp2_structure::{find_perm};
-extern crate rsp2_structure;
-
 use rsp2_integration_test::filetypes::Primitive;
-extern crate rsp2_integration_test;
 
 #[test]
 fn test_graphene() {

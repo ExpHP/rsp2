@@ -14,16 +14,10 @@
 #![allow(unused_unsafe)]
 #![deny(unused_must_use)]
 
-extern crate slice_of_array;
-extern crate rsp2_structure;
-extern crate rsp2_array_types;
-extern crate lammps_sys;
 #[macro_use] extern crate log;
 #[macro_use] extern crate failure;
 #[macro_use] extern crate lazy_static;
-extern crate chrono;
-#[cfg(feature = "mpi")]
-extern crate mpi as mpi_rs;
+#[cfg(feature = "mpi")] extern crate mpi as mpi_rs;
 
 #[cfg(feature = "mpi")]
 mod mpi {
@@ -244,7 +238,7 @@ impl UpdateFsm {
     fn _action(&self) -> UpdateAction {
         struct YesNo(bool);
         impl fmt::Display for YesNo {
-            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 write!(f, "{}", if self.0 { "yes" } else { "no" })
             }
         }
@@ -456,7 +450,7 @@ pub trait Potential {
     fn atom_types(&self, coords: &Coords, meta: &Self::Meta) -> Vec<AtomType>;
 }
 
-impl<'a, M: Clone> Potential for Box<Potential<Meta=M> + 'a> {
+impl<'a, M: Clone> Potential for Box<dyn Potential<Meta=M> + 'a> {
     type Meta = M;
 
     fn init_info(&self, coords: &Coords, meta: &Self::Meta) -> InitInfo
@@ -466,7 +460,7 @@ impl<'a, M: Clone> Potential for Box<Potential<Meta=M> + 'a> {
     { (&**self).atom_types(coords, meta) }
 }
 
-impl<'a, M: Clone> Potential for &'a (Potential<Meta=M> + 'a) {
+impl<'a, M: Clone> Potential for &'a (dyn Potential<Meta=M> + 'a) {
     type Meta = M;
 
     fn init_info(&self, coords: &Coords, meta: &Self::Meta) -> InitInfo
@@ -834,7 +828,7 @@ impl<P: Potential> Lammps<P> {
     fn check_data_set_in_stone(&self, coords: &Coords, meta: &P::Meta) -> FailResult<()>
     {Ok({
         // struct acting as a generic closure
-        struct Closure<'a, P: Potential + 'a> {
+        struct Closure<'a, P: Potential> {
             lmp: &'a Lammps<P>,
             coords: &'a Coords,
         }

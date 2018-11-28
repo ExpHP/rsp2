@@ -19,11 +19,9 @@ mod cp_mv;
 pub use crate::tempdir::{ActualTempDir, TempDir};
 mod tempdir;
 
-#[macro_use]
-extern crate failure;
+#[macro_use] extern crate failure;
+#[macro_use] extern crate log;
 extern crate tempdir as tempdir_crate;
-#[macro_use]
-extern crate log;
 
 use ::failure::ResultExt;
 

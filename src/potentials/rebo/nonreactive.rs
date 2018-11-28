@@ -2001,7 +2001,7 @@ mod g_spline {
         let brenner = Params::new_brenner();
         let lammps = Params::new_lammps();
 
-        fn try_above_and_below(input: Input) -> impl Iterator<Item=GSpline> {
+        fn try_above_and_below(input: Input<'_>) -> impl Iterator<Item=GSpline> {
             let mut above = input.clone();
             let mut below = input.clone();
             above.cos_ijk += 1e-12;
@@ -2078,7 +2078,7 @@ mod g_spline {
                 coses.extend(mid_xs.iter().map(|&x| x - 1e-11));
                 coses.extend(mid_xs.iter().map(|&x| x + 1e-11));
 
-                let mut tcoords = vec![
+                let tcoords = vec![
                     3.0,
                     4.0,
                     // FIXME: points around 3.2 and 3.7 once the interpolation is implemented

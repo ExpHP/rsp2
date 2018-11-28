@@ -17,7 +17,7 @@ use ::std::fmt::Debug;
 /// This is useful for testing code that uses things
 /// like `std::mem::ManuallyDrop` and `std::ptr::read`.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct PushDrop<'a, T: Debug + 'a>(Option<T>, &'a RefCell<Vec<T>>);
+pub(crate) struct PushDrop<'a, T: Debug>(Option<T>, &'a RefCell<Vec<T>>);
 impl<'a, T: Debug> PushDrop<'a, T> {
     pub(crate) fn new(x: T, cell: &'a RefCell<Vec<T>>) -> Self { PushDrop(Some(x), cell) }
 }

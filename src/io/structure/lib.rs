@@ -9,19 +9,13 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-extern crate rsp2_soa_ops;
-extern crate rsp2_structure;
-extern crate rsp2_array_utils;
-extern crate rsp2_array_types;
 #[macro_use] extern crate rsp2_util_macros;
 
 #[macro_use] extern crate log;
 #[macro_use] extern crate itertools;
 #[macro_use] extern crate failure;
 #[macro_use] extern crate serde_derive;
-extern crate serde;
-extern crate serde_yaml;
-extern crate vasp_poscar;
+use vasp_poscar; // FIXME: ????
 
 pub type FailResult<T> = Result<T, ::failure::Error>;
 #[allow(bad_style)]

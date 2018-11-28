@@ -350,7 +350,7 @@ pub mod hager_beta {
         pub from_gradient: &'a [f64],
     }
 
-    pub fn compute(input: Input) -> f64 {
+    pub fn compute(input: Input<'_>) -> f64 {
         use rsp2_slice_math::{v, V, vnormalize, vnorm, vdot, BadNorm};
 
         let Input {
@@ -451,7 +451,7 @@ pub struct Failure<E> {
 }
 
 impl<E: fmt::Display> fmt::Display for Failure<E> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result
     { self.error.fmt(f) }
 }
 
@@ -1031,7 +1031,7 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
             //         is currently a bit messy and sometimes asks for a point
             //         more than once.  These are really issues with the linesearch,
             //         and ought not to be the caller's concern)
-            let mut memoized: Box<FnMut(f64) -> Result<(f64, f64), ComputeError<E>>>
+            let mut memoized: Box<dyn FnMut(f64) -> Result<(f64, f64), ComputeError<E>>>
                 = crate::util::cache::hash_memoize_result_by_key(
                     |&alpha| ::ordered_float::NotNan::new(alpha).unwrap(),
                     |alpha| {

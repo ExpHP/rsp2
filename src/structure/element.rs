@@ -77,12 +77,12 @@ impl Element {
 }
 
 impl fmt::Display for Element {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result
     { fmt::Display::fmt(self.symbol(), f) }
 }
 
 impl fmt::Debug for Element {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result
     {
         match f.alternate() {
             false => fmt::Debug::fmt(self.symbol(), f),

@@ -185,7 +185,7 @@ impl<L> IntoIterator for Part<L> {
 ///
 /// One day, we will be able to replace it with an associated type on `Partition`
 /// (once existential types are supported on traits).
-pub type Unlabeled<'a, T> = Box<VeclikeIterator<Item=T> + 'a>;
+pub type Unlabeled<'a, T> = Box<dyn VeclikeIterator<Item=T> + 'a>;
 
 pub trait VeclikeIterator: ExactSizeIterator + DoubleEndedIterator + FusedIterator {}
 

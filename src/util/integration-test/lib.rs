@@ -9,23 +9,13 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-extern crate failure;
-extern crate path_abs;
-#[cfg(feature = "test-diff")]
-#[macro_use]
-extern crate pretty_assertions;
-extern crate serde;
-extern crate serde_json;
-#[macro_use]
-extern crate serde_derive;
-extern crate itertools;
+#[macro_use] extern crate rsp2_assert_close;
 
-extern crate rsp2_fs_util as fsx;
-extern crate rsp2_structure;
-extern crate rsp2_python;
-extern crate rsp2_array_types;
-#[macro_use]
-extern crate rsp2_assert_close;
+#[cfg(feature = "test-diff")]
+#[macro_use] extern crate pretty_assertions;
+#[macro_use] extern crate serde_derive;
+
+use rsp2_fs_util as fsx;
 
 use ::std::path::PathBuf;
 

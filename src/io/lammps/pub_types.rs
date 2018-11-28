@@ -97,8 +97,8 @@ impl From<::std::ops::Range<AtomType>> for AtomTypeRange {
 }
 
 impl fmt::Display for AtomTypeRange {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fn write_endpoint(f: &mut fmt::Formatter, i: Option<i64>) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fn write_endpoint(f: &mut fmt::Formatter<'_>, i: Option<i64>) -> fmt::Result {
             match i {
                 Some(i) => write!(f, "{}", i),
                 None => Ok(()),
@@ -136,12 +136,12 @@ impl Arg {
 
 impl fmt::Display for Arg {
     // TODO: Actually handle quoting. (low priority)
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result
     { write!(f, "{}", self.0) }
 }
 
 impl fmt::Display for PairStyle {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result
     {Ok({
         let PairStyle(name, args) = self;
         write!(f, "pair_style {} {}", name, ws_join(args))?;
@@ -149,7 +149,7 @@ impl fmt::Display for PairStyle {
 }
 
 impl fmt::Display for PairCoeff {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result
     {Ok({
         let PairCoeff(i, j, args) = self;
         write!(f, "pair_coeff {} {} {}", i, j, ws_join(args))?;
@@ -160,13 +160,13 @@ fn ws_join(items: &[Arg]) -> JoinDisplay<'_, Arg>
 { JoinDisplay { items, sep: " " } }
 
 // Utility Display adapter for writing a separator between items.
-struct JoinDisplay<'a, D: 'a> {
+struct JoinDisplay<'a, D> {
     items: &'a [D],
     sep: &'a str,
 }
 
 impl<'a, D: fmt::Display> fmt::Display for JoinDisplay<'a, D> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result
     {Ok({
         let mut items = self.items.iter();
 
@@ -211,7 +211,7 @@ mod atom_type {
     }
 
     impl fmt::Display for AtomType {
-        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             fmt::Display::fmt(&self.0, f)
         }
     }

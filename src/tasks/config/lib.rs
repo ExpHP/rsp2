@@ -26,14 +26,9 @@
 
 #[macro_use]
 extern crate serde_derive;
-extern crate serde_yaml;
 
-extern crate serde;
-extern crate serde_ignored;
-
-extern crate failure;
-
-extern crate rsp2_minimize;
+use serde; // FIXME: cargo fix artifact ???
+use rsp2_minimize; // FIXME: cargo fix artifact ???
 
 #[macro_use]
 extern crate log;
@@ -48,7 +43,7 @@ pub trait YamlRead: for <'de> ::serde::Deserialize<'de> {
     fn from_reader(mut r: impl Read) -> Result<Self, Error>
     { YamlRead::from_dyn_reader(&mut r) }
 
-    fn from_dyn_reader(r: &mut Read) -> Result<Self, Error> {
+    fn from_dyn_reader(r: &mut dyn Read) -> Result<Self, Error> {
         // serde_ignored needs a Deserializer.
         // unlike serde_json, serde_yaml doesn't seem to expose a Deserializer that is
         // directly constructable from a Read... but it does impl Deserialize for Value.
@@ -223,7 +218,7 @@ impl<'de> serde::Deserialize<'de> for Parameter {
         impl<'a> serde::de::Visitor<'a> for Visitor {
             type Value = Parameter;
 
-            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 write!(f, "1, a single character, or null")
             }
 

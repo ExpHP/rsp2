@@ -31,7 +31,7 @@ pub struct LammpsError {
 }
 
 impl fmt::Display for LammpsError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f, "LAMMPS threw {}: {}",
             match self.severity {

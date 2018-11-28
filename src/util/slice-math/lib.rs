@@ -258,7 +258,7 @@ mod tests {
     #[test]
     fn vown_overridden_methods() {
         // Ensure IntoIter::Item is by-value
-        let _: Box<Iterator<Item=f64>> = Box::new(v(vec![]).into_iter());
+        let _: Box<dyn Iterator<Item=f64>> = Box::new(v(vec![]).into_iter());
     }
 
     #[test]

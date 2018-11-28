@@ -49,7 +49,7 @@ where
 //--------------------------------------------------------------------------------------
 // implementation
 
-fn dump(w: &mut Write, title: &str, carts: &[V3], types: &[Element]) -> FailResult<()>
+fn dump(w: &mut dyn Write, title: &str, carts: &[V3], types: &[Element]) -> FailResult<()>
 {
     assert!(!title.contains("\n"));
     assert!(!title.contains("\r"));

@@ -286,7 +286,7 @@ impl SupercellToken {
         meta: Vec<M>,
         mut fold_meta: F,
     ) -> Vec<M2>
-    where F: FnMut(OwnedMetas<M>, &[[u32; 3]]) -> M2,
+    where F: FnMut(OwnedMetas<'_, M>, &[[u32; 3]]) -> M2,
     { self.try_collapse_with(meta, |m, i| Ok::<_, ()>(fold_meta(m, i))).expect("BUG!") }
 
     // !!! This function affects the supercell convention !!! (SUPERCELL-CONV)
@@ -302,7 +302,7 @@ impl SupercellToken {
         meta: Vec<M>,
         mut fold_meta: F,
     ) -> Result<Vec<M2>, E>
-    where F: FnMut(OwnedMetas<M>, &[[u32; 3]]) -> Result<M2, E>,
+    where F: FnMut(OwnedMetas<'_, M>, &[[u32; 3]]) -> Result<M2, E>,
     {
         let sc_idx = image_cells(self.periods);
         let mut meta = meta;

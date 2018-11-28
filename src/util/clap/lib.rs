@@ -9,7 +9,7 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-pub extern crate clap;
+pub use clap;
 
 // * clap_app! is full of problems:
 //   - --nice versus --("ew-gross")

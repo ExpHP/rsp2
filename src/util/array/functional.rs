@@ -200,7 +200,7 @@ mod tests {
 
         // Completely construct something;
         // nothing should get dropped.
-        let arr: Result<[PushDrop<i32>; 5], ()> = try_arr_from_fn(
+        let arr: Result<[PushDrop<'_, i32>; 5], ()> = try_arr_from_fn(
             |i| Ok(PushDrop::new(i as i32, &vec))
         );
         assert_eq!(*vec.borrow(), vec![3, 4, 2]);
@@ -208,7 +208,7 @@ mod tests {
 
         // Interrupt construction with an Err.
         // The successfully added elements should be dropped in reverse.
-        let ret: Result<[PushDrop<i32>; 5], _> = try_arr_from_fn(
+        let ret: Result<[PushDrop<'_, i32>; 5], _> = try_arr_from_fn(
             |i| match i {
                 3 => Err("lol!"),
                 i => Ok(PushDrop::new(i as i32, &vec)),
@@ -223,14 +223,14 @@ mod tests {
         use super::{try_map_arr, arr_from_fn};
 
         let vec = RefCell::new(vec![]);
-        let make_arr = || -> [PushDrop<i32>; 5] {
+        let make_arr = || -> [PushDrop<'_, i32>; 5] {
             arr_from_fn(|i| PushDrop::new(i as i32, &vec))
         };
 
         // Completely map something;
         // nothing should get dropped.
         let arr = make_arr();
-        let _arr: Result<[PushDrop<i32>; 5], ()> =
+        let _arr: Result<[PushDrop<'_, i32>; 5], ()> =
             try_map_arr(arr, |x| Ok(PushDrop::new(x.into_inner() + 10, &vec)));
 
         assert_eq!(*vec.borrow(), vec![]);
@@ -240,7 +240,7 @@ mod tests {
         // Both the unmapped elements and the successfully mapped
         //   elements should be dropped.
         let arr = make_arr();
-        let ret: Result<[PushDrop<i32>; 5], _> =
+        let ret: Result<[PushDrop<'_, i32>; 5], _> =
             try_map_arr(arr, |x| match x.into_inner() {
                 2 => Err("lol!"),
                 x => Ok(PushDrop::new(x + 10, &vec)),

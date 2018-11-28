@@ -68,7 +68,7 @@ impl Poscar {
 
 // monomorphic
 fn dump(
-    w: &mut Write,
+    w: &mut dyn Write,
     title: &str,
     coords: &Coords,
     elements: &[Element],
@@ -102,7 +102,7 @@ fn dump(
 }
 
 /// Reads a POSCAR from an open file.
-fn load_txt(f: &mut BufRead) -> FailResult<Poscar>
+fn load_txt(f: &mut dyn BufRead) -> FailResult<Poscar>
 {
     use vasp_poscar::failure::ResultExt;
     let poscar = imp::Poscar::from_reader(f).compat()?;

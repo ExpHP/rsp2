@@ -20,21 +20,6 @@
 
 #![deny(unused_must_use)]
 
-extern crate rsp2_tasks_config;
-
-extern crate rsp2_lammps_wrap;
-extern crate rsp2_minimize;
-extern crate rsp2_structure;
-extern crate rsp2_structure_io;
-extern crate rsp2_phonopy_io;
-extern crate rsp2_array_utils;
-extern crate rsp2_array_types;
-extern crate rsp2_soa_ops;
-extern crate rsp2_slice_math;
-extern crate rsp2_python;
-extern crate rsp2_fs_util;
-extern crate rsp2_linalg;
-extern crate rsp2_potentials;
 #[macro_use] extern crate rsp2_newtype_indices;
 #[macro_use] extern crate rsp2_util_macros;
 #[macro_use] extern crate rsp2_clap;
@@ -43,38 +28,13 @@ extern crate rsp2_potentials;
 #[macro_use] extern crate extension_trait;
 #[macro_use] extern crate enum_map;
 #[macro_use] extern crate frunk;
-extern crate rayon;
-extern crate either;
-extern crate rand;
-extern crate slice_of_array;
-extern crate serde;
 #[macro_use] extern crate indoc;
-extern crate ansi_term;
-extern crate fern;
-extern crate shlex;
-extern crate stack;
-extern crate clap;
-extern crate petgraph;
 #[macro_use] extern crate lazy_static;
-extern crate rsp2_kets;
-extern crate path_abs;
-extern crate serde_ignored;
-extern crate serde_yaml;
-extern crate env_logger;
-extern crate num_traits;
 #[macro_use] extern crate serde_json;
 #[macro_use] extern crate serde_derive;
 #[macro_use] extern crate log;
 #[macro_use] extern crate itertools;
 #[macro_use] extern crate failure;
-#[cfg(feature = "mpi")]
-extern crate mpi;
-extern crate num_cpus;
-#[cfg(test)]
-extern crate xz2;
-
-extern crate lapacke;
-extern crate lapack_src;
 
 macro_rules! ichain {
     ($e:expr,) => { $e.into_iter() };

@@ -31,7 +31,7 @@ mod drop_pusher {
     impl<T: Copy + 'static> DropPusher<T> {
         /// Create a shared vector, and a `new` function which constructs
         /// `DropPushers` tied to that vector.
-        pub fn new_trial() -> (Rc<RefCell<Vec<T>>>, Box<Fn(T) -> DropPusher<T>>)
+        pub fn new_trial() -> (Rc<RefCell<Vec<T>>>, Box<dyn Fn(T) -> DropPusher<T>>)
         {
             let history = Rc::new(RefCell::new(vec![]));
             let new = {

@@ -1,5 +1,3 @@
-extern crate rsp2_integration_test;
-
 use ::rsp2_integration_test::{CliTest, filetypes, resource};
 
 #[test]

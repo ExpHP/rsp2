@@ -75,13 +75,13 @@ macro_rules! newtype_index {
         }
 
         impl ::std::fmt::Display for $type {
-            fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
                 ::std::fmt::Display::fmt(&self.0, f)
             }
         }
 
         impl ::std::fmt::Debug for $type {
-            fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
                 ::std::fmt::Debug::fmt(&self.0, f)
             }
         }
@@ -104,7 +104,7 @@ pub type IndexVec<I, T> = Indexed<I, Vec<T>>;
 unsafe impl<I: Idx, V> Send for Indexed<I, V> where V: Send {}
 
 impl<I: Idx, V: ?Sized + fmt::Debug> fmt::Debug for Indexed<I, V> {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(&self.raw, fmt)
     }
 }
@@ -278,7 +278,7 @@ impl<I: Idx, T> Indexed<I, Vec<T>> {
 /// # Non-consuming iteration
 impl<I: Idx, T> Indexed<I, [T]> {
     #[inline]
-    pub fn iter(&self) -> slice::Iter<T> {
+    pub fn iter(&self) -> slice::Iter<'_, T> {
         self.raw.iter()
     }
 
@@ -309,7 +309,7 @@ impl<I: Idx, T> Indexed<I, [T]> {
     }
 
     #[inline]
-    pub fn iter_mut(&mut self) -> slice::IterMut<T> {
+    pub fn iter_mut(&mut self) -> slice::IterMut<'_, T> {
         self.raw.iter_mut()
     }
 

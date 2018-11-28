@@ -52,7 +52,7 @@ macro_rules! expr { ($i:expr, $e:expr) => { expr_opt!($i, Some($e)) }; }
 //  of a do_parse! chain.
 macro_rules! expr_ires { ($i:expr, $e:expr) => { expr_res!($i, $e.to_full_result()) }; }
 
-fn chunk_evenly<T>(slice: &[T], size: usize) -> ::std::slice::Chunks<T> {
+fn chunk_evenly<T>(slice: &[T], size: usize) -> ::std::slice::Chunks<'_, T> {
     assert_eq!(slice.len() % size, 0);
     slice.chunks(size)
 }

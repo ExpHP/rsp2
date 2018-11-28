@@ -1,5 +1,3 @@
-extern crate rsp2_tasks;
-
 pub mod version {
     use ::rsp2_tasks::VersionInfo;
 

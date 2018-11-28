@@ -9,24 +9,14 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-extern crate serde;
-#[macro_use] extern crate serde_derive;
-#[macro_use] extern crate failure;
-#[macro_use] extern crate serde_json;
-
-#[cfg_attr(test, macro_use)] extern crate rsp2_assert_close;
+#[cfg(test)] #[macro_use] extern crate rsp2_assert_close;
 #[macro_use] extern crate rsp2_util_macros;
-extern crate rsp2_array_utils;
-extern crate rsp2_slice_math;
 
-extern crate either;
-
+#[macro_use] extern crate serde_derive;
+#[macro_use] extern crate serde_json;
+#[macro_use] extern crate failure;
 #[macro_use] extern crate log;
-#[cfg_attr(test, macro_use)] extern crate itertools;
-extern crate rand;
-extern crate objekt;
-extern crate ordered_float;
-#[cfg(test)] extern crate env_logger;
+#[cfg(test)] #[macro_use] extern crate itertools;
 
 pub mod test;
 

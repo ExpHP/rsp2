@@ -11,10 +11,6 @@
 
 // Original author: Josh Stone:
 
-extern crate either;
-extern crate itertools;
-extern crate rayon;
-
 use either::Either;
 use itertools::Itertools;
 use rayon::prelude::*;

@@ -50,8 +50,8 @@ impl Default for CliTest {
     }
 }
 
-pub type DirChecker = Box<Fn(&PathDir) -> Result<()>>;
-pub type AfterRun = Box<Fn(&PathDir) -> Result<()>>;
+pub type DirChecker = Box<dyn Fn(&PathDir) -> Result<()>>;
+pub type AfterRun = Box<dyn Fn(&PathDir) -> Result<()>>;
 
 impl CliTest {
     pub fn cargo_binary(name: impl AsRef<OsStr>) -> Self {

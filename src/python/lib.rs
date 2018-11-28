@@ -12,12 +12,9 @@
 ** parts of it are licensed under more permissive terms.                  **
 ** ********************************************************************** */
 
-#[macro_use]
-extern crate include_dir;
-#[macro_use]
-extern crate log;
-extern crate rsp2_fs_util as fsx;
-extern crate failure;
+#[macro_use] extern crate include_dir;
+#[macro_use] extern crate log;
+use rsp2_fs_util as fsx;
 
 use crate::fsx::TempDir;
 use include_dir::{Dir, File};
@@ -27,7 +24,7 @@ use std::{
     env,
 };
 
-pub static ROOT_DIR: Dir = include_dir!("rsp2");
+pub static ROOT_DIR: Dir<'_> = include_dir!("rsp2");
 
 pub struct Guard(TempDir);
 
@@ -95,7 +92,7 @@ fn modify_path_env(
     Ok(())
 }
 
-fn write_dir_contents(dir: &Dir, dest: &Path) -> Result<(), ::failure::Error> {
+fn write_dir_contents(dir: &Dir<'_>, dest: &Path) -> Result<(), ::failure::Error> {
     for file in dir.files() {
         write_file(file, &dest.join(file.path().file_name().unwrap()))?;
     }
@@ -107,7 +104,7 @@ fn write_dir_contents(dir: &Dir, dest: &Path) -> Result<(), ::failure::Error> {
     Ok(())
 }
 
-fn write_file(file: &File, dest: &Path) -> Result<(), ::failure::Error> {
+fn write_file(file: &File<'_>, dest: &Path) -> Result<(), ::failure::Error> {
     use ::std::io::Write;
 
     fsx::create(dest)?.write_all(file.contents())?;

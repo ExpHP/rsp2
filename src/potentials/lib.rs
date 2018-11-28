@@ -13,24 +13,11 @@
 #[macro_use] extern crate rsp2_assert_close;
 #[macro_use] extern crate rsp2_newtype_indices;
 #[macro_use] extern crate rsp2_array_utils;
-extern crate rsp2_array_types;
-extern crate rsp2_structure;
-extern crate rsp2_minimize;
-extern crate rsp2_rayon_utils;
-#[cfg(test)] extern crate rsp2_structure_io;
 
 #[macro_use] extern crate enum_map;
 #[macro_use] extern crate failure;
 #[macro_use] extern crate log;
 #[macro_use] extern crate lazy_static;
-extern crate stack;
-extern crate petgraph;
-extern crate rayon;
-extern crate slice_of_array;
-#[cfg(test)] extern crate rand;
-#[cfg(test)] extern crate xz2;
-#[cfg(test)] extern crate serde;
-#[cfg(test)] extern crate serde_json;
 #[cfg(test)] #[macro_use] extern crate serde_derive;
 
 pub mod crespi;

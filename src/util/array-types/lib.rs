@@ -9,19 +9,14 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-extern crate rsp2_array_utils;
 #[cfg(test)]
-#[macro_use]
-extern crate rsp2_assert_close;
+#[macro_use] extern crate rsp2_assert_close;
 
 #[cfg(feature = "serde")]
-#[macro_use]
-extern crate serde;
-extern crate slice_of_array;
-extern crate rand;
-extern crate num_traits;
+#[macro_use] extern crate serde;
 
-#[macro_use] mod macros;
+#[macro_use]
+mod macros;
 
 pub use self::types::*;
 mod types;

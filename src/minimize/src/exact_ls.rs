@@ -56,9 +56,9 @@ pub struct Bound { pub alpha: f64, pub value: f64, pub slope: f64 }
 
 pub type Interval = (f64, f64);
 pub type SlopeInterval = (SlopeBound, SlopeBound);
-pub type ValueFn<'a, E> = FnMut(f64) -> Result<Value, E> + 'a;
-pub type SlopeFn<'a, E> = FnMut(f64) -> Result<Slope, E> + 'a;
-pub type OneDeeFn<'a, E> = FnMut(f64) -> Result<(Value, Slope), E> + 'a;
+pub type ValueFn<'a, E> = dyn FnMut(f64) -> Result<Value, E> + 'a;
+pub type SlopeFn<'a, E> = dyn FnMut(f64) -> Result<Slope, E> + 'a;
+pub type OneDeeFn<'a, E> = dyn FnMut(f64) -> Result<(Value, Slope), E> + 'a;
 
 fn check_mirroring_assumption(x0: f64) -> Result<(), GoldenSearchError> {
     // Assumption:
@@ -102,7 +102,7 @@ where F: FnMut(f64) -> Result<Slope, E>
     };
 
     // make it possible to conditionally wrap the closure into another.
-    let mut compute: Box<FnMut(f64) -> Result<SlopeBound, Result<E, GoldenSearchError>>>
+    let mut compute: Box<dyn FnMut(f64) -> Result<SlopeBound, Result<E, GoldenSearchError>>>
         = Box::new(compute);
 
     nest_err(|| {
@@ -128,7 +128,7 @@ where F: FnMut(f64) -> Result<Slope, E>
 
 fn find_initial<E>(
     (a, mut b): SlopeInterval,
-    compute: &mut FnMut(f64) -> Result<SlopeBound, Result<E, GoldenSearchError>>,
+    compute: &mut dyn FnMut(f64) -> Result<SlopeBound, Result<E, GoldenSearchError>>,
 ) -> Result<SlopeInterval, Result<E, GoldenSearchError>>
 {
     assert!(a.slope <= 0.0);
@@ -145,7 +145,7 @@ fn find_initial<E>(
 
 fn bisect<E>(
     (mut lo, mut hi): SlopeInterval,
-    compute: &mut FnMut(f64) -> Result<SlopeBound, E>,
+    compute: &mut dyn FnMut(f64) -> Result<SlopeBound, E>,
 ) -> Result<SlopeBound, E>
 {
     assert!(lo.alpha <= hi.alpha);

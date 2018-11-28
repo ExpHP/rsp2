@@ -131,7 +131,7 @@ where F: FnMut(f64) -> Result<(f64, f64), E>,
 
     // I highly doubt that statically known function will help optimize
     // linesearches very much, and boxing helps us handle negative slope.
-    let mut compute: Box<FnMut(f64) -> Result<Bound, E>> = Box::new(compute);
+    let mut compute: Box<dyn FnMut(f64) -> Result<Bound, E>> = Box::new(compute);
     let mut initial = compute(0.0)?;
 
     if initial.slope > 0.0 {
@@ -191,7 +191,7 @@ impl Hager {
     fn linesearch<E>(
         &self,
         start_alpha: f64,
-        compute: &mut FnMut(f64) -> Result<Bound, E>,
+        compute: &mut dyn FnMut(f64) -> Result<Bound, E>,
     ) -> Result<Bound, E>
     {
         // We do a nasty trick with control flow here.
@@ -336,7 +336,7 @@ impl Hager {
     fn seek_initial_interval<E>(
         &self,
         start_alpha: f64,
-        compute: &mut FnMut(f64, How) -> ShortCircuitResult<Bound, Bound, E>,
+        compute: &mut dyn FnMut(f64, How) -> ShortCircuitResult<Bound, Bound, E>,
     ) -> ShortCircuitResult<Interval, Bound, E>
     {
         // Hager (2004) provides no strategy for this.
@@ -397,7 +397,7 @@ impl Hager {
         &self,
         input: Interval, // Current boundaries, written as 'a' and 'b' in the paper.
         guess: Bound, // Guess for next bound, written as 'c' in the paper
-        compute: &mut FnMut(f64, How) -> Result<Bound, E>,
+        compute: &mut dyn FnMut(f64, How) -> Result<Bound, E>,
     ) -> Result<Interval, E>
     {
         self.validate_opposite_slope(input);
@@ -441,7 +441,7 @@ impl Hager {
     fn funky_loop_in_u3<E>(
         &self,
         (mut lo, mut hi): Interval,
-        compute: &mut FnMut(f64, How) -> Result<Bound, E>,
+        compute: &mut dyn FnMut(f64, How) -> Result<Bound, E>,
     ) -> Result<Result<Interval, Bound>, E>
     {
         debug!("update_interval: Beginning same-slope bisection strategy.");
@@ -489,7 +489,7 @@ impl Hager {
     fn double_secant_strategy<E>(
         &self,
         (lo, hi): Interval,
-        compute: &mut FnMut(f64, How) -> Result<Bound, E>,
+        compute: &mut dyn FnMut(f64, How) -> Result<Bound, E>,
     ) -> Result<Interval, E>
     {
         self.validate_opposite_slope((lo, hi));

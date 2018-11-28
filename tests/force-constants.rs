@@ -1,18 +1,7 @@
-extern crate rsp2_array_types;
-extern crate rsp2_tasks;
-extern crate rsp2_structure;
-extern crate rsp2_soa_ops;
-#[macro_use]
-extern crate rsp2_assert_close;
-extern crate serde;
-#[macro_use]
-extern crate serde_derive;
-extern crate serde_json;
-extern crate failure;
-extern crate itertools;
+#[macro_use] extern crate rsp2_assert_close;
+#[macro_use] extern crate rsp2_integration_test;
 
-#[macro_use]
-extern crate rsp2_integration_test;
+#[macro_use] extern crate serde_derive;
 
 use ::rsp2_integration_test::filetypes::Primitive;
 

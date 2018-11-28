@@ -103,7 +103,7 @@ pub struct LatticeSymmetryError {
 }
 
 impl fmt::Display for LatticeSymmetryError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f, "{:?} is not in the point group of the lattice {:?}",
             self.cart_rot, self.lattice.matrix(),

@@ -9,7 +9,7 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-extern crate failure;
+use failure; // FIXME: artefact of cargo fix ???
 use std::fmt;
 
 pub const DEFAULT_NONZERO_TOL: f64 = 1e-9;
@@ -152,11 +152,11 @@ pub struct CheckCloseError<T = f64> {
 // avoid `T: Fail` bound
 impl<T: fmt::Debug + Send + Sync + 'static> failure::Fail for CheckCloseError<T> {
     fn backtrace(&self) -> Option <&::failure::Backtrace> { None }
-    fn cause(&self) -> Option <&::failure::Fail> { None }
+    fn cause(&self) -> Option <&dyn (::failure::Fail)> { None }
 }
 
 impl<T: fmt::Debug> fmt::Display for CheckCloseError<T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let (left, right) = &self.values;
         write!(f, "failed at:
   left: {:?}

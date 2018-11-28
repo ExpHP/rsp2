@@ -1,5 +1,3 @@
-extern crate rsp2_integration_test;
-
 use ::rsp2_integration_test::{CliTest, filetypes, resource};
 
 #[ignore] // This test is expensive; use `cargo test -- --ignored` to run it!

@@ -211,7 +211,7 @@ pub trait VeclikeIterator: ExactSizeIterator + DoubleEndedIterator {}
 
 impl<I> VeclikeIterator for I where I: ExactSizeIterator + DoubleEndedIterator {}
 
-pub type FracIter<'a> = Box<VeclikeIterator<Item = FracBond> + 'a>;
+pub type FracIter<'a> = Box<dyn VeclikeIterator<Item = FracBond> + 'a>;
 impl<'a> IntoIterator for &'a FracBonds {
     type Item = FracBond;
     type IntoIter = FracIter<'a>;
@@ -225,7 +225,7 @@ impl<'a> IntoIterator for &'a FracBonds {
     }
 }
 
-pub type CartIter<'a> = Box<VeclikeIterator<Item = CartBond> + 'a>;
+pub type CartIter<'a> = Box<dyn VeclikeIterator<Item = CartBond> + 'a>;
 impl<'a> IntoIterator for &'a CartBonds {
     type Item = CartBond;
     type IntoIter = CartIter<'a>;
@@ -1004,13 +1004,13 @@ pub struct ComponentLabel(
 );
 
 impl fmt::Debug for ComponentLabel {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(&self.0, f)
     }
 }
 
 impl fmt::Display for ComponentLabel {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(&self.0, f)
     }
 }

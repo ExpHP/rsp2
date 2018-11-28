@@ -71,7 +71,7 @@ pub mod disp_yaml {
     { _read(&mut r) }
 
     // Monomorphic to ensure that all the yaml parsing code is generated inside this crate
-    pub fn _read(r: &mut Read) -> FailResult<DispYaml>
+    pub fn _read(r: &mut dyn Read) -> FailResult<DispYaml>
     {
         use ::rsp2_structure::{CoordsKind, Lattice};
         use self::cereal::{Point, Displacement, DispYaml as RawDispYaml};
@@ -181,7 +181,7 @@ pub mod symmetry_yaml {
     { _read(&mut r) }
 
     // Monomorphic to ensure that all the yaml parsing code is generated inside this crate
-    pub fn _read(r: &mut Read) -> FailResult<SymmetryYaml>
+    pub fn _read(r: &mut dyn Read) -> FailResult<SymmetryYaml>
     {Ok({ ::serde_yaml::from_reader(r)? })}
 }
 
