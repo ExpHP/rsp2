@@ -107,7 +107,7 @@ gen_each!{
         // during debugging)
         impl<$T: fmt::Debug> fmt::Debug for $Cn<$T> {
             #[inline]
-            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result
             { fmt::Debug::fmt(&self.0, f) }
         }
     }

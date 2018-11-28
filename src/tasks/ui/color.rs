@@ -107,7 +107,7 @@ macro_rules! derive_fmt_impl {
             U: ::std::borrow::Borrow<T>,
             T: $Trait,
         {
-            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 write!(f, "{}", self.style.prefix())?;
                 T::fmt(self.value.borrow(), f)?;
                 write!(f, "{}", self.style.suffix())?;

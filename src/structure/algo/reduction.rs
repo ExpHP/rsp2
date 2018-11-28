@@ -107,7 +107,8 @@ mod unimodular {
         pub fn row_axpy(&mut self, to: usize, mul: i32, from: usize)
         {
             assert_ne!(from, to, "adding a row to itself is not a unimodular operation");
-            self.0[to] += mul * self.0[from];
+            let x = self.0[from];
+            self.0[to] += mul * x;
         }
 
         // steps N3

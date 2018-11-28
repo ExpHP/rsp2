@@ -24,7 +24,7 @@ use std::rc::Rc;
 macro_rules! derive_newtype_display {
     ($Type:ident) => {
         impl fmt::Display for $Type {
-            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 fmt::Display::fmt(&self.0, f)
             }
         }
