@@ -9,7 +9,7 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::FailResult;
+use crate::FailResult;
 use ::std::io::prelude::*;
 use ::std::collections::HashMap;
 

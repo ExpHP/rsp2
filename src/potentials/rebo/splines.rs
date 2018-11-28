@@ -14,7 +14,7 @@
 //! ...well. Most have been removed. These are largely dummy types that expose
 //! the same API as they would if the splines *were* implemented.
 
-use ::FailResult;
+use crate::FailResult;
 #[allow(unused)] // https://github.com/rust-lang/rust/issues/45268
 use ::slice_of_array::prelude::*;
 use ::std::ops::RangeInclusive;

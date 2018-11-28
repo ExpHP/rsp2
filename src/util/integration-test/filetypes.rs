@@ -15,9 +15,9 @@ use ::std::io::prelude::*;
 use ::itertools::Itertools;
 use ::std::collections::{BTreeSet, BTreeMap};
 
-use ::util;
+use crate::util;
 
-use ::CheckFile;
+use crate::CheckFile;
 
 pub use ::failure::Error;
 
@@ -187,7 +187,7 @@ impl Dynmat {
     pub fn load(path: impl AsRef<::std::path::Path>) -> Result<Self, Error> {
         // we can't read NPZ in rust
         let _guard = ::rsp2_python::add_to_python_path();
-        let _tmp = ::fsx::TempDir::new("rsp2")?;
+        let _tmp = crate::fsx::TempDir::new("rsp2")?;
         let json_path = _tmp.path().join("tmp.json");
         // FIXME awkward as heck to be using process::Command for this, should the rust wrapper
         //       maybe be public in rsp2_python rather than private in rsp2_tasks?
@@ -210,7 +210,7 @@ impl Dynmat {
         // we can't write NPZ in rust
         let _guard = ::rsp2_python::add_to_python_path();
 
-        let _tmp = ::fsx::TempDir::new("rsp2")?;
+        let _tmp = crate::fsx::TempDir::new("rsp2")?;
         let json_path = _tmp.path().join("tmp.json");
         save_json(&json_path, self)?;
 

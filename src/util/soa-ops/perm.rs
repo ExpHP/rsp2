@@ -554,7 +554,7 @@ mod tests {
 
     #[test]
     fn drop_safety() {
-        let (drop_history, dp) = ::util::DropPusher::new_trial();
+        let (drop_history, dp) = crate::util::DropPusher::new_trial();
         {
             let vec = vec![dp(0), dp(1), dp(2), dp(3), dp(4)];
 

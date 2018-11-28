@@ -174,7 +174,7 @@ impl Lattice {
     {
         warn!("Untested code path: ee755063-5bc7-4a44-b049-ea0b923a73c8");
         let m = self.matrix() * other.inverse_matrix();
-        match ::util::Tol(tol).unfloat_m33(&m) {
+        match crate::util::Tol(tol).unfloat_m33(&m) {
             Ok(m) => m.det().abs() == 1,
             Err(_) => false,
         }
@@ -434,8 +434,8 @@ mod tests {
         // check the normals of some arbitrary planes
         for _ in 0..20 {
             let lattice = Lattice::random_uniform(20.0);
-            let miller = ::miller::random_nonzero(10);
-            let gcd = ::miller::gcd(miller);
+            let miller = crate::miller::random_nonzero(10);
+            let gcd = crate::miller::gcd(miller);
 
             let recip = miller.map(|x| x as f64) * &lattice.reciprocal();
             let normal = lattice.plane_normal(miller);

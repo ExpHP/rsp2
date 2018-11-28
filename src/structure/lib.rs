@@ -43,10 +43,10 @@ pub struct IntPrecisionError {
     value: f64,
 }
 
-pub use ::algo::bonds;
-pub use ::algo::supercell;
-pub use ::algo::find_perm;
-pub use ::algo::layer;
+pub use crate::algo::bonds;
+pub use crate::algo::supercell;
+pub use crate::algo::find_perm;
+pub use crate::algo::layer;
 
 mod core;
 mod algo;

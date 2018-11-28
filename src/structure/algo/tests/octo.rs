@@ -38,7 +38,7 @@
 //!   *G*<sup>op</sup>, where the operations compose in reverse.
 //!   See https://github.com/ExpHP/rsp2/issues/1#issuecomment-340279243
 
-use ::IntRot;
+use crate::IntRot;
 use ::rsp2_soa_ops::{Perm};
 
 use ::rsp2_array_types::{V3, vee, Envee};
@@ -223,7 +223,7 @@ lazy_static! {
 
 mod tests {
     use super::*;
-    use ::algo::group::generate_finite_group;
+    use crate::algo::group::generate_finite_group;
     use ::rsp2_soa_ops::Permute;
 
     use ::std::fmt::Debug;
@@ -533,7 +533,7 @@ mod tests {
     #[test]
     fn group_tree_r_to_vop()
     {
-        use ::algo::group::GroupTree;
+        use crate::algo::group::GroupTree;
 
         // Elide most calls to `vertex_perm_from_rot` using the
         // homomorphism into the opposite group of permutations

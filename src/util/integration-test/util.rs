@@ -14,7 +14,7 @@ macro_rules! zip_eq {
         $a.into_iter().map(|a| (a,))
     };
     ($a:expr, $b:expr $(,)*) => {
-        ::util::zip_eq($a, $b)
+        crate::util::zip_eq($a, $b)
     };
     ($a:expr, $b:expr, $c:expr $(,)*) => {
         ::util::zip_eq(::util::zip_eq($a, $b), $c)

@@ -137,11 +137,11 @@ mod tests {
     /// without much thought for edge-cases.
     #[test]
     fn test_stop_condition() {
-        use ::stop_condition::prelude::*;
-        use ::cg::stop_condition::Objectives;
+        use crate::stop_condition::prelude::*;
+        use crate::cg::stop_condition::Objectives;
 
         // (value that has at least one of each logical expression type)
-        let cereal: ::cg::stop_condition::StopCondition = from_json!(
+        let cereal: crate::cg::stop_condition::StopCondition = from_json!(
             {"any": [
                 {"all": [
                     {"grad-max": 1.0},

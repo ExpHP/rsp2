@@ -9,8 +9,8 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::{Lattice, Coords, CoordsKind};
-use ::{CartOp};
+use crate::{Lattice, Coords, CoordsKind};
+use crate::{CartOp};
 use super::group::GroupTree;
 
 use ::rsp2_array_types::V3;
@@ -227,7 +227,7 @@ fn fracs_sorted_by_lattice_distance<M: Ord>(
     }
 
     let data_to_sort = {
-        ::CoordsKind::Fracs(fracs.clone())
+        crate::CoordsKind::Fracs(fracs.clone())
             // NOTE: It's possible that computing distances in fractional space can be
             //       even more effective than in cartesian space.  See this comment
             //       and the conversation leading up to it:
@@ -396,7 +396,7 @@ fn fracs_within(lattice: &Lattice, a: V3, b: V3, tol: f64) -> bool {
 #[cfg(test)]
 #[deny(unused)]
 mod tests {
-    use ::Lattice;
+    use crate::Lattice;
     use super::*;
 
     use ::rand::{Rand, Rng};

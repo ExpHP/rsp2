@@ -27,10 +27,10 @@ pub type FailResult<T> = Result<T, ::failure::Error>;
 #[allow(bad_style)]
 pub fn FailOk<T>(x: T) -> Result<T, ::failure::Error> { Ok(x) }
 
-pub use poscar::Poscar;
+pub use crate::poscar::Poscar;
 mod poscar;
 
-pub use xyz::Xyz;
+pub use crate::xyz::Xyz;
 mod xyz;
 
 pub mod layers_yaml;

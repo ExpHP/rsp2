@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 description = "A safe(r) wrapper around the lammps C bindings."
 !!LICENSE-GPL
+!!DEFAULT-EDITION
 
 [lib]
 path = "lib.rs"

@@ -9,7 +9,7 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::FailResult;
+use crate::FailResult;
 use ::std::ffi::OsStr;
 use ::std::process::{Command, Stdio};
 use ::std::io::Read;

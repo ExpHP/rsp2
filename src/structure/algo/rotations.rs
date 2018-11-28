@@ -9,7 +9,7 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::{Lattice, CoordsKind};
+use crate::{Lattice, CoordsKind};
 use ::rsp2_array_utils::{map_arr};
 use super::reduction::LatticeReduction;
 
@@ -129,7 +129,7 @@ impl Context {
             .map(|u| u.map(|x| x as f64))
             .map(|ref u| l_inv * &(u * l_mat))
             // FIXME: when might this fail? (bug? user error?)
-            .map(|u| ::util::Tol(1e-3).unfloat_m33(&u).unwrap())
+            .map(|u| crate::util::Tol(1e-3).unfloat_m33(&u).unwrap())
             .collect()
     }
 

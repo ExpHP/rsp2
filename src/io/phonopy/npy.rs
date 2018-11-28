@@ -14,7 +14,7 @@
 // 2 or more elements.
 #![allow(unused_parens)]
 
-use ::FailResult;
+use crate::FailResult;
 use ::rsp2_kets::Basis;
 use ::nom::*;
 use ::std::io::Read;

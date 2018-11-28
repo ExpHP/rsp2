@@ -176,7 +176,7 @@ pub mod golden {
     pub(crate) use self::stop_condition::Objectives;
 
     pub mod stop_condition {
-        use ::stop_condition::prelude::*;
+        use crate::stop_condition::prelude::*;
 
         #[derive(Debug, Clone, PartialEq)]
         pub(crate) struct Objectives {
@@ -210,15 +210,15 @@ pub mod golden {
             }
         }
 
-        pub type Cereal = ::stop_condition::Cereal<Simple>;
-        pub type Rpn = ::stop_condition::Rpn<Simple>;
+        pub type Cereal = crate::stop_condition::Cereal<Simple>;
+        pub type Rpn = crate::stop_condition::Rpn<Simple>;
 
         mod tests {
             #[test]
             fn test_serialized_repr() {
                 use super::Simple::Iterations;
-                use ::stop_condition::Cereal::{Simple,Logical};
-                use ::stop_condition::LogicalExpression::All;
+                use crate::stop_condition::Cereal::{Simple,Logical};
+                use crate::stop_condition::LogicalExpression::All;
                 use ::serde_json::to_value;
                 assert_eq!(
                     to_value(Simple(Iterations(5))).unwrap(),
@@ -307,7 +307,7 @@ impl Golden {
 
                 // user-supplied stop condition
                 {
-                    use ::stop_condition::ShouldStop;
+                    use crate::stop_condition::ShouldStop;
                     let objectives = golden::Objectives {
                         alphas: (a.alpha, b.alpha, d.alpha),
                         iterations: iterations,

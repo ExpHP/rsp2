@@ -343,7 +343,7 @@ pub mod n_dee {
                                     (0..domain_min.len()).map(|i| {
                                         let min = domain_min[i];
                                         let max = domain_max[i];
-                                        ::util::random::uniform(min, max)
+                                        crate::util::random::uniform(min, max)
                                     }).collect()
                                 })
                                 .collect()
@@ -558,7 +558,7 @@ pub mod n_dee {
             let mut lj = super::HyperLennardJones { ndim, min_value, min_radius };
 
             for _ in 0..5 {
-                let V(point) = min_radius * v(::util::random::direction(ndim));
+                let V(point) = min_radius * v(crate::util::random::direction(ndim));
                 assert_close!(min_value, lj.value(&point));
                 for x in lj.gradient(&point) {
                     assert_close!(abs=1e-8, x, 0.0);

@@ -10,7 +10,7 @@
 ** ************************************************************************ */
 
 use ::failure::Error;
-use ::{Coords, Lattice};
+use crate::{Coords, Lattice};
 use ::rsp2_soa_ops::{Permute, Perm, Part, Partition};
 
 use ::std::mem;
@@ -200,7 +200,7 @@ fn find_layers_impl<L: Ord>(
         return Ok(Layers::NoAtoms);
     }
 
-    let gcd = ::miller::gcd(miller);
+    let gcd = crate::miller::gcd(miller);
     ensure!(gcd == 1, "Layers can only be found along a primitive miller index");
     let normal = coords.lattice().plane_normal(miller);
     let periodic_length = coords.lattice().plane_spacing(miller);
@@ -570,7 +570,7 @@ impl LayersPerUnitCell {
 #[deny(unused)]
 mod tests {
     use super::*;
-    use ::CoordsKind;
+    use crate::CoordsKind;
     use ::rsp2_soa_ops::{Permute, Perm};
     use ::rsp2_array_types::Envee;
 
@@ -776,7 +776,7 @@ mod tests {
     fn overlapping_layers() {
         let check = |frac_tol: f64, points: &[(char, f64)], expected_frac_layers: Layers| {
             let lattice = Lattice::random_uniform(10.0);
-            let miller = ::miller::make_primitive(::miller::random_nonzero(10)).unwrap();
+            let miller = crate::miller::make_primitive(crate::miller::random_nonzero(10)).unwrap();
             let cart_normal = lattice.plane_normal(miller);
 
             let axis_len = lattice.plane_spacing(miller);

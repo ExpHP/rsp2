@@ -30,7 +30,7 @@ mod mpi {
     // There is little conceivable reason why rsmpi exposes a heirarchial public API
     // other than laziness; I see nothing in it that benefits from the namespacing,
     // and it adds a lot of mental overhead to remember the paths.
-    pub(crate) use ::mpi_rs::{
+    pub(crate) use crate::mpi_rs::{
         topology::*,
         collective::*,
         datatype::*,
@@ -40,10 +40,10 @@ mod mpi {
     };
 }
 
-use ::maybe_dirty::MaybeDirty;
-use ::low_level::{LowLevelApi, ComputeStyle, Skews, LammpsOwner};
+use crate::maybe_dirty::MaybeDirty;
+use crate::low_level::{LowLevelApi, ComputeStyle, Skews, LammpsOwner};
 #[cfg(feature = "mpi")]
-use ::low_level::mpi::{MpiLammpsOwner, LammpsOnDemand as LammpsOnDemandImpl, LammpsDispatch};
+use crate::low_level::mpi::{MpiLammpsOwner, LammpsOnDemand as LammpsOnDemandImpl, LammpsDispatch};
 
 use ::std::path::{Path, PathBuf};
 use ::std::sync::{Mutex, MutexGuard};
@@ -58,13 +58,13 @@ use ::rsp2_array_types::{V3, Unvee, Envee};
 
 pub type FailResult<T> = Result<T, ::failure::Error>;
 
-pub use pub_types::*;
+pub use crate::pub_types::*;
 mod pub_types;
 
 pub const API_TRACE_TARGET: &'static str = concat!(module_path!(), "::c_api");
 pub const API_TRACE_LEVEL: Level = Level::Trace;
 
-pub use ::low_level::{LammpsError, Severity};
+pub use crate::low_level::{LammpsError, Severity};
 mod low_level;
 
 mod maybe_dirty;
@@ -414,7 +414,7 @@ pub fn link_test() -> FailResult<()>
 #[cfg(feature = "mpi")]
 pub fn mpi_link_test() -> FailResult<()>
 {Ok({
-    println!("{}", ::mpi::library_version().unwrap());
+    println!("{}", crate::mpi::library_version().unwrap());
     LammpsOnDemandImpl::install(
         LammpsDispatch::new(),
         |on_demand| {
@@ -523,7 +523,7 @@ impl LammpsOnDemand {
     ///
     /// This will be completely ineffective if the panic implementation does not unwind.
     pub fn with_mpi_abort_on_unwind<R>(func: impl ::std::panic::UnwindSafe + FnOnce() -> R) -> R {
-        ::low_level::mpi_helper::with_mpi_abort_on_unwind(func)
+        crate::low_level::mpi_helper::with_mpi_abort_on_unwind(func)
     }
 }
 

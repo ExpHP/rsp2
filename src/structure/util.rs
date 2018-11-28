@@ -14,7 +14,7 @@
 #[cfg(test)]
 use ::ordered_float::NotNan;
 
-use ::IntPrecisionError;
+use crate::IntPrecisionError;
 
 use ::rsp2_array_types::{V3, M33, M3};
 

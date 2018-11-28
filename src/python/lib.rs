@@ -19,7 +19,7 @@ extern crate log;
 extern crate rsp2_fs_util as fsx;
 extern crate failure;
 
-use fsx::TempDir;
+use crate::fsx::TempDir;
 use include_dir::{Dir, File};
 use std::{
     path::{Path, PathBuf},
@@ -37,7 +37,7 @@ pub fn add_to_python_path() -> Result<Guard, ::failure::Error> {
     let temp_dir = TempDir::new("rsp2")?;
     let py_package_dir = temp_dir.path().join("rsp2");
 
-    ::fsx::create_dir(&py_package_dir)?;
+    crate::fsx::create_dir(&py_package_dir)?;
     write_dir_contents(&ROOT_DIR, &py_package_dir)?;
 
     modify_path_env(

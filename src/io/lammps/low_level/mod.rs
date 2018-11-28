@@ -12,14 +12,14 @@
 ** parts of it are licensed under more permissive terms.                  **
 ** ********************************************************************** */
 
-use ::FailResult;
+use crate::FailResult;
 
 use ::std::os::raw::{c_int};
 use ::std::fmt;
 use ::failure::Backtrace;
 
 macro_rules! api_trace {
-    ($($t:tt)*) => { log!(target: ::API_TRACE_TARGET, ::API_TRACE_LEVEL, $($t)*) };
+    ($($t:tt)*) => { log!(target: crate::API_TRACE_TARGET, crate::API_TRACE_LEVEL, $($t)*) };
 }
 
 /// An error thrown by the LAMMPS C API.

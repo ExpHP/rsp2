@@ -9,7 +9,7 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::{Lattice, CoordsKind, Coords};
+use crate::{Lattice, CoordsKind, Coords};
 
 use ::rsp2_soa_ops::{Perm};
 use ::rsp2_array_utils::{arr_from_fn, try_arr_from_fn};
@@ -90,7 +90,7 @@ fn _make_supercell(builder: Builder, coords: &Coords) -> (Coords, SupercellToken
     for atom_cart in coords.to_carts(&lattice) {
         let old_len = new_carts.len();
         new_carts.extend_from_slice(&image_offset_carts);
-        ::util::translate_mut_n3_3(&mut new_carts[old_len..], &atom_cart);
+        crate::util::translate_mut_n3_3(&mut new_carts[old_len..], &atom_cart);
     }
 
     let coords = Coords::new(
@@ -240,7 +240,7 @@ impl SupercellToken {
                 // of an atom near the periodic boundary.
                 image_carts.clear();
                 image_carts.extend(carts.drain(new_len..));
-                ::util::translate_mut_n3_n3(&mut image_carts, &neg_offsets);
+                crate::util::translate_mut_n3_n3(&mut image_carts, &neg_offsets);
 
                 out_carts.push(V3(try_arr_from_fn(|k| {
                     let this_axis = || image_carts.iter().map(|v| v[k]);
@@ -350,7 +350,7 @@ impl SupercellToken {
     /// **Note:** The lattice point is wrapped into the supercell.
     pub fn cell_from_lattice_point(&self, v: V3<i32>) -> [u32; 3] {
         let diff = v - self.offset;
-        let cell = V3::from_fn(|k| ::util::mod_euc(diff[k], self.periods[k] as i32) as u32);
+        let cell = V3::from_fn(|k| crate::util::mod_euc(diff[k], self.periods[k] as i32) as u32);
         cell.0
     }
 
@@ -468,7 +468,7 @@ fn image_lattice_vecs(periods: [u32; 3], offset: V3<i32>, lattice: &Lattice) -> 
 #[deny(unused)]
 mod tests {
     use ::rsp2_soa_ops::{Permute, Perm};
-    use ::{Coords, CoordsKind, Lattice};
+    use crate::{Coords, CoordsKind, Lattice};
     use ::rsp2_array_types::{V3, Envee};
 
     use ::rand::Rng;
@@ -478,12 +478,12 @@ mod tests {
         let coords = CoordsKind::Fracs(vec![[0.0, 0.0, 0.0]].envee());
 
         let original = Coords::new(Lattice::eye(), coords);
-        let (supercell, sc_token) = ::supercell::diagonal([2, 2, 2]).build(&original);
+        let (supercell, sc_token) = crate::supercell::diagonal([2, 2, 2]).build(&original);
 
         assert_eq!(supercell.num_atoms(), 8);
         assert_eq!(supercell.lattice(), &Lattice::cubic(2.0));
 
-        assert!(::util::eq_unordered_n3(&supercell.to_carts(), [
+        assert!(crate::util::eq_unordered_n3(&supercell.to_carts(), [
             [0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [0.0, 1.0, 1.0],
             [1.0, 0.0, 0.0], [1.0, 0.0, 1.0], [1.0, 1.0, 0.0], [1.0, 1.0, 1.0],
         ].envee_ref()));
@@ -510,7 +510,7 @@ mod tests {
         ].envee());
 
         let original = Coords::new(lattice, coords);
-        let (supercell, sc_token) = ::supercell::diagonal([4, 2, 2]).build(&original);
+        let (supercell, sc_token) = crate::supercell::diagonal([4, 2, 2]).build(&original);
         let deconstructed = sc_token.deconstruct(1e-10, supercell.clone()).unwrap();
 
         assert_eq!(original.to_carts(), deconstructed.to_carts());
@@ -540,7 +540,7 @@ mod tests {
 
         let original = Coords::new(lattice, coords);
         let (supercell, sc_token) = {
-            ::supercell::centered_diagonal([0, 2, 1])
+            crate::supercell::centered_diagonal([0, 2, 1])
                 .build(&original)
         };
         let deconstructed = sc_token.deconstruct(1e-10, supercell.clone()).unwrap();
@@ -556,12 +556,12 @@ mod tests {
                 .collect::<Vec<_>>().envee()
         };
         let actual_carts = supercell.to_carts();
-        assert!(::util::eq_unordered_n3(&expected_carts, &actual_carts), "{:?} {:?}", expected_carts, actual_carts);
+        assert!(crate::util::eq_unordered_n3(&expected_carts, &actual_carts), "{:?} {:?}", expected_carts, actual_carts);
     }
 
     #[test]
     fn cell_index_conversions() {
-        let sc_token = ::supercell::diagonal([2, 5, 3]).into_sc_token(7);
+        let sc_token = crate::supercell::diagonal([2, 5, 3]).into_sc_token(7);
         let lattice_points = sc_token.atom_lattice_points();
         let cells = sc_token.atom_cells();
         ::itertools::assert_equal(
@@ -602,7 +602,7 @@ mod tests {
         // supercell is chosen to give exact floating representation.
         // some dimensions are larger than 2 to ensure that there exist translational
         //  symmetries that are not equal to their own inverses.
-        let (super_coords, sc) = ::supercell::diagonal([8, 2, 4]).build(&prim_coords);
+        let (super_coords, sc) = crate::supercell::diagonal([8, 2, 4]).build(&prim_coords);
         let super_meta = sc.replicate_with(&prim_meta, |&atom, cell| Label { atom, cell });
 
         for _ in 0..10 {
@@ -659,7 +659,7 @@ mod tests {
                 0|1 => V3::zero(),
                 _ => V3::from_fn(|_| rng.gen_range(-10, 10 + 1)),
             };
-            let (_, sc_token) = ::supercell::diagonal(dims).center(center).build(&coords);
+            let (_, sc_token) = crate::supercell::diagonal(dims).center(center).build(&coords);
 
             let lattice_points = sc_token.atom_lattice_points();
             let cells = sc_token.atom_cells();

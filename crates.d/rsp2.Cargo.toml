@@ -4,6 +4,7 @@
 !!CRATE-NAME-LINE
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
+!!DEFAULT-EDITION
 
 # Note: The majority of subcrates are dual-licensed under MIT or Apache 2.0,
 #       but the project as a whole is provided under the GPL.

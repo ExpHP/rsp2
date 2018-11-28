@@ -10,7 +10,7 @@ use rsp2_array_types::V3;
 
 #[path = "potentials/airebo.rs"]
 mod airebo;
-use airebo::Airebo;
+use crate::airebo::Airebo;
 
 fn main() -> Result<(), failure::Error> {
     let unit_coords = Coords::new(

@@ -9,7 +9,7 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::Lattice;
+use crate::Lattice;
 use ::rsp2_soa_ops::{Perm, Permute};
 use ::rsp2_soa_ops::{Part, Partition, Unlabeled};
 
@@ -202,8 +202,8 @@ impl<'iter> Partition<'iter> for CoordsKind<Vec<V3>>
 #[cfg(test)]
 #[deny(unused)]
 mod tests {
-    use ::Lattice;
-    use ::CoordsKind::{Fracs, Carts};
+    use crate::Lattice;
+    use crate::CoordsKind::{Fracs, Carts};
 
     use ::rsp2_array_types::Envee;
 

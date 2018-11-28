@@ -16,11 +16,11 @@
 //! most vectors used are row vectors (in which case most matrix-vector multiplication
 //! has the matrix on the right)
 
-use ::traits::{Semiring, Ring, Field};
-use ::traits::internal::{PrimitiveSemiring, PrimitiveRing, PrimitiveFloat};
-use ::vee;
-use ::types::*;
-use ::{Unvee, Envee};
+use crate::traits::{Semiring, Ring, Field};
+use crate::traits::internal::{PrimitiveSemiring, PrimitiveRing, PrimitiveFloat};
+use crate::vee;
+use crate::types::*;
+use crate::{Unvee, Envee};
 use ::num_traits::{Zero, One};
 
 // ---------------------------------------------------------------------------

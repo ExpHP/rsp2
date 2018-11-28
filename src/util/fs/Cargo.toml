@@ -9,6 +9,7 @@ version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 description = "Adds error context to fs operations.  Sort of superceded by path_abs, but not everywhere."
 license = "MIT OR Apache 2.0"
+edition = "2015"
 
 [lib]
 path = "lib.rs"

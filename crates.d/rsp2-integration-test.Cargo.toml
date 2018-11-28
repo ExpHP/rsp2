@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 description = "utilities shared by rsp2's integration tests"
 !!LICENSE-PERMISSIVE
+!!DEFAULT-EDITION
 
 [lib]
 path = "lib.rs"

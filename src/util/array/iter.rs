@@ -9,7 +9,7 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::traits::IsArray;
+use crate::traits::IsArray;
 
 use ::std::ptr;
 use ::std::ops::Range;
@@ -91,7 +91,7 @@ each_array_size!{ impl_iter_move!{0...32} }
 #[cfg(test)]
 #[deny(dead_code)]
 mod tests {
-    use ::test_util::PushDrop;
+    use crate::test_util::PushDrop;
 
     use ::std::cell::RefCell;
     use super::*;
@@ -117,7 +117,7 @@ mod tests {
 
     #[test]
     fn drop_behavior() {
-        use ::arr_from_fn;
+        use crate::arr_from_fn;
         let vec = RefCell::new(vec![]);
 
         let arr: [PushDrop<i32>; 6] = arr_from_fn(

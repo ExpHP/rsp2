@@ -9,7 +9,7 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::{Coords, CoordsKind, Lattice};
+use crate::{Coords, CoordsKind, Lattice};
 use ::std::fmt;
 
 use ::rsp2_array_types::{V3, M33, mat};
@@ -99,7 +99,7 @@ pub struct LatticeSymmetryError {
     lattice: Lattice,
     cart_rot: M33,
     #[cause]
-    cause: ::IntPrecisionError,
+    cause: crate::IntPrecisionError,
 }
 
 impl fmt::Display for LatticeSymmetryError {
@@ -129,8 +129,8 @@ impl IntRot {
         }
     }
 
-    fn from_frac_t(float_t: &M33<f64>) -> Result<IntRot, ::IntPrecisionError>
-    { float_t.try_map(|x| ::util::Tol(1e-4).unfloat(x)).map(|t| IntRot { t }) }
+    fn from_frac_t(float_t: &M33<f64>) -> Result<IntRot, crate::IntPrecisionError>
+    { float_t.try_map(|x| crate::util::Tol(1e-4).unfloat(x)).map(|t| IntRot { t }) }
 
     /// Obtain an integer representation of a point group operation, in units
     /// of a particular lattice.
@@ -394,7 +394,7 @@ mod serde_impls {
 mod tests {
     use super::*;
     use ::rsp2_array_types::{mat, Unvee, Envee};
-    use CoordsKind;
+    use crate::CoordsKind;
 
     pub(super) fn graphene_lattice() -> Lattice {
         let half_r3 = 0.5 * f64::sqrt(3.0);

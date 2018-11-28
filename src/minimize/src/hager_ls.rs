@@ -612,8 +612,8 @@ impl Hager {
 mod tests {
     use super::linesearch;
 
-    use ::test::one_dee::prelude::*;
-    use ::test::one_dee::Polynomial;
+    use crate::test::one_dee::prelude::*;
+    use crate::test::one_dee::Polynomial;
 
     fn init_logger() {
         let _ = ::env_logger::try_init();

@@ -9,7 +9,7 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::Idx;
+use crate::Idx;
 use ::std::marker::PhantomData;
 use ::std::mem;
 

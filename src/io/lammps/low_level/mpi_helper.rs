@@ -30,7 +30,7 @@
 //! I dunno.  Haven't tried it, don't need it, and I would probably try to come up with
 //! a more scalable design if I *did* need it.
 
-use ::mpi;
+use crate::mpi;
 use ::std::sync::Arc;
 use ::slice_of_array::prelude::*;
 
@@ -184,7 +184,7 @@ impl<D: DispatchMultiProcess> MpiOnDemand<D> {
 ///
 /// This will be completely ineffective if the panic implementation does not unwind.
 pub fn with_mpi_abort_on_unwind<R>(func: impl ::std::panic::UnwindSafe + FnOnce() -> R) -> R {
-    use ::mpi::{AsCommunicator, Communicator};
+    use crate::mpi::{AsCommunicator, Communicator};
 
     with_default_root(|root| {
         let res = ::std::panic::catch_unwind(func);
@@ -205,7 +205,7 @@ pub fn with_mpi_abort_on_unwind<R>(func: impl ::std::panic::UnwindSafe + FnOnce(
 //
 // It is returned continuation-style because it is impossible to construct one that is `'static`.
 fn with_default_root<R>(continuation: impl FnOnce(mpi::Process<'_, mpi::SystemCommunicator>) -> R) -> R {
-    use ::mpi::Communicator;
+    use crate::mpi::Communicator;
 
     let world = mpi::SystemCommunicator::world();
     let root = world.process_at_rank(0);
@@ -233,7 +233,7 @@ impl<D: DispatchMultiProcess> MpiOnDemandInner<D> {
     const ECO_MODE_FINISH: i32 = 1;
 
     fn root_eco_mode<B>(&self, root: &impl mpi::Root, cont: impl FnOnce() -> B) -> B {
-        use ::mpi::{Destination, Communicator};
+        use crate::mpi::{Destination, Communicator};
 
         // Inform the others.
         assert!(this_process_is_root(root));
@@ -256,7 +256,7 @@ impl<D: DispatchMultiProcess> MpiOnDemandInner<D> {
     }
 
     fn non_root_eco_mode(&self, root: &impl mpi::Root) {
-        use ::mpi::{Source, Communicator};
+        use crate::mpi::{Source, Communicator};
 
         assert!(!this_process_is_root(root));
 

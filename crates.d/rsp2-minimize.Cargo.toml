@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 description = "Function minimization algorithms, even in multiple dimensions."
 !!LICENSE-PERMISSIVE
+!!DEFAULT-EDITION
 
 [dependencies]
 !!itertools

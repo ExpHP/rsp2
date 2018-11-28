@@ -9,6 +9,7 @@
 name = "rsp2"
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
+edition = "2015"
 
 # Note: The majority of subcrates are dual-licensed under MIT or Apache 2.0,
 #       but the project as a whole is provided under the GPL.

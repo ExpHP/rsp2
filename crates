@@ -231,6 +231,9 @@ exclude = ["./scripts"]
             'LICENSE-PERMISSIVE': ConstantMacro('license = "MIT OR Apache 2.0"'),
             'LICENSE-GPL':        ConstantMacro('license = "GPL-3.0"'),
 
+            # Edition
+            'DEFAULT-EDITION': ConstantMacro('edition = "2015"'),
+
             # FIXME this is waaaaaay too application-specific.
             'BINARY-SHIM-BIN-ENTRIES': BinaryShimsMacro(binary_shim_pairs),
 
@@ -479,6 +482,7 @@ CARGO_TOML_TEMPLATE = '''
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 {license}
+!!DEFAULT-EDITION
 
 [lib]
 path = "lib.rs"

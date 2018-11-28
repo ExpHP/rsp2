@@ -9,7 +9,7 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::{Lattice, CoordsKind, Missing};
+use crate::{Lattice, CoordsKind, Missing};
 use ::rsp2_soa_ops::{Perm, Permute};
 use ::rsp2_soa_ops::{Part, Partition, Unlabeled};
 use ::rsp2_array_types::{M33, V3, Unvee};
@@ -217,10 +217,10 @@ impl Coords {
 /// # Spatial operations
 impl Coords {
     pub fn translate_frac(&mut self, v: &V3)
-    { ::util::translate_mut_n3_3(self.fracs_mut(), v); }
+    { crate::util::translate_mut_n3_3(self.fracs_mut(), v); }
 
     pub fn translate_cart(&mut self, v: &V3)
-    { ::util::translate_mut_n3_3(self.carts_mut(), v); }
+    { crate::util::translate_mut_n3_3(self.carts_mut(), v); }
 
     /// Applies a cartesian transformation matrix.
     ///
@@ -284,7 +284,7 @@ impl Coords {
         Ok({
             warn!("Untested code path: 1650857f-42df-47e4-8ff0-cdd9dcb85020");
             let unimodular = &self.lattice * target_lattice.inverse_matrix();
-            let unimodular = match ::util::Tol(tol).unfloat_m33(unimodular.matrix()) {
+            let unimodular = match crate::util::Tol(tol).unfloat_m33(unimodular.matrix()) {
                 Ok(m) => m,
                 Err(_) => {
                     throw!(NonEquivalentLattice {
@@ -321,7 +321,7 @@ impl Coords {
         &self,
         target: &Coords,
         tol: f64,
-    ) -> Result<Perm, ::algo::find_perm::PositionMatchError>
+    ) -> Result<Perm, crate::algo::find_perm::PositionMatchError>
     {
         // FIXME: incompatible lattices should return Error and not panic
         // NOTE: maybe this test on the lattice should use a larger or smaller
@@ -333,7 +333,7 @@ impl Coords {
             target.lattice().matrix().unvee(),
         );
         let fake_meta = vec![(); self.coords.len()];
-        ::algo::find_perm::brute_force_with_sort_trick(
+        crate::algo::find_perm::brute_force_with_sort_trick(
             self.lattice(),
             &fake_meta, self.coords.as_ref(),
             &fake_meta, target.coords.as_ref(),
@@ -363,7 +363,7 @@ impl Coords {
             other.lattice().matrix().unvee(),
         );
         let fake_meta = vec![(); self.coords.len()];
-        ::algo::find_perm::set_difference_with_sort_trick(
+        crate::algo::find_perm::set_difference_with_sort_trick(
             self.lattice(),
             &fake_meta, self.coords.as_ref(),
             &fake_meta, other.coords.as_ref(),
@@ -420,7 +420,7 @@ fn dumb_nearest_distance(
     frac_a: &V3,
     frac_b: &V3,
 ) -> f64 {
-    use ::CoordsKind;
+    use crate::CoordsKind;
     let diff = (frac_a - frac_b).map(|x| x - x.round());
 
     let mut diffs = Vec::with_capacity(27);

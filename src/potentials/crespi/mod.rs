@@ -161,7 +161,7 @@ impl Params {
     /// of being completely inside or completely outside.
     #[cfg(test)]
     fn random_r(&self) -> V3 {
-        use ::util::uniform;
+        use crate::util::uniform;
 
         match ::rand::random::<f64>() {
             p if p < 0.10 => (self.cutoff_end() + uniform(0.0, 3.0)) * V3::random_unit(),

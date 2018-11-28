@@ -9,8 +9,8 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::traits::{Semiring, Ring, Field};
-use ::traits::internal::{PrimitiveSemiring, PrimitiveRing, PrimitiveFloat};
+use crate::traits::{Semiring, Ring, Field};
+use crate::traits::internal::{PrimitiveSemiring, PrimitiveRing, PrimitiveFloat};
 
 use super::types::*;
 

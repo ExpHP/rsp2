@@ -9,7 +9,7 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::{Perm, Permute};
+use crate::{Perm, Permute};
 use ::std::iter::FusedIterator;
 #[cfg(feature = "frunk")]
 use ::frunk::{HNil, HCons};
@@ -222,7 +222,7 @@ pub trait Partition<'iter>: Sized + 'iter {
     /// original order of those elements relative to each other in the
     /// input vec, rather than the order of the indices in `part`.
     fn into_partitions<L: Clone>(self, part: &'iter Part<L>) -> Parted<L, Self>
-    { ::util::zip_eq(part.region_keys().cloned(), self.into_unlabeled_partitions(part)).collect() }
+    { crate::util::zip_eq(part.region_keys().cloned(), self.into_unlabeled_partitions(part)).collect() }
 }
 
 impl<'iter, T: 'iter> Partition<'iter> for Vec<T> {
@@ -247,7 +247,7 @@ impl<'iter, T: 'iter> Partition<'iter> for Vec<T> {
 /// The `Perm` returned permutes a vector so that all data for the first label
 /// comes last, with all the data for the second label before it, and so on.
 /// Ordering within each label follows the order required by the `Partition` trait.
-pub fn composite_perm_for_part_lifo<L>(part: &Part<L>) -> ::Perm
+pub fn composite_perm_for_part_lifo<L>(part: &Part<L>) -> crate::Perm
 {
     let mut sort_keys = vec![::std::usize::MAX; part.index_limit];
 
@@ -297,7 +297,7 @@ where
     {
         let a_parted = self.0.into_unlabeled_partitions(part);
         let b_parted = self.1.into_unlabeled_partitions(part);
-        Box::new(::util::zip_eq(a_parted, b_parted))
+        Box::new(crate::util::zip_eq(a_parted, b_parted))
     }
 }
 
@@ -427,7 +427,7 @@ mod tests {
 
     #[test]
     fn drop() {
-        let (drop_history, dp) = ::util::DropPusher::new_trial();
+        let (drop_history, dp) = crate::util::DropPusher::new_trial();
 
         {
             let vec = vec![dp('a'), dp('b'), dp('c'), dp('d'), dp('e'), dp('f')];

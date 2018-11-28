@@ -57,8 +57,8 @@ pub mod settings {
 
     #[derive(Debug, Clone, PartialEq)]
     pub enum Linesearch {
-        Acgsd(::strong_ls::Settings),
-        Hager(::hager_ls::Settings),
+        Acgsd(crate::strong_ls::Settings),
+        Hager(crate::hager_ls::Settings),
     }
 
     /// Behavior when a linesearch along the steepest descent direction fails.
@@ -224,7 +224,7 @@ $$
 pub use self::stop_condition::StopCondition;
 pub mod stop_condition {
     use super::*;
-    use ::stop_condition::prelude::*;
+    use crate::stop_condition::prelude::*;
 
     #[derive(Debug, Clone, PartialEq)]
     pub(crate) struct Objectives<'a> {
@@ -300,7 +300,7 @@ pub mod stop_condition {
     ///
     /// If this doesn't fit your needs, you can use CG's Builder API to define your own arbitrary
     /// stop conditions as functions of [`AlgorithmState`].
-    pub type StopCondition = ::stop_condition::Cereal<Simple>;
+    pub type StopCondition = crate::stop_condition::Cereal<Simple>;
 
     impl StopCondition {
         /// Convert to the more general form accepted by the Builder API.
@@ -327,8 +327,8 @@ pub mod stop_condition {
         #[test]
         fn test_serialized_repr() {
             use super::Simple::Iterations;
-            use ::stop_condition::Cereal::{Simple,Logical};
-            use ::stop_condition::LogicalExpression::All;
+            use crate::stop_condition::Cereal::{Simple,Logical};
+            use crate::stop_condition::LogicalExpression::All;
             use ::serde_json::to_value;
             assert_eq!(
                 to_value(Simple(Iterations(5))).unwrap(),
@@ -401,7 +401,7 @@ fn calc_beta_acgsd(gradient: &[f64], delta_x: &[f64], delta_g: &[f64]) -> f64 {
 //==================================================================================================
 // Errors
 
-use ::strong_ls::LinesearchError;
+use crate::strong_ls::LinesearchError;
 #[derive(Debug, Fail)]
 pub enum AcgsdError {
     #[fail(display = "Linesearch failed: {}", _0)]
@@ -1032,7 +1032,7 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
             //         more than once.  These are really issues with the linesearch,
             //         and ought not to be the caller's concern)
             let mut memoized: Box<FnMut(f64) -> Result<(f64, f64), ComputeError<E>>>
-                = ::util::cache::hash_memoize_result_by_key(
+                = crate::util::cache::hash_memoize_result_by_key(
                     |&alpha| ::ordered_float::NotNan::new(alpha).unwrap(),
                     |alpha| {
                         let point = compute_in_dir(alpha, &direction)?;
@@ -1056,14 +1056,14 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
 
             match &ls_settings {
                 settings::Linesearch::Acgsd(settings) => {
-                    match ::strong_ls::linesearch(settings, guess_alpha, &mut *memoized) {
+                    match crate::strong_ls::linesearch(settings, guess_alpha, &mut *memoized) {
                         Ok(x) => x,
                         Err(Left(e)) => Err(AcgsdError::from(e))?,
                         Err(Right(e)) => Err(e)?,
                     }
                 },
                 settings::Linesearch::Hager(settings) => {
-                    ::hager_ls::linesearch(settings, guess_alpha, &mut *memoized)?
+                    crate::hager_ls::linesearch(settings, guess_alpha, &mut *memoized)?
                 },
             }
 
@@ -1136,7 +1136,7 @@ fn max_norm(v: &[f64]) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use ::util::Never;
+    use crate::util::Never;
     use ::itertools::Itertools;
 
     type NoFailResult = Result<(f64, Vec<f64>), Never>;
@@ -1146,8 +1146,8 @@ mod tests {
     fn quadratic_test_fn(
         target: &[f64],
     ) -> impl FnMut(&[f64]) -> Result<(f64, Vec<f64>), Never> {
-        use ::test::one_dee::prelude::*;
-        use ::test::one_dee::Polynomial;
+        use crate::test::one_dee::prelude::*;
+        use crate::test::one_dee::Polynomial;
 
         let target = target.to_vec();
         let polys = target.iter().map(|&x| Polynomial::x_n(2).recenter(-x)).collect_vec();
@@ -1174,7 +1174,7 @@ mod tests {
     // A high-level "it works" test.
     #[test]
     fn simple_quadratic() {
-        use ::util::random::uniform_n;
+        use crate::util::random::uniform_n;
 
         let target = uniform_n(15, -10.0, 10.0);
         let initial_point = uniform_n(15, -10.0, 10.0);
@@ -1187,7 +1187,7 @@ mod tests {
     //  by using absurdly large tolerances.
     #[test]
     fn insta_finish() {
-        use ::util::random::uniform_n;
+        use crate::util::random::uniform_n;
 
         // a potential where we are not initially at the minimum
         let point = uniform_n(18, -10.0, 10.0);
@@ -1217,7 +1217,7 @@ mod tests {
     //   to uniform scale factors, WE HAVE WIGGLE ROOM.)
     #[test]
     fn scale_agnosticity() {
-        use ::util::random::uniform_n;
+        use crate::util::random::uniform_n;
 
         let target = uniform_n(15, -10.0, 10.0);
         let start = uniform_n(15, -10.0, 10.0);
@@ -1245,7 +1245,7 @@ mod tests {
     fn zero_force_stability() {
         // constant potential
         fn potential(_: &[f64]) -> NoFailResult { Ok((0.0, vec![0.0; 18])) }
-        let point = ::util::random::uniform_n(18, -10.0, 10.0);
+        let point = crate::util::random::uniform_n(18, -10.0, 10.0);
 
         // FIXME there should be a setting for whether linesearch failure is considered successful;
         //       in the case of this test, it is.
@@ -1259,7 +1259,7 @@ mod tests {
 
     #[test]
     fn test_iterations_stop_condition() {
-        use ::util::random::uniform_n;
+        use crate::util::random::uniform_n;
         let target = uniform_n(15, -10.0, 10.0);
         let start = uniform_n(15, -10.0, 10.0);
 
@@ -1278,8 +1278,8 @@ mod tests {
 
     #[test]
     fn trid() {
-        use ::test::n_dee::{Trid, OnceDifferentiable};
-        use ::util::random::uniform_n;
+        use crate::test::n_dee::{Trid, OnceDifferentiable};
+        use crate::util::random::uniform_n;
         let d = 10;
         for _ in 0..10 {
             let max_coord = (d*d) as f64;
@@ -1297,8 +1297,8 @@ mod tests {
     #[test]
     fn lj() {
         use ::rsp2_slice_math::{v, V};
-        use ::test::n_dee::{HyperLennardJones, OnceDifferentiable, Sum};
-        use ::util::random as urand;
+        use crate::test::n_dee::{HyperLennardJones, OnceDifferentiable, Sum};
+        use crate::util::random as urand;
         let d = 10;
 
         for _ in 0..10 {

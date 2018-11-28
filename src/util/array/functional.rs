@@ -9,7 +9,7 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::traits::{IsArray, WithElement};
+use crate::traits::{IsArray, WithElement};
 
 use ::std::mem::{ManuallyDrop, uninitialized};
 use ::std::ptr;
@@ -189,7 +189,7 @@ const INDICES: [usize; 65] = [
 #[cfg(test)]
 #[deny(dead_code)]
 mod tests {
-    use ::test_util::PushDrop;
+    use crate::test_util::PushDrop;
     use std::cell::RefCell;
 
     #[test]

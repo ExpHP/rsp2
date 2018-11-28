@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 description = "Macros that suck less than clap_app"
 !!LICENSE-PERMISSIVE
+!!DEFAULT-EDITION
 
 [lib]
 path = "lib.rs"

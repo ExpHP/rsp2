@@ -39,5 +39,5 @@ pub mod vee;
 #[path = "./methods_m.rs"]
 pub mod mat;
 
-pub use vee::dot;
-pub use mat::inv;
+pub use crate::vee::dot;
+pub use crate::mat::inv;

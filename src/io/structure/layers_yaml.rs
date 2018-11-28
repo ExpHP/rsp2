@@ -12,8 +12,8 @@
 // This is a reincarnation of assemble.py, in the form of
 // a rust library function rather than a CLI utility.
 
-use ::{FailResult, FailOk};
-use ::assemble::{RawAssemble, Assemble};
+use crate::{FailResult, FailOk};
+use crate::assemble::{RawAssemble, Assemble};
 
 use ::rsp2_structure::{CoordsKind, Lattice, Coords};
 use ::std::io::Read;

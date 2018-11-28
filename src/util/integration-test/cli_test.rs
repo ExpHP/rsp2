@@ -11,7 +11,7 @@
 
 // NOTE: This draws heavily off of assert-cli (MIT 2.0/Apache)
 
-use ::fsx::TempDir;
+use crate::fsx::TempDir;
 use ::path_abs::{PathDir, FileWrite, FileRead};
 use ::failure::Error;
 

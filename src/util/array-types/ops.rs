@@ -12,8 +12,8 @@
 use ::std::ops::{Add, Sub, AddAssign, SubAssign, Neg};
 use ::std::ops::{Mul, Div, MulAssign, DivAssign};
 use ::std::fmt;
-use ::traits::{Semiring, Ring, Field};
-use ::traits::internal::{PrimitiveSemiring, PrimitiveRing, PrimitiveFloat};
+use crate::traits::{Semiring, Ring, Field};
+use crate::traits::internal::{PrimitiveSemiring, PrimitiveRing, PrimitiveFloat};
 
 use super::*;
 

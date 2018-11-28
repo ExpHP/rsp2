@@ -266,9 +266,9 @@ mod tests {
     fn bad_parse_regression() {
         #[derive(Debug)] struct S;
         impl S { fn x(self) -> S { self } }
-        impl ::CheckClose for S {
+        impl crate::CheckClose for S {
             type Scalar = f64;
-            fn check_close(&self, _: &S, _: ::Tolerances) -> Result<(), ::CheckCloseError<Self::Scalar>> { Ok(()) }
+            fn check_close(&self, _: &S, _: crate::Tolerances) -> Result<(), crate::CheckCloseError<Self::Scalar>> { Ok(()) }
         }
         assert_close!(
             abs=1e-10,

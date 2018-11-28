@@ -9,6 +9,7 @@ version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 license = "GPL-3.0"
 description = "Embeds python modules used by rsp2 into the source code."
+edition = "2015"
 
 [lib]
 path = "lib.rs"

@@ -37,8 +37,8 @@ pub mod helper {
     //       of this crate.  But it was *intended* to be public, and I guess it
     //       could still be useful if some veclike data were not stored in a Vec
     //       for some reason. (like a dense matrix?)
-    pub use ::part::composite_perm_for_part_lifo;
-    pub use ::part::partition_each_item;
+    pub use crate::part::composite_perm_for_part_lifo;
+    pub use crate::part::partition_each_item;
 }
 
 pub use self::perm::{Perm, Permute};

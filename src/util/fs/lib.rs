@@ -13,10 +13,10 @@ use ::std::path::{Path, PathBuf};
 use ::std::fs::{self, File};
 use ::std::io::{BufReader};
 
-pub use cp_mv::{cp_a, mv, Copy, Move};
+pub use crate::cp_mv::{cp_a, mv, Copy, Move};
 mod cp_mv;
 
-pub use tempdir::{ActualTempDir, TempDir};
+pub use crate::tempdir::{ActualTempDir, TempDir};
 mod tempdir;
 
 #[macro_use]

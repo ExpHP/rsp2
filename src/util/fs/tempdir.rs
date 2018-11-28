@@ -9,7 +9,7 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-pub use ::tempdir_crate::TempDir as ActualTempDir;
+pub use crate::tempdir_crate::TempDir as ActualTempDir;
 
 use ::std::io::Result as IoResult;
 use ::std::path::{Path, PathBuf};
@@ -116,7 +116,7 @@ impl TempDir {
         let dest_file = dest.join(name);
         let dest_file: &Path = dest_file.as_ref();
 
-        match ::mv(temp, dest_file) {
+        match crate::mv(temp, dest_file) {
             Err(e) => warn!("failed to move during panic: from '{}' to '{}': {}", temp.display(), dest_file.display(), e),
             Ok(_) => info!("recovered tempdir during panic: {}", dest_file.display()),
         }

@@ -13,10 +13,10 @@
 ** ********************************************************************** */
 
 #[cfg(feature = "mpi")]
-use ::mpi;
-use ::FailResult;
+use crate::mpi;
+use crate::FailResult;
 use ::std::os::raw::{c_int, c_void, c_double, c_char};
-use ::low_level::{ComputeStyle, ComputeType, Skews, LowLevelApi, Severity, ScatterGatherDatatype};
+use crate::low_level::{ComputeStyle, ComputeType, Skews, LowLevelApi, Severity, ScatterGatherDatatype};
 
 // Lammps exposes no API to obtain the error message length so we have to guess.
 const MAX_ERROR_BYTES: usize = 4096;
@@ -60,7 +60,7 @@ impl LammpsOwner {
     /// Construction of LammpsOwner is inherently unsafe because it is unsafe
     /// to use multiple instances simultaneously on separate threads.
     #[cfg(feature = "mpi")]
-    pub(in ::low_level) unsafe fn with_mpi<C: mpi::Communicator>(comm: &C, argv: &[&str]) -> FailResult<Self>
+    pub(in crate::low_level) unsafe fn with_mpi<C: mpi::Communicator>(comm: &C, argv: &[&str]) -> FailResult<Self>
     {Ok({
         let mut argv = CArgv::from_strs(argv);
         let mut ptr: *mut c_void = ::std::ptr::null_mut();
@@ -233,19 +233,19 @@ impl LowLevelApi for LammpsOwner {
 //       followed by one of these methods.
 impl LammpsOwner {
     // (this is our '?')
-    pub(in ::low_level) fn pop_error_as_result(&mut self) -> Result<(), ::LammpsError>
+    pub(in crate::low_level) fn pop_error_as_result(&mut self) -> Result<(), crate::LammpsError>
     {
         match self.pop_error() {
             None => Ok(()),
             Some((severity, message)) => {
                 let backtrace = ::failure::Backtrace::new();
-                Err(::LammpsError { severity, message, backtrace })
+                Err(crate::LammpsError { severity, message, backtrace })
             },
         }
     }
 
     // (this is our 'unwrap')
-    pub(in ::low_level) fn assert_no_error(&mut self)
+    pub(in crate::low_level) fn assert_no_error(&mut self)
     {
         self.pop_error_as_result().unwrap_or_else(|e| {
             panic!("Unexpected error from LAMMPS: {}", e);
@@ -254,7 +254,7 @@ impl LammpsOwner {
 
     // Read an error from the Lammps API if there is one.
     // (This removes the error, so that a second call will produce None.)
-    pub(in ::low_level) fn pop_error(&mut self) -> Option<(Severity, String)>
+    pub(in crate::low_level) fn pop_error(&mut self) -> Option<(Severity, String)>
     {
         use ::lammps_sys::{lammps_get_last_error_message, lammps_has_error};
 
