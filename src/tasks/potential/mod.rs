@@ -230,10 +230,10 @@ pub trait DynCloneDetail<Meta> {
 macro_rules! impl_dyn_clone_detail {
     (impl[$($bnd:tt)*] DynCloneDetail<$Meta:ty> for $Type:ty { ... }) => {
         impl<$($bnd)*> DynCloneDetail<$Meta> for $Type {
-            fn box_clone(&self) -> Box<dyn PotentialBuilder<$Meta>> {
+            fn box_clone(&self) -> Box<PotentialBuilder<$Meta>> {
                 Box::new(<$Type as Clone>::clone(self))
             }
-            fn _as_ref_dyn(&self) -> &dyn PotentialBuilder<$Meta> { self }
+            fn _as_ref_dyn(&self) -> &PotentialBuilder<$Meta> { self }
         }
     };
 }
@@ -274,7 +274,7 @@ where Meta: Clone + 'static,
 }
 
 impl_dyn_clone_detail!{
-    impl[Meta: Clone + 'static] DynCloneDetail<Meta> for Box<dyn PotentialBuilder<Meta>> { ... }
+    impl[Meta: Clone + 'static] DynCloneDetail<Meta> for Box<PotentialBuilder<Meta>> { ... }
 }
 
 //-------------------------------------
