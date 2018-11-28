@@ -9,7 +9,7 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-pub use crate::tempdir_crate::TempDir as ActualTempDir;
+pub use ::tempdir::TempDir as ActualTempDir;
 
 use ::std::io::Result as IoResult;
 use ::std::path::{Path, PathBuf};

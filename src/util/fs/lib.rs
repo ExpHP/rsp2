@@ -21,7 +21,6 @@ mod tempdir;
 
 #[macro_use] extern crate failure;
 #[macro_use] extern crate log;
-extern crate tempdir as tempdir_crate;
 
 use ::failure::ResultExt;
 
