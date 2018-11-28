@@ -33,6 +33,8 @@ use rsp2_array_types::{V3};
 use rsp2_structure::{Coords};
 use rsp2_minimize::{cg};
 
+use std::rc::Rc;
+
 pub trait EvLoopDiagonalizer {
     type ExtraOut;
 
@@ -290,7 +292,7 @@ impl EvLoopFsm {
 
 fn cg_builder_from_config(
     cg_settings: &cfg::Cg,
-) -> cg::Builder {
+) -> (cg::Builder, cg::StopCondition) {
     let cfg::Cg {
         ref stop_condition, ref flavor, ref on_ls_failure,
         alpha_guess_first, alpha_guess_max,
@@ -318,10 +320,7 @@ fn cg_builder_from_config(
         cfg::CgOnLsFailure::Warn => cg::settings::OnLsFailure::Warn,
     });
 
-    // FIXME: Do something different when parameters are optimized
-    builder.basic_output_fn(|args| trace!(target: "rsp2_minimize::acgsd", "{}", args));
-    builder.stop_condition(stop_condition.to_function());
-    builder
+    (builder, stop_condition.clone())
 }
 
 fn do_cg_relax(
@@ -334,12 +333,16 @@ fn do_cg_relax(
 {Ok({
     let mut flat_diff_fn = pot.parallel(true).initialize_flat_diff_fn(&coords, meta.sift())?;
     let relaxed_flat = {
-        cg_builder_from_config(cg_settings)
+        let (mut cg, stop_condition) = cg_builder_from_config(cg_settings);
+        cg.stop_condition(stop_condition.to_function())
+            .basic_output_fn(log_cg_output)
             .run(coords.to_carts().flat(), &mut *flat_diff_fn)
             .unwrap().position
     };
     coords.with_carts(relaxed_flat.nest().to_vec())
 })}
+
+fn log_cg_output(args: std::fmt::Arguments<'_>) { trace!("{}", args) }
 
 //------------------
 
@@ -377,21 +380,116 @@ fn do_cg_relax_with_param_optimization(
         None => return Ok(None),
         Some(f) => f,
     };
+
+    // Object that encapsulates the coordinate conversion logic for param optimization
+    let helper = Rc::new(RelaxationOptimizationHelper::new(parameters, coords.lattice()));
+
+    let (mut cg, stop_condition_cereal) = cg_builder_from_config(cg_settings);
+
+    // Make the stop condition and output representative of the cartesian forces.
+    cg.output_fn(get_param_opt_output_fn(helper.clone(), log_cg_output));
+    cg.stop_condition({
+        let helper = helper.clone();
+        let mut imp = stop_condition_cereal.to_function();
+        move |state: cg::AlgorithmState<'_>| {
+            // HACK: to avoid code duplication, use the stop conditions built into rsp2_minimize,
+            //       but feed them modified data.  I know that the stop condition won't look at
+            //       most of these fields since I maintain both crates...          - ML
+            let cg::AlgorithmState {
+                iterations, value, position, gradient, direction, alpha,
+                ..
+            } = state;
+
+            let (d_carts, _) = helper.unflatten_grad(position, gradient);
+            let gradient = d_carts.flat();
+
+            imp(cg::AlgorithmState {
+                iterations, value, position, gradient, direction, alpha,
+                // HACK: To make matters even worse, we can't just replace the `gradient` field
+                //       of state due to lifetime issues. We must construct a new one, and there
+                //       is no public API for doing that (and I'm not sure I want to provide one).
+                //
+                //       So for now this field is `#[doc(hidden)] pub`...
+                __no_full_destructure: (),
+            })
+        }
+    });
+
     trace!("Incorporating parameter optimization into relaxation");
-    let helper = RelaxationOptimizationHelper::new(parameters, coords.lattice());
     let relaxed_flat = {
-        cg_builder_from_config(cg_settings).run(
+         cg.run(
             &helper.flatten_coords(&coords),
-            |flat_coords| {
-                let ref coords = helper.unflatten_coords(flat_coords);
-                let (value, bond_grads) = bond_diff_fn.compute(coords, meta.clone())?;
-                let flat_grad = helper.flatten_grad(flat_coords, &bond_grads);
-                FailOk((value, flat_grad))
+            {
+                let helper = helper.clone();
+                move |flat_coords| {
+                    let ref coords = helper.unflatten_coords(flat_coords);
+                    let (value, bond_grads) = bond_diff_fn.compute(coords, meta.clone())?;
+                    let flat_grad = helper.flatten_grad(flat_coords, &bond_grads);
+                    FailOk((value, flat_grad))
+                }
             },
         ).unwrap().position
     };
     Some(helper.unflatten_coords(&relaxed_flat[..]))
 })}
+
+// FIXME Make this not copy-pasta
+pub fn get_param_opt_output_fn(
+    opt_helper: Rc<RelaxationOptimizationHelper>,
+    mut emit: impl Clone + FnMut(std::fmt::Arguments<'_>) + 'static,
+) -> impl Clone + FnMut(cg::AlgorithmState<'_>) + 'static {
+    use rsp2_slice_math::vnorm;
+    use std::fmt::Write;
+
+    let mut last_value = None;
+    let mut past_directions = std::collections::VecDeque::<Vec<_>>::new();
+    let opt_helper = opt_helper.clone();
+
+    move |state: cg::AlgorithmState<'_>| {
+        // Use cartesian gradient instead of actual gradient
+        let (cart_grad, _) = opt_helper.unflatten_grad(state.position, state.gradient);
+        emit(format_args!(
+            " i: {i:>6}  v: {v:7.3}  dv: {dv:+8.2e}  g: {g:>6.1e}  max: {gm:>6.1e}  p: {p:4.2}  {cos:<24}",
+            i = state.iterations,
+            v = state.value,
+            dv = last_value.as_ref().map(|prev| state.value - prev).unwrap_or(0.0),
+            g = vnorm(&cart_grad.flat()),
+            gm = cart_grad.flat().iter().cloned().map(f64::abs).fold(0.0, f64::max),
+            cos = {
+                let mut s = String::new();
+                if !past_directions.is_empty() {
+                    write!(&mut s, "cos:").unwrap();
+                    let latest = state.direction.expect("(BUG)");
+                    for other in &past_directions {
+                        write!(&mut s, " {:>+5.2}", vdot(latest, other)).unwrap();
+                    }
+                }
+                s
+            },
+            // fraction of direction's magnitude that lies in lattice-param space
+            p = match state.direction {
+                Some(flat_dir) => vnorm(opt_helper.split(flat_dir).1),
+                None => 0.0
+            },
+        ));
+
+        // Record data for next call.
+        last_value = Some(state.value);
+
+        if let Some(direction) = state.direction {
+            let max_cosines = 3;
+            let mut buf = match past_directions.len().cmp(&max_cosines) {
+                std::cmp::Ordering::Less => vec![],
+                std::cmp::Ordering::Equal => past_directions.pop_back().unwrap(),
+                std::cmp::Ordering::Greater => unreachable!(),
+            };
+            buf.clear();
+            buf.extend(direction.iter().cloned());
+            past_directions.push_front(buf);
+        }
+    }
+}
+
 
 //------------------
 
@@ -446,10 +544,13 @@ fn _do_cg_along_evecs(
 
     let mut flat_diff_fn = pot.parallel(true).initialize_flat_diff_fn(&coords, meta.sift())?;
     let relaxed_coeffs = {
-        cg_builder_from_config(cg_settings).run(
-            &vec![0.0; evecs.len()],
-            &mut *constrained_diff_fn(&mut *flat_diff_fn, init_pos.flat(), &flat_evecs),
-        ).unwrap().position
+        let (mut cg, stop_condition) = cg_builder_from_config(cg_settings);
+        cg.stop_condition(stop_condition.to_function())
+            .basic_output_fn(log_cg_output)
+            .run(
+                &vec![0.0; evecs.len()],
+                &mut *constrained_diff_fn(&mut *flat_diff_fn, init_pos.flat(), &flat_evecs),
+            ).unwrap().position
     };
 
     let final_flat_pos = flat_constrained_position(init_pos.flat(), &relaxed_coeffs, &flat_evecs);

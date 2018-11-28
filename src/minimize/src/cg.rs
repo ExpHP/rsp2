@@ -591,8 +591,14 @@ pub struct AlgorithmState<'a> {
     /// Direction traveled last iteration. `None` on the first iteration.
     pub direction: Option<&'a [f64]>,
     // ensures addition of new fields is backwards compatible
+
+    // FIXME shouldn't be pub but there is currently code in rsp2-minimize that monkey patches
+    // an AlgorithmState to avoid having to duplicate self::stop_condition::Simple
+    // and self::StopCondition::to_function().  Need to think of a better way to make this
+    // logic available.
     #[allow(non_snake_case)]
-    __no_full_destructure: (),
+    #[doc(hidden)]
+    pub __no_full_destructure: (),
 }
 
 /// Trait for producing fresh instances of an `AlgorithmStateFn`.
@@ -628,24 +634,24 @@ pub fn get_basic_output_fn(
     let mut past_directions = VecDeque::<Vec<_>>::new();
 
     move |state: AlgorithmState<'_>| {
-        let d_value = last_value.as_ref().map(|prev| state.value - prev).unwrap_or(0.0);
-        let grad_mag = vnorm(&state.gradient);
-        emit(format_args!(" i: {i:>6}  v: {v:18.14} dv: {dv:+8.2e}  g: {g:>12.7e}  {cos:<24}",
-               i = state.iterations,
-               v = state.value,
-               dv = d_value,
-               g = grad_mag,
-               cos = {
-                   let mut s = String::new();
-                   if !past_directions.is_empty() {
-                       write!(&mut s, "cos:").unwrap();
-                       let latest = state.direction.expect("(BUG)");
-                       for other in &past_directions {
-                           write!(&mut s, " {:>+5.2}", vdot(latest, other)).unwrap();
-                       }
-                   }
-                   s
-               },
+        emit(format_args!(
+            " i: {i:>6} v: {v:7.3} dv: {dv:+8.2e} g: {g:>6.1e} max: {gm:>6.1e} {cos:<24}",
+            i = state.iterations,
+            v = state.value,
+            dv = last_value.as_ref().map(|prev| state.value - prev).unwrap_or(0.0),
+            g = vnorm(&state.gradient),
+            gm = state.gradient.iter().cloned().map(f64::abs).fold(0.0, f64::max),
+            cos = {
+                let mut s = String::new();
+                if !past_directions.is_empty() {
+                    write!(&mut s, "cos:").unwrap();
+                    let latest = state.direction.expect("(BUG)");
+                    for other in &past_directions {
+                        write!(&mut s, " {:>+5.2}", vdot(latest, other)).unwrap();
+                    }
+                }
+                s
+            },
         ));
 
         // Record data for next call.

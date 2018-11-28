@@ -351,6 +351,19 @@ impl RelaxationOptimizationHelper {
 
     pub fn num_params(&self) -> usize { self.param_primary_axis.len() }
 
+    /// Split a slice into the parts corresponding to fractional coords, and the part corresponding
+    /// to the parameters.
+    pub fn split<'b, T>(&self, slice: &'b [T]) -> (&'b [V3<T>], &'b [T]) {
+        let (frac, params) = slice.split_at(slice.len() - self.num_params());
+        (frac.nest(), params)
+    }
+
+    pub fn split_mut<'b, T>(&self, slice: &'b mut [T]) -> (&'b mut [V3<T>], &'b mut [T]) {
+        let div = slice.len() - self.num_params();
+        let (frac, params) = slice.split_at_mut(div);
+        (frac.nest_mut(), params)
+    }
+
     /// Produce a flat representation of the coords, with lattice params included as elements.
     pub fn flatten_coords(&self, coords: &Coords) -> Vec<f64> {
         let mut out = coords.to_fracs().flat().to_vec();
@@ -371,17 +384,13 @@ impl RelaxationOptimizationHelper {
     /// Get the effective gradient on the coordinates in the flattened representation
     /// given gradients with respect to the cartesian bond vectors.
     pub fn flatten_grad(&self, flat: &[f64], bond_grads: &[BondGrad]) -> Vec<f64> {
-        #![allow(bad_style)]
-
         let mut out = vec![0.0; flat.len()];
         { // FIXME: Block will be unnecessary once NLL lands
-            let divider = flat.len() - self.num_params();
-            let (_, params) = flat.split_at(divider);
-            let (d_site_frac, d_param) = out.split_at_mut(divider);
-            let d_site_frac: &mut [V3] = d_site_frac.nest_mut();
+            let (_, params) = self.split(flat);
+            let (d_site_frac, d_param) = self.split_mut(&mut out);
 
             let ref lattice = self.lattice_with_params(params);
-            let reciprocal_lattice = self.normalized_lattice.reciprocal();
+            let ref recip_normalized_lattice = self.normalized_lattice.reciprocal();
             let diag = V3::from_fn(|axis| self.axis_param[axis].map_or(1.0, |param| params[param]));
 
             for item in bond_grads {
@@ -403,9 +412,8 @@ impl RelaxationOptimizationHelper {
                 let frac = cart / lattice;
                 let term_d_cart = item.grad;
 
-                let cart_J_scaled = reciprocal_lattice.inverse_matrix(); // = L^T
-
-                let term_d_scaled = term_d_cart * cart_J_scaled;
+                // gradients transform by the reciprocal lattice
+                let term_d_scaled = term_d_cart / recip_normalized_lattice;
 
                 // scaled_J_frac = diag.t()
                 let term_d_frac = term_d_scaled.mul_diag(&diag);
@@ -424,6 +432,18 @@ impl RelaxationOptimizationHelper {
         }
 
         out
+    }
+
+    /// Get the gradient with respect to positions in cartesian space,
+    /// and with respect to each lattice parameter.
+    pub fn unflatten_grad(&self, coords: &[f64], grad: &[f64]) -> (Vec<V3>, ArrayVec<[f64; 3]>) {
+        let (_, params) = self.split(coords);
+        let (d_fracs, d_params) = self.split(grad);
+
+        // gradients transform as reciprocal vectors
+        let recip_lattice = self.lattice_with_params(params).reciprocal();
+        let d_carts = CoordsKind::Fracs(d_fracs).to_carts(&recip_lattice);
+        (d_carts, d_params.iter().cloned().collect())
     }
 
     fn read_lattice_params(&self, lattice: &Lattice) -> ArrayVec<[f64; 3]> {
