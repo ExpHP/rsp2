@@ -630,34 +630,81 @@ where
 pub fn get_basic_output_fn(
     mut emit: impl Clone + FnMut(fmt::Arguments<'_>),
 ) -> impl Clone + FnMut(AlgorithmState<'_>) {
-    let mut last_value = None;
-    let mut past_directions = VecDeque::<Vec<_>>::new();
+    let mut dv_formatter = output_fn_dv_formatter("dv:", 1);
+    let mut cos_formatter = output_fn_cosine_formatter("cos:", 3, 2);
 
     move |state: AlgorithmState<'_>| {
         emit(format_args!(
-            " i: {i:>6} v: {v:7.3} dv: {dv:+8.2e} g: {g:>6.1e} max: {gm:>6.1e} {cos:<24}",
+            " i: {i:>6}  v: {v:7.3}  {dv}  g: {g:>6.1e}  max: {gm:>6.1e}  {cos}",
             i = state.iterations,
             v = state.value,
-            dv = last_value.as_ref().map(|prev| state.value - prev).unwrap_or(0.0),
+            dv = dv_formatter(state.value),
             g = vnorm(&state.gradient),
             gm = state.gradient.iter().cloned().map(f64::abs).fold(0.0, f64::max),
-            cos = {
-                let mut s = String::new();
-                if !past_directions.is_empty() {
-                    write!(&mut s, "cos:").unwrap();
-                    let latest = state.direction.expect("(BUG)");
-                    for other in &past_directions {
-                        write!(&mut s, " {:>+5.2}", vdot(latest, other)).unwrap();
-                    }
-                }
-                s
-            },
+            cos = cos_formatter(state.direction),
         ));
+    }
+}
 
-        // Record data for next call.
-        last_value = Some(state.value);
+/// Helper for producing a column with the change in value between succesive iterations,
+/// just like the one produced by `basic_output_fn`.
+pub fn output_fn_dv_formatter(
+    prefix: &str,
+    precision: usize,
+) -> impl Clone + FnMut(f64) -> String {
+    let mut last_value = None;
 
-        if let Some(direction) = state.direction {
+    // sign leading_digit decimal (precision digits) "e-10"
+    let float_width = 1 + 1 + 1 + precision + 4;
+    let width = prefix.len() + 1 + float_width;
+
+    let prefix = prefix.to_string();
+    move |value| {
+        let out = match last_value {
+            None => format!("{:width$}", "", width=width),
+            Some(last) => format!(
+                "{} {:+f$.prec$e}", prefix, value - last,
+                f=float_width, prec=precision,
+            ),
+        };
+        last_value = Some(value);
+        out
+    }
+}
+
+/// Helper for producing a column with the cosines between succesive directions, just like
+/// the one produced by `basic_output_fn`.
+///
+/// The word "cos: " is included in the output, since it is hidden on the first iteration.
+pub fn output_fn_cosine_formatter(
+    prefix: &str,
+    num_cosines: usize,
+    precision: usize,
+) -> impl Clone + FnMut(Option<&[f64]>) -> String {
+    let mut past_directions = VecDeque::<Vec<_>>::new();
+
+    let word_len = precision + 3; // fit sign, leading 0/1, decimal point.
+    let total_len = prefix.len() + (1 + word_len) * num_cosines; // fit words and spaces
+    let prefix = prefix.to_string();
+
+    move |direction| {
+
+        let mut s = String::new();
+        if !past_directions.is_empty() {
+            write!(&mut s, "{}", prefix).unwrap();
+            let latest = direction.expect("called with None after first call!?");
+            for other in &past_directions {
+                write!(
+                    &mut s, " {:>+word$.prec$}",
+                    vdot(latest, other),
+                    prec=precision,
+                    word=word_len,
+                ).unwrap();
+            }
+        }
+        let out_string = format!("{:<w$}", s, w=total_len);
+
+        if let Some(direction) = direction {
             let max_cosines = 3;
             let mut buf = match past_directions.len().cmp(&max_cosines) {
                 std::cmp::Ordering::Less => vec![],
@@ -668,6 +715,7 @@ pub fn get_basic_output_fn(
             buf.extend(direction.iter().cloned());
             past_directions.push_front(buf);
         }
+        out_string
     }
 }
 

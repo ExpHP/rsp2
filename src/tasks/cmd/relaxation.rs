@@ -433,7 +433,6 @@ fn do_cg_relax_with_param_optimization(
     Some(helper.unflatten_coords(&relaxed_flat[..]))
 })}
 
-// FIXME Make this not copy-pasta
 pub fn get_param_opt_output_fn(
     opt_helper: Rc<RelaxationOptimizationHelper>,
     mut emit: impl Clone + FnMut(std::fmt::Arguments<'_>) + 'static,
@@ -441,55 +440,34 @@ pub fn get_param_opt_output_fn(
     use rsp2_slice_math::vnorm;
     use std::fmt::Write;
 
-    let mut last_value = None;
-    let mut past_directions = std::collections::VecDeque::<Vec<_>>::new();
+    let mut dv_formatter = cg::output_fn_dv_formatter("dv:", 1);
+    let mut cos_formatter = cg::output_fn_cosine_formatter("cos:", 3, 2);
     let opt_helper = opt_helper.clone();
 
     move |state: cg::AlgorithmState<'_>| {
         // Use cartesian gradient instead of actual gradient
-        let (cart_grad, _) = opt_helper.unflatten_grad(state.position, state.gradient);
+        let (cart_grad, d_param) = opt_helper.unflatten_grad(state.position, state.gradient);
+        let num_atoms = cart_grad.len();
         emit(format_args!(
-            " i: {i:>6}  v: {v:7.3}  dv: {dv:+8.2e}  g: {g:>6.1e}  max: {gm:>6.1e}  p: {p:4.2}  {cos:<24}",
+            " i: {i:>6}  v: {v:7.3}  {dv}  g: {g:>6.1e}  max: {gm:>6.1e}  {fpar}  {cos}",
             i = state.iterations,
             v = state.value,
-            dv = last_value.as_ref().map(|prev| state.value - prev).unwrap_or(0.0),
+            dv = dv_formatter(state.value),
             g = vnorm(&cart_grad.flat()),
             gm = cart_grad.flat().iter().cloned().map(f64::abs).fold(0.0, f64::max),
-            cos = {
-                let mut s = String::new();
-                if !past_directions.is_empty() {
-                    write!(&mut s, "cos:").unwrap();
-                    let latest = state.direction.expect("(BUG)");
-                    for other in &past_directions {
-                        write!(&mut s, " {:>+5.2}", vdot(latest, other)).unwrap();
-                    }
+            cos = cos_formatter(state.direction),
+            // Force acting upon each lattice parameter, per atom.
+            fpar = {
+                let mut s = String::from("fpar:");
+                for d_a in d_param {
+                    let force_a = -d_a;
+                    write!(s, " {:>+6.1e}", force_a / num_atoms as f64).unwrap();
                 }
                 s
             },
-            // fraction of direction's magnitude that lies in lattice-param space
-            p = match state.direction {
-                Some(flat_dir) => vnorm(opt_helper.split(flat_dir).1),
-                None => 0.0
-            },
         ));
-
-        // Record data for next call.
-        last_value = Some(state.value);
-
-        if let Some(direction) = state.direction {
-            let max_cosines = 3;
-            let mut buf = match past_directions.len().cmp(&max_cosines) {
-                std::cmp::Ordering::Less => vec![],
-                std::cmp::Ordering::Equal => past_directions.pop_back().unwrap(),
-                std::cmp::Ordering::Greater => unreachable!(),
-            };
-            buf.clear();
-            buf.extend(direction.iter().cloned());
-            past_directions.push_front(buf);
-        }
     }
 }
-
 
 //------------------
 
