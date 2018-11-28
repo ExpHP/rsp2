@@ -9,7 +9,7 @@ version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 description = "Stuff pulled out of rsp2-tasks because it takes too long to compile."
 license = "GPL-3.0"
-edition = "2015"
+edition = "2018"
 
 [lib]
 path = "lib.rs"

@@ -8,7 +8,7 @@ name = "rsp2-tasks"
 version = "0.1.0"
 authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 description = "Where madness reigns eternal."
-edition = "2015"
+edition = "2018"
 
 # Note: Many files within this crate are dual-licensed under MIT and Apache 2.0
 license = "GPL-3.0"

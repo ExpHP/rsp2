@@ -125,7 +125,7 @@ mod loggers {
 
         fn flush(&self) {
             if let Ok(mut inner) = self.rw.write() {
-                if let Some(mut file) = inner.file.as_mut() {
+                if let Some(file) = inner.file.as_mut() {
                     // ignore error for same reasons as ignoring PoisonError (see above)
                     let _ = file.flush();
                 }

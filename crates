@@ -232,7 +232,7 @@ exclude = ["./scripts"]
             'LICENSE-GPL':        ConstantMacro('license = "GPL-3.0"'),
 
             # Edition
-            'DEFAULT-EDITION': ConstantMacro('edition = "2015"'),
+            'DEFAULT-EDITION': ConstantMacro('edition = "2018"'),
 
             # FIXME this is waaaaaay too application-specific.
             'BINARY-SHIM-BIN-ENTRIES': BinaryShimsMacro(binary_shim_pairs),

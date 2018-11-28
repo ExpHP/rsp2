@@ -861,8 +861,8 @@ fn _compute_rebo_bonds(
 //            }.compute_paranoid(dbg, 1e-9);
             let BondOrderPi {
                 value: bpi,
-                d_deltas_ik: mut bpi_d_deltas_ik,
-                d_deltas_jl: mut bpi_d_deltas_jl,
+                d_deltas_ik: bpi_d_deltas_ik,
+                d_deltas_jl: bpi_d_deltas_jl,
             } = out;
             dbg!(dbg, "bpi: {:.9}", bpi);
 
