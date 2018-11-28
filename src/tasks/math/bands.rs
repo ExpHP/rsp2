@@ -163,7 +163,7 @@ pub fn unfold_gamma_phonon(
     // them to a projection cannot cancel.
     superstructure: &Coords,
     // eigenvector_q: &SuperFracQ, // NOTE: only gamma now
-    eigenvector: KetRef,
+    eigenvector: KetRef<'_>,
     supercell_matrix: &ScMatrix,
 ) -> Vec<([u32; 3], f64)>
 {
@@ -275,7 +275,7 @@ impl GammaUnfolder {
     pub fn q_fracs(&self) -> &[V3]
     { &self.sc_qs_frac }
 
-    pub fn unfold_phonon(&self, threading: Threading, eigenvector: KetRef) -> Vec<f64>
+    pub fn unfold_phonon(&self, threading: Threading, eigenvector: KetRef<'_>) -> Vec<f64>
     {
         assert_eq!(eigenvector.len(), 3 * self.q_kets_by_pc_sc[0][0].len());
 

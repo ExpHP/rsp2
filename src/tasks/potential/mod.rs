@@ -230,10 +230,10 @@ pub trait DynCloneDetail<Meta> {
 macro_rules! impl_dyn_clone_detail {
     (impl[$($bnd:tt)*] DynCloneDetail<$Meta:ty> for $Type:ty { ... }) => {
         impl<$($bnd)*> DynCloneDetail<$Meta> for $Type {
-            fn box_clone(&self) -> Box<PotentialBuilder<$Meta>> {
+            fn box_clone(&self) -> Box<dyn PotentialBuilder<$Meta>> {
                 Box::new(<$Type as Clone>::clone(self))
             }
-            fn _as_ref_dyn(&self) -> &PotentialBuilder<$Meta> { self }
+            fn _as_ref_dyn(&self) -> &dyn PotentialBuilder<$Meta> { self }
         }
     };
 }
@@ -274,7 +274,7 @@ where Meta: Clone + 'static,
 }
 
 impl_dyn_clone_detail!{
-    impl[Meta: Clone + 'static] DynCloneDetail<Meta> for Box<PotentialBuilder<Meta>> { ... }
+    impl[Meta: Clone + 'static] DynCloneDetail<Meta> for Box<dyn PotentialBuilder<Meta>> { ... }
 }
 
 //-------------------------------------
@@ -415,7 +415,7 @@ pub trait DispFn {
 //-------------------------------------
 
 /// See `PotentialBuilder::one_off` for more information.
-pub struct OneOff<'a, M: 'a>(&'a dyn PotentialBuilder<M>);
+pub struct OneOff<'a, M>(&'a dyn PotentialBuilder<M>);
 impl<'a, M: Clone + 'static> DiffFn<M> for OneOff<'a, M> {
     fn compute(&mut self, coords: &Coords, meta: M) -> FailResult<(f64, Vec<V3>)> {
         self.0.initialize_diff_fn(coords, meta.clone())?.compute(coords, meta)
@@ -425,12 +425,12 @@ impl<'a, M: Clone + 'static> DiffFn<M> for OneOff<'a, M> {
 //-------------------------------------
 
 /// High-level logic
-impl PotentialBuilder {
+impl dyn PotentialBuilder {
     pub(crate) fn from_root_config(
         trial_dir: &TrialDir,
         on_demand: Option<LammpsOnDemand>,
         cfg: &cfg::Settings,
-    ) -> Box<PotentialBuilder> {
+    ) -> Box<dyn PotentialBuilder> {
         Self::from_config_parts(
             Some(trial_dir),
             on_demand,
@@ -448,7 +448,7 @@ impl PotentialBuilder {
         update_style: &cfg::LammpsUpdateStyle,
         axis_mask: &[bool; 3], // HACK; lammps should have its own section
         config: &cfg::Potential,
-    ) -> Box<PotentialBuilder> {
+    ) -> Box<dyn PotentialBuilder> {
         match config {
             cfg::Potential::Single(cfg) => {
                 PotentialBuilder::single_from_config_parts(trial_dir, on_demand, threading, update_style, axis_mask, &cfg)
@@ -475,7 +475,7 @@ impl PotentialBuilder {
         update_style: &cfg::LammpsUpdateStyle,
         axis_mask: &[bool; 3], // HACK; lammps should have its own section
         config: &cfg::PotentialKind,
-    ) -> Box<PotentialBuilder> {
+    ) -> Box<dyn PotentialBuilder> {
         match config {
             cfg::PotentialKind::Rebo(cfg) => {
                 let lammps_pot = self::lammps::Airebo::from(cfg);

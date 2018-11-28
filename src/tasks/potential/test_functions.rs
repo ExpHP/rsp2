@@ -156,7 +156,7 @@ impl<'a, M> DiffFn<M> for &'a ConvergeTowards {
 pub struct Chainify;
 
 impl<Meta: Clone + 'static> PotentialBuilder<Meta> for Chainify {
-    fn initialize_diff_fn(&self, initial_coords: &Coords, _: Meta) -> FailResult<Box<DiffFn<Meta>>>
+    fn initialize_diff_fn(&self, initial_coords: &Coords, _: Meta) -> FailResult<Box<dyn DiffFn<Meta>>>
     {
         let na = initial_coords.num_atoms();
         let target = Coords::new(

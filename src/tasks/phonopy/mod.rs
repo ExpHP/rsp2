@@ -43,7 +43,7 @@ pub(crate) struct PhonopyFailed {
 }
 
 impl MissingFileError {
-    fn new(ty: &'static str, dir: &AsPath, filename: String) -> Self {
+    fn new(ty: &'static str, dir: &dyn AsPath, filename: String) -> Self {
         let backtrace = Backtrace::new();
         let dir = DisplayPathArcNice(dir.as_path().to_owned().into());
         MissingFileError { backtrace, ty, dir, filename }

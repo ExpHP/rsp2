@@ -60,7 +60,7 @@ pub enum ModeKind {
 pub struct Colorful(pub ModeKind);
 
 impl fmt::Display for ModeKind {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match *self {
             ModeKind::Translational => "T",
             ModeKind::Rotational    => "R",
@@ -72,7 +72,7 @@ impl fmt::Display for ModeKind {
 }
 
 impl fmt::Display for Colorful {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let color = match self.0 {
             ModeKind::Translational => ::ansi_term::Colour::Yellow.bold(),
             ModeKind::Rotational    => ::ansi_term::Colour::Purple.bold(),
@@ -85,7 +85,7 @@ impl fmt::Display for Colorful {
 }
 
 pub(crate) fn perform_acoustic_search(
-    pot: &PotentialBuilder,
+    pot: &dyn PotentialBuilder,
     eigenvalues: &[f64],
     eigenvectors: &Basis3,
     coords: &Coords,

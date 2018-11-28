@@ -75,7 +75,7 @@ mod errors {
     #[derive(Debug, Clone)]
     pub struct DisplayPathArcNice(pub ::path_abs::PathArc);
     impl fmt::Display for DisplayPathArcNice {
-        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             use crate::util::ext_traits::PathNiceExt;
             fmt::Display::fmt(&self.0.as_path().nice(), f)
         }

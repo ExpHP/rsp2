@@ -29,8 +29,8 @@ mod loggers {
     pub struct CapturableStderr;
 
     impl Log for CapturableStderr {
-        fn enabled(&self, _: &::log::Metadata) -> bool { true }
-        fn log(&self, record: &Record) { eprintln!("{}", record.args()); }
+        fn enabled(&self, _: &::log::Metadata<'_>) -> bool { true }
+        fn log(&self, record: &Record<'_>) { eprintln!("{}", record.args()); }
         fn flush(&self) {}
     }
 
@@ -100,9 +100,9 @@ mod loggers {
     }
 
     impl Log for DelayedLogFile {
-        fn enabled(&self, _: &::log::Metadata) -> bool { true }
+        fn enabled(&self, _: &::log::Metadata<'_>) -> bool { true }
 
-        fn log(&self, record: &Record) {
+        fn log(&self, record: &Record<'_>) {
             if let Ok(mut inner) = self.rw.write() {
                 let inner = &mut *inner;
                 match (inner.file.as_mut(), inner.delayed_messages.as_mut()) {
@@ -185,8 +185,8 @@ pub fn init_global_logger() -> FailResult<SetGlobalLogfile>
             out.finish(format_args!("{}", message))
         })
         .filter(move |metadata| env_filter.enabled(metadata))
-        .chain(&*GLOBAL_LOGFILE as &Log)
-        .chain(Box::new(CapturableStderr) as Box<Log>)
+        .chain(&*GLOBAL_LOGFILE as &dyn Log)
+        .chain(Box::new(CapturableStderr) as Box<dyn Log>)
         ;
 
     fern.apply()?;
@@ -236,9 +236,9 @@ impl Drop for SetGlobalLogfile {
 }
 
 fn fmt_log_message_lines(
-    message: &fmt::Arguments,
+    message: &fmt::Arguments<'_>,
     colors: &::fern::colors::ColoredLevelConfig,
-    record: &Record,
+    record: &Record<'_>,
     elapsed: time::Duration,
     log_mod_setting: bool,
 ) -> String {

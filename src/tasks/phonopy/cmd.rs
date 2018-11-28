@@ -637,7 +637,7 @@ impl<P: AsPath> DirWithForces<P> {
     /// Compute bands in a temp directory.
     ///
     /// Returns an object used to configure the computation.
-    pub fn build_bands(&self) -> BandsBuilder<P>
+    pub fn build_bands(&self) -> BandsBuilder<'_, '_, P>
     { BandsBuilder::init(self) }
 }
 
@@ -646,7 +646,7 @@ impl<P: AsPath> DirWithForces<P> {
 //
 //       Dang filesystem; it's like global variables all over again.
 #[derive(Debug)]
-pub struct BandsBuilder<'moveck, 'p, P: AsPath + 'p> {
+pub struct BandsBuilder<'moveck, 'p, P: AsPath> {
     dir_with_forces: &'p DirWithForces<P>,
     eigenvectors: bool,
     // Part of a trick to simulate "moving" a value with a `&mut self` function

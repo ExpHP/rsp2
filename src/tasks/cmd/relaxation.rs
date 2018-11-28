@@ -44,7 +44,7 @@ pub trait EvLoopDiagonalizer {
         //  written for debugging purposes)
         trial: &TrialDir,
         settings: &cfg::Settings,
-        pot: &PotentialBuilder,
+        pot: &dyn PotentialBuilder,
         stored: &StoredStructure,
         stop_after_dynmat: bool, // HACK
         // HACK: Used to set the filename for saving the gamma dynmat.
@@ -64,7 +64,7 @@ impl TrialDir {
     pub(crate) fn do_main_ev_loop<ExtraOut>(
         &self,
         settings: &Settings,
-        pot: &PotentialBuilder,
+        pot: &dyn PotentialBuilder,
         diagonalizer: impl EvLoopDiagonalizer<ExtraOut=ExtraOut>,
         original_coords: Coords,
         meta: HList5<
@@ -126,7 +126,7 @@ impl TrialDir {
     pub(in crate::cmd) fn do_ev_loop_stuff_before_diagonalization(
         &self,
         settings: &Settings,
-        pot: &PotentialBuilder,
+        pot: &dyn PotentialBuilder,
         meta: HList5<
             meta::SiteElements,
             meta::SiteMasses,
@@ -159,7 +159,7 @@ impl TrialDir {
     pub(in crate::cmd) fn do_ev_loop_stuff_after_diagonalization(
         &self,
         settings: &Settings,
-        pot: &PotentialBuilder,
+        pot: &dyn PotentialBuilder,
         meta: HList5<
             meta::SiteElements,
             meta::SiteMasses,
@@ -204,7 +204,7 @@ impl TrialDir {
     fn maybe_do_ev_chasing(
         &self,
         settings: &Settings,
-        pot: &PotentialBuilder,
+        pot: &dyn PotentialBuilder,
         coords: Coords,
         meta: potential::CommonMeta,
         ev_analysis: &GammaSystemAnalysis,
@@ -324,7 +324,7 @@ fn cg_builder_from_config(
 }
 
 fn do_cg_relax(
-    pot: &PotentialBuilder,
+    pot: &dyn PotentialBuilder,
     cg_settings: &cfg::Cg,
     // NOTE: takes ownership of coords because it is likely an accident to reuse them
     coords: Coords,
@@ -347,7 +347,7 @@ fn log_cg_output(args: std::fmt::Arguments<'_>) { trace!("{}", args) }
 //------------------
 
 fn do_cg_relax_with_param_optimization_if_supported(
-    pot: &PotentialBuilder,
+    pot: &dyn PotentialBuilder,
     cg_settings: &cfg::Cg,
     parameters: Option<&cfg::Parameters>,
     // NOTE: takes ownership of coords because it is likely an accident to reuse them
@@ -369,7 +369,7 @@ fn do_cg_relax_with_param_optimization_if_supported(
 
 /// Returns Ok(None) if the potential does not support this method.
 fn do_cg_relax_with_param_optimization(
-    pot: &PotentialBuilder,
+    pot: &dyn PotentialBuilder,
     cg_settings: &cfg::Cg,
     parameters: &cfg::Parameters,
     coords: &Coords,
@@ -479,7 +479,7 @@ pub fn get_param_opt_output_fn(
 //------------------
 
 fn do_eigenvector_chase(
-    pot: &PotentialBuilder,
+    pot: &dyn PotentialBuilder,
     chase_settings: &cfg::EigenvectorChase,
     mut coords: Coords,
     meta: potential::CommonMeta,
@@ -505,7 +505,7 @@ fn do_eigenvector_chase(
 })}
 
 fn do_cg_along_evecs(
-    pot: &PotentialBuilder,
+    pot: &dyn PotentialBuilder,
     cg_settings: &cfg::Cg,
     coords: Coords,
     meta: potential::CommonMeta,
@@ -517,7 +517,7 @@ fn do_cg_along_evecs(
 })}
 
 fn _do_cg_along_evecs(
-    pot: &PotentialBuilder,
+    pot: &dyn PotentialBuilder,
     cg_settings: &cfg::Cg,
     coords: Coords,
     meta: potential::CommonMeta,
@@ -543,7 +543,7 @@ fn _do_cg_along_evecs(
 })}
 
 fn do_minimize_along_evec(
-    pot: &PotentialBuilder,
+    pot: &dyn PotentialBuilder,
     from_coords: Coords,
     meta: potential::CommonMeta,
     evec: &[V3],
@@ -568,7 +568,7 @@ fn do_minimize_along_evec(
 })}
 
 fn warn_on_improvable_lattice_params(
-    pot: &PotentialBuilder,
+    pot: &dyn PotentialBuilder,
     coords: &Coords,
     meta: potential::CommonMeta,
 ) -> FailResult<()>
@@ -618,7 +618,7 @@ fn constrained_diff_fn<'a>(
     flat_init_pos: &'a [f64],
     // K eigenvectors
     flat_evs: &'a [&[f64]],
-) -> Box<FnMut(&[f64]) -> FailResult<(f64, Vec<f64>)> + 'a>
+) -> Box<dyn FnMut(&[f64]) -> FailResult<(f64, Vec<f64>)> + 'a>
 {
     Box::new(move |coeffs| Ok({
         assert_eq!(coeffs.len(), flat_evs.len());

@@ -123,7 +123,7 @@ impl PotentialBuilder<CommonMeta> for KolmogorovCrespiZ {
         fn_body(self, coords, meta)
     }
 
-    fn initialize_disp_fn(&self, coords: &Coords, meta: CommonMeta) -> FailResult<Box<DispFn>>
+    fn initialize_disp_fn(&self, coords: &Coords, meta: CommonMeta) -> FailResult<Box<dyn DispFn>>
     { self._default_initialize_disp_fn(coords, meta) }
 }
 
@@ -218,7 +218,7 @@ impl PotentialBuilder<CommonMeta> for Rebo {
         fn_body(self, coords, meta)
     }
 
-    fn initialize_disp_fn(&self, coords: &Coords, meta: CommonMeta) -> FailResult<Box<DispFn>>
+    fn initialize_disp_fn(&self, coords: &Coords, meta: CommonMeta) -> FailResult<Box<dyn DispFn>>
     { self._default_initialize_disp_fn(coords, meta) }
 }
 

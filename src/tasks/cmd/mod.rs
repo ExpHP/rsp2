@@ -105,7 +105,7 @@ pub enum EvLoopStructureKind {
 pub struct Iteration(pub u32);
 
 impl fmt::Display for Iteration {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result
     { fmt::Display::fmt(&self.0, f) }
 }
 
@@ -162,7 +162,7 @@ impl TrialDir {
         //
         // Unfortunately, the addition of a second solver has only made this more convoluted,
         // and so now the guard is an option. (`None` when the sparse solver is used)
-        let _do_not_drop_the_bands_dir: Option<DirWithBands<Box<AsPath>>>;
+        let _do_not_drop_the_bands_dir: Option<DirWithBands<Box<dyn AsPath>>>;
 
         let (coords, ev_analysis) = {
             use self::cfg::PhononEigenSolver::*;
@@ -333,17 +333,17 @@ impl EvLoopDiagonalizer for PhonopyDiagonalizer {
     //  they can be recovered by RSP2_TEMPDIR if a panic occurs, even without `save_bands`.
     // (to be honest, the code has gone through so many changes in requirements that I can
     //  no longer remember; I just put this here to preserve behavior during a refactor.)
-    type ExtraOut = DirWithBands<Box<AsPath>>;
+    type ExtraOut = DirWithBands<Box<dyn AsPath>>;
 
     fn do_post_relaxation_computations(
         &self,
         _trial: &TrialDir,
         settings: &Settings,
-        pot: &PotentialBuilder,
+        pot: &dyn PotentialBuilder,
         stored: &StoredStructure,
         _stop_after_dynmat: bool, // HACK
         _iteration: Option<Iteration>,
-    ) -> FailResult<(Vec<f64>, Basis3, DirWithBands<Box<AsPath>>)>
+    ) -> FailResult<(Vec<f64>, Basis3, DirWithBands<Box<dyn AsPath>>)>
     {Ok({
         let meta = stored.meta();
         let coords = stored.coords.clone();
@@ -375,7 +375,7 @@ impl PhonopyDiagonalizer {
     fn create_bands_dir(
         &self,
         cfg_threading: &cfg::Threading,
-        pot: &PotentialBuilder,
+        pot: &dyn PotentialBuilder,
         phonopy: &PhonopyBuilder,
         coords: &Coords,
         meta: HList3<
@@ -383,7 +383,7 @@ impl PhonopyDiagonalizer {
             meta::SiteMasses,
             Option<meta::FracBonds>,
         >,
-    ) -> FailResult<DirWithBands<Box<AsPath>>>
+    ) -> FailResult<DirWithBands<Box<dyn AsPath>>>
     {Ok({
         let disp_dir = phonopy.displacements(coords, meta.sift())?;
         let force_sets = do_force_sets_at_disps_for_phonopy(pot, cfg_threading, &disp_dir)?;
@@ -413,7 +413,7 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
         &self,
         _trial: &TrialDir,
         settings: &Settings,
-        pot: &PotentialBuilder,
+        pot: &dyn PotentialBuilder,
         stored: &StoredStructure,
         stop_after_dynmat: bool,
         iteration: Option<Iteration>,
@@ -728,7 +728,7 @@ fn run_gamma_system_analysis(
 
 fn write_eigen_info_for_humans(
     analysis: &GammaSystemAnalysis,
-    writeln: &mut FnMut(String) -> FailResult<()>,
+    writeln: &mut dyn FnMut(String) -> FailResult<()>,
 ) -> FailResult<()>
 {
     analysis.make_columns(ev_analyses::ColumnsMode::ForHumans)
@@ -750,7 +750,7 @@ impl TrialDir {
     fn write_summary_file(
         &self,
         settings: &Settings,
-        pot: &PotentialBuilder,
+        pot: &dyn PotentialBuilder,
         ev_analysis: &GammaSystemAnalysis,
     ) -> FailResult<()> {Ok({
         use crate::ui::cfg_merging::{make_nested_mapping, no_summary, merge_summaries};
@@ -807,7 +807,7 @@ fn phonopy_builder_from_settings(
 }
 
 fn do_force_sets_at_disps_for_phonopy<P: AsPath + Send + Sync>(
-    pot: &PotentialBuilder,
+    pot: &dyn PotentialBuilder,
     threading: &cfg::Threading,
     disp_dir: &DirWithDisps<P>,
 ) -> FailResult<Vec<Vec<V3>>>
@@ -826,7 +826,7 @@ fn do_force_sets_at_disps_for_phonopy<P: AsPath + Send + Sync>(
         meta.sift(),
         (threading == &cfg::Threading::Rayon).into(),
         disp_dir.displaced_coord_sets().collect::<Vec<_>>(),
-        move |diff_fn: &mut DiffFn<_>, meta, coords: Coords| FailOk({
+        move |diff_fn: &mut dyn DiffFn<_>, meta, coords: Coords| FailOk({
             let i = counter.inc();
             eprint!("\rdisp {} of {}", i + 1, num_displacements);
             ::std::io::stderr().flush().unwrap();
@@ -840,7 +840,7 @@ fn do_force_sets_at_disps_for_phonopy<P: AsPath + Send + Sync>(
 })}
 
 fn do_force_sets_at_disps_for_sparse(
-    pot: &PotentialBuilder,
+    pot: &dyn PotentialBuilder,
     _threading: &cfg::Threading,
     displacements: &[(usize, V3)],
     coords: &Coords,
@@ -875,7 +875,7 @@ fn do_force_sets_at_disps_for_sparse(
 //
 // When rayon is not used, a single DiffFn is reused.
 fn use_potential_maybe_with_rayon<Inputs, Input, F, Output>(
-    pot: &PotentialBuilder,
+    pot: &dyn PotentialBuilder,
     coords_for_initialize: &Coords,
     meta: CommonMeta,
     threading: Threading,
@@ -887,7 +887,7 @@ where
     Output: Send,
     Inputs: IntoIterator<Item=Input>,
     Inputs: ::rayon::iter::IntoParallelIterator<Item=Input>,
-    F: Fn(&mut DiffFn<CommonMeta>, CommonMeta, Input) -> FailResult<Output> + Sync + Send,
+    F: Fn(&mut dyn DiffFn<CommonMeta>, CommonMeta, Input) -> FailResult<Output> + Sync + Send,
 { match threading {
     Threading::Parallel => {
         use ::rayon::prelude::*;

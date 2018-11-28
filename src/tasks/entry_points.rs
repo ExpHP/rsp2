@@ -169,7 +169,7 @@ impl CliDeserialize for ConfigArgs {
         ])
     }
 
-    fn _resolve_args(m: &clap::ArgMatches) -> FailResult<Self>
+    fn _resolve_args(m: &clap::ArgMatches<'_>) -> FailResult<Self>
     { ConfigSources::resolve_from_args(m.expect_values_of("config")).map(ConfigArgs) }
 }
 
@@ -180,7 +180,7 @@ impl CliDeserialize for ConfigOverrideArgs {
         ])
     }
 
-    fn _resolve_args(m: &clap::ArgMatches) -> FailResult<Self> {
+    fn _resolve_args(m: &clap::ArgMatches<'_>) -> FailResult<Self> {
         if let Some(args) = m.values_of("config") {
             Ok(ConfigOverrideArgs(Some(ConfigSources::resolve_from_args(args)?)))
         } else {
@@ -199,7 +199,7 @@ impl CliDeserialize for NewTrialDirArgs {
         ConfigArgs::_augment_clap_app(app)
     }
 
-    fn _resolve_args(m: &clap::ArgMatches) -> FailResult<Self>
+    fn _resolve_args(m: &clap::ArgMatches<'_>) -> FailResult<Self>
     { Ok(NewTrialDirArgs {
         config_sources: ConfigArgs::_resolve_args(m)?.0,
         err_if_existing: !m.is_present("force"),
@@ -222,7 +222,7 @@ impl CliDeserialize for OptionalFileType {
         ])
     }
 
-    fn _resolve_args(m: &clap::ArgMatches) -> FailResult<Self> {
+    fn _resolve_args(m: &clap::ArgMatches<'_>) -> FailResult<Self> {
         Ok(OptionalFileType({
             if let Some(s) = m.value_of("structure_type") {
                 match s {

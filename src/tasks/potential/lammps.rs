@@ -168,7 +168,7 @@ impl<M: Clone + 'static, P: LammpsPotential<Meta=M> + Clone + Send + Sync + 'sta
                 .expect("Tried to construct multiple Lammps instances in parallel")
         };
 
-        let lammps_pot = Box::new(self.potential.clone()) as Box<LammpsPotential<Meta=P::Meta>>;
+        let lammps_pot = Box::new(self.potential.clone()) as Box<dyn LammpsPotential<Meta=P::Meta>>;
         let lmp = self.inner.build(lock, lammps_pot, coords.clone(), meta)?;
         Ok(Box::new(MyDiffFn::<M>(lmp)) as Box<_>)
     }
@@ -197,10 +197,10 @@ impl<M: Clone + 'static, P: LammpsPotential<Meta=M> + Clone + Send + Sync + 'sta
 
 impl<M: Clone + 'static, P: Clone + LammpsPotential<Meta=M> + Send + Sync + 'static> PotentialBuilder<M> for Builder<P>
 {
-    fn parallel(&self, parallel: bool) -> Box<PotentialBuilder<M>>
+    fn parallel(&self, parallel: bool) -> Box<dyn PotentialBuilder<M>>
     { Box::new(<Builder<_>>::parallel(self, parallel)) }
 
-    fn allow_blocking(&self, allow: bool) -> Box<PotentialBuilder<M>>
+    fn allow_blocking(&self, allow: bool) -> Box<dyn PotentialBuilder<M>>
     { Box::new({
         let mut me = self.clone();
         me.allow_blocking = allow;

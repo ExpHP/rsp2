@@ -485,7 +485,7 @@ impl GammaSystemAnalysis {
                 } else {
                     data.into_iter().map(|x| x / max).collect_vec()
                 };
-                let painter: Box<PaintAs<_, f64>> = match mode {
+                let painter: Box<dyn PaintAs<_, f64>> = match mode {
                     ColumnsMode::ForHumans => Box::new({
                         use ::ansi_term::Colour::*;
                         ColorByRange::new(vec![
@@ -717,7 +717,7 @@ fn default_prob_color_range() -> ColorByRange<f64> {
 #[derive(Debug, Copy, Clone)]
 pub struct FixedProb(f64, usize);
 impl fmt::Display for FixedProb {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result
     { write!(f, "{:width$.prec$}", self.0, prec = self.1, width = self.1 + 2) }
 }
 
@@ -732,7 +732,7 @@ pub struct ShortExp {
     cutoff_exp: i32,
 }
 impl fmt::Display for ShortExp {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result
     {
         let ShortExp { value, cutoff_exp } = *self;
         assert!(value >= 0.0);
@@ -755,7 +755,7 @@ impl fmt::Display for ShortExp {
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
 pub struct DisplayProb(f64);
 impl fmt::Display for DisplayProb {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let log10_1p = |x: f64| x.ln_1p() / ::std::f64::consts::LN_10;
 
         // NOTE: This used to deliberately reject values precisely equal to zero,
@@ -825,7 +825,7 @@ mod columns {
     /// Values are string-formatted by some mapping function, and optionally colorized
     /// according to the magnitude of their value.
     pub fn quick_column<C, D, F>(
-        painter: &PaintAs<D, C>, header: &str, values: &[C],
+        painter: &dyn PaintAs<D, C>, header: &str, values: &[C],
         width: usize, mut show: F,
     ) -> Columns
     where
@@ -887,7 +887,7 @@ mod columns {
 
     pub fn fixed_prob_column(color: Color, precision: Precision, header: &str, values: &[f64]) -> Columns
     {
-        let painter: Box<PaintAs<_, f64>> = match color {
+        let painter: Box<dyn PaintAs<_, f64>> = match color {
             Color::Colorful  => Box::new(default_prob_color_range()),
             Color::Colorless => Box::new(NullPainter),
         };
@@ -896,7 +896,7 @@ mod columns {
 
     pub fn display_prob_column(color: Color, header: &str, values: &[f64]) -> Columns
     {
-        let painter: Box<PaintAs<_, f64>> = match color {
+        let painter: Box<dyn PaintAs<_, f64>> = match color {
             Color::Colorful  => Box::new(default_prob_color_range()),
             Color::Colorless => Box::new(NullPainter),
         };

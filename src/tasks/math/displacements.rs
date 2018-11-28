@@ -34,7 +34,7 @@ lazy_static! {
 #[allow(unused)] // useful for debugging
 struct FmtDisp(V3<i32>);
 impl ::std::fmt::Display for FmtDisp {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
         let sign = |x: i32| if x < 0 { "-" } else { " " };
         macro_rules! fmt { ($e:expr) => (format_args!("{}{}", sign($e), $e.abs())); }
         let [a, b, c] = *self.0;

@@ -25,7 +25,7 @@ pub trait CliDeserialize: Sized {
     /// Don't use this. Call 'augment_clap_app' instead.
     fn _augment_clap_app<'a, 'b>(app: clap::App<'a, 'b>) -> clap::App<'a, 'b>;
     /// Don't use this. Call 'resolve_args' on the ClapDeserializer instead.
-    fn _resolve_args(matches: &clap::ArgMatches) -> FailResult<Self>;
+    fn _resolve_args(matches: &clap::ArgMatches<'_>) -> FailResult<Self>;
 }
 
 /// Token of "proof" that a clap app was augmented to be capable of deserializing A.
@@ -42,7 +42,7 @@ where A: CliDeserialize,
     /// (that said, implementations of the trait are highly discouraged from doing things
     ///  that would cause the behavior of arg resolution to depend on the order in which
     ///  multiple CliDeserialize instances are handled)
-    pub fn resolve_args(self, matches: &clap::ArgMatches) -> FailResult<A>
+    pub fn resolve_args(self, matches: &clap::ArgMatches<'_>) -> FailResult<A>
     { A::_resolve_args(matches) }
 }
 
@@ -52,7 +52,7 @@ impl CliDeserialize for () {
     fn _augment_clap_app<'a, 'b>(app: clap::App<'a, 'b>) -> clap::App<'a, 'b>
     { app }
 
-    fn _resolve_args(_: &clap::ArgMatches) -> FailResult<Self>
+    fn _resolve_args(_: &clap::ArgMatches<'_>) -> FailResult<Self>
     { Ok(()) }
 }
 
@@ -69,6 +69,6 @@ where
         app
     }
 
-    fn _resolve_args(matches: &clap::ArgMatches) -> FailResult<Self>
+    fn _resolve_args(matches: &clap::ArgMatches<'_>) -> FailResult<Self>
     { Ok((A::_resolve_args(matches)?, B::_resolve_args(matches)?)) }
 }

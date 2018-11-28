@@ -30,7 +30,7 @@ impl AtomicCounter {
 }
 
 impl fmt::Display for AtomicCounter {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         <usize as fmt::Display>::fmt(&self.get(), f)
     }
 }

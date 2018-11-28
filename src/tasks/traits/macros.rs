@@ -87,7 +87,7 @@ macro_rules! impl_dirlike_boilerplate {
             }
 
             /// Box the path, erasing its type.
-            pub fn boxed(self) -> $Type<Box<AsPath>>
+            pub fn boxed(self) -> $Type<Box<dyn AsPath>>
             where P: 'static,
             { self.map_dir(move |d| Box::new(d) as _) }
         }

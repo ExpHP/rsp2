@@ -24,7 +24,7 @@ use slice_of_array::prelude::*;
 
 pub(crate) fn optimize_layer_parameters(
     settings: &cfg::ScaleRanges,
-    pot: &PotentialBuilder,
+    pot: &dyn PotentialBuilder,
     mut coords_builder: ScalableCoords,
     meta: CommonMeta,
 ) -> FailResult<ScalableCoords>
@@ -118,7 +118,7 @@ pub(crate) fn optimize_layer_parameters(
 })}
 
 struct Scalable {
-    setter: Box<Fn(&mut ScalableCoords, f64)>,
+    setter: Box<dyn Fn(&mut ScalableCoords, f64)>,
     name: String,
     spec: cfg::ScalableRange,
 }

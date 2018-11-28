@@ -112,25 +112,25 @@ where
 /// This makes a sendable function that produces a copy of Self
 /// each time it is called.
 pub trait MetaSendable: Sized + Clone {
-    fn sendable<'a>(&'a self) -> Box<Fn() -> Self + Send + Sync + 'a>;
+    fn sendable<'a>(&'a self) -> Box<dyn Fn() -> Self + Send + Sync + 'a>;
 }
 
 impl<T: Clone + Sync> MetaSendable for ::std::rc::Rc<[T]> {
-    fn sendable<'a>(&'a self) -> Box<Fn() -> Self + Send + Sync + 'a> {
+    fn sendable<'a>(&'a self) -> Box<dyn Fn() -> Self + Send + Sync + 'a> {
         let send = &self[..];
         Box::new(move || send.into())
     }
 }
 
 impl MetaSendable for FracBonds {
-    fn sendable<'a>(&'a self) -> Box<Fn() -> Self + Send + Sync + 'a> {
+    fn sendable<'a>(&'a self) -> Box<dyn Fn() -> Self + Send + Sync + 'a> {
         let send = &**self;
         Box::new(move || Rc::new(send.clone()))
     }
 }
 
 impl<V: MetaSendable> MetaSendable for Option<V> {
-    fn sendable<'a>(&'a self) -> Box<Fn() -> Self + Send + Sync + 'a> {
+    fn sendable<'a>(&'a self) -> Box<dyn Fn() -> Self + Send + Sync + 'a> {
         let get = self.as_ref().map(|x| x.sendable());
         Box::new(move || get.as_ref().map(|f| f()))
     }
@@ -141,7 +141,7 @@ where
     A: MetaSendable,
     B: MetaSendable,
 {
-    fn sendable<'a>(&'a self) -> Box<Fn() -> Self + Send + Sync + 'a> {
+    fn sendable<'a>(&'a self) -> Box<dyn Fn() -> Self + Send + Sync + 'a> {
         let get_a = self.head.sendable();
         let get_b = self.tail.sendable();
         Box::new(move || hlist![get_a(), ...get_b()])
@@ -149,7 +149,7 @@ where
 }
 
 impl MetaSendable for ::frunk::HNil {
-    fn sendable<'a>(&'a self) -> Box<Fn() -> Self + Send + Sync + 'a> {
+    fn sendable<'a>(&'a self) -> Box<dyn Fn() -> Self + Send + Sync + 'a> {
         Box::new(|| ::frunk::HNil)
     }
 }

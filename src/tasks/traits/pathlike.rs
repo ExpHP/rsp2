@@ -162,9 +162,9 @@ mod tests {
         // sharable TempDirs
         let x: DirWithBands<TempDir> = (|| panic!())();
         let x = x.map_dir(Arc::new);
-        let _: &(Send + Sync) = &x;
+        let _: &(dyn Send + Sync) = &x;
 
         // erased types, for conditional deletion
-        let _: DirWithBands<Box<AsPath>> = x.map_dir(|e| Box::new(e) as _);
+        let _: DirWithBands<Box<dyn AsPath>> = x.map_dir(|e| Box::new(e) as _);
     }
 }
