@@ -21,9 +21,9 @@
 // (which are decisions that `rsp2_lammps_wrap` has largely chosen to defer)
 
 use super::{DynCloneDetail, PotentialBuilder, DiffFn, DispFn, CommonMeta, helper, BondDiffFn};
-use ::FailResult;
+use crate::FailResult;
 #[allow(unused)] // rustc bug
-use ::meta::{self, prelude::*};
+use crate::meta::{self, prelude::*};
 #[allow(unused)] // rustc bug
 use ::rsp2_soa_ops::{Part, Partition};
 use ::rsp2_structure::{Coords, consts};
@@ -31,7 +31,7 @@ use ::rsp2_structure::layer::Layers;
 use ::rsp2_tasks_config as cfg;
 use ::rsp2_array_types::{V3};
 use ::std::collections::BTreeMap;
-use ::cmd::trial::TrialDir;
+use crate::cmd::trial::TrialDir;
 
 use ::rsp2_lammps_wrap::{InitInfo, AtomType, PairStyle, PairCoeff};
 use ::rsp2_lammps_wrap::Builder as InnerBuilder;
@@ -106,7 +106,7 @@ impl<P: Clone> Builder<P>
         }
 
         #[cfg(feature = "mpi")] {
-            if *threading != cfg::Threading::Lammps && ::env::num_mpi_processes() != 1 {
+            if *threading != cfg::Threading::Lammps && crate::env::num_mpi_processes() != 1 {
                 // We can't fool lammps into thinking it has fewer processes than it actually has.
                 // At least, not without adding support for custom communicators to lammps-wrap.
                 //

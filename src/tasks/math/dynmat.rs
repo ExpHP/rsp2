@@ -9,17 +9,17 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::FailResult;
-use ::meta;
+use crate::FailResult;
+use crate::meta;
 use ::rsp2_array_types::{V3, M33, M3};
 use ::rsp2_soa_ops::{Perm, Permute};
 use ::rsp2_structure::supercell::SupercellToken;
 use ::rsp2_newtype_indices::{Idx, Indexed, index_cast};
 use ::std::collections::BTreeMap;
 use ::slice_of_array::prelude::*;
-use ::math::sparse::{self, RawCoo, RawCsr};
+use crate::math::sparse::{self, RawCoo, RawCsr};
 
-use ::util::ext_traits::OptionExpectNoneExt;
+use crate::util::ext_traits::OptionExpectNoneExt;
 
 // index types for local use, to aid in reasoning
 newtype_index!{DispI}  // index of a displacement

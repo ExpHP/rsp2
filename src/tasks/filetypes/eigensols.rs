@@ -9,10 +9,10 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::FailResult;
-use ::math::basis::{Ket3, Basis3};
+use crate::FailResult;
+use crate::math::basis::{Ket3, Basis3};
 use ::slice_of_array::prelude::*;
-use ::traits::{Load, AsPath, save::Json};
+use crate::traits::{Load, AsPath, save::Json};
 
 // Conversion factor phonopy uses to scale the eigenvalues to THz angular momentum.
 //    = sqrt(eV/amu)/angstrom/(2*pi)/THz

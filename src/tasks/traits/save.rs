@@ -9,9 +9,9 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::FailResult;
-use ::traits::AsPath;
-use ::meta::Element;
+use crate::FailResult;
+use crate::traits::AsPath;
+use crate::meta::Element;
 
 use ::rsp2_structure::Coords;
 use ::rsp2_structure_io::Poscar;

@@ -43,8 +43,8 @@
 //!
 //! So there you have it.
 
-use ::FailResult;
-use ::math::basis::{Basis3};
+use crate::FailResult;
+use crate::math::basis::{Basis3};
 
 #[allow(unused)] // rustc bug
 use ::slice_of_array::prelude::*;
@@ -67,12 +67,12 @@ type Frequency = f64;
 
 mod scripts {
     use super::*;
-    use filetypes::eigensols;
+    use crate::filetypes::eigensols;
 
     #[derive(Serialize)]
     #[serde(rename_all = "kebab-case")]
     pub(super) struct Eigsh {
-        pub(super) matrix: ::math::dynmat::Cereal,
+        pub(super) matrix: crate::math::dynmat::Cereal,
         pub(super) kw: PyKw,
         // permits non-convergence exceptions
         pub(super) allow_fewer_solutions: bool,
@@ -88,7 +88,7 @@ mod scripts {
     #[derive(Serialize)]
     #[serde(rename_all = "kebab-case")]
     pub(super) struct Negative {
-        pub(super) matrix: ::math::dynmat::Cereal,
+        pub(super) matrix: crate::math::dynmat::Cereal,
         pub(super) shift_invert_attempts: u32,
     }
 
@@ -159,7 +159,7 @@ pub struct ScipyAvailabilityError;
 
 //-------------------------------------------------------------------------------
 
-use ::math::dynmat::DynamicalMatrix;
+use crate::math::dynmat::DynamicalMatrix;
 
 impl DynamicalMatrix {
     /// Requesting more than this number of eigensolutions will fail.

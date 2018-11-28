@@ -9,13 +9,13 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::FailResult;
-use ::meta;
-use ::traits::{Save, Load, AsPath};
-use ::hlist_aliases::*;
+use crate::FailResult;
+use crate::meta;
+use crate::traits::{Save, Load, AsPath};
+use crate::hlist_aliases::*;
 use ::rsp2_structure_io::Poscar;
 use ::rsp2_structure::Coords;
-use ::traits::save::Json;
+use crate::traits::save::Json;
 
 use ::path_abs::PathDir;
 

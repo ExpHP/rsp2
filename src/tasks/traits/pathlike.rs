@@ -9,7 +9,7 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::FailResult;
+use crate::FailResult;
 use ::std::path::Path;
 use ::std::io::Result as IoResult;
 use ::std::path::PathBuf;
@@ -143,7 +143,7 @@ impl HasTempDir for TempDir {
 #[deny(unused)]
 mod tests {
     use super::*;
-    use ::phonopy::DirWithBands;
+    use crate::phonopy::DirWithBands;
 
     // check use cases I need to work
     #[test]

@@ -123,7 +123,7 @@ impl TrialDir {
         }
     }
 
-    pub(in ::cmd) fn do_ev_loop_stuff_before_diagonalization(
+    pub(in crate::cmd) fn do_ev_loop_stuff_before_diagonalization(
         &self,
         settings: &Settings,
         pot: &PotentialBuilder,
@@ -156,7 +156,7 @@ impl TrialDir {
         coords
     })}
 
-    pub(in ::cmd) fn do_ev_loop_stuff_after_diagonalization(
+    pub(in crate::cmd) fn do_ev_loop_stuff_after_diagonalization(
         &self,
         settings: &Settings,
         pot: &PotentialBuilder,

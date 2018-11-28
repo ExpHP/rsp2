@@ -12,9 +12,9 @@
 ** parts of it are licensed under more permissive terms.                  **
 ** ********************************************************************** */
 
-use ::FailResult;
+use crate::FailResult;
 use ::std::env;
-use ::util::ext_traits::OptionResultExt;
+use crate::util::ext_traits::OptionResultExt;
 
 fn var(key: &str) -> FailResult<Option<String>>
 { match ::std::env::var(key) {

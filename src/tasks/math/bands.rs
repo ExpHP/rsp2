@@ -13,7 +13,7 @@ use ::rsp2_structure::{CoordsKind, Lattice, Coords};
 use ::rsp2_kets::{Ket, KetRef, Rect};
 use ::rsp2_array_utils::{arr_from_fn};
 use ::rsp2_array_types::{V3, M33, dot, inv};
-use ::threading::Threading;
+use crate::threading::Threading;
 
 use ::rayon::prelude::*;
 use ::std::f64::consts::PI;

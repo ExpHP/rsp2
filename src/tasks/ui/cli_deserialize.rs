@@ -10,7 +10,7 @@
 ** ************************************************************************ */
 
 use ::clap;
-use ::FailResult;
+use crate::FailResult;
 
 /// Trait used to factor out code for adding arguments to a binary and parsing them,
 /// leveraging type inference to help reduce boilerplate.

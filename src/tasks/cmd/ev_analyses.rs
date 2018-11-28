@@ -9,11 +9,11 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::FailResult;
-use ::ui::color::{ColorByRange, PaintAs, NullPainter};
-use ::ui::cfg_merging::{no_summary, merge_summaries, make_nested_mapping};
-use ::math::basis::{Basis3, EvDirections};
-use ::math::bands::{GammaUnfolder};
+use crate::FailResult;
+use crate::ui::color::{ColorByRange, PaintAs, NullPainter};
+use crate::ui::cfg_merging::{no_summary, merge_summaries, make_nested_mapping};
+use crate::math::basis::{Basis3, EvDirections};
+use crate::math::bands::{GammaUnfolder};
 #[allow(unused)] // compiler bug
 use ::itertools::Itertools;
 use ::rsp2_tasks_config::Settings;
@@ -25,7 +25,7 @@ use ::std::fmt;
 use ::serde_yaml::Value as YamlValue;
 #[allow(unused)] // compiler bug
 use ::frunk::hlist::Sculptor;
-use ::threading::Threading;
+use crate::threading::Threading;
 
 use super::acoustic_search;
 
@@ -37,10 +37,10 @@ use super::acoustic_search;
 //       is to prefix the name with each thing they are indexed over (in order)
 // FIXME: Y'know, we DO have `Indexed` now...
 pub use ::rsp2_structure::Coords as SiteCoordinates;
-pub use ::meta::SiteLayers;
-pub use ::meta::SiteElements;
-pub use ::meta::SiteMasses;
-pub use ::meta::LayerScMatrices;
+pub use crate::meta::SiteLayers;
+pub use crate::meta::SiteElements;
+pub use crate::meta::SiteMasses;
+pub use crate::meta::LayerScMatrices;
 #[derive(Debug, Clone)] pub struct EvClassifications(pub Vec<acoustic_search::ModeKind>);
 #[derive(Debug, Clone)] pub struct EvFrequencies(pub Vec<f64>);
 #[derive(Debug, Clone)] pub struct EvEigenvectors(pub Basis3);
@@ -342,7 +342,7 @@ fn _unfold_probs(
     let ev_layer_partial_evs = (ev_eigenvectors.0).0.iter().map(|ket| {
         ket.clone().into_unlabeled_partitions(&part)
     });
-    let layer_partial_evs = ::util::transpose_iter_to_vec(ev_layer_partial_evs);
+    let layer_partial_evs = crate::util::transpose_iter_to_vec(ev_layer_partial_evs);
 
     let (layer_unfolders, layer_ev_q_probs) = {
         zip_eq!(layer_partial_coords, layer_partial_evs, &layer_sc_mats[..])
@@ -369,7 +369,7 @@ fn _unfold_probs(
 }
 
 wrap_maybe_compute! {
-    pub struct EvRamanTensors(pub Vec<::math::bond_polarizability::RamanTensor>);
+    pub struct EvRamanTensors(pub Vec<crate::math::bond_polarizability::RamanTensor>);
     fn ev_raman_tensors(
         bonds: &Bonds,
         site_masses: &SiteMasses,
@@ -387,7 +387,7 @@ fn _ev_raman_tensors(
     ev_frequencies: &EvFrequencies,
     ev_eigenvectors: &EvEigenvectors,
 ) -> FailResult<EvRamanTensors> {
-    use ::math::bond_polarizability::{Input};
+    use crate::math::bond_polarizability::{Input};
 
     Input {
         temperature: 0.0,
@@ -453,7 +453,7 @@ impl GammaSystemAnalysis {
                 header: "(C)".to_string(),
                 entries: data.0.iter().map(|&kind| {
                     match mode {
-                        ColumnsMode::ForHumans => format!("({})", ::cmd::acoustic_search::Colorful(kind)),
+                        ColumnsMode::ForHumans => format!("({})", crate::cmd::acoustic_search::Colorful(kind)),
                         ColumnsMode::ForMachines => format!("({})", kind),
                     }
                 }).collect(),
@@ -504,7 +504,7 @@ impl GammaSystemAnalysis {
                 )
             };
 
-            use ::math::bond_polarizability::LightPolarization::*;
+            use crate::math::bond_polarizability::LightPolarization::*;
             columns.push(raman_column(
                 "RamnA",
                 &tensors.iter().map(|t| t.integrate_intensity(&Average)).collect_vec(),

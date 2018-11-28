@@ -75,7 +75,7 @@ pub(crate) fn index_of_shortest(carts: &[V3], tol: f64) -> Option<usize>
 
 pub(crate) use self::lockfile::{LockfilePath, LockfileGuard};
 mod lockfile {
-    use ::FailResult;
+    use crate::FailResult;
     use ::std::fs::{OpenOptions};
     use ::std::io;
     use ::path_abs::{PathArc, PathFile, FileWrite};

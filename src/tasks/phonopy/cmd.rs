@@ -25,15 +25,15 @@
 //! things was the biggest limitation of the previous API, which never
 //! exposed its own temporary directories.
 
-use ::{FailOk, FailResult};
-use ::{IoResult};
+use crate::{FailOk, FailResult};
+use crate::{IoResult};
 
 use super::{MissingFileError, PhonopyFailed};
 use super::{Conf, DispYaml, SymmetryYaml, QPositions, Args, ForceSets};
-use ::traits::{AsPath, HasTempDir, Save, Load};
-use ::math::basis::Basis3;
-use ::meta::{self, prelude::*};
-use ::hlist_aliases::*;
+use crate::traits::{AsPath, HasTempDir, Save, Load};
+use crate::math::basis::Basis3;
+use crate::meta::{self, prelude::*};
+use crate::hlist_aliases::*;
 
 use ::std::io::prelude::*;
 use ::std::rc::Rc;
@@ -193,7 +193,7 @@ impl Builder {
             {
                 use std::os::unix::fs::OpenOptionsExt;
                 use ::failure::ResultExt;
-                use ::util::ext_traits::PathNiceExt;
+                use crate::util::ext_traits::PathNiceExt;
                 let path = dir.join(FNAME_HELPER_SCRIPT);
                 ::std::fs::OpenOptions::new()
                     .create(true)
@@ -421,7 +421,7 @@ impl<P: AsPath> DirWithDisps<P> {
     /// Gets the spacegroup operators.
     pub fn symmetry(&self) -> FailResult<Vec<CartOp>>
     {
-        use cmd::python::SpgDataset;
+        use crate::cmd::python::SpgDataset;
 
         // phonopy prints symmetry.yaml at too little precision.
         // Use spglib.
@@ -835,7 +835,7 @@ impl<P: AsPath> DirWithBands<P> {
 
     pub fn eigensystem_at(&self, q: V3) -> FailResult<(Vec<f64>, Basis3)>
     {Ok({
-        let index = ::util::index_of_nearest(&self.q_positions()?, q, 1e-4);
+        let index = crate::util::index_of_nearest(&self.q_positions()?, q, 1e-4);
         let index = match index {
             Some(i) => i,
             None => bail!("Bands do not include kpoint:\n  dir: {}\npoint: {:?}",
@@ -857,7 +857,7 @@ impl<P: AsPath> DirWithBands<P> {
 // helpers
 
 fn get_sc_dim(conf: &Conf) -> FailResult<Option<[u32; 3]>> {
-    use ::util::ext_traits::OptionResultExt;
+    use crate::util::ext_traits::OptionResultExt;
     conf.0.get("DIM")
         .map(|s| {
             let words = s.split_whitespace().map(str::parse).collect::<Result<Vec<_>, _>>()?;
@@ -937,8 +937,8 @@ pub(crate) fn log_stdio_and_wait(
         child.stdin.take().unwrap().write_all(text.as_bytes())?;
     }
 
-    let stdout_worker = ::stdout::spawn_log_worker(child.stdout.take().unwrap());
-    let stderr_worker = ::stderr::spawn_log_worker(child.stderr.take().unwrap());
+    let stdout_worker = crate::stdout::spawn_log_worker(child.stdout.take().unwrap());
+    let stderr_worker = crate::stderr::spawn_log_worker(child.stderr.take().unwrap());
 
     check_status(child.wait()?)?;
 

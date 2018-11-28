@@ -9,7 +9,7 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::FailResult;
+use crate::FailResult;
 use ::std::fmt;
 use ::std::time;
 use ::log::{Log, Record};
@@ -65,7 +65,7 @@ mod loggers {
     }
 
     impl DelayedLogFile {
-        pub(in ::ui::logging) fn start(&self, path: PathFile) -> FailResult<()> {
+        pub(in crate::ui::logging) fn start(&self, path: PathFile) -> FailResult<()> {
             if let Ok(mut inner) = self.rw.write() {
                 // This situation should be impossible since SetGlobalLogFile (the only API
                 // visible outside the `ui` module) has methods that take `self`.
@@ -86,7 +86,7 @@ mod loggers {
             Ok(())
         }
 
-        pub(in ::ui::logging) fn disable(&self) {
+        pub(in crate::ui::logging) fn disable(&self) {
             if let Ok(mut inner) = self.rw.write() {
                 // This situation should be impossible since SetGlobalLogFile (the only API
                 // visible outside the `ui` module) has methods that take `self`.
@@ -141,7 +141,7 @@ mod loggers {
 /// "unused variable" lint to help remind you to do this once possible.
 pub fn init_global_logger() -> FailResult<SetGlobalLogfile>
 {
-    let log_mod_setting = ::env::log_mod()?;
+    let log_mod_setting = crate::env::log_mod()?;
 
     let colors = colors::ColoredLevelConfig {
         error: colors::Color::BrightRed,
@@ -173,7 +173,7 @@ pub fn init_global_logger() -> FailResult<SetGlobalLogfile>
             // specific paths under this. (don't set the whole module to `trace`; you will quickly
             // fill your hard drive!)
             .parse("rsp2_tasks::special=info")
-            .parse(&::env::rust_log()?)
+            .parse(&crate::env::rust_log()?)
             .build()
     };
 

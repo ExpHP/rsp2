@@ -12,16 +12,16 @@
 ** parts of it are licensed under more permissive terms.                  **
 ** ********************************************************************** */
 
-use ::FailResult;
-use ::VersionInfo;
-use ::cmd::trial::{TrialDir, NewTrialDirArgs};
-use ::cmd::{StructureFileType, DidEvChasing};
-use ::traits::Load;
-use ::ui::logging::{init_global_logger, SetGlobalLogfile};
-use ::ui::cfg_merging::ConfigSources;
-use ::ui::cli_deserialize::CliDeserialize;
-use ::util::ext_traits::{ArgMatchesExt};
-use ::filetypes::{StoredStructure, Eigensols};
+use crate::FailResult;
+use crate::VersionInfo;
+use crate::cmd::trial::{TrialDir, NewTrialDirArgs};
+use crate::cmd::{StructureFileType, DidEvChasing};
+use crate::traits::Load;
+use crate::ui::logging::{init_global_logger, SetGlobalLogfile};
+use crate::ui::cfg_merging::ConfigSources;
+use crate::ui::cli_deserialize::CliDeserialize;
+use crate::util::ext_traits::{ArgMatchesExt};
+use crate::filetypes::{StoredStructure, Eigensols};
 
 use ::rsp2_lammps_wrap::LammpsOnDemand;
 
@@ -54,7 +54,7 @@ where
 
         result.unwrap_or_else(|e| {
             // HACK
-            if let Some(::cmd::StoppedAfterDynmat) = e.downcast_ref() {
+            if let Some(crate::cmd::StoppedAfterDynmat) = e.downcast_ref() {
                 return;
             }
 
@@ -98,7 +98,7 @@ fn log_thread_info() -> FailResult<()> {
     info!("Available resources for parallelism:");
 
     #[cfg(feature = "mpi")] {
-        info!("    MPI: {} process(es)", ::env::num_mpi_processes());
+        info!("    MPI: {} process(es)", crate::env::num_mpi_processes());
     }
     #[cfg(not(feature = "mpi"))] {
         info!("    MPI: N/A (disabled during compilation)");
@@ -109,13 +109,13 @@ fn log_thread_info() -> FailResult<()> {
     // so OMP info is deliberately vague and currently only here for debugging.
     info!(
         " OpenMP: {} thread(s) per process ({})",
-        ::env::omp_num_threads()?,
-        ::env::OMP_NUM_THREADS,
+        crate::env::omp_num_threads()?,
+        crate::env::OMP_NUM_THREADS,
     );
     info!(
         "       : {} thread(s) in single-process tasks ({})",
-        ::env::max_omp_num_threads()?,
-        ::env::MAX_OMP_NUM_THREADS,
+        crate::env::max_omp_num_threads()?,
+        crate::env::MAX_OMP_NUM_THREADS,
     );
     info!("  rayon: {} thread(s) on the root process", ::rayon::current_num_threads());
     Ok(())
@@ -143,7 +143,7 @@ fn show_errors(e: ::failure::Error) {
 }
 
 fn check_for_deps() -> FailResult<()> {
-    ::cmd::python::check_availability()?;
+    crate::cmd::python::check_availability()?;
 
     if ::std::env::var_os("LAMMPS_POTENTIALS").is_none() {
         bail!("rsp2 requires you to set the LAMMPS_POTENTIALS environment variable.");
@@ -165,7 +165,7 @@ struct ConfigOverrideArgs(Option<ConfigSources>);
 impl CliDeserialize for ConfigArgs {
     fn _augment_clap_app<'a, 'b>(app: clap::App<'a, 'b>) -> clap::App<'a, 'b> {
         app.args(&[
-            arg!(*config [-c][--config]=CONFIG... ::ui::cfg_merging::CONFIG_HELP_STR),
+            arg!(*config [-c][--config]=CONFIG... crate::ui::cfg_merging::CONFIG_HELP_STR),
         ])
     }
 
@@ -176,7 +176,7 @@ impl CliDeserialize for ConfigArgs {
 impl CliDeserialize for ConfigOverrideArgs {
     fn _augment_clap_app<'a, 'b>(app: clap::App<'a, 'b>) -> clap::App<'a, 'b> {
         app.args(&[
-            arg!(?config [-c][--config]=CONFIG... ::ui::cfg_merging::CONFIG_OVERRIDE_HELP_STR),
+            arg!(?config [-c][--config]=CONFIG... crate::ui::cfg_merging::CONFIG_OVERRIDE_HELP_STR),
         ])
     }
 
@@ -397,7 +397,7 @@ pub fn rerun_analysis(bin_name: &str, version: VersionInfo) -> ! {
         let () = de.resolve_args(&matches)?;
 
         let dir = PathDir::new(matches.expect_value_of("dir"))?;
-        let (mut trial, structure) = ::cmd::resolve_trial_or_structure_path(&dir, "final.structure")?;
+        let (mut trial, structure) = crate::cmd::resolve_trial_or_structure_path(&dir, "final.structure")?;
 
         logfile.start(PathFile::new(trial.new_logfile_path()?)?)?;
 
@@ -440,9 +440,9 @@ pub fn sparse_analysis(bin_name: &str, version: VersionInfo) -> ! {
         // reminder: does not fail on existing
         let outdir = PathDir::create(matches.expect_value_of("output"))?;
 
-        let analysis = ::cmd::run_sparse_analysis(structure, &evals, &evecs)?;
+        let analysis = crate::cmd::run_sparse_analysis(structure, &evals, &evecs)?;
 
-        ::cmd::write_ev_analysis_output_files(&outdir, &analysis)?;
+        crate::cmd::write_ev_analysis_output_files(&outdir, &analysis)?;
         Ok(())
     });
 }
@@ -465,7 +465,7 @@ pub fn bond_test(bin_name: &str, version: VersionInfo) -> ! {
         let input = PathAbs::new(matches.expect_value_of("input"))?;
         let filetype = OptionalFileType::or_guess(filetype, &input);
 
-        let (coords, _) = ::cmd::read_optimizable_structure(None, None, filetype, &input)?;
+        let (coords, _) = crate::cmd::read_optimizable_structure(None, None, filetype, &input)?;
         let coords = coords.construct(); // reckless
 
         let bonds = rsp2_structure::bonds::FracBonds::from_brute_force(&coords, 1.8)?;
@@ -494,7 +494,7 @@ pub fn dynmat_test(bin_name: &str, version: VersionInfo) -> ! {
 
         logfile.disable(); // no trial dir
 
-        ::cmd::run_dynmat_test(&input)
+        crate::cmd::run_dynmat_test(&input)
     });
 }
 
@@ -525,7 +525,7 @@ pub fn plot_vdw(bin_name: &str, version: VersionInfo) -> ! {
             r_min * (1.0 - alpha) + r_max * alpha
         }).collect::<Vec<_>>();
 
-        ::cmd::run_plot_vdw(mpi_on_demand, &config.deserialize()?, z, &rs[..])
+        crate::cmd::run_plot_vdw(mpi_on_demand, &config.deserialize()?, z, &rs[..])
     });
 }
 
@@ -550,7 +550,7 @@ pub fn converge_vdw(bin_name: &str, version: VersionInfo) -> ! {
         let r_min: f64 = matches.value_of("r_min").map_or(Ok(z), str::parse)?;
         let r_max: f64 = matches.value_of("r_max").unwrap_or("15.0").parse()?;
 
-        ::cmd::run_converge_vdw(mpi_on_demand, &config.deserialize()?, z, (r_min, r_max))
+        crate::cmd::run_converge_vdw(mpi_on_demand, &config.deserialize()?, z, (r_min, r_max))
     });
 }
 

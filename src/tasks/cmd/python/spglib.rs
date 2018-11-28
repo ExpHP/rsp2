@@ -12,7 +12,7 @@
 //! (spglib may be written in C, but I've had enough FFI.
 //!  We're just going to call a python script.)
 
-use ::FailResult;
+use crate::FailResult;
 use ::rsp2_array_types::{V3, M33};
 use ::rsp2_structure::{Coords, Lattice, IntRot, CartOp};
 

@@ -116,7 +116,7 @@ mod errors {
     pub struct DisplayPathArcNice(pub ::path_abs::PathArc);
     impl fmt::Display for DisplayPathArcNice {
         fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            use ::util::ext_traits::PathNiceExt;
+            use crate::util::ext_traits::PathNiceExt;
             fmt::Display::fmt(&self.0.as_path().nice(), f)
         }
     }
@@ -126,7 +126,7 @@ mod errors {
 /// This module only exists to have its name appear in logs.
 /// It marks a child process's stdout.
 mod stdout {
-    use ::FailResult;
+    use crate::FailResult;
     use ::std::{process::ChildStdout, thread, io::{BufReader, BufRead}};
     use ::log::Level;
 
@@ -141,7 +141,7 @@ mod stdout {
 
     pub fn spawn_log_worker(stdout: ChildStdout) -> thread::JoinHandle<FailResult<()>> {
         let f = BufReader::new(stdout);
-        thread::spawn(move || -> ::FailResult<()> {Ok({
+        thread::spawn(move || -> crate::FailResult<()> {Ok({
             for line in f.lines() {
                 log(&(line?[..]));
             }
@@ -152,7 +152,7 @@ mod stdout {
 /// This module only exists to have its name appear in logs.
 /// It marks a child process's stderr.
 mod stderr {
-    use ::FailResult;
+    use crate::FailResult;
     use ::std::{process::ChildStderr, thread, io::{BufReader, BufRead}};
     use ::log::Level;
 
@@ -166,7 +166,7 @@ mod stderr {
 
     pub fn spawn_log_worker(stderr: ChildStderr) -> thread::JoinHandle<FailResult<()>> {
         let f = BufReader::new(stderr);
-        thread::spawn(move || -> ::FailResult<()> {Ok({
+        thread::spawn(move || -> crate::FailResult<()> {Ok({
             for line in f.lines() {
                 log(&(line?[..]));
             }
@@ -175,8 +175,8 @@ mod stderr {
 }
 
 mod common {
-    use ::FailResult;
-    use ::meta::{Element, Mass};
+    use crate::FailResult;
+    use crate::meta::{Element, Mass};
     use ::rsp2_structure::{consts};
 
     pub fn default_element_mass(elem: Element) -> FailResult<Mass>
@@ -207,8 +207,8 @@ mod hlist_aliases {
 }
 
 pub mod exposed_for_testing {
-    pub use ::math::dynmat::ForceConstants;
-    pub use ::meta;
+    pub use crate::math::dynmat::ForceConstants;
+    pub use crate::meta;
 }
 
 mod threading {

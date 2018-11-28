@@ -9,19 +9,19 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::FailResult;
-use ::potential::{PotentialBuilder};
+use crate::FailResult;
+use crate::potential::{PotentialBuilder};
 
-use ::meta::{self, prelude::*};
+use crate::meta::{self, prelude::*};
 use ::rsp2_tasks_config as cfg;
 
-use ::math::basis::{Basis3, EvDirections};
+use crate::math::basis::{Basis3, EvDirections};
 
 use ::rsp2_slice_math::{v, V, vdot, vnormalize, BadNorm};
 
 use ::slice_of_array::prelude::*;
 use ::rsp2_structure::{Coords};
-use ::hlist_aliases::*;
+use crate::hlist_aliases::*;
 
 use ::std::fmt;
 use ::std::rc::Rc;
@@ -80,7 +80,7 @@ impl fmt::Display for Colorful {
             ModeKind::OtherAcoustic => ::ansi_term::Colour::Green.bold(),
             ModeKind::Vibrational   => ::ansi_term::Colour::White.normal(),
         };
-        write!(f, "{}", ::ui::color::gpaint(color, self.0))
+        write!(f, "{}", crate::ui::color::gpaint(color, self.0))
     }
 }
 

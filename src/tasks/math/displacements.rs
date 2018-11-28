@@ -9,7 +9,7 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::math::stars::Stars;
+use crate::math::stars::Stars;
 
 use ::rsp2_tasks_config as cfg;
 

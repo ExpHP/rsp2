@@ -9,7 +9,7 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::util::VeclikeIterator;
+use crate::util::VeclikeIterator;
 
 use ::rsp2_newtype_indices::{Idx, Indexed, IndexVec};
 use ::rsp2_soa_ops::{Perm};

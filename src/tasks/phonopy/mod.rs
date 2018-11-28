@@ -9,10 +9,10 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::FailResult;
-use ::traits::{Save, Load, AsPath};
-use ::traits::save::Json;
-use ::errors::DisplayPathArcNice;
+use crate::FailResult;
+use crate::traits::{Save, Load, AsPath};
+use crate::traits::save::Json;
+use crate::errors::DisplayPathArcNice;
 
 use ::rsp2_phonopy_io::{symmetry_yaml, disp_yaml, conf, force_sets};
 use ::std::io::BufReader;
@@ -112,7 +112,7 @@ impl Load for Args {
     fn load(path: impl AsPath) -> FailResult<Self>
     {
         use ::path_abs::FileRead;
-        use ::util::ext_traits::PathNiceExt;
+        use crate::util::ext_traits::PathNiceExt;
         let path = path.as_path();
 
         let text = FileRead::read(path)?.read_string()?;

@@ -12,15 +12,15 @@
 ** parts of it are licensed under more permissive terms.                  **
 ** ********************************************************************** */
 
-use ::FailResult;
-use ::hlist_aliases::*;
-use ::meta;
+use crate::FailResult;
+use crate::hlist_aliases::*;
+use crate::meta;
 use ::rsp2_structure::{Coords};
 use ::rsp2_tasks_config as cfg;
 use ::rsp2_array_types::{V3, Unvee};
 use ::slice_of_array::prelude::*;
 use ::std::collections::BTreeMap;
-use ::cmd::trial::TrialDir;
+use crate::cmd::trial::TrialDir;
 use ::rsp2_lammps_wrap::LammpsOnDemand;
 
 /// Metadata type shared by all potentials usable in the main code.

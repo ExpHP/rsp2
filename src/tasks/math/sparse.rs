@@ -21,7 +21,7 @@
 //! chosen generic bounds). That's why they don't provide very many mathematical
 //! operations.
 
-use ::FailResult;
+use crate::FailResult;
 use ::std::collections::BTreeMap;
 use ::std::ops::{Range, Add, AddAssign};
 use ::num_traits::Zero;

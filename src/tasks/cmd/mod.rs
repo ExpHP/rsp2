@@ -24,7 +24,7 @@ mod ev_analyses;
 use self::trial::TrialDir;
 pub(crate) mod trial;
 
-pub(crate) use ::filetypes::stored_structure::StoredStructure;
+pub(crate) use crate::filetypes::stored_structure::StoredStructure;
 
 use self::relaxation::EvLoopDiagonalizer;
 pub(crate) use self::relaxation::DidEvChasing;
@@ -34,15 +34,15 @@ mod param_optimization;
 
 pub(crate) mod python;
 
-use ::{FailResult, FailOk};
+use crate::{FailResult, FailOk};
 use ::rsp2_tasks_config::{self as cfg, Settings, NormalizationMode, SupercellSpec};
-use ::traits::{AsPath, Load, Save};
-use ::phonopy::{DirWithBands, DirWithDisps, DirWithForces};
+use crate::traits::{AsPath, Load, Save};
+use crate::phonopy::{DirWithBands, DirWithDisps, DirWithForces};
 use ::rsp2_lammps_wrap::LammpsOnDemand;
 
-use ::meta::{self, prelude::*};
-use ::util::ext_traits::{OptionResultExt, PathNiceExt};
-use ::math::{
+use crate::meta::{self, prelude::*};
+use crate::util::ext_traits::{OptionResultExt, PathNiceExt};
+use crate::math::{
     basis::{Basis3},
     bands::{ScMatrix},
     dynmat::{ForceConstants},
@@ -61,7 +61,7 @@ use ::rsp2_structure::{
     layer::LayersPerUnitCell,
     bonds::FracBonds,
 };
-use ::phonopy::Builder as PhonopyBuilder;
+use crate::phonopy::Builder as PhonopyBuilder;
 
 use ::rsp2_fs_util::{rm_rf, hard_link};
 
@@ -75,10 +75,10 @@ use ::std::{
 };
 
 use ::itertools::Itertools;
-use ::hlist_aliases::*;
-use ::potential::{PotentialBuilder, DiffFn, CommonMeta};
-use ::traits::save::Json;
-use ::threading::Threading;
+use crate::hlist_aliases::*;
+use crate::potential::{PotentialBuilder, DiffFn, CommonMeta};
+use crate::traits::save::Json;
+use crate::threading::Threading;
 
 const SAVE_BANDS_DIR: &'static str = "gamma-bands";
 
@@ -133,7 +133,7 @@ impl TrialDir {
         let original_coords = {
             // (can't reliably get bonds until the lattice parameter is correct)
             let meta = meta.clone().prepend(None::<meta::FracBonds>);
-            ::cmd::param_optimization::optimize_layer_parameters(
+            crate::cmd::param_optimization::optimize_layer_parameters(
                 &settings.scale_ranges,
                 &pot,
                 optimizable_coords,
@@ -238,7 +238,7 @@ pub(crate) fn write_ev_analysis_output_files(
             average_3d: Vec<f64>,
             backscatter: Vec<f64>,
         }
-        use ::math::bond_polarizability::LightPolarization::*;
+        use crate::math::bond_polarizability::LightPolarization::*;
         ::serde_json::to_writer(FileWrite::create(dir.join("raman.json"))?, &Output {
             frequency: frequency.0.to_vec(),
             average_3d: raman.0.iter().map(|t| t.integrate_intensity(&Average)).collect(),
@@ -455,7 +455,7 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
                 let phonopy = phonopy_builder_from_settings(&settings.phonons, prim_coords.lattice());
                 let disp_dir = phonopy.displacements(prim_coords, prim_meta.sift())?;
 
-                let ::phonopy::Rsp2StyleDisplacements {
+                let crate::phonopy::Rsp2StyleDisplacements {
                     super_coords, sc, prim_displacements, ..
                 } = disp_dir.rsp2_style_displacements()?;
 
@@ -480,9 +480,9 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
 
                 trace!("Computing deperms in primitive cell");
                 let prim_deperms = compute_deperms(&prim_coords, &cart_ops)?;
-                let prim_stars = ::math::stars::compute_stars(&prim_deperms);
+                let prim_stars = crate::math::stars::compute_stars(&prim_deperms);
 
-                let prim_displacements = ::math::displacements::compute_displacements(
+                let prim_displacements = crate::math::displacements::compute_displacements(
                     directions,
                     cart_ops.iter().map(|c| {
                         c.int_rot(prim_coords.lattice()).expect("bad operator from spglib!?")
@@ -554,7 +554,7 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
         }
 
         trace!("Computing sparse force constants");
-        let force_constants = ::math::dynmat::ForceConstants::compute_required_rows(
+        let force_constants = crate::math::dynmat::ForceConstants::compute_required_rows(
             &super_displacements,
             &force_sets,
             &cart_rots,
@@ -577,10 +577,10 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
             // we can't write NPZ easily from rust, so write JSON and convert via python
             Json(dynmat.cereal()).save(_trial.uncompressed_gamma_dynmat_path(iteration))?;
 
-            ::cmd::python::convert::dynmat(
+            crate::cmd::python::convert::dynmat(
                 _trial.uncompressed_gamma_dynmat_path(iteration),
                 _trial.gamma_dynmat_path(iteration),
-                ::cmd::python::convert::Mode::Delete,
+                crate::cmd::python::convert::Mode::Delete,
             )?;
         }
         // EVEN NASTIER HACK
@@ -646,7 +646,7 @@ fn visualize_sparse_force_sets(
     }
     let subdir = PathDir::create(subdir)?;
 
-    let super_stars = ::math::stars::compute_stars(super_deperms);
+    let super_stars = crate::math::stars::compute_stars(super_deperms);
 
     for (disp_i, (&(displaced, _), map)) in zip_eq!(super_disps, force_sets).enumerate() {
         let disp_dir = PathDir::create(subdir.join(format!("{:04}", disp_i)))?;
@@ -753,7 +753,7 @@ impl TrialDir {
         pot: &PotentialBuilder,
         ev_analysis: &GammaSystemAnalysis,
     ) -> FailResult<()> {Ok({
-        use ::ui::cfg_merging::{make_nested_mapping, no_summary, merge_summaries};
+        use crate::ui::cfg_merging::{make_nested_mapping, no_summary, merge_summaries};
 
         #[derive(Serialize)]
         struct EnergyPerAtom {
@@ -816,7 +816,7 @@ fn do_force_sets_at_disps_for_phonopy<P: AsPath + Send + Sync>(
 
     trace!("Computing forces at displacements");
 
-    let counter = ::util::AtomicCounter::new();
+    let counter = crate::util::AtomicCounter::new();
     let num_displacements = disp_dir.displacements().len();
     let (initial_coords, meta) = disp_dir.superstructure();
 
@@ -930,7 +930,7 @@ impl TrialDir {
             Ok(dir) => dir.boxed(),
             Err(e) => {
                 // try computing gamma bands from a force dir
-                use ::phonopy::MissingFileError;
+                use crate::phonopy::MissingFileError;
 
                 // bail out on anything other than MissingFileError
                 // (this check is awkwardly written; I couldn't see a better way
@@ -983,7 +983,7 @@ impl TrialDir {
         let [ymin, ymax] = settings.ylim;
         let [w, h] = settings.dim;
         let data = {
-            ::cmd::integrate_2d::integrate_two_eigenvectors(
+            crate::cmd::integrate_2d::integrate_two_eigenvectors(
                 (w, h),
                 &coords.to_carts(),
                 (xmin..xmax, ymin..ymax),
@@ -1243,7 +1243,7 @@ pub(crate) fn run_plot_vdw(
         Coords::new(lattice.clone(), CoordsKind::Carts(vec![V3::zero(), pos]))
     };
 
-    let masses: meta::SiteMasses = vec![::common::default_element_mass(CARBON).unwrap(); 2].into();
+    let masses: meta::SiteMasses = vec![crate::common::default_element_mass(CARBON).unwrap(); 2].into();
     let elements: meta::SiteElements = vec![CARBON; 2].into();
     let bonds = None::<meta::FracBonds>;
     let meta = hlist![masses, elements, bonds];
@@ -1288,7 +1288,7 @@ pub(crate) fn run_converge_vdw(
         Coords::new(lattice.clone(), CoordsKind::Carts(vec![V3::zero(), pos]))
     };
 
-    let masses: meta::SiteMasses = vec![::common::default_element_mass(CARBON).unwrap(); 2].into();
+    let masses: meta::SiteMasses = vec![crate::common::default_element_mass(CARBON).unwrap(); 2].into();
     let elements: meta::SiteElements = vec![CARBON; 2].into();
     let bonds = None::<meta::FracBonds>;
     let meta = hlist![masses, elements, bonds];
@@ -1307,7 +1307,7 @@ pub(crate) fn run_converge_vdw(
     println!("# Density Work DValue");
     for density in work::RefinementMode::Double.densities().take(20) {
         let work = work::compute_work_along_path(
-            ::potential::Rsp2MinimizeDiffFnShim {
+            crate::potential::Rsp2MinimizeDiffFnShim {
                 ndim: 6,
                 diff_fn: pot.initialize_flat_diff_fn(&get_coords(r_min), meta.sift())?,
             },
@@ -1325,7 +1325,7 @@ pub(crate) fn run_dynmat_test(phonopy_dir: &PathDir) -> FailResult<()>
     // Make a supercell, and determine how our ordering of the supercell differs from phonopy.
     let forces_dir = DirWithForces::from_existing(phonopy_dir)?;
     let disp_dir = DirWithDisps::from_existing(phonopy_dir)?;
-    let ::phonopy::Rsp2StyleDisplacements {
+    let crate::phonopy::Rsp2StyleDisplacements {
         super_coords, sc, perm_from_phonopy, ..
     } = disp_dir.rsp2_style_displacements()?;
 
@@ -1342,7 +1342,7 @@ pub(crate) fn run_dynmat_test(phonopy_dir: &PathDir) -> FailResult<()>
     };
 
     let (force_sets, super_displacements): (Vec<_>, Vec<_>) = {
-        let ::phonopy::ForceSets {
+        let crate::phonopy::ForceSets {
             force_sets: phonopy_force_sets,
             displacements: phonopy_super_displacements,
         } = forces_dir.force_sets()?;
@@ -1364,7 +1364,7 @@ pub(crate) fn run_dynmat_test(phonopy_dir: &PathDir) -> FailResult<()>
     };
 
     trace!("Computing designated rows of force constants...");
-    let force_constants = ::math::dynmat::ForceConstants::compute_required_rows(
+    let force_constants = crate::math::dynmat::ForceConstants::compute_required_rows(
         &super_displacements,
         &force_sets,
         &cart_rots,
@@ -1445,7 +1445,7 @@ impl TrialDir {
     /// Used to figure out which iteration we're on when starting from the
     /// post-diagonalization part of the EV loop for sparse.
     pub(crate) fn find_iteration_for_ev_chase(&self) -> FailResult<Iteration> {
-        use ::cmd::EvLoopStructureKind::*;
+        use crate::cmd::EvLoopStructureKind::*;
 
         for iteration in (1..).map(Iteration) {
             let pre_chase = self.structure_path(PreEvChase(iteration));
@@ -1473,8 +1473,8 @@ impl TrialDir {
         settings: &Settings,
         iteration: Iteration,
     ) -> FailResult<DidEvChasing> {
-        use ::cmd::EvLoopStructureKind::*;
-        use ::filetypes::Eigensols;
+        use crate::cmd::EvLoopStructureKind::*;
+        use crate::filetypes::Eigensols;
 
         let pot = PotentialBuilder::from_root_config(&self, on_demand, &settings);
 
@@ -1538,7 +1538,7 @@ pub(crate) fn read_optimizable_structure(
         Option<meta::LayerScMatrices>,
     >
 )> {
-    use ::meta::Layer;
+    use crate::meta::Layer;
 
     let input = input.as_path();
 
@@ -1655,7 +1655,7 @@ fn masses_by_config(
     elements: meta::SiteElements,
 ) -> FailResult<meta::SiteMasses>
 {Ok({
-    use ::meta::Mass;
+    use crate::meta::Mass;
 
     elements.iter().cloned()
         .map(|element| match cfg_masses {
@@ -1667,7 +1667,7 @@ fn masses_by_config(
                         format_err!("No mass in config for element {}", element.symbol())
                     })
             },
-            None => ::common::default_element_mass(element),
+            None => crate::common::default_element_mass(element),
         })
         .collect::<Result<Vec<_>, _>>()?.into()
 })}

@@ -15,7 +15,7 @@ mod spglib;
 pub mod convert;
 
 //---------------------------------------------------------
-use ::{FailResult, FailOk};
+use crate::{FailResult, FailOk};
 use ::std::process;
 use ::std::io::prelude::*;
 use ::std::path::{Path, PathBuf};
@@ -63,8 +63,8 @@ fn call_script_and_check_success<E: ::failure::Fail>(
     let child_stdout = child.stdout.take().unwrap();
     let child_stderr = child.stderr.take().unwrap();
 
-    let stdout_worker = ::stdout::spawn_log_worker(child_stdout);
-    let stderr_worker = ::stderr::spawn_log_worker(child_stderr);
+    let stdout_worker = crate::stdout::spawn_log_worker(child_stdout);
+    let stderr_worker = crate::stderr::spawn_log_worker(child_stderr);
 
     if !child.wait()?.success() {
         throw!(error);
@@ -108,14 +108,14 @@ where
         // FIXME HACK:
         // It'd be a PITA to propagate down threading configuration, but for now, I know
         // that rsp2 never runs more than one python script at at time.
-        cmd.env("OMP_NUM_THREADS", ::env::max_omp_num_threads()?.to_string());
+        cmd.env("OMP_NUM_THREADS", crate::env::max_omp_num_threads()?.to_string());
 
         let mut child = cmd.spawn()?;
         let child_stdin = child.stdin.take().unwrap();
         let child_stderr = child.stderr.take().unwrap();
         let mut child_stdout = child.stdout.take().unwrap();
 
-        let stderr_worker = ::stderr::spawn_log_worker(child_stderr);
+        let stderr_worker = crate::stderr::spawn_log_worker(child_stderr);
 
         ::serde_json::to_writer(child_stdin, &stdin_data)?;
 
@@ -129,7 +129,7 @@ where
         let value = ::serde_json::from_str(&stdout[..])?;
 
         if !child.wait()?.success() {
-            let extra = match ::stderr::is_log_enabled() {
+            let extra = match crate::stderr::is_log_enabled() {
                 true => "check the log for a python backtrace",
                 false => "that's all we now",
             };

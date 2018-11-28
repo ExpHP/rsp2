@@ -187,14 +187,14 @@ impl_dyn_clone_detail!{
 #[deny(unused)]
 mod tests {
     use super::*;
-    use ::FailOk;
+    use crate::FailOk;
     use ::rsp2_structure::{Lattice, CoordsKind};
     use ::rsp2_array_types::{Envee, Unvee};
     use ::slice_of_array::prelude::*;
 
     #[test]
     fn converge_towards() {
-        ::ui::logging::init_test_logger();
+        crate::ui::logging::init_test_logger();
 
         let lattice = Lattice::from(&[
             // chosen arbitrarily

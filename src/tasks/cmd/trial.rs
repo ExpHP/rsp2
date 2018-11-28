@@ -9,13 +9,13 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use ::FailResult;
+use crate::FailResult;
 
-use ::traits::{Save, AsPath};
-use ::traits::save::{Json, Yaml};
-use ::util::{LockfilePath, LockfileGuard};
-use ::util::ext_traits::PathNiceExt;
-use ::ui::cfg_merging::ConfigSources;
+use crate::traits::{Save, AsPath};
+use crate::traits::save::{Json, Yaml};
+use crate::util::{LockfilePath, LockfileGuard};
+use crate::util::ext_traits::PathNiceExt;
+use crate::ui::cfg_merging::ConfigSources;
 
 use ::std::path::{Path};
 use ::path_abs::{PathArc, PathDir, PathFile, FileRead, FileWrite};
