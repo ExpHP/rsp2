@@ -803,11 +803,9 @@ impl<P: Potential> Lammps<P> {
                 let old_user_carts = old_user_coords.as_carts_cached().expect("(BUG)");
                 let mut lmp_carts = self.read_raw_lmp_carts()?;
 
-                { // scope mut borrow.  NLL, come save us!
-                    let iter = old_user_carts.iter().zip(new_user_carts).zip(&mut lmp_carts);
-                    for ((old_user, new_user), lmp) in iter {
-                        *lmp += new_user - old_user;
-                    }
+                let iter = old_user_carts.iter().zip(new_user_carts).zip(&mut lmp_carts);
+                for ((old_user, new_user), lmp) in iter {
+                    *lmp += new_user - old_user;
                 }
                 lmp_carts
             }

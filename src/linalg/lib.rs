@@ -13,6 +13,7 @@
 
 #[macro_use] extern crate failure;
 #[macro_use] extern crate ndarray;
+extern crate lapack_src;
 
 use failure::{Error};
 use ndarray::{Array, Array2, ArrayView2, ArrayBase, Ix2, Axis};

@@ -35,6 +35,7 @@
 #[macro_use] extern crate log;
 #[macro_use] extern crate itertools;
 #[macro_use] extern crate failure;
+extern crate lapacke;
 
 macro_rules! ichain {
     ($e:expr,) => { $e.into_iter() };

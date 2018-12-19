@@ -385,48 +385,46 @@ impl RelaxationOptimizationHelper {
     /// given gradients with respect to the cartesian bond vectors.
     pub fn flatten_grad(&self, flat: &[f64], bond_grads: &[BondGrad]) -> Vec<f64> {
         let mut out = vec![0.0; flat.len()];
-        { // FIXME: Block will be unnecessary once NLL lands
-            let (_, params) = self.split(flat);
-            let (d_site_frac, d_param) = self.split_mut(&mut out);
+        let (_, params) = self.split(flat);
+        let (d_site_frac, d_param) = self.split_mut(&mut out);
 
-            let ref lattice = self.lattice_with_params(params);
-            let ref recip_normalized_lattice = self.normalized_lattice.reciprocal();
-            let diag = V3::from_fn(|axis| self.axis_param[axis].map_or(1.0, |param| params[param]));
+        let ref lattice = self.lattice_with_params(params);
+        let ref recip_normalized_lattice = self.normalized_lattice.reciprocal();
+        let diag = V3::from_fn(|axis| self.axis_param[axis].map_or(1.0, |param| params[param]));
 
-            for item in bond_grads {
-                // We have a term of the potential that can be expressed as V(cart), where
-                //
-                // cart =     frac    * lattice
-                //      = frac * diag * normalized_lattice
-                //      =    scaled   * normalized_lattice
-                //
-                // cart is the cartesian vector of a bond.
-                // frac is the vector in fractional coordinates.
-                // diag is a diagonal 3x3 matrix formed from the lattice params.
-                //
-                // and we want to reformulate it as V(frac, params)
+        for item in bond_grads {
+            // We have a term of the potential that can be expressed as V(cart), where
+            //
+            // cart =     frac    * lattice
+            //      = frac * diag * normalized_lattice
+            //      =    scaled   * normalized_lattice
+            //
+            // cart is the cartesian vector of a bond.
+            // frac is the vector in fractional coordinates.
+            // diag is a diagonal 3x3 matrix formed from the lattice params.
+            //
+            // and we want to reformulate it as V(frac, params)
 
-                // using the notation from rsp2-potentials (each row in a_J_b is a gradient of
-                // an element of a with respect to b, so that products compose sensibly)
-                let cart = item.cart_vector;
-                let frac = cart / lattice;
-                let term_d_cart = item.grad;
+            // using the notation from rsp2-potentials (each row in a_J_b is a gradient of
+            // an element of a with respect to b, so that products compose sensibly)
+            let cart = item.cart_vector;
+            let frac = cart / lattice;
+            let term_d_cart = item.grad;
 
-                // gradients transform by the reciprocal lattice
-                let term_d_scaled = term_d_cart / recip_normalized_lattice;
+            // gradients transform by the reciprocal lattice
+            let term_d_scaled = term_d_cart / recip_normalized_lattice;
 
-                // scaled_J_frac = diag.t()
-                let term_d_frac = term_d_scaled.mul_diag(&diag);
+            // scaled_J_frac = diag.t()
+            let term_d_frac = term_d_scaled.mul_diag(&diag);
 
-                // frac = fracs[plus_site] - fracs[minus_site]
-                d_site_frac[item.plus_site] += term_d_frac;
-                d_site_frac[item.minus_site] -= term_d_frac;
+            // frac = fracs[plus_site] - fracs[minus_site]
+            d_site_frac[item.plus_site] += term_d_frac;
+            d_site_frac[item.minus_site] -= term_d_frac;
 
-                // scaled_J_param = frac * (a diagonal matrix of 1s and 0s for each param)
-                for axis in 0..3 {
-                    if let Some(param) = self.axis_param[axis] {
-                        d_param[param] += term_d_scaled[axis] * frac[axis];
-                    }
+            // scaled_J_param = frac * (a diagonal matrix of 1s and 0s for each param)
+            for axis in 0..3 {
+                if let Some(param) = self.axis_param[axis] {
+                    d_param[param] += term_d_scaled[axis] * frac[axis];
                 }
             }
         }

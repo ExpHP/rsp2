@@ -198,13 +198,11 @@ where
     pub fn eco_mode<B>(&self, cont: impl FnOnce() -> B) -> B {
         let mut cont = Some(cont);
         let mut out = None;
-        { // NLL please save us ;_;
-            let mut cont_as_fn_mut = || {
-                let cont = cont.take().expect("(BUG!) _eco_mode called continuation twice!");
-                out = Some(cont());
-            };
-            self._eco_mode(&mut cont_as_fn_mut);
-        }
+        let mut cont_as_fn_mut = || {
+            let cont = cont.take().expect("(BUG!) _eco_mode called continuation twice!");
+            out = Some(cont());
+        };
+        self._eco_mode(&mut cont_as_fn_mut);
 
         out.expect("(BUG!) _eco_mode failed to call continuation!")
     }

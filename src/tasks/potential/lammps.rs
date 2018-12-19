@@ -274,22 +274,18 @@ mod overlay {
         /// For that, see `set_none`.
         pub fn push(&mut self, new_item: Item) -> &mut Self
         {
-            { // scope &. NLL, come save us!!
-                let name = new_item.pair_style.name();
-                assert_ne!(name, "none", "attempted to push() pair_style none");
-                assert_ne!(name, "hybrid", "attempted to nest hybrid potentials");
-                assert_ne!(name, "hybrid/overlay", "attempted to nest hybrid potentials");
-            }
+            let name = new_item.pair_style.name();
+            assert_ne!(name, "none", "attempted to push() pair_style none");
+            assert_ne!(name, "hybrid", "attempted to nest hybrid potentials");
+            assert_ne!(name, "hybrid/overlay", "attempted to nest hybrid potentials");
 
-            { // scope &mut. NLL, please visit soon!!
-                // If there are any duplicates at all of a style, its first occurrence should have
-                // index 1.
-                let mut iter = zip_eq!(&mut self.items, &mut self.indices);
-                if let Some((_, index)) = iter.find(|(x, _)| x.is_same_style(&new_item)) {
-                    debug_assert!(*index == None || *index == Some(1));
-                    *index = Some(1);
-                };
-            }
+            // If there are any duplicates at all of a style, its first occurrence should have
+            // index 1.
+            let mut iter = zip_eq!(&mut self.items, &mut self.indices);
+            if let Some((_, index)) = iter.find(|(x, _)| x.is_same_style(&new_item)) {
+                debug_assert!(*index == None || *index == Some(1));
+                *index = Some(1);
+            };
 
             let new_index = {
                 zip_eq!(&self.items, &self.indices)

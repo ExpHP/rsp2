@@ -984,14 +984,12 @@ pub mod tricubic {
         }
 
         pub fn map_all_floats(mut self, mut f: impl FnMut(f64) -> f64) -> Self {
-            { // FIXME: block will be unnecessary once NLL lands
-                let Input { value, di, dj, dk } = &mut self;
-                for &mut &mut ref mut array in &mut[value, di, dj, dk] {
-                    for plane in array {
-                        for row in plane {
-                            for x in row {
-                                *x = f(*x);
-                            }
+            let Input { value, di, dj, dk } = &mut self;
+            for &mut &mut ref mut array in &mut[value, di, dj, dk] {
+                for plane in array {
+                    for row in plane {
+                        for x in row {
+                            *x = f(*x);
                         }
                     }
                 }
@@ -1065,19 +1063,17 @@ pub mod tricubic {
         // useful for tests
         #[cfg(test)]
         pub(super) fn ensure_clipping_is_valid(mut self) -> Self {
-            { // FIXME block is unnecessary once NLL lands
-                let Input { value: _, di, dj, dk } = &mut self;
-                fn zero<'a>(xs: impl IntoIterator<Item=&'a mut f64>) {
-                    for x in xs { *x = 0.0; }
-                }
-
-                zero(di[0].flat_mut());
-                zero(di.last_mut().unwrap().flat_mut());
-                zero(dj.iter_mut().flat_map(|plane| &mut plane[0]));
-                zero(dj.iter_mut().flat_map(|plane| plane.last_mut().unwrap()));
-                zero(dk.iter_mut().flat_map(|plane| plane.iter_mut().map(|row| &mut row[0])));
-                zero(dk.iter_mut().flat_map(|plane| plane.iter_mut().map(|row| row.last_mut().unwrap())));
+            let Input { value: _, di, dj, dk } = &mut self;
+            fn zero<'a>(xs: impl IntoIterator<Item=&'a mut f64>) {
+                for x in xs { *x = 0.0; }
             }
+
+            zero(di[0].flat_mut());
+            zero(di.last_mut().unwrap().flat_mut());
+            zero(dj.iter_mut().flat_map(|plane| &mut plane[0]));
+            zero(dj.iter_mut().flat_map(|plane| plane.last_mut().unwrap()));
+            zero(dk.iter_mut().flat_map(|plane| plane.iter_mut().map(|row| &mut row[0])));
+            zero(dk.iter_mut().flat_map(|plane| plane.iter_mut().map(|row| row.last_mut().unwrap())));
             self
         }
     }
@@ -1252,17 +1248,15 @@ pub mod bicubic {
         // useful for tests
         #[cfg(test)]
         pub(super) fn ensure_clipping_is_valid(mut self) -> Self {
-            { // FIXME block is unnecessary once NLL lands
-                let Input { value: _, di, dj } = &mut self;
-                fn zero<'a>(xs: impl IntoIterator<Item=&'a mut f64>) {
-                    for x in xs { *x = 0.0; }
-                }
-
-                zero(&mut di[0]);
-                zero(di.last_mut().unwrap());
-                zero(dj.iter_mut().map(|row| &mut row[0]));
-                zero(dj.iter_mut().map(|row| row.last_mut().unwrap()));
+            let Input { value: _, di, dj } = &mut self;
+            fn zero<'a>(xs: impl IntoIterator<Item=&'a mut f64>) {
+                for x in xs { *x = 0.0; }
             }
+
+            zero(&mut di[0]);
+            zero(di.last_mut().unwrap());
+            zero(dj.iter_mut().map(|row| &mut row[0]));
+            zero(dj.iter_mut().map(|row| row.last_mut().unwrap()));
             self
         }
     }

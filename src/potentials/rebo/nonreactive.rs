@@ -451,41 +451,39 @@ mod interactions {
 
             // Get the index of each bond's reverse.
             let mut bond_reverse_index = IndexVec::<BondI, _>::new();
-            { // FIXME block no longer necessary once NLL lands
 
-                // We can no longer use bond_graph.frac_bonds_from because not all bonds in the input
-                // graph are represented in our vectors.
-                let frac_bonds_from = |site_i: SiteI| {
-                    let range = bond_div[site_i].0..bond_div[site_i.next()].0;
-                    zip_eq!(
-                        &bond_source.raw[range.clone()],
-                        &bond_target.raw[range.clone()],
-                        &bond_image_diff.raw[range.clone()],
-                    ).map(|(&SiteI(from), &SiteI(to), &image_diff)| FracBond { from, to, image_diff })
-                };
+            // We can no longer use bond_graph.frac_bonds_from because not all bonds in the input
+            // graph are represented in our vectors.
+            let frac_bonds_from = |site_i: SiteI| {
+                let range = bond_div[site_i].0..bond_div[site_i.next()].0;
+                zip_eq!(
+                    &bond_source.raw[range.clone()],
+                    &bond_target.raw[range.clone()],
+                    &bond_image_diff.raw[range.clone()],
+                ).map(|(&SiteI(from), &SiteI(to), &image_diff)| FracBond { from, to, image_diff })
+            };
 
-                for node in bond_graph.node_indices() {
-                    let site_i = SiteI(node.index());
+            for node in bond_graph.node_indices() {
+                let site_i = SiteI(node.index());
 
-                    for frac_bond_ij in frac_bonds_from(site_i) {
-                        let site_j = SiteI(frac_bond_ij.to);
-                        let sbindex_ji = {
-                            frac_bonds_from(site_j)
-                                .position(|bond| frac_bond_ij == bond.flip())
-                        };
-                        let sbindex_ji = match sbindex_ji {
-                            Some(x) => x,
-                            None => bail!("A bond has no counterpart in the reverse direction!"),
-                        };
-                        let bond_ji = BondI(bond_div[site_j].0 + sbindex_ji);
-                        bond_reverse_index.push(bond_ji);
+                for frac_bond_ij in frac_bonds_from(site_i) {
+                    let site_j = SiteI(frac_bond_ij.to);
+                    let sbindex_ji = {
+                        frac_bonds_from(site_j)
+                            .position(|bond| frac_bond_ij == bond.flip())
+                    };
+                    let sbindex_ji = match sbindex_ji {
+                        Some(x) => x,
+                        None => bail!("A bond has no counterpart in the reverse direction!"),
+                    };
+                    let bond_ji = BondI(bond_div[site_j].0 + sbindex_ji);
+                    bond_reverse_index.push(bond_ji);
 
-                        if (site_type[site_i], site_type[site_j]) == (AtomType::Hydrogen, AtomType::Hydrogen) {
-                            println!("HH bond: {} {}", site_i, site_j);
-                        }
-                    } // for bond_ij
-                } // for node
-            }
+                    if (site_type[site_i], site_type[site_j]) == (AtomType::Hydrogen, AtomType::Hydrogen) {
+                        println!("HH bond: {} {}", site_i, site_j);
+                    }
+                } // for bond_ij
+            } // for node
 
             assert_eq!(bond_reverse_index.len(), bond_div.raw.last().unwrap().0);
             Ok(Interactions {
@@ -1202,25 +1200,23 @@ mod site_sigma_pi_term {
         pub fn compute_paranoid(self, dbg: Debug, tol: f64) -> Output {
 
             let output = self.clone().compute(dbg);
-            { // FIXME block unnecessary after NLL lands
-                let Output { value, ref d_deltas, ref d_VAs } = output;
+            let Output { value, ref d_deltas, ref d_VAs } = output;
 
-                assert_close!(
-                    rel=tol, abs=tol,
-                    d_deltas.flat(),
-                    &numerical::gradient(1e-4, None, self.bond_deltas.flat(), |x| {
-                        Input { bond_deltas: x.nest(), ..self }.compute(Debug::Never).value
-                    })[..],
-                );
+            assert_close!(
+                rel=tol, abs=tol,
+                d_deltas.flat(),
+                &numerical::gradient(1e-4, None, self.bond_deltas.flat(), |x| {
+                    Input { bond_deltas: x.nest(), ..self }.compute(Debug::Never).value
+                })[..],
+            );
 
-                assert_close!(
-                    rel=tol, abs=tol,
-                    &d_VAs[..],
-                    &numerical::gradient(1e-3, None, self.bond_VAs, |x| {
-                        Input { bond_VAs: x, ..self }.compute(Debug::Never).value
-                    })[..],
-                );
-            }
+            assert_close!(
+                rel=tol, abs=tol,
+                &d_VAs[..],
+                &numerical::gradient(1e-3, None, self.bond_VAs, |x| {
+                    Input { bond_VAs: x, ..self }.compute(Debug::Never).value
+                })[..],
+            );
             output
         }
     }
@@ -1342,37 +1338,35 @@ mod bondorder_sigma_pi {
         #[allow(unused)]
         pub(super) fn compute_paranoid(self, dbg: Debug, tol: f64) -> Output {
             let output = self.clone().compute(dbg);
-            { // FIXME block unnecessary after NLL lands
-                let Output { value, ref d_coses_ijk, ref d_lengths_ik } = output;
+            let Output { value, ref d_coses_ijk, ref d_lengths_ik } = output;
 
-                let mut coses_ijk = self.coses_ijk.to_vec();
-                for sbindex_ik in 0..self.coses_ijk.len() {
-                    if sbindex_ik == self.sbindex_ij {
-                        continue;
-                    }
-
-                    assert_close!(
-                        rel=tol, abs=tol,
-                        d_coses_ijk[sbindex_ik],
-                        numerical::slope(1e-4, None, self.coses_ijk[sbindex_ik], |cos_ijk| {
-                            // FIXME so dumb
-                            let old = self.coses_ijk[sbindex_ik];
-                            coses_ijk[sbindex_ik] = cos_ijk;
-                            let out = Input { coses_ijk: &coses_ijk, ..self }.compute(Debug::Never).value;
-                            coses_ijk[sbindex_ik] = old;
-                            out
-                        }),
-                    );
+            let mut coses_ijk = self.coses_ijk.to_vec();
+            for sbindex_ik in 0..self.coses_ijk.len() {
+                if sbindex_ik == self.sbindex_ij {
+                    continue;
                 }
 
                 assert_close!(
                     rel=tol, abs=tol,
-                    &d_lengths_ik[..],
-                    &numerical::gradient(1e-4, None, self.lengths_ik, |lengths_ik| {
-                        Input { lengths_ik, ..self }.compute(Debug::Never).value
-                    })[..],
+                    d_coses_ijk[sbindex_ik],
+                    numerical::slope(1e-4, None, self.coses_ijk[sbindex_ik], |cos_ijk| {
+                        // FIXME so dumb
+                        let old = self.coses_ijk[sbindex_ik];
+                        coses_ijk[sbindex_ik] = cos_ijk;
+                        let out = Input { coses_ijk: &coses_ijk, ..self }.compute(Debug::Never).value;
+                        coses_ijk[sbindex_ik] = old;
+                        out
+                    }),
                 );
             }
+
+            assert_close!(
+                rel=tol, abs=tol,
+                &d_lengths_ik[..],
+                &numerical::gradient(1e-4, None, self.lengths_ik, |lengths_ik| {
+                    Input { lengths_ik, ..self }.compute(Debug::Never).value
+                })[..],
+            );
             output
         }
     }
@@ -1569,25 +1563,23 @@ mod bondorder_pi {
         #[allow(unused)]
         pub(super) fn compute_paranoid(self, dbg: Debug, tol: f64) -> Output {
             let output = self.clone().compute(dbg);
-            { // FIXME block unnecessary after NLL lands
-                let Output { value, ref d_deltas_ik, ref d_deltas_jl } = output;
+            let Output { value, ref d_deltas_ik, ref d_deltas_jl } = output;
 
-                assert_close!(
-                    rel=tol, abs=tol,
-                    d_deltas_ik.flat(),
-                    &numerical::gradient(1e-4, None, self.deltas_ik.flat(), |x| {
-                        Input { deltas_ik: x.nest(), ..self }.compute(Debug::Never).value
-                    })[..],
-                );
+            assert_close!(
+                rel=tol, abs=tol,
+                d_deltas_ik.flat(),
+                &numerical::gradient(1e-4, None, self.deltas_ik.flat(), |x| {
+                    Input { deltas_ik: x.nest(), ..self }.compute(Debug::Never).value
+                })[..],
+            );
 
-                assert_close!(
-                    rel=tol, abs=tol,
-                    d_deltas_jl.flat(),
-                    &numerical::gradient(1e-4, None, self.deltas_jl.flat(), |x| {
-                        Input { deltas_jl: x.nest(), ..self }.compute(Debug::Never).value
-                    })[..],
-                );
-            }
+            assert_close!(
+                rel=tol, abs=tol,
+                d_deltas_jl.flat(),
+                &numerical::gradient(1e-4, None, self.deltas_jl.flat(), |x| {
+                    Input { deltas_jl: x.nest(), ..self }.compute(Debug::Never).value
+                })[..],
+            );
             output
         }
     }
