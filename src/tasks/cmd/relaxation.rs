@@ -310,8 +310,8 @@ fn cg_builder_from_config(
         },
         cfg::CgFlavor::Hager {} => cg::Builder::new_hager(),
     };
-    if let Some(x) = alpha_guess_first { builder.alpha_guess_first(x); }
-    if let Some(x) = alpha_guess_max { builder.alpha_guess_max(x); }
+    builder.alpha_guess_first(alpha_guess_first);
+    builder.alpha_guess_max(alpha_guess_max);
 
     // FIXME XXX should not be a responsibility of the builder
     builder.on_ls_failure(match on_ls_failure {
@@ -456,11 +456,12 @@ pub fn get_param_opt_output_fn(
         let (cart_grad, d_param) = opt_helper.unflatten_grad(state.position, state.gradient);
         let num_atoms = cart_grad.len();
         emit(format_args!(
-            " i: {i:>6}  v: {v:7.3}  {dv}  g: {g:>6.1e}  max: {gm:>6.1e}  {fpar}  {cos}",
+            " i: {i:>6}  v: {v:7.3}  {dv}  g: {g:>6.1e}  max: {gm:>6.1e}  {fpar}  a: {a:>6.1e} {cos}",
             i = state.iterations,
             v = state.value,
             dv = dv_formatter(state.value),
             g = vnorm(&cart_grad.flat()),
+            a = state.alpha,
             gm = cart_grad.flat().iter().cloned().map(f64::abs).fold(0.0, f64::max),
             cos = cos_formatter(state.direction),
             // Force acting upon each lattice parameter, per atom.

@@ -1515,6 +1515,73 @@ impl TrialDir {
 
 //=================================================================
 
+pub fn run_make_supercell(
+    structure: StoredStructure,
+    dims_str: &str,
+    output: impl AsPath,
+) -> FailResult<()> {
+    let StoredStructure {
+        title, mut coords, mut elements, mut layers, mut masses,
+        mut layer_sc_matrices, mut frac_bonds,
+    } = structure;
+
+    if let Some(_) = frac_bonds.take() {
+        // TODO: support this properly.
+        warn!("\
+            Supercells of bond graphs are not yet implemented, so the created supercell will be \
+            missing a bond graph.  (don't worry too much about this; rsp2 will typically \
+            generate a new bond graph when run on the output).\
+        ");
+    };
+    if let Some(_) = frac_bonds.take() {
+        // TODO: support this properly.
+        warn!("\
+            Layer SC matrices will be lost.  This means that some layer-specific data won't \
+            be included in rsp2's output. (like band unfolding)
+        ");
+    };
+
+    let sc_dim = parse_sc_dims_argument(dims_str)?;
+    let (super_coords, sc) = rsp2_structure::supercell::diagonal(sc_dim).build(&coords);
+    coords = super_coords;
+
+    elements = sc.replicate(&elements).into();
+    masses = sc.replicate(&masses).into();
+    layers = layers.as_mut().map(|x| sc.replicate(&x).into());
+    layer_sc_matrices = layer_sc_matrices.map(|x| sc.replicate(&x).into());
+
+    StoredStructure {
+        title, coords, elements, layers, masses,
+        layer_sc_matrices, frac_bonds,
+    }.save(output)
+}
+
+fn parse_sc_dims_argument(arg: &str) -> FailResult<[u32; 3]> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Cereal {
+        Scalar(i32),
+        Vector([i32; 3]),
+        Matrix([[i32; 3]; 3])
+    }
+
+    match serde_json::from_str(arg)? {
+        Cereal::Scalar(x) if x <= 0 => bail!("A scalar supercell must be non-negative."),
+        Cereal::Scalar(x) => Ok([x as u32; 3]),
+        Cereal::Vector(v) => {
+            if v.iter().any(|&x| x <= 0) {
+                bail!("A vector supercell must consist of non-negative integers.")
+            } else {
+                let [a, b, c] = v;
+                Ok([a as u32, b as u32, c as u32])
+            }
+        },
+        Cereal::Matrix(_) => bail!("General matrix supercells are not yet implemented."),
+    }
+}
+
+//=================================================================
+
 // Reads a POSCAR or layers.yaml into an intermediate form which can have its
 // parameters optimized before producing a structure. (it also returns some other
 // layer-related data).

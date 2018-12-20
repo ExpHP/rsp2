@@ -64,6 +64,25 @@ where
     });
 }
 
+fn wrap_main_just_for_ui<F>(main: F) -> !
+where
+    F: FnOnce(SetGlobalLogfile) -> FailResult<()>,
+    F: UnwindSafe,
+{
+    // FIXME: copy-pasta due to ordering of init code in `wrap_main` making these bits
+    //        difficult to factor out.
+    let result = {
+        let logfile = init_global_logger().expect("Could not init logger");
+        main(logfile)
+    };
+
+    result.unwrap_or_else(|e| {
+        show_errors(e);
+        exit(1);
+    });
+    exit(0);
+}
+
 // This initializes MPI so it must be done at the very beginning.
 //
 // The closure runs on only one process.
@@ -551,6 +570,37 @@ pub fn converge_vdw(bin_name: &str, version: VersionInfo) -> ! {
         let r_max: f64 = matches.value_of("r_max").unwrap_or("15.0").parse()?;
 
         crate::cmd::run_converge_vdw(mpi_on_demand, &config.deserialize()?, z, (r_min, r_max))
+    });
+}
+
+// %% CRATES: binary: rsp2-make-supercell %%
+pub fn make_supercell(bin_name: &str, _version: VersionInfo) -> ! {
+    wrap_main_just_for_ui(|logfile| {
+        let (app, de) = CliDeserialize::augment_clap_app({
+            clap::App::new(bin_name)
+                .about("Makes a supercell of a structure that is in rsp2's 'directory.structure' format.")
+                .args(&[
+                    arg!( dims=SC_MATRIX "\
+                        A JSON literal of an integer, integer vector, or matrix. \
+                        Each row of the matrix describes a basis vector of the output as a linear \
+                        combination of the basis vectors in the original lattice. \
+                        A vector is interpreted as a diagonal matrix, and an integer is interpreted \
+                        as multiplied by the identity.\
+                    "),
+                    arg!( input=INPUT_DIR ""),
+                    arg!(*output [-o][--output]=PATH ""),
+                ])
+        });
+        let matches = app.get_matches();
+        let () = de.resolve_args(&matches)?;
+
+        logfile.disable();
+
+        let input = StoredStructure::load(matches.expect_value_of("input"))?;
+        let dim_string = matches.expect_value_of("dims");
+        let output = matches.expect_value_of("output");
+
+        crate::cmd::run_make_supercell(input, &dim_string, output)
     });
 }
 

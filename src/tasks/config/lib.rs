@@ -343,11 +343,14 @@ pub struct Cg {
     pub flavor: CgFlavor,
     #[serde(default)]
     pub on_ls_failure: CgOnLsFailure,
+    #[serde(default = "_cg__alpha_guess_first")]
+    pub alpha_guess_first: f64,
     #[serde(default)]
-    pub alpha_guess_first: OrDefault<f64>,
-    #[serde(default)]
-    pub alpha_guess_max: OrDefault<f64>,
+    pub alpha_guess_max: f64,
 }
+// Been using these values for a while on structures of arbitrary size.
+fn _cg__alpha_guess_first() -> f64 { 0.01 }
+fn _cg__alpha_guess_max() -> f64 { 0.1 }
 
 pub type CgStopCondition = rsp2_minimize::cg::StopCondition;
 

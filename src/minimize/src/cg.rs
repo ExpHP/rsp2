@@ -635,11 +635,12 @@ pub fn get_basic_output_fn(
 
     move |state: AlgorithmState<'_>| {
         emit(format_args!(
-            " i: {i:>6}  v: {v:7.3}  {dv}  g: {g:>6.1e}  max: {gm:>6.1e}  {cos}",
+            " i: {i:>6}  v: {v:7.3}  {dv}  g: {g:>6.1e}  max: {gm:>6.1e}  a: {a:>6.1e} {cos}",
             i = state.iterations,
             v = state.value,
             dv = dv_formatter(state.value),
             g = vnorm(&state.gradient),
+            a = state.alpha,
             gm = state.gradient.iter().cloned().map(f64::abs).fold(0.0, f64::max),
             cos = cos_formatter(state.direction),
         ));
