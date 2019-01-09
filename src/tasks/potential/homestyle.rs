@@ -112,18 +112,14 @@ impl PotentialBuilder<CommonMeta> for KolmogorovCrespiZ {
 
                 let params = &self.params;
 
-                let diff = {
+                let (part_values, bond_grads): (Vec<f64>, Vec<_>) = {
                     // HACK: collect to vec so that it implements IntoParallelIterator
-                    let frac_bonds = frac_bonds.into_iter().collect::<Vec<_>>();
+                    let frac_bonds = frac_bonds.into_iter().filter(|bond| bond.is_canonical()).collect::<Vec<_>>();
                     // HACK: collect from Rc<[_]> to Vec to impl Send
                     let elements = elements.iter().cloned().collect::<Vec<_>>();
 
                     CondIterator::new(frac_bonds, self.parallel)
-                        .filter_map(|bond| {
-                            if !bond.is_canonical() {
-                                return None;
-                            }
-
+                        .map(|bond| {
                             debug_assert_eq!((elements[bond.from], elements[bond.to]), (CARBON, CARBON));
                             let cart_vector = bond.cart_vector_using_cache(&cart_coords).unwrap();
                             let (part_value, part_grad) = params.compute_z(cart_vector);
@@ -134,25 +130,11 @@ impl PotentialBuilder<CommonMeta> for KolmogorovCrespiZ {
                                 grad: part_grad,
                                 cart_vector,
                             };
-                            Some((part_value, bond_grad))
-                        }).fold(
-                            || (0.0, vec![]),
-                            |(mut value, mut bond_grads), (part_value, bond_grad)| {
-                                value += part_value;
-                                bond_grads.push(bond_grad);
-                                (value, bond_grads)
-                            },
-                        // FIXME: Not entirely surprisingly, a lot of time is spent here.
-                        ).reduce(
-                            || (0.0, vec![]),
-                            |(mut value, mut bond_grads), (part_value, part_grads)| {
-                                value += part_value;
-                                bond_grads.extend(part_grads);
-                                (value, bond_grads)
-                            }
-                        )
+                            (part_value, bond_grad)
+                        }).unzip()
                 };
-                Ok(diff)
+                let value = part_values.iter().sum();
+                Ok((value, bond_grads))
             }
         }
 
