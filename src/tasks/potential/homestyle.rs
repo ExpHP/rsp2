@@ -19,6 +19,7 @@ use super::helper::DiffFnFromBondDiffFn;
 use crate::FailResult;
 use crate::math::frac_bonds_with_skin::FracBondsWithSkin;
 use crate::meta::{self, prelude::*};
+use rsp2_rayon_utils::CondIterator;
 use rsp2_structure::{Coords, layer::Layers, Element, consts::{CARBON}};
 use rsp2_tasks_config as cfg;
 use rsp2_array_types::{V3};
@@ -30,17 +31,28 @@ use rsp2_potentials::rebo::nonreactive as rebo_imp;
 /// **NOTE:** This has the limitation that the set of pairs within interaction range
 /// must not change after the construction of the DiffFn. The elements also must not change.
 #[derive(Debug, Clone)]
-pub struct KolmogorovCrespiZ(pub(super) cfg::PotentialKolmogorovCrespiZNew);
+pub struct KolmogorovCrespiZ {
+    pub(super) cfg: cfg::PotentialKolmogorovCrespiZNew,
+    pub(super) parallel: bool,
+}
 
 // FIXME the whole layer deal is such a mess
 impl PotentialBuilder<CommonMeta> for KolmogorovCrespiZ {
     fn initialize_diff_fn(&self, coords: &Coords, meta: CommonMeta) -> FailResult<Box<dyn DiffFn<CommonMeta>>>
     { Ok(Box::new(DiffFnFromBondDiffFn::new(self.initialize_bond_diff_fn(coords, meta)?.unwrap()))) }
 
+    fn parallel(&self, parallel: bool) -> Box<dyn PotentialBuilder<CommonMeta>> {
+        let mut me = self.clone();
+        me.parallel = parallel;
+        Box::new(me)
+    }
+
     fn initialize_bond_diff_fn(&self, coords: &Coords, meta: CommonMeta) -> FailResult<Option<Box<dyn BondDiffFn<CommonMeta>>>>
     {
         fn fn_body(me: &KolmogorovCrespiZ, coords: &Coords, meta: CommonMeta) -> FailResult<Option<Box<dyn BondDiffFn<CommonMeta>>>> {
-            let cfg::PotentialKolmogorovCrespiZNew { cutoff_begin, cutoff_transition_dist, skin_depth, skin_check_frequency } = me.0;
+            let cfg::PotentialKolmogorovCrespiZNew { cutoff_begin, cutoff_transition_dist, skin_depth, skin_check_frequency } = me.cfg;
+            let parallel = me.parallel;
+
             let mut params = crespi_imp::Params::default();
             if let Some(cutoff_begin) = cutoff_begin {
                 params.cutoff_begin = cutoff_begin;
@@ -75,7 +87,7 @@ impl PotentialBuilder<CommonMeta> for KolmogorovCrespiZ {
             );
             bonds.set_check_frequency(skin_check_frequency);
 
-            Ok(Some(Box::new(Diff { params, bonds, layers })))
+            Ok(Some(Box::new(Diff { params, bonds, layers, parallel })))
         }
 
         type BondMeta = (Element, usize);
@@ -86,6 +98,7 @@ impl PotentialBuilder<CommonMeta> for KolmogorovCrespiZ {
                 BondMeta,
                 dyn Fn(&BondMeta, &BondMeta) -> Option<f64>,
             >,
+            parallel: bool,
         }
 
         impl BondDiffFn<CommonMeta> for Diff {
@@ -97,26 +110,49 @@ impl PotentialBuilder<CommonMeta> for KolmogorovCrespiZ {
 
                 let cart_coords = coords.with_carts(coords.to_carts());
 
-                let mut value = 0.0;
-                let mut grad = Vec::with_capacity(frac_bonds.len() / 2); // just canonical ones
-                for bond in frac_bonds {
-                    if !bond.is_canonical() {
-                        continue;
-                    }
+                let params = &self.params;
 
-                    debug_assert_eq!((elements[bond.from], elements[bond.to]), (CARBON, CARBON));
-                    let cart_vector = bond.cart_vector_using_cache(&cart_coords).unwrap();
-                    let (part_value, part_grad) = self.params.compute_z(cart_vector);
+                let diff = {
+                    // HACK: collect to vec so that it implements IntoParallelIterator
+                    let frac_bonds = frac_bonds.into_iter().collect::<Vec<_>>();
+                    // HACK: collect from Rc<[_]> to Vec to impl Send
+                    let elements = elements.iter().cloned().collect::<Vec<_>>();
 
-                    value += part_value;
-                    grad.push(BondGrad {
-                        plus_site: bond.to,
-                        minus_site: bond.from,
-                        grad: part_grad,
-                        cart_vector,
-                    });
-                }
-                Ok((value, grad))
+                    CondIterator::new(frac_bonds, self.parallel)
+                        .filter_map(|bond| {
+                            if !bond.is_canonical() {
+                                return None;
+                            }
+
+                            debug_assert_eq!((elements[bond.from], elements[bond.to]), (CARBON, CARBON));
+                            let cart_vector = bond.cart_vector_using_cache(&cart_coords).unwrap();
+                            let (part_value, part_grad) = params.compute_z(cart_vector);
+
+                            let bond_grad = BondGrad {
+                                plus_site: bond.to,
+                                minus_site: bond.from,
+                                grad: part_grad,
+                                cart_vector,
+                            };
+                            Some((part_value, bond_grad))
+                        }).fold(
+                            || (0.0, vec![]),
+                            |(mut value, mut bond_grads), (part_value, bond_grad)| {
+                                value += part_value;
+                                bond_grads.push(bond_grad);
+                                (value, bond_grads)
+                            },
+                        // FIXME: Not entirely surprisingly, a lot of time is spent here.
+                        ).reduce(
+                            || (0.0, vec![]),
+                            |(mut value, mut bond_grads), (part_value, part_grads)| {
+                                value += part_value;
+                                bond_grads.extend(part_grads);
+                                (value, bond_grads)
+                            }
+                        )
+                };
+                Ok(diff)
             }
         }
 

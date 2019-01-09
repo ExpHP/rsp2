@@ -491,8 +491,9 @@ impl dyn PotentialBuilder {
                 Box::new(pot)
             },
             cfg::PotentialKind::KolmogorovCrespiZNew(cfg) => {
-                let pot = self::homestyle::KolmogorovCrespiZ(cfg.clone());
-                Box::new(pot)
+                let cfg = cfg.clone();
+                let parallel = threading == &cfg::Threading::Rayon;
+                Box::new(self::homestyle::KolmogorovCrespiZ { cfg, parallel })
             },
             cfg::PotentialKind::ReboNew(cfg) => {
                 let cfg = cfg.clone();
