@@ -49,7 +49,7 @@ where
     pub fn new<I>(iterable: I, parallel: bool) -> Self
     where
         I: IntoParallelIterator<Iter = P, Item = P::Item>
-            + IntoIterator<IntoIter = S, Item = S::Item>,
+        + IntoIterator<IntoIter = S, Item = S::Item>,
     {
         if parallel {
             Self::from_par_iter(iterable)
@@ -113,9 +113,9 @@ macro_rules! wrap_either {
 
 #[allow(unused)]
 impl<P, S> CondIterator<P, S>
-where
-    P: ParallelIterator,
-    S: Iterator<Item = P::Item>,
+    where
+        P: ParallelIterator,
+        S: Iterator<Item = P::Item>,
 {
     pub fn for_each<OP>(self, op: OP)
     where
@@ -282,9 +282,9 @@ where
         init: T,
         fold_op: F,
     ) -> CondIterator<ri::FoldWith<P, T, F>, si::Once<T>>
-    where
-        F: Fn(T, P::Item) -> T + Sync + Send,
-        T: Send + Clone,
+        where
+            F: Fn(T, P::Item) -> T + Sync + Send,
+            T: Send + Clone,
     {
         CondIterator {
             inner: match self.inner {
@@ -490,9 +490,9 @@ where
 
 #[allow(unused)]
 impl<P, S> CondIterator<P, S>
-where
-    P: IndexedParallelIterator,
-    S: Iterator<Item = P::Item>,
+    where
+        P: IndexedParallelIterator,
+        S: Iterator<Item = P::Item>,
 {
     pub fn collect_into_vec(self, target: &mut Vec<P::Item>) {
         match self.inner {

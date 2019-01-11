@@ -15,9 +15,6 @@ use std::sync::Arc;
 use std::fmt;
 use rsp2_array_types::{V3};
 
-pub use self::rayon_cond::CondIterator;
-mod rayon_cond;
-
 //--------------------------------------------------------
 
 #[derive(Clone)]
