@@ -403,11 +403,11 @@ fn do_cg_relax_with_param_optimization(
             //
             let (d_carts, d_params) = helper.unflatten_grad(position, gradient);
             let mut gradient = d_carts.flat().to_vec();
-            // FIXME HACK: include the parameter forces in the list so that they are checked
-            //             by a "max-grad" constraint.
+            // FIXME HACK: include the parameter forces in the list, scaled to an intrinsic
+            //             quantity, so that they are checked by a "max-grad" constraint.
             // The proper solution is to make a new replacement for
             // rsp2_minimize::cg::stop_condition::Simple that has a "stress-max" variant.
-            gradient.extend(d_params);
+            gradient.extend(d_params.into_iter().map(|x| x / d_carts.len() as f64));
 
             let gradient = &gradient[..];
             imp(cg::AlgorithmState {
@@ -456,7 +456,7 @@ pub fn get_param_opt_output_fn(
         let (cart_grad, d_param) = opt_helper.unflatten_grad(state.position, state.gradient);
         let num_atoms = cart_grad.len();
         emit(format_args!(
-            " i: {i:>6}  v: {v:7.3}  {dv}  g: {g:>6.1e}  max: {gm:>6.1e}  {fpar}  a: {a:>6.1e} {cos}",
+            " i: {i:>6}  v: {v:7.3}  {dv}  g: {g:>6.1e}  max: {gm:>6.1e}  {fpar}  α: {a:>6.1e} {cos}",
             i = state.iterations,
             v = state.value,
             dv = dv_formatter(state.value),
