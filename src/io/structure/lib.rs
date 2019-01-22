@@ -15,7 +15,6 @@
 #[macro_use] extern crate itertools;
 #[macro_use] extern crate failure;
 #[macro_use] extern crate serde_derive;
-use vasp_poscar; // FIXME: ????
 
 pub type FailResult<T> = Result<T, failure::Error>;
 #[allow(bad_style)]
