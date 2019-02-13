@@ -30,16 +30,22 @@ from . import dwim
 # with in any language besides Python.
 
 def from_path(path):
-    d = dwim.from_path(path)
-    if isinstance(d, dict):
-        return from_dict(d)
-    elif isinstance(d, np.ndarray) or scipy.sparse.issparse(d):
-        return d
-    else:
-        raise TypeError
+    return dwim.from_path_impl(
+        path,
+        from_dict=from_dict,
+        from_ext={
+            '.npz': dwim.sparse_from_npz,
+        },
+    )
 
 def to_path(path, obj):
-    dwim.to_path(path, obj, to_dict=to_dict)
+    dwim.to_path_impl(
+        path, obj,
+        to_dict=to_dict,
+        to_ext={
+            '.npz': dwim.sparse_to_npz,
+        },
+    )
 
 def to_dict(m):
     assert isinstance(m, scipy.sparse.bsr_matrix)
