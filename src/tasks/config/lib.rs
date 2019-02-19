@@ -153,11 +153,13 @@ pub struct Settings {
     // FIXME there should be a general lammps section
     #[serde(default)]
     pub lammps_update_style: LammpsUpdateStyle,
+    #[serde(default = "_settings__lammps_processor_axis_mask")]
     pub lammps_processor_axis_mask: [bool; 3],
 }
 derive_yaml_read!{Settings}
 
 fn _settings__update_large_neighbor_lists() -> bool { true }
+fn _settings__lammps_processor_axis_mask() -> [bool; 3] { [true; 3] }
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
