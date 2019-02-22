@@ -46,7 +46,7 @@ use crate::FailResult;
 #[cfg(test)] use crate::util::uniform;
 use crate::util::{try_num_grad_v3, num_grad_v3, switch};
 
-use rsp2_rayon_utils::CondIterator;
+use rayon_cond::CondIterator;
 use rsp2_structure::{Element, Coords};
 use rsp2_structure::bonds::{FracBond, PeriodicGraph};
 use rsp2_minimize::numerical;

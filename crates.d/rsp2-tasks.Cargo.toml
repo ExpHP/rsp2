@@ -33,7 +33,6 @@ path = "lib.rs"
 !!rsp2-linalg
 !!rsp2-newtype-indices
 !!rsp2-python
-!!rsp2-rayon-utils
 
 !!clap
 !!slice-of-array
@@ -50,6 +49,7 @@ path = "lib.rs"
 !!ansi-term
 !!petgraph
 !!rayon
+!!rayon-cond
 !!serde
 !!serde-derive
 !!serde-json

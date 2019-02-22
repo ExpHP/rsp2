@@ -19,7 +19,7 @@ use super::helper::DiffFnFromBondDiffFn;
 use crate::FailResult;
 use crate::math::frac_bonds_with_skin::FracBondsWithSkin;
 use crate::meta::{self, prelude::*};
-use rsp2_rayon_utils::CondIterator;
+use rayon_cond::CondIterator;
 use rsp2_structure::{Coords, layer::Layers, Element, consts::{CARBON}};
 use rsp2_tasks_config as cfg;
 use rsp2_array_types::{V3};

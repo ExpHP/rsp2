@@ -9,7 +9,6 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 path = "lib.rs"
 
 [dependencies]
-!!rsp2-rayon-utils
 !!rsp2-structure
 !!rsp2-assert-close
 !!rsp2-array-types
@@ -25,6 +24,7 @@ path = "lib.rs"
 !!failure
 !!stack
 !!rayon
+!!rayon-cond
 !!log
 
 [dev-dependencies]

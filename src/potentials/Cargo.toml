@@ -14,7 +14,6 @@ edition = "2018"
 path = "lib.rs"
 
 [dependencies]
-rsp2-rayon-utils = { path = "../util/rayon" }
 rsp2-structure = { path = "../structure" }
 rsp2-assert-close = { path = "../util/assert-close" }
 rsp2-array-types = { path = "../util/array-types" }
@@ -30,6 +29,7 @@ petgraph = "0.4"
 failure = "0.1.2"
 stack = "0.3"
 rayon = "1.0.1"
+rayon-cond = "0.1.0"
 log = "0.4"
 
 [dev-dependencies]
@@ -41,5 +41,5 @@ rand = "0.3"
 xz2 = "0.1.6"
 
 [features]
-nightly = ["beta", "rsp2-array-types/nightly", "rsp2-array-utils/nightly", "rsp2-assert-close/nightly", "rsp2-minimize/nightly", "rsp2-newtype-indices/nightly", "rsp2-rayon-utils/nightly", "rsp2-structure-io/nightly", "rsp2-structure/nightly", "rsp2-util-macros/nightly"]
-beta = ["rsp2-array-types/beta", "rsp2-array-utils/beta", "rsp2-assert-close/beta", "rsp2-minimize/beta", "rsp2-newtype-indices/beta", "rsp2-rayon-utils/beta", "rsp2-structure-io/beta", "rsp2-structure/beta", "rsp2-util-macros/beta"]
+nightly = ["beta", "rsp2-array-types/nightly", "rsp2-array-utils/nightly", "rsp2-assert-close/nightly", "rsp2-minimize/nightly", "rsp2-newtype-indices/nightly", "rsp2-structure-io/nightly", "rsp2-structure/nightly", "rsp2-util-macros/nightly"]
+beta = ["rsp2-array-types/beta", "rsp2-array-utils/beta", "rsp2-assert-close/beta", "rsp2-minimize/beta", "rsp2-newtype-indices/beta", "rsp2-structure-io/beta", "rsp2-structure/beta", "rsp2-util-macros/beta"]

@@ -92,7 +92,6 @@ rsp2-soa-ops = { path = "src/util/soa-ops" }
 rsp2-newtype-indices = { path = "src/util/newtype-indices" }
 rsp2-python = { path = "src/python" }
 rsp2-potentials = { path = "src/potentials" }
-rsp2-rayon-utils = { path = "src/util/rayon" }
 
 # Deps of examples/ and tests/.
 # Some of these could be dev-dependencies, however currently
@@ -137,8 +136,8 @@ test-diff=["rsp2-integration-test/test-diff"]
 #     https://github.com/rust-lang/cargo/issues/5565 (tracking issue, of sorts)
 mpi-support = ["mpi", "rsp2-tasks/mpi-support"]
 
-nightly = ["beta", "rsp2-array-types/nightly", "rsp2-array-utils/nightly", "rsp2-assert-close/nightly", "rsp2-clap/nightly", "rsp2-fs-util/nightly", "rsp2-integration-test/nightly", "rsp2-lammps-wrap/nightly", "rsp2-linalg/nightly", "rsp2-minimize/nightly", "rsp2-newtype-indices/nightly", "rsp2-phonopy-io/nightly", "rsp2-potentials/nightly", "rsp2-python/nightly", "rsp2-rayon-utils/nightly", "rsp2-slice-math/nightly", "rsp2-soa-ops/nightly", "rsp2-structure-io/nightly", "rsp2-structure/nightly", "rsp2-tasks-config/nightly", "rsp2-tasks/nightly", "rsp2-util-macros/nightly"]
-beta = ["rsp2-array-types/beta", "rsp2-array-utils/beta", "rsp2-assert-close/beta", "rsp2-clap/beta", "rsp2-fs-util/beta", "rsp2-integration-test/beta", "rsp2-lammps-wrap/beta", "rsp2-linalg/beta", "rsp2-minimize/beta", "rsp2-newtype-indices/beta", "rsp2-phonopy-io/beta", "rsp2-potentials/beta", "rsp2-python/beta", "rsp2-rayon-utils/beta", "rsp2-slice-math/beta", "rsp2-soa-ops/beta", "rsp2-structure-io/beta", "rsp2-structure/beta", "rsp2-tasks-config/beta", "rsp2-tasks/beta", "rsp2-util-macros/beta"]
+nightly = ["beta", "rsp2-array-types/nightly", "rsp2-array-utils/nightly", "rsp2-assert-close/nightly", "rsp2-clap/nightly", "rsp2-fs-util/nightly", "rsp2-integration-test/nightly", "rsp2-lammps-wrap/nightly", "rsp2-linalg/nightly", "rsp2-minimize/nightly", "rsp2-newtype-indices/nightly", "rsp2-phonopy-io/nightly", "rsp2-potentials/nightly", "rsp2-python/nightly", "rsp2-slice-math/nightly", "rsp2-soa-ops/nightly", "rsp2-structure-io/nightly", "rsp2-structure/nightly", "rsp2-tasks-config/nightly", "rsp2-tasks/nightly", "rsp2-util-macros/nightly"]
+beta = ["rsp2-array-types/beta", "rsp2-array-utils/beta", "rsp2-assert-close/beta", "rsp2-clap/beta", "rsp2-fs-util/beta", "rsp2-integration-test/beta", "rsp2-lammps-wrap/beta", "rsp2-linalg/beta", "rsp2-minimize/beta", "rsp2-newtype-indices/beta", "rsp2-phonopy-io/beta", "rsp2-potentials/beta", "rsp2-python/beta", "rsp2-slice-math/beta", "rsp2-soa-ops/beta", "rsp2-structure-io/beta", "rsp2-structure/beta", "rsp2-tasks-config/beta", "rsp2-tasks/beta", "rsp2-util-macros/beta"]
 
 [workspace]
 exclude = ["./scripts"]
