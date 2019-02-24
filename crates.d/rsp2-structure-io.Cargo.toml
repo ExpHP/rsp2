@@ -15,8 +15,8 @@ path = "lib.rs"
 !!vasp-poscar
 !!log
 !!serde
-!!serde_derive
-!!serde_yaml
+!!serde-derive
+!!serde-yaml
 
 !!rsp2-structure
 !!rsp2-array-types
