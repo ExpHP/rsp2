@@ -47,7 +47,7 @@ install:
 
 - python -c "import sysconfig; print('\n'.join(map(repr,sorted(sysconfig.get_config_vars().items()))))"
 - curl -sL https://static.rust-lang.org/rustup.sh -o ~/build/rustup.sh
-- sh ~/build/rustup.sh --default-toolchain=$RUST_VERSION -y --disable-sudo
+- sh ~/build/rustup.sh --default-toolchain=$RUST_VERSION -y
 # - find $PYTHON_LIB
 - rustc -V
 
