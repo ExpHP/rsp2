@@ -20,6 +20,8 @@ env:
   - OPENMPI_VERSION=3.1.2
   - OPENMPI_VERSION_SHORT=3.1
   - LAMMPS_POTENTIALS=$HOME/lammps/potentials
+  - RUSTUP_HOME=$HOME/deps
+  - CARGO_HOME=$HOME/deps
 
 matrix:
   include:
@@ -45,7 +47,7 @@ install:
 
 - python -c "import sysconfig; print('\n'.join(map(repr,sorted(sysconfig.get_config_vars().items()))))"
 - curl -sL https://static.rust-lang.org/rustup.sh -o ~/build/rustup.sh
-- sh ~/build/rustup.sh --prefix=$HOME/deps --spec=$RUST_VERSION -y --disable-sudo
+- sh ~/build/rustup.sh --spec=$RUST_VERSION -y --disable-sudo
 # - find $PYTHON_LIB
 - rustc -V
 
