@@ -63,7 +63,7 @@ def to_dict(m):
         'dim': tuple(x // 3 for x in m.shape),
     }
 
-def from_dict(m):
+def from_dict(m, path=None):
     data = np.array(m['complex-blocks'])
 
     assert data.ndim == 4
