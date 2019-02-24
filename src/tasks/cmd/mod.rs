@@ -191,9 +191,9 @@ impl TrialDir {
                     _do_not_drop_the_bands_dir = Some(final_bands_dir);
                     (coords, ev_analysis)
                 },
-                Sparse { shift_invert_attempts } => {
+                Rsp2 { shift_invert_attempts, dense } => {
                     let (coords, ev_analysis, final_iteration) = {
-                        do_ev_loop!(SparseDiagonalizer { shift_invert_attempts })?
+                        do_ev_loop!(InternalDiagonalizer { shift_invert_attempts, dense })?
                     };
                     _do_not_drop_the_bands_dir = None;
 
@@ -403,10 +403,11 @@ impl PhonopyDiagonalizer {
     })}
 }
 
-struct SparseDiagonalizer {
+struct InternalDiagonalizer {
     shift_invert_attempts: u32,
+    dense: bool,
 }
-impl EvLoopDiagonalizer for SparseDiagonalizer {
+impl EvLoopDiagonalizer for InternalDiagonalizer {
     type ExtraOut = Option<Iteration>;
 
     fn do_post_relaxation_computations(
@@ -598,7 +599,7 @@ impl EvLoopDiagonalizer for SparseDiagonalizer {
         trace!("Diagonalizing dynamical matrix");
         let (evals, evecs) = {
             pot.eco_mode(|| { // don't let MPI processes compete with python's threads
-                dynmat.compute_negative_eigensolutions(self.shift_invert_attempts)
+                dynmat.compute_negative_eigensolutions(self.shift_invert_attempts, self.dense)
             })?
         };
         trace!("Done diagonalizing dynamical matrix");
@@ -1151,9 +1152,9 @@ impl TrialDir {
                     };
                     (evals, evecs)
                 },
-                Sparse { shift_invert_attempts } => {
+                Rsp2 { shift_invert_attempts, dense } => {
                     let (evals, evecs, _) = {
-                        use_diagonalizer!(SparseDiagonalizer { shift_invert_attempts } )?
+                        use_diagonalizer!(InternalDiagonalizer { shift_invert_attempts, dense } )?
                     };
                     (evals, evecs)
                 },
@@ -1386,7 +1387,7 @@ pub(crate) fn run_dynmat_test(phonopy_dir: &PathDir) -> FailResult<()>
 
         trace!("Computing eigensolutions...");
         let shift_invert_attempts = 4;
-        let (low, _low_basis) = our_dynamical_matrix.compute_negative_eigensolutions(shift_invert_attempts)?;
+        let (low, _low_basis) = our_dynamical_matrix.compute_negative_eigensolutions(shift_invert_attempts, false)?;
         let (high, _high_basis) = our_dynamical_matrix.compute_most_extreme_eigensolutions(3)?;
         trace!("Done computing eigensolutions...");
 

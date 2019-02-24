@@ -43,9 +43,11 @@ def main_from_rust():
     d = json.load(sys.stdin)
     m = dynmat.from_dict(d.pop('matrix'))
     shift_invert_attempts = d.pop('shift-invert-attempts')
+    dense = d.pop('dense')
     assert not d
 
     out = run(m,
+              dense=dense,
               shift_invert_attempts=shift_invert_attempts,
               plain_ncv=DEFAULT_NCV, # FIXME add to input json from rust
               shift_invert_ncv=DEFAULT_NCV, # FIXME add to input json from rust
@@ -64,6 +66,10 @@ def main_from_cli():
     p = argparse.ArgumentParser()
     p.add_argument('DYNMAT', help='dynmat file (.npz, .json, .json.gz, ...)')
     p.add_argument('--output', '-o', type=str, required=True)
+    p.add_argument(
+        '--dense', type=bool, default=False,
+        help="Use dense eigenvalue solver."
+    )
     p.add_argument('--shift-invert-attempts', type=int, default=DEFAULT_SHIFT_INVERT_ATTEMPTS)
     p.add_argument(
         '--max-solutions', type=int, default=DEFAULT_MAX_SOLUTIONS,
@@ -90,6 +96,7 @@ def main_from_cli():
 
     evals, evecs = run(
         m=dynmat.from_path(args.DYNMAT),
+        dense=args.dense,
         shift_invert_attempts=args.shift_invert_attempts,
         shift_invert_ncv=args.shift_invert_ncv,
         plain_ncv=args.plain_ncv,
@@ -103,6 +110,7 @@ def main_from_cli():
         sys.exit(1)
 
 def run(m: scipy.sparse.bsr_matrix,
+        dense: tp.Optional[bool],
         shift_invert_attempts: int,
         shift_invert_ncv: int,
         plain_ncv: int,
@@ -117,7 +125,9 @@ def run(m: scipy.sparse.bsr_matrix,
 
     # Logic for deciding when to use shift invert results
     def inner():
-        if shift_invert_attempts:
+        if dense:
+            return try_dense(m)
+        elif shift_invert_attempts:
             esols = try_shift_invert(m,
                                      max_solutions=search_solutions,
                                      shift_invert_attempts=shift_invert_attempts,
@@ -337,6 +347,14 @@ def try_regular(m, *, max_solutions, ncv):
         auto_adjust_k=True,
         auto_adjust_ncv=True,
     )
+
+def try_dense(m):
+    info('trace: trying dense eigenvalue solver')
+
+    # note: order for returned eigenvalues is the same as 'SA'
+    # note: raises LinAlgError if the eigenvalue computation does not converge
+    evals, evecs = np.linalg.eigh(m.todense())
+    return evals, evecs.T
 
 if __name__ == '__main__':
     main_from_rust()

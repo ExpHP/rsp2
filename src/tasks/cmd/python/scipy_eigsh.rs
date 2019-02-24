@@ -90,6 +90,7 @@ mod scripts {
     pub(super) struct Negative {
         pub(super) matrix: crate::math::dynmat::Cereal,
         pub(super) shift_invert_attempts: u32,
+        pub(super) dense: bool,
     }
 
     impl Negative {
@@ -182,10 +183,11 @@ impl DynamicalMatrix {
     ///
     /// If none of the modes produced are negative, then it is safe (-ish) to assume that the matrix
     /// has no such eigenmodes.  (At least, that is the intent!)
-    pub fn compute_negative_eigensolutions(&self, shift_invert_attempts: u32) -> FailResult<(Vec<f64>, Basis3)> {
+    pub fn compute_negative_eigensolutions(&self, shift_invert_attempts: u32, dense: bool) -> FailResult<(Vec<f64>, Basis3)> {
         trace!("Computing most negative eigensolutions.");
         scripts::Negative {
             shift_invert_attempts,
+            dense,
             matrix: self.cereal()
         }.invoke()
     }
