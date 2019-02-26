@@ -31,24 +31,27 @@ def main():
     )
 
     all_tasks = []
+    def register(task):
+        nonlocal all_tasks
 
-    structure = TaskStructure()
-    all_tasks.append(structure)
+        all_tasks.append(task)
+        return task
 
-    kpoint_sfrac = TaskKpointSfrac()
-    all_tasks.append(kpoint_sfrac)
+    structure = register(TaskStructure())
 
-    eigensols = TaskEigensols(structure)
-    all_tasks.append(eigensols)
+    kpoint_sfrac = register(TaskKpointSfrac())
 
-    translation_deperms = TaskDeperms(structure)
-    all_tasks.append(translation_deperms)
+    eigensols = register(TaskEigensols(structure))
 
-    ev_gpoint_probs = TaskQProbs(structure, kpoint_sfrac, eigensols, translation_deperms)
-    all_tasks.append(ev_gpoint_probs)
+    translation_deperms = register(TaskDeperms(structure))
 
-    bandplot = TaskBandPlot(structure, eigensols, ev_gpoint_probs, kpoint_sfrac)
-    all_tasks.append(bandplot)
+    ev_gpoint_probs = register(TaskQProbs(structure, kpoint_sfrac, eigensols, translation_deperms))
+
+    band_path = register(TaskBandPath(structure))
+
+    bands = register(TaskBands(structure, kpoint_sfrac, band_path, ev_gpoint_probs))
+
+    _bandplot = register(TaskBandPlot(structure, eigensols, ev_gpoint_probs, band_path, bands))
 
     for task in all_tasks:
         task.add_parser_opts(parser)
@@ -273,32 +276,15 @@ class TaskQProbs(Task):
         if args.write_probs:
             dwim.to_path(args.write_probs, ev_gpoint_probs)
 
-# Arguments related to high symmetry path resampling
-# (an intermediate file format that allows skipping the griddata computations)
-class TaskBands(Task):
-    def has_action(self, args):
-        return bool(args.write_bands)
-
-class TaskBandPlot(Task):
+class TaskBandPath(Task):
     def __init__(
             self,
             structure: TaskStructure,
-            eigensols: TaskEigensols,
-            ev_gpoint_probs: TaskQProbs,
-            kpoint_sfrac: TaskKpointSfrac,
     ):
         super().__init__()
         self.structure = structure
-        self.eigensols = eigensols
-        self.ev_gpoint_probs = ev_gpoint_probs
-        self.kpoint_sfrac = kpoint_sfrac
 
     def add_parser_opts(self, parser):
-        # parser.add_argument(
-        #     '--write-bands', help=
-        #     'Write data resampled onto layer high sym path. (.npz)',
-        # )
-
         parser.add_argument(
             '--output-kpath', help=
             "A kpath in the format accepted by ASE's parse_path_string, "
@@ -306,53 +292,130 @@ class TaskBandPlot(Task):
             "plot is generated."
         )
 
-        # parser.add_argument(
-        #     '--bands', help=
-        #     'Path to file previously written through --write-bands.',
-        # )
+    def _compute(self, args):
+        from ase.dft.kpoints import bandpath
+
+        supercell = self.structure.require(args)['supercell']
+        super_lattice = self.structure.require(args)['structure'].lattice.matrix
+
+        prim_lattice = np.linalg.inv(supercell.matrix) @ super_lattice
+
+        if args.output_kpath is None:
+            die('--output-kpath is required')
+
+        # NOTE: The kpoints returned by get_special_points (and by proxy, this
+        #       function) do adapt to the user's specific choice of primitive cell.
+        #       (at least, for reasonable cells; I haven't tested it with a highly
+        #       skewed cell). Respect!
+        bandpath_output = bandpath(args.output_kpath, prim_lattice, 300)
+        return {
+            'plot_kpoint_pfracs': bandpath_output[0],
+            'plot_x_coordinates': bandpath_output[1],
+            'plot_xticks': bandpath_output[2],
+        }
+
+# Arguments related to high symmetry path resampling
+# (an intermediate file format that allows skipping the griddata computations)
+class TaskBands(Task):
+    def __init__(
+            self,
+            structure: TaskStructure,
+            kpoint_sfrac: TaskKpointSfrac,
+            band_path: TaskBandPath,
+            ev_gpoint_probs: TaskQProbs,
+    ):
+        super().__init__()
+        self.structure = structure
+        self.band_path = band_path
+        self.ev_gpoint_probs = ev_gpoint_probs
+        self.kpoint_sfrac = kpoint_sfrac
+
+    def add_parser_opts(self, parser):
+        parser.add_argument(
+            '--write-bands', help=
+            'Write data resampled onto layer high sym path. (.npz)',
+        )
+
+        parser.add_argument(
+            '--bands', help=
+            'Path to file previously written through --write-bands.',
+        )
 
     def has_action(self, args):
-        return bool(args.output_kpath)
+        return bool(args.write_bands)
 
     def _compute(self, args):
-        progress_callback = None
-        if args.verbose:
-            def progress_callback(done, count):
-                print(f'Plot: {done:>5} of {count} eigenvectors')
+        if args.bands:
+            ev_path_probs = dwim.from_path(args.bands)
+        else:
+            progress_callback = None
+            if args.verbose:
+                def progress_callback(done, count):
+                    print(f'Resampling: {done:>5} of {count} eigenvectors')
 
+            ev_path_probs = resample_gprobs_on_kpath(
+                    super_lattice=self.structure.require(args)['structure'].lattice.matrix,
+                    supercell=self.structure.require(args)['supercell'],
+                    ev_gpoint_probs=self.ev_gpoint_probs.require(args),
+                    kpoint_sfrac=self.kpoint_sfrac.require(args),
+                    plot_kpoint_pfracs=self.band_path.require(args)['plot_kpoint_pfracs'],
+                    progress=progress_callback,
+            )
+
+        return { 'ev_path_probs': ev_path_probs }
+
+    def _do_action(self, args):
+        if args.write_bands:
+            ev_path_probs = self.require(args)['ev_path_probs']
+            dwim.to_path(args.write_bands, ev_path_probs)
+
+class TaskBandPlot(Task):
+    def __init__(
+            self,
+            structure: TaskStructure,
+            eigensols: TaskEigensols,
+            ev_gpoint_probs: TaskQProbs,
+            band_path: TaskBandPath,
+            bands: TaskBands,
+    ):
+        super().__init__()
+        self.structure = structure
+        self.eigensols = eigensols
+        self.ev_gpoint_probs = ev_gpoint_probs
+        self.band_path = band_path
+        self.bands = bands
+
+    def has_action(self, args):
+        return bool(args.output_kpath) # FIXME: --show
+
+    def _compute(self, args):
+        return None
+
+    def _do_action(self, args):
         if args.output_kpath:
             probs_to_band_plot(
-                super_lattice=self.structure.require(args)['structure'].lattice.matrix,
-                supercell=self.structure.require(args)['supercell'],
-                ev_gpoint_probs=self.ev_gpoint_probs.require(args),
                 ev_frequencies=self.eigensols.require(args)['ev_frequencies'],
                 ev_eigenvectors=self.eigensols.require(args)['ev_projected_eigenvectors'],
-                kpoint_sfrac=self.kpoint_sfrac.require(args),
-                plot_kpath=args.output_kpath,
-                progress=progress_callback,
+                ev_path_probs=self.bands.require(args)['ev_path_probs'],
+                plot_x_coordinates=self.band_path.require(args)['plot_x_coordinates'],
+                plot_xticks=self.band_path.require(args)['plot_xticks'],
             )
 
 #----------------------------------------------------------------
 
-def probs_to_band_plot(
+def resample_gprobs_on_kpath(
         super_lattice,
         supercell,
         ev_gpoint_probs,
-        ev_frequencies,
-        ev_eigenvectors,
         kpoint_sfrac,
-        plot_kpath,
+        plot_kpoint_pfracs,
         progress=None,
 ):
-    from ase.dft.kpoints import bandpath
-    import matplotlib.pyplot as plt
-
     check_arrays(
         super_lattice = (super_lattice, [3, 3], np.floating),
         ev_gpoint_probs = (ev_gpoint_probs, ['ev', 'quotient'], np.floating),
-        ev_frequencies = (ev_frequencies, ['ev'], np.floating),
-        ev_eigenvectors = (ev_eigenvectors, ['ev', 'projected_site', 3], np.floating),
         kpoint_sfrac = (kpoint_sfrac, [3], np.floating),
+        plot_kpoint_pfracs = (plot_kpoint_pfracs, ['x', 3], np.floating),
     )
 
     prim_lattice = np.linalg.inv(supercell.matrix) @ super_lattice
@@ -361,24 +424,10 @@ def probs_to_band_plot(
     kpoint_sfracs = supercell.gpoint_sfracs() + kpoint_sfrac
     kpoint_carts = kpoint_sfracs @ np.linalg.inv(super_lattice).T
 
-    # NOTE: The kpoints returned by get_special_points (and by proxy, this
-    #       function) do adapt to the user's specific choice of primitive cell.
-    #       (at least, for reasonable cells; I haven't tested it with a highly
-    #       skewed cell). Respect!
-    bandpath_output = bandpath(plot_kpath, prim_lattice, 300)
-
-    # [plot_x_index][3]
-    plot_kpoint_pfracs = bandpath_output[0]
-    # [plot_x_index]
-    plot_x_coordinates = bandpath_output[1]
-    # [highsym_point_index]
-    plot_xticks = bandpath_output[2]
-
     plot_kpoint_carts = plot_kpoint_pfracs @ np.linalg.inv(prim_lattice).T
 
-    X, Y, S, Z_proj = [], [] ,[], []
-    iterator = zip(ev_gpoint_probs, ev_frequencies, ev_eigenvectors)
-    for (gpoint_probs, frequency, eigenvector) in iter_with_progress(iterator, progress):
+    ev_path_probs = []
+    for gpoint_probs in iter_with_progress(ev_gpoint_probs, progress):
         if sparse.issparse(gpoint_probs):
             gpoint_probs = np.asarray(gpoint_probs.todense()).squeeze(axis=0)
 
@@ -397,14 +446,39 @@ def probs_to_band_plot(
         # supercells, every point in the primitive BZ is close to an image of
         # the supercell gamma point, limiting the negative impact of this
         # interpolation scheme... I hope.
-        path_probs = griddata_periodic(
+        ev_path_probs.append(griddata_periodic(
             points=kpoint_carts,
             values=gpoint_probs,
             xi=plot_kpoint_carts,
             lattice=np.linalg.inv(prim_lattice).T,
             periodic_axis_mask=[1,1,0], # FIXME
             method='nearest',
-        )
+        ))
+
+    return sparse.csr_matrix(ev_path_probs)
+
+def probs_to_band_plot(
+        ev_frequencies,
+        ev_eigenvectors,
+        ev_path_probs,
+        plot_x_coordinates,
+        plot_xticks,
+):
+    import matplotlib.pyplot as plt
+
+    check_arrays(
+        ev_frequencies = (ev_frequencies, ['ev'], np.floating),
+        ev_eigenvectors = (ev_eigenvectors, ['ev', 'projected_site', 3], np.floating),
+        ev_path_probs = (ev_path_probs, ['ev', 'x'], np.floating),
+        plot_x_coordinates = (plot_x_coordinates, ['x'], np.floating),
+        plot_xticks = (plot_xticks, ['special_point'], np.floating),
+    )
+
+    X, Y, S, Z_proj = [], [] ,[], []
+    iterator = zip(ev_frequencies, ev_eigenvectors, ev_path_probs)
+    for (frequency, eigenvector, path_probs) in iterator:
+        if sparse.issparse(path_probs):
+            path_probs = np.asarray(path_probs.todense()).squeeze(axis=0)
 
         # Don't ask matplotlib to draw thousands of points with alpha=0
         mask = path_probs != 0
@@ -412,7 +486,7 @@ def probs_to_band_plot(
         X.append(plot_x_coordinates[mask])
         Y.append([frequency] * mask.sum())
         S.append(path_probs[mask])
-        Z_proj.append([np.sum(eigenvector.reshape((-1, 3))[:, :2] ** 2)] * mask.sum())
+        Z_proj.append([np.linalg.norm(eigenvector[:, :2])**2] * mask.sum())
 
     X = np.hstack(X)
     Y = np.hstack(Y)
