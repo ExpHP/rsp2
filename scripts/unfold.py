@@ -51,7 +51,9 @@ def main():
 
     bands = register(TaskBands(structure, kpoint_sfrac, band_path, ev_gpoint_probs))
 
-    _bandplot = register(TaskBandPlot(structure, eigensols, ev_gpoint_probs, band_path, bands))
+    mode_data = register(TaskEigenmodeData(eigensols))
+
+    _bandplot = register(TaskBandPlot(structure, mode_data, ev_gpoint_probs, band_path, bands))
 
     for task in all_tasks:
         task.add_parser_opts(parser)
@@ -167,13 +169,41 @@ class TaskDeperms(Task):
         super().__init__()
         self.structure = structure
 
-    def _compute(self, args):
-        return collect_translation_deperms(
-            superstructure=self.structure.require(args)['projected_structure'],
-            supercell=self.structure.require(args)['supercell'],
-            axis_mask=np.array([1,1,0]),
-            tol=DEFAULT_TOL,
+    def add_parser_opts(self, parser):
+        parser.add_argument(
+            '--write-perms', help=
+            'Write permutations of translations to this file. (.npy, .npy.xz)',
         )
+
+        parser.add_argument(
+            '--perms', help=
+            'Path to file previously written through --write-perms.',
+        )
+
+    def has_action(self, args):
+        return bool(args.write_perms)
+
+    def _compute(self, args):
+        if args.perms:
+            return np.array(dwim.from_path(args.perms))
+        else:
+            progress_callback = None
+            if args.verbose:
+                def progress_callback(done, count):
+                    print(f'Deperms: {done:>5} of {count} translations')
+
+            return collect_translation_deperms(
+                superstructure=self.structure.require(args)['projected_structure'],
+                supercell=self.structure.require(args)['supercell'],
+                axis_mask=np.array([1,1,0]),
+                tol=DEFAULT_TOL,
+                progress=progress_callback,
+            )
+
+    def _do_action(self, args):
+        if args.write_perms:
+            translation_deperms = self.require(args)
+            dwim.to_path(args.write_perms, translation_deperms)
 
 class TaskEigensols(Task):
     def __init__(self, structure: TaskStructure):
@@ -193,10 +223,59 @@ class TaskEigensols(Task):
 
         return {
             'ev_eigenvalues': ev_eigenvalues,
-            # 'ev_eigenvectors': ev_eigenvectors, # Too much RAM wasteage
-            'ev_frequencies': eigensols.wavenumber_from_eigenvalue(ev_eigenvalues),
+            'ev_eigenvectors': ev_eigenvectors,
             'ev_projected_eigenvectors': ev_projected_eigenvectors,
         }
+
+class TaskEigenmodeData(Task):
+    """ Scalar data about eigenmodes for the plot. """
+    def __init__(self, eigensols: TaskEigensols):
+        super().__init__()
+        self.eigensols = eigensols
+
+    def add_parser_opts(self, parser):
+        parser.add_argument(
+            '--write-mode-data', help=
+            'Write data about plotted eigenmodes to this file. (.npz)',
+        )
+
+        parser.add_argument(
+            '--mode-data', help=
+            'Read data previously written using --write-mode-data so that reading '
+            'the (large) eigensols file is not necessary to produce a plot.',
+        )
+
+    def has_action(self, args):
+        return bool(args.write_mode_data)
+
+    def _compute(self, args):
+        if args.mode_data:
+            npz = np.load(args.mode_data)
+            return {
+                'ev_frequencies': npz.f.ev_frequencies,
+                'ev_z_projections': npz.f.ev_z_projection,
+            }
+
+        ev_eigenvalues = self.eigensols.require(args)['ev_eigenvalues']
+        ev_eigenvectors = self.eigensols.require(args)['ev_eigenvectors']
+
+        ev_frequencies = eigensols.wavenumber_from_eigenvalue(ev_eigenvalues)
+
+        ev_z_coords = ev_eigenvectors.reshape((-1, ev_eigenvectors.shape[1]//3, 3))[:, :, 2]
+        ev_z_projections = np.linalg.norm(ev_z_coords, axis=1)**2
+        return {
+            'ev_frequencies': ev_frequencies,
+            'ev_z_projections': ev_z_projections,
+        }
+
+    def _do_action(self, args):
+        if args.write_mode_data:
+            d = self.require(args)
+            np.savez_compressed(
+                args.write_mode_data,
+                ev_frequencies=d['ev_frequencies'],
+                ev_z_projections=d['ev_z_projections'],
+            )
 
 # Arguments related to probabilities
 # (an intermediate file format that can be significantly smaller than the
@@ -373,14 +452,14 @@ class TaskBandPlot(Task):
     def __init__(
             self,
             structure: TaskStructure,
-            eigensols: TaskEigensols,
+            mode_data: TaskEigenmodeData,
             ev_gpoint_probs: TaskQProbs,
             band_path: TaskBandPath,
             bands: TaskBands,
     ):
         super().__init__()
         self.structure = structure
-        self.eigensols = eigensols
+        self.mode_data = mode_data
         self.ev_gpoint_probs = ev_gpoint_probs
         self.band_path = band_path
         self.bands = bands
@@ -394,8 +473,8 @@ class TaskBandPlot(Task):
     def _do_action(self, args):
         if args.output_kpath:
             probs_to_band_plot(
-                ev_frequencies=self.eigensols.require(args)['ev_frequencies'],
-                ev_eigenvectors=self.eigensols.require(args)['ev_projected_eigenvectors'],
+                ev_frequencies=self.mode_data.require(args)['ev_frequencies'],
+                ev_z_projections=self.mode_data.require(args)['ev_z_projections'],
                 ev_path_probs=self.bands.require(args)['ev_path_probs'],
                 plot_x_coordinates=self.band_path.require(args)['plot_x_coordinates'],
                 plot_xticks=self.band_path.require(args)['plot_xticks'],
@@ -459,7 +538,7 @@ def resample_gprobs_on_kpath(
 
 def probs_to_band_plot(
         ev_frequencies,
-        ev_eigenvectors,
+        ev_z_projections,
         ev_path_probs,
         plot_x_coordinates,
         plot_xticks,
@@ -468,15 +547,15 @@ def probs_to_band_plot(
 
     check_arrays(
         ev_frequencies = (ev_frequencies, ['ev'], np.floating),
-        ev_eigenvectors = (ev_eigenvectors, ['ev', 'projected_site', 3], np.floating),
+        ev_z_projections = (ev_z_projections, ['ev'], np.floating),
         ev_path_probs = (ev_path_probs, ['ev', 'x'], np.floating),
         plot_x_coordinates = (plot_x_coordinates, ['x'], np.floating),
         plot_xticks = (plot_xticks, ['special_point'], np.floating),
     )
 
     X, Y, S, Z_proj = [], [] ,[], []
-    iterator = zip(ev_frequencies, ev_eigenvectors, ev_path_probs)
-    for (frequency, eigenvector, path_probs) in iterator:
+    iterator = zip(ev_frequencies, ev_z_projections, ev_path_probs)
+    for (frequency, z_projection, path_probs) in iterator:
         if sparse.issparse(path_probs):
             path_probs = np.asarray(path_probs.todense()).squeeze(axis=0)
 
@@ -486,7 +565,7 @@ def probs_to_band_plot(
         X.append(plot_x_coordinates[mask])
         Y.append([frequency] * mask.sum())
         S.append(path_probs[mask])
-        Z_proj.append([np.linalg.norm(eigenvector[:, :2])**2] * mask.sum())
+        Z_proj.append([z_projection] * mask.sum())
 
     X = np.hstack(X)
     Y = np.hstack(Y)
