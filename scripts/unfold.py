@@ -16,11 +16,14 @@ A = tp.TypeVar('A')
 B = tp.TypeVar('B')
 
 def main():
+    global SHOW_ACTION_STACK
+
     import argparse
 
     parser = argparse.ArgumentParser(description="Unfold phonon eigenvectors")
 
     parser.add_argument('--verbose', action='store_true')
+    parser.add_argument('--debug', action='store_true')
     parser.add_argument('STRUCTURE', help='rsp2 structure directory')
 
     all_tasks = []
@@ -56,6 +59,9 @@ def main():
     if not any(task.has_action(args) for task in all_tasks):
         parser.error("Nothing to do!")
 
+    if args.debug:
+        SHOW_ACTION_STACK = True
+
     for task in all_tasks:
         if task.has_action(args):
             task.require(args)
@@ -65,6 +71,10 @@ def main():
 #
 # Written in a vaguely declarative style with the help of a Task class
 # that defers computation until it is needed.
+
+# FIXME remove globals
+ACTION_STACK = []
+SHOW_ACTION_STACK = False
 
 class Task:
     NOT_YET_COMPUTED = object()
@@ -84,8 +94,12 @@ class Task:
 
         It is cached after the first call so that it need not be run again.
         """
+        global ACTION_STACK
+
         if self.cached is Task.NOT_YET_COMPUTED:
+            ACTION_STACK.append(type(self).__name__)
             self.cached = self._compute(args)
+            ACTION_STACK.pop()
             self._do_action(args)
 
         return self.cached
@@ -164,12 +178,12 @@ class TaskDeperms(Task):
 
     def add_parser_opts(self, parser):
         parser.add_argument(
-            '--write-perms', help=
+            '--write-perms', metavar='FILE', help=
             'Write permutations of translations to this file. (.npy, .npy.xz)',
         )
 
         parser.add_argument(
-            '--perms', help=
+            '--perms', metavar='FILE', help=
             'Path to file previously written through --write-perms.',
         )
 
@@ -204,7 +218,10 @@ class TaskEigensols(Task):
         self.structure = structure
 
     def add_parser_opts(self, parser):
-        parser.add_argument('--eigensols', help='rsp2 eigensols file. (.npz)')
+        parser.add_argument(
+            '--eigensols', metavar='FILE',
+            help='rsp2 eigensols file. (.npz)',
+        )
 
     def _compute(self, args):
         if not args.eigensols:
@@ -234,12 +251,12 @@ class TaskEigenmodeData(Task):
 
     def add_parser_opts(self, parser):
         parser.add_argument(
-            '--write-mode-data', help=
+            '--write-mode-data', metavar='FILE', help=
             'Write data about plotted eigenmodes to this file. (.npz)',
         )
 
         parser.add_argument(
-            '--mode-data', help=
+            '--mode-data', metavar='FILE', help=
             'Read data previously written using --write-mode-data so that reading '
             'the (large) eigensols file is not necessary to produce a plot.',
         )
@@ -295,7 +312,7 @@ class TaskQProbs(Task):
 
     def add_parser_opts(self, parser):
         parser.add_argument(
-            '--write-probs', help=
+            '--write-probs', metavar='FILE', help=
             'Write magnitudes of g-point projections to this file. (.npz)',
         )
 
@@ -306,7 +323,7 @@ class TaskQProbs(Task):
         )
 
         parser.add_argument(
-            '--probs', help=
+            '--probs', metavar='FILE', help=
             'Path to .npz file previously written through --write-probs.',
         )
 
@@ -364,7 +381,7 @@ class TaskBandPath(Task):
 
     def add_parser_opts(self, parser):
         parser.add_argument(
-            '--output-kpath', help=
+            '--plot-kpath', help=
             "A kpath in the format accepted by ASE's parse_path_string, "
             "naming points in the monolayer BZ.  If not specified, no band "
             "plot is generated."
@@ -378,14 +395,14 @@ class TaskBandPath(Task):
 
         prim_lattice = np.linalg.inv(supercell.matrix) @ super_lattice
 
-        if args.output_kpath is None:
-            die('--output-kpath is required')
+        if args.plot_kpath is None:
+            die('--plot-kpath is required')
 
         # NOTE: The kpoints returned by get_special_points (and by proxy, this
         #       function) do adapt to the user's specific choice of primitive cell.
         #       (at least, for reasonable cells; I haven't tested it with a highly
         #       skewed cell). Respect!
-        bandpath_output = bandpath(args.output_kpath, prim_lattice, 300)
+        bandpath_output = bandpath(args.plot_kpath, prim_lattice, 300)
         return {
             'plot_kpoint_pfracs': bandpath_output[0],
             'plot_x_coordinates': bandpath_output[1],
@@ -410,12 +427,12 @@ class TaskBands(Task):
 
     def add_parser_opts(self, parser):
         parser.add_argument(
-            '--write-bands', help=
+            '--write-bands', metavar='FILE', help=
             'Write data resampled onto layer high sym path. (.npz)',
         )
 
         parser.add_argument(
-            '--bands', help=
+            '--bands', metavar='FILE', help=
             'Path to file previously written through --write-bands.',
         )
 
@@ -463,21 +480,32 @@ class TaskBandPlot(Task):
         self.band_path = band_path
         self.bands = bands
 
+    def add_parser_opts(self, parser):
+        parser.add_argument('--show', action='store_true', help='show plot')
+        parser.add_argument('--write-plot', metavar='FILE', help='save plot to file')
+
     def has_action(self, args):
-        return bool(args.output_kpath) # FIXME: --show
+        return args.show or bool(args.write_plot)
 
     def _compute(self, args):
-        return None
+        return probs_to_band_plot(
+            ev_frequencies=self.mode_data.require(args)['ev_frequencies'],
+            ev_z_projections=self.mode_data.require(args)['ev_z_projections'],
+            ev_path_probs=self.bands.require(args)['ev_path_probs'],
+            plot_x_coordinates=self.band_path.require(args)['plot_x_coordinates'],
+            plot_xticks=self.band_path.require(args)['plot_xticks'],
+        )
 
     def _do_action(self, args):
-        if args.output_kpath:
-            probs_to_band_plot(
-                ev_frequencies=self.mode_data.require(args)['ev_frequencies'],
-                ev_z_projections=self.mode_data.require(args)['ev_z_projections'],
-                ev_path_probs=self.bands.require(args)['ev_path_probs'],
-                plot_x_coordinates=self.band_path.require(args)['plot_x_coordinates'],
-                plot_xticks=self.band_path.require(args)['plot_xticks'],
-            )
+        fig, ax = self.require(args)
+
+        if args.show:
+            import matplotlib.pyplot as plt
+            # fig.show() # doesn't do anything :/
+            plt.show()
+
+        if args.write_plot:
+            fig.savefig(args.write_plot)
 
 #----------------------------------------------------------------
 
@@ -575,7 +603,7 @@ def probs_to_band_plot(
 
     # colorize Z projection
     from matplotlib.colors import LinearSegmentedColormap
-    cmap = LinearSegmentedColormap.from_list('', [[0, 0.5, 0], [0, 0, 1]])
+    cmap = LinearSegmentedColormap.from_list('', [[0, 0, 1], [0, 0.5, 0]])
     C[:, :3] = cmap(Z_proj)[:, :3]
 
     fig, ax = plt.subplots(figsize=(7, 8))
@@ -584,7 +612,7 @@ def probs_to_band_plot(
     for x in plot_xticks:
         ax.axvline(x)
 
-    plt.show()
+    return fig, ax
 
 def reduce_carts(carts, lattice):
     fracs = carts @ np.linalg.inv(lattice)
@@ -1076,6 +1104,9 @@ def cartesian_product(*arrays):
 
 def die(*args, **kw):
     print('unfold:', *args, **kw, file=sys.stderr)
+    if SHOW_ACTION_STACK:
+        for name in ACTION_STACK[::-1]:
+            print(f"  while computing {name}", file=sys.stderr)
     sys.exit(1)
 
 #---------------------------------------------------------------
