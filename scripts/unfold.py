@@ -21,14 +21,7 @@ def main():
     parser = argparse.ArgumentParser(description="Unfold phonon eigenvectors")
 
     parser.add_argument('--verbose', action='store_true')
-    parser.add_argument(
-        'STRUCTURE',
-        help='rsp2 structure directory',
-    )
-    parser.add_argument(
-        'EIGENSOLS', help=
-        'rsp2 eigensols file. (.npz)',
-    )
+    parser.add_argument('STRUCTURE', help='rsp2 structure directory')
 
     all_tasks = []
     def register(task):
@@ -210,7 +203,13 @@ class TaskEigensols(Task):
         super().__init__()
         self.structure = structure
 
+    def add_parser_opts(self, parser):
+        parser.add_argument('--eigensols', help='rsp2 eigensols file. (.npz)')
+
     def _compute(self, args):
+        if not args.eigensols:
+            die('--eigensols is required for this action')
+
         mask = self.structure.require(args)['mask']
         nsites = len(mask)
 
@@ -218,7 +217,7 @@ class TaskEigensols(Task):
             # This file can be very large and reading it can take a long time
             print('Reading eigensols file')
 
-        ev_eigenvalues, ev_eigenvectors = eigensols.from_path(args.EIGENSOLS)
+        ev_eigenvalues, ev_eigenvectors = eigensols.from_path(args.eigensols)
         ev_projected_eigenvectors = ev_eigenvectors.reshape((-1, nsites, 3))[:, mask]
 
         return {
@@ -253,7 +252,7 @@ class TaskEigenmodeData(Task):
             npz = np.load(args.mode_data)
             return {
                 'ev_frequencies': npz.f.ev_frequencies,
-                'ev_z_projections': npz.f.ev_z_projection,
+                'ev_z_projections': npz.f.ev_z_projections,
             }
 
         ev_eigenvalues = self.eigensols.require(args)['ev_eigenvalues']
