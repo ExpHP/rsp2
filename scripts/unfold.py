@@ -37,7 +37,9 @@ def main():
 
     kpoint_sfrac = register(TaskKpointSfrac())
 
-    eigensols = register(TaskEigensols(structure))
+    dynmat = register(TaskDynmat())
+
+    eigensols = register(TaskEigensols(structure, dynmat))
 
     translation_deperms = register(TaskDeperms(structure))
 
@@ -212,29 +214,57 @@ class TaskDeperms(Task):
             translation_deperms = self.require(args)
             dwim.to_path(args.write_perms, translation_deperms)
 
+class TaskDynmat(Task):
+    def add_parser_opts(self, parser):
+        parser.add_argument(
+            '--dynmat', metavar='FILE', help='rsp2 dynmat file (.npz)',
+        )
+
+    def _compute(self, args):
+        if not args.dynmat:
+            die('--dynmat is required for this action')
+        return sparse.load_npz(args.dynmat)
+
 class TaskEigensols(Task):
-    def __init__(self, structure: TaskStructure):
+    def __init__(self, structure: TaskStructure, dynmat: TaskDynmat):
         super().__init__()
         self.structure = structure
+        self.dynmat = dynmat
 
     def add_parser_opts(self, parser):
         parser.add_argument(
             '--eigensols', metavar='FILE',
-            help='rsp2 eigensols file. (.npz)',
+            help='read rsp2 eigensols file. (.npz)',
         )
 
-    def _compute(self, args):
-        if not args.eigensols:
-            die('--eigensols is required for this action')
+        parser.add_argument(
+            '--write-eigensols', metavar='FILE',
+            help='write rsp2 eigensols file. (.npz)',
+        )
 
+    def has_action(self, args):
+        return bool(args.write_eigensols)
+
+    def _compute(self, args):
         mask = self.structure.require(args)['mask']
         nsites = len(mask)
 
-        if args.verbose:
-            # This file can be very large and reading it can take a long time
-            print('Reading eigensols file')
+        if args.eigensols:
+            if args.verbose:
+                # This file can be very large and reading it can take a long time
+                print('Reading eigensols file')
 
-        ev_eigenvalues, ev_eigenvectors = eigensols.from_path(args.eigensols)
+            ev_eigenvalues, ev_eigenvectors = eigensols.from_path(args.eigensols)
+
+        else:
+            import scipy.linalg
+            if args.verbose:
+                print('--eigensols not supplied. Will diagonalize dynmat.')
+
+            m = self.dynmat.require(args)
+            ev_eigenvalues, ev_eigenvectors = scipy.linalg.eigh(m.todense())
+            ev_eigenvectors = ev_eigenvectors.T
+
         ev_projected_eigenvectors = ev_eigenvectors.reshape((-1, nsites, 3))[:, mask]
 
         return {
@@ -242,6 +272,12 @@ class TaskEigensols(Task):
             'ev_eigenvectors': ev_eigenvectors,
             'ev_projected_eigenvectors': ev_projected_eigenvectors,
         }
+
+    def _do_action(self, args):
+        if args.write_eigensols:
+            d = self.require(args)
+            esols = d['ev_eigenvalues'], d['ev_eigenvectors']
+            eigensols.to_path(args.write_eigensols, esols)
 
 class TaskEigenmodeData(Task):
     """ Scalar data about eigenmodes for the plot. """
@@ -271,6 +307,9 @@ class TaskEigenmodeData(Task):
                 'ev_frequencies': npz.f.ev_frequencies,
                 'ev_z_projections': npz.f.ev_z_projections,
             }
+        else:
+            if args.verbose:
+                print('--mode-data not supplied. Computing from eigensols.')
 
         ev_eigenvalues = self.eigensols.require(args)['ev_eigenvalues']
         ev_eigenvectors = self.eigensols.require(args)['ev_eigenvectors']
@@ -334,6 +373,9 @@ class TaskQProbs(Task):
         if args.probs:
             ev_gpoint_probs = dwim.from_path(args.probs)
         else:
+            if args.verbose:
+                print('--probs not supplied. Will compute by unfolding eigensols.')
+
             layer = self.structure.require(args)['layer']
 
             progress_callback = None
@@ -461,6 +503,7 @@ class TaskBands(Task):
         else:
             progress_callback = None
             if args.verbose:
+                print('--bands not supplied. Will compute by resampling from Q probabilities.')
                 def progress_callback(done, count):
                     print(f'Resampling: {done:>5} of {count} eigenvectors')
 
