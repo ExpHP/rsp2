@@ -388,7 +388,7 @@ class TaskBandPath(Task):
         )
 
     def _compute(self, args):
-        from ase.dft.kpoints import bandpath
+        from ase.dft.kpoints import bandpath, parse_path_string
 
         supercell = self.structure.require(args)['supercell']
         super_lattice = self.structure.require(args)['structure'].lattice.matrix
@@ -403,10 +403,16 @@ class TaskBandPath(Task):
         #       (at least, for reasonable cells; I haven't tested it with a highly
         #       skewed cell). Respect!
         bandpath_output = bandpath(args.plot_kpath, prim_lattice, 300)
+
+        point_names = parse_path_string(args.plot_kpath)
+        if len(point_names) > 1:
+            die('This script currently does not support plots along discontinuous paths.')
+
         return {
             'plot_kpoint_pfracs': bandpath_output[0],
             'plot_x_coordinates': bandpath_output[1],
             'plot_xticks': bandpath_output[2],
+            'plot_xticklabels': point_names[0],
         }
 
 # Arguments related to high symmetry path resampling
@@ -429,6 +435,16 @@ class TaskBands(Task):
         parser.add_argument(
             '--write-bands', metavar='FILE', help=
             'Write data resampled onto layer high sym path. (.npz)',
+        )
+
+        parser.add_argument(
+            '--plot-exponent', type=float, metavar='VALUE', default=1.0, help=
+            'Scale probabilities by this exponent before plotting.'
+        )
+
+        parser.add_argument(
+            '--plot-max-alpha', type=float, metavar='VALUE', default=1.0, help=
+            'Scale probabilities by this exponent before plotting.'
         )
 
         parser.add_argument(
@@ -494,6 +510,10 @@ class TaskBandPlot(Task):
             ev_path_probs=self.bands.require(args)['ev_path_probs'],
             plot_x_coordinates=self.band_path.require(args)['plot_x_coordinates'],
             plot_xticks=self.band_path.require(args)['plot_xticks'],
+            plot_xticklabels=self.band_path.require(args)['plot_xticklabels'],
+            alpha_exponent=args.plot_exponent,
+            alpha_max=args.plot_max_alpha,
+            verbose=args.verbose,
         )
 
     def _do_action(self, args):
@@ -569,6 +589,10 @@ def probs_to_band_plot(
         ev_path_probs,
         plot_x_coordinates,
         plot_xticks,
+        plot_xticklabels,
+        alpha_exponent=1.0,
+        alpha_max=1.0,
+        verbose=False,
 ):
     import matplotlib.pyplot as plt
 
@@ -594,10 +618,16 @@ def probs_to_band_plot(
         S.append(path_probs[mask])
         Z_proj.append([z_projection] * mask.sum())
 
+    if verbose:
+        print(f'Plotting {len(X)} points!')
+
     X = np.hstack(X)
     Y = np.hstack(Y)
     S = np.hstack(S)
     Z_proj = np.hstack(Z_proj)
+
+    S **= alpha_exponent
+    S *= alpha_max
 
     C = np.hstack([np.zeros((len(S), 3)), S[:, None]])
 
@@ -607,10 +637,16 @@ def probs_to_band_plot(
     C[:, :3] = cmap(Z_proj)[:, :3]
 
     fig, ax = plt.subplots(figsize=(7, 8))
+    fig.set_tight_layout(True)
+
     ax.scatter(X, Y, 20, C)
 
     for x in plot_xticks:
         ax.axvline(x)
+
+    ax.set_xlim(X.min(), X.max())
+    ax.set_xticks(plot_xticks)
+    ax.set_xticklabels(plot_xticklabels)
 
     return fig, ax
 
