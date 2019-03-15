@@ -117,8 +117,8 @@ enum Debug { Auto, Never }
 //    Generally speaking, `foo_d_bar * bar_d_baz = foo_d_baz`, assuming the
 //    multiplication operation is supported by those types.
 //
-// 2. When inputs and outputs of a function can be ambiguous, wrap in a module
-//    to define input/output types with named members.
+// 2. When inputs and outputs of a function can be ambiguous, simulate named parameters by
+//    wrapping it in a module that defines input/output structs.
 //
 // 3. Fully destructure the output of any function that computes pieces of the potential,
 //    so that the compiler complains about missing fields when one is added.
@@ -126,6 +126,26 @@ enum Debug { Auto, Never }
 // 4. A function should not accept derivatives as arguments, because such a function
 //    cannot be tested with numerical differentiation. It should instead return
 //    derivatives with respect to its immediate inputs and let the caller handle them.
+//
+// 5. Naming: Use indices `ijkl` in naming as in the papers.  `i` and `j` are the source
+//    and target of a bond.  `k` is another site bonded with site `i`.  `l` is another site
+//    bonded with `j`.
+//
+//    Sometimes the indices are information overload. For this I can only offer my apologies
+//    and suggest you take a break.  I experimented with factoring some parts out in ways that
+//    allowed some indices to be removed, but in the long run I've found that keeping the indices
+//    around makes the code easier to maintain regardless of how it is factored.
+//
+//    Use plurals to denote when something is an array over its last index (alphabetically).
+//
+//    E.g.
+//    - `cos_ijk_d_delta_ik` is the gradient of `cos_ijk` with respect to `delta_ik`.
+//    - `coses_ijk_d_delta_ik` would be a `SiteBondVec<V3>` where the `k`th element is the
+//      gradient of `cos_ijk` with respect to `delta_ik`.
+//    - `coses_ijk_d_delta_ij` would be a `SiteBondVec<V3>` where the `k`th element is the
+//      gradient of `cos_ijk` with respect to `delta_ij`.
+//
+//    (FIXME: Some parts don't adhere to these naming rules yet)
 //
 //-------------------------------------------------------
 
@@ -1110,7 +1130,6 @@ mod site_sigma_pi_term {
 
         for (sbindex_ij, _) in interactions.bonds(site_i).enumerate() {
             let type_j = bond_target_types[sbindex_ij];
-            let delta_ij = bond_deltas[sbindex_ij];
             let weight_ij = bond_weights[sbindex_ij];
 
             // These are what Brenner's Ni REALLY are.
@@ -1121,28 +1140,9 @@ mod site_sigma_pi_term {
             dbg!(dbg, "P: {:.9}", P_ij);
 
             // Gather all cosines between bond i->j and other bonds i->k.
-            let mut coses_ijk = SiteBondVec::new();
-            let mut coses_ijk_d_delta_ij = SiteBondVec::new();
-            let mut coses_ijk_d_delta_ik = SiteBondVec::new();
-            for (sbindex_ik, _) in interactions.bonds(site_i).enumerate() {
-                let delta_ik = bond_deltas[sbindex_ik];
-                if sbindex_ij == sbindex_ik {
-                    // set up bombs in case of possible misuse
-                    coses_ijk.push(NAN);
-                    coses_ijk_d_delta_ij.push(V3::from_fn(|_| NAN));
-                    coses_ijk_d_delta_ik.push(V3::from_fn(|_| NAN));
-                } else {
-                    let out = bond_cosine::Input { delta_ij, delta_ik }.compute();
-                    let BondCosine {
-                        value: cos,
-                        d_delta_ij: cos_d_delta_ij,
-                        d_delta_ik: cos_d_delta_ik,
-                    } = out;
-                    coses_ijk.push(cos);
-                    coses_ijk_d_delta_ij.push(cos_d_delta_ij);
-                    coses_ijk_d_delta_ik.push(cos_d_delta_ik);
-                }
-            }
+            let BondCosines {
+                coses_ijk, coses_ijk_d_delta_ij, coses_ijk_d_delta_ik,
+            } = bond_cosines::Input { sbindex_ij, deltas_ik: bond_deltas }.compute();
 
             // We're finally ready to compute the bond order.
             let bsp_ij;
@@ -1399,8 +1399,8 @@ mod bondorder_pi {
         pub bond_ij: BondI,
         // info about all bonds ik connected to site i
         // and all bonds jl connected to site j
-        pub tcoords_k: &'a [f64],
-        pub tcoords_l: &'a [f64],
+        pub tcoords_k: &'a [f64], // tcoords of sites connected to i
+        pub tcoords_l: &'a [f64], // tcoords of sites connected to j
         pub deltas_ik: &'a [V3],
         pub deltas_jl: &'a [V3],
         pub weights_ik: &'a [f64],
@@ -1427,6 +1427,7 @@ mod bondorder_pi {
             tcoords_l, weights_jl, alt_weights_jl, deltas_jl,
         } = input;
 
+        // Gather all sorts of boring info about the bond from the bond index.
         let site_i = interactions.bond_source(bond_ij);
         let site_j = interactions.bond_target(bond_ij);
         let type_i = interactions.site_type(site_i);
@@ -1444,87 +1445,149 @@ mod bondorder_pi {
         let sbindex_ij = interactions.bond_sbvec_index(bond_ij);
         let sbindex_ji = interactions.bond_sbvec_index(bond_ji);
 
-        let ycoord_ij = ycoord::Input {
-            skip_index: sbindex_ij,
-            weights_ik: weights_ik,
-            tcoords_k: tcoords_k,
-            types_k: &types_k,
-        }.compute(dbg);
+        //----------------
+        // Both pieces of this term depend on NConj (which we call the "x coordination number").
+        // It is an argument to the splines.
+        //
+        //     NConj = 1 + (square sum over bonds ik) + (square sum over bonds jl)
+        //
+        // or in our nomenclature
+        //
+        //     xcoord_ij = 1 + ycoord_ij + ycoord_ji
+        //
+        let xcoord_ij;
+        {
+            let ycoord_ij = ycoord::Input {
+                skip_index: sbindex_ij,
+                weights_ik: weights_ik,
+                tcoords_k: tcoords_k,
+                types_k: &types_k,
+            }.compute(dbg);
 
-        let ycoord_ji = ycoord::Input {
-            skip_index: sbindex_ji,
-            weights_ik: weights_jl,
-            tcoords_k: tcoords_l,
-            types_k: &types_l,
-        }.compute(dbg);
+            let ycoord_ji = ycoord::Input {
+                skip_index: sbindex_ji,
+                weights_ik: weights_jl,
+                tcoords_k: tcoords_l,
+                types_k: &types_l,
+            }.compute(dbg);
 
-        // NConj = 1 + (square sum over bonds ik) + (square sum over bonds jl)
-        let xcoord_ij = 1.0 + ycoord_ij + ycoord_ji;
+            xcoord_ij = 1.0 + ycoord_ij + ycoord_ji;
+        }
 
-        let weight_ij = weights_ik[sbindex_ij];
-        let weight_ji = weights_jl[sbindex_ji];
+        //----------------
+        // The splines also depend on N_{ij} and N_{ji}. (tcoord_ij, tcoord_ji)
 
-        // (these are not flipped; tcoords_k and tcoords_l describe the tcoords of
-        //  the *target* atoms, so tcoord_i is in tcoords_l and etc.)
-        let tcoord_i = tcoords_l[sbindex_ji];
-        let tcoord_j = tcoords_k[sbindex_ij];
+        let (tcoord_ij, tcoord_ji);
+        {
+            let weight_ij = weights_ik[sbindex_ij];
+            let weight_ji = weights_jl[sbindex_ji];
 
-        let tcoord_ij = tcoord_i - weight_ij;
-        let tcoord_ji = tcoord_j - weight_ji;
+            // (these are not flipped; tcoords_k and tcoords_l describe the tcoords of
+            //  the *target* atoms, so tcoord_i is in tcoords_l and etc.)
+            let tcoord_i = tcoords_l[sbindex_ji];
+            let tcoord_j = tcoords_k[sbindex_ij];
 
-        // Accumulators for the output value,
-        // initially formulated in terms of a larger set of variables.
+            tcoord_ij = tcoord_i - weight_ij;
+            tcoord_ji = tcoord_j - weight_ji;
+        }
+
+        //----------------
+        // Accumulators for the output value.
+        // (we'll be adding two terms to this)
         let mut value = 0.0;
         let mut d_deltas_ik = sbvec_filled(V3::zero(), types_k.len());
         let mut d_deltas_jl = sbvec_filled(V3::zero(), types_l.len());
 
         // First term has a T_ij prefactor, which is zero for non-CC bonds.
         if (type_i, type_j) == (AtomType::Carbon, AtomType::Carbon) {
-            // sum = ∑_{k,l} sin^2(Θ_{ijkl}) f_{ik} f_{jl}
+
+            // NOTE: The AIREBO paper introduces cutoffs here:
+            //
+            //        sinsq_ijkl * alt_weight_ik * alt_weight_jl
+            //                   * H(|sin_ijk| - s_min)
+            //                   * H(|sin_jil| - s_min)    (s_min = 0.1)
+            //
+            // where H is the Heaviside function. The absolute value bars (not present in the paper)
+            // were added based on my personal interpretation of the intent.
+            //
+            // This is to avoid an ill-defined region of sinsq where a bond angle is 0 or 180
+            // degrees. The latter is a condition that actually can occur in carbon chains, and the
+            // former means that we can skip self-angles (e.g. where k = j) without an additional
+            // test.
+            //
+            // Of course, that Heaviside is a pretty harsh cutoff, and we prefer to use something
+            // with C1 continuity. LAMMPS does something similar (thmin and thmax), but only around
+            // 180 degrees.
+            // (NOTE: for some reason, LAMMPS also has a hard cutoff at abs(sin) < 1e-9.  This seems
+            //        pointless; we just use a thmax that is smaller than 1, and apply the smooth
+            //        cutoff around 0 degrees as well)
+            const T_COS_0: f64 = 1.0 - 1e-11; // = -thmax
+            const T_COS_1: f64 = 0.95;        // = -thmin
+
+            // Because every ijk angle gets paired with every jil angle, we precompute all of these
+            // cutoff factors right now.
+
+            let BondCosines {
+                coses_ijk,
+                coses_ijk_d_delta_ij,
+                coses_ijk_d_delta_ik,
+            } = bond_cosines::Input {
+                deltas_ik,
+                sbindex_ij,
+            }.compute();
+
+            let BondCosines {
+                coses_ijk: coses_jil,
+                coses_ijk_d_delta_ij: coses_jil_d_delta_ji,
+                coses_ijk_d_delta_ik: coses_jil_d_delta_jl,
+            } = bond_cosines::Input {
+                deltas_ik: deltas_jl,
+                sbindex_ij: sbindex_ji,
+            }.compute();
+
+            let get_cutoffs = |site_i, sbindex_ij, coses_ijk: &[f64]| {
+                let mut cutoffs_ijk = SiteBondVec::new();
+                let mut cutoffs_ijk_d_cos_ijk = SiteBondVec::new();
+                for (sbindex_ik, _) in interactions.bonds(site_i).enumerate() {
+                    if sbindex_ik == sbindex_ij {
+                        // A cutoff of zero ensures this is skipped later.
+                        cutoffs_ijk.push(0.0);
+                        cutoffs_ijk_d_cos_ijk.push(NAN); // bomb; should never be used
+                    } else {
+                        // (we could do a single switch on abs(cos_ijk) here but then we'd
+                        //  also need to potentially fix the sign of the derivative)
+                        let (pcut, pcut_d_cos) = switch::poly5((T_COS_0, T_COS_1), coses_ijk[sbindex_ik]);
+                        let (mcut, mcut_d_cos) = switch::poly5((-T_COS_0, -T_COS_1), coses_ijk[sbindex_ik]);
+                        cutoffs_ijk.push(pcut * mcut);
+                        cutoffs_ijk_d_cos_ijk.push(pcut * mcut_d_cos + pcut_d_cos * mcut);
+                    }
+                }
+                (cutoffs_ijk, cutoffs_ijk_d_cos_ijk)
+            };
+            let (cutoffs_ijk, cutoffs_ijk_d_cos_ijk) = get_cutoffs(site_i, sbindex_ij, &coses_ijk);
+            let (cutoffs_jil, cutoffs_jil_d_cos_jil) = get_cutoffs(site_j, sbindex_ji, &coses_jil);
+
+            // Now for the actual sum:
+            //
+            //     sum = ∑_{k,l} sin^2(Θ_{ijkl}) f_{ik} f_{jl} cut_{ijk} cut_{jil}
+            //
+            // We must iterate over groups of four atoms ijkl, where k != i and l != j.
+            // For now it is less work if we consider the cosines to be independent variables.
             let mut sum = 0.0;
             let mut sum_d_deltas_ik = sbvec_filled(V3::zero(), weights_ik.len()); // w.r.t. bonds around site i
             let mut sum_d_deltas_jl = sbvec_filled(V3::zero(), weights_jl.len()); // w.r.t. bonds around site j
-            // We must iterate over groups of four atoms ijkl,
-            // where k and l are not equal to i or j.
-            for (sbindex_ik, _) in interactions.bonds(site_i).enumerate() {
+            let mut sum_d_coses_ijk = sbvec_filled(0.0, weights_ik.len()); // w.r.t. bonds around site i
+            let mut sum_d_coses_jil = sbvec_filled(0.0, weights_jl.len()); // w.r.t. bonds around site j
 
-                // Recall that because a site may have multiple images involved in the interaction,
-                // simply comparing site indices is not good enough.
-                //
-                // Thankfully, verifying i != l and j != k is easily done because we can
-                // compare bond indices.
-                if sbindex_ik == sbindex_ij {
-                    continue; // site k is site j
+            for sbindex_ik in 0..types_k.len() {
+                if cutoffs_ijk[sbindex_ik] == 0.0 {
+                    continue; // region where sinsq_ijkl is ill-defined
                 }
 
-                for (sbindex_jl, _) in interactions.bonds(site_j).enumerate() {
-                    if sbindex_jl == sbindex_ji {
-                        continue; // site l is site i
+                for sbindex_jl in 0..types_l.len() {
+                    if cutoffs_jil[sbindex_jl] == 0.0 {
+                        continue; // region where sinsq_ijkl is ill-defined
                     }
-
-                    //-----------
-                    // FIXME: the AIREBO paper adds cutoff factors here:
-                    //
-                    //        sinsq_ijkl * alt_weight_ik * alt_weight_jl
-                    //                   * H(sin_ijk - s_min)
-                    //                   * H(sin_jil - s_min)    (s_min = 0.1)
-                    //
-                    // where H is the Heaviside function. (Of course, for C1 continuity, we should
-                    // use a smooth cutoff, and maybe not such a large interval! LAMMPS does
-                    // something that seems closer to the right idea...)
-                    //
-                    // These appear to be present to cut the term off for bond angles that are near
-                    // either 0 degrees or 180 degrees, because sin_ijkl is undefined in these
-                    // scenarios.  0 degrees should basically never happen, but 180 degrees could
-                    // be a real problem for us.
-                    //
-                    // Unfortunately, doing this "right" seems sufficiently complicated (and will be
-                    // seldom tested) that I don't currently feel like it's worth handling for now.
-                    //
-                    // (NOTE: once we do add this, we should get rid of the index checks above, as
-                    //  well as interactions.bond_source and bond_reverse_index which only exist for
-                    //  this purpose)
-                    //-----------
 
                     let delta_ij = deltas_ik[sbindex_ij];
                     let delta_ik = deltas_ik[sbindex_ik];
@@ -1541,23 +1604,51 @@ mod bondorder_pi {
                         delta_ij, delta_ik, delta_jl,
                     );
 
+                    // Other terms in the product
                     let alt_weight_ik = alt_weights_ik[sbindex_ik];
                     let alt_weight_jl = alt_weights_jl[sbindex_jl];
+                    let cutoff_ijk = cutoffs_ijk[sbindex_ik];
+                    let cutoff_jil = cutoffs_jil[sbindex_jl];
+                    let cutoff_ijk_d_cos_ijk = cutoffs_ijk_d_cos_ijk[sbindex_ik];
+                    let cutoff_jil_d_cos_jil = cutoffs_jil_d_cos_jil[sbindex_jl];
 
-                    sum += sinsq * alt_weight_ik * alt_weight_jl;
+                    // Postfactor of sinsq_ijkl
+                    let post = alt_weight_ik * alt_weight_jl * cutoff_ijk * cutoff_jil;
+                    let post_d_cos_ijk = alt_weight_ik * alt_weight_jl * cutoff_ijk_d_cos_ijk * cutoff_jil;
+                    let post_d_cos_jil = alt_weight_ik * alt_weight_jl * cutoff_ijk * cutoff_jil_d_cos_jil;
 
-                    sum_d_deltas_ik[sbindex_ij] += sinsq_d_delta_ij * alt_weight_ik * alt_weight_jl;
-                    sum_d_deltas_ik[sbindex_ik] += sinsq_d_delta_ik * alt_weight_ik * alt_weight_jl;
-                    sum_d_deltas_jl[sbindex_jl] += sinsq_d_delta_jl * alt_weight_ik * alt_weight_jl;
+                    sum += sinsq * post;
+
+                    sum_d_deltas_ik[sbindex_ij] += sinsq_d_delta_ij * post;
+                    sum_d_deltas_ik[sbindex_ik] += sinsq_d_delta_ik * post;
+                    sum_d_deltas_jl[sbindex_jl] += sinsq_d_delta_jl * post;
+
+                    sum_d_coses_ijk[sbindex_ik] += sinsq * post_d_cos_ijk;
+                    sum_d_coses_jil[sbindex_jl] += sinsq * post_d_cos_jil;
                 } // for bond_jl
             } // for bond_ik
 
             let T = t_spline::Input { params, type_i, type_j, tcoord_ij, tcoord_ji, xcoord_ij }.compute();
             dbg!(dbg, "T: {:.9}", T);
 
+            // Now add to the outer accumulators.
+            // This is a convenient time to eliminate the cosines from our independent variables.
             value += T * sum;
             axpy_mut(&mut d_deltas_ik, T, &sum_d_deltas_ik);
             axpy_mut(&mut d_deltas_jl, T, &sum_d_deltas_jl);
+
+            for (sbindex_ik, &sum_d_cos_ijk) in sum_d_coses_ijk.iter().enumerate() {
+                if sbindex_ik != sbindex_ij {
+                    d_deltas_ik[sbindex_ik] += sum_d_cos_ijk * coses_ijk_d_delta_ik[sbindex_ik];
+                    d_deltas_ik[sbindex_ij] += sum_d_cos_ijk * coses_ijk_d_delta_ij[sbindex_ik];
+                }
+            }
+            for (sbindex_jl, &sum_d_cos_jil) in sum_d_coses_jil.iter().enumerate() {
+                if sbindex_jl != sbindex_ji {
+                    d_deltas_jl[sbindex_jl] += sum_d_cos_jil * coses_jil_d_delta_jl[sbindex_jl];
+                    d_deltas_jl[sbindex_ji] += sum_d_cos_jil * coses_jil_d_delta_ji[sbindex_jl];
+                }
+            }
         }
 
         // Second term: Just F.
@@ -1866,7 +1957,7 @@ mod dihedral_sine_sq {
     }
 }
 
-use self::bond_cosine::BondCosine;
+use self::bond_cosine::{BondCosine};
 mod bond_cosine {
     //! Diff function for the cos(θ) between bonds.
     use super::*;
@@ -1934,6 +2025,64 @@ mod bond_cosine {
             assert_close!(abs=1e-8, output_d_delta_ij.0, numerical_d_delta_ij.0);
             assert_close!(abs=1e-8, output_d_delta_ik.0, numerical_d_delta_ik.0);
         }
+    }
+}
+
+use self::bond_cosines::{BondCosines};
+mod bond_cosines {
+    //! For a given bond, get all cosines with other bonds at the originating site.
+    //!
+    //! This is mostly a trivial wrapper around `BondCosine`, but the output SiteBondVecs will
+    //! contain NaNs in the location that correspond to the current bond (as a bond has no cosine
+    //! with itself).
+    use super::*;
+
+    pub(super) type Output = BondCosines;
+    pub(super) struct Input<'a> {
+        pub deltas_ik: &'a [V3],
+        pub sbindex_ij: usize,
+    }
+
+    pub(super) struct BondCosines {
+        pub coses_ijk: SiteBondVec<f64>,
+        pub coses_ijk_d_delta_ij: SiteBondVec<V3>,
+        pub coses_ijk_d_delta_ik: SiteBondVec<V3>,
+    }
+
+    impl<'a> Input<'a> {
+        pub(super) fn compute(self) -> Output { compute(self) }
+    }
+
+    // free function for smaller indent
+    fn compute(input: Input) -> Output {
+        let Input { deltas_ik, sbindex_ij } = input;
+
+        let delta_ij = deltas_ik[sbindex_ij];
+
+        let mut coses_ijk = SiteBondVec::new();
+        let mut coses_ijk_d_delta_ij = SiteBondVec::new();
+        let mut coses_ijk_d_delta_ik = SiteBondVec::new();
+        for sbindex_ik in 0..deltas_ik.len() {
+            let delta_ik = deltas_ik[sbindex_ik];
+            if sbindex_ij == sbindex_ik {
+                // set up bombs in case of possible misuse
+                coses_ijk.push(NAN);
+                coses_ijk_d_delta_ij.push(V3::from_fn(|_| NAN));
+                coses_ijk_d_delta_ik.push(V3::from_fn(|_| NAN));
+            } else {
+                let out = bond_cosine::Input { delta_ij, delta_ik }.compute();
+                let BondCosine {
+                    value: cos,
+                    d_delta_ij: cos_d_delta_ij,
+                    d_delta_ik: cos_d_delta_ik,
+                } = out;
+                coses_ijk.push(cos);
+                coses_ijk_d_delta_ij.push(cos_d_delta_ij);
+                coses_ijk_d_delta_ik.push(cos_d_delta_ik);
+            }
+        }
+
+        BondCosines { coses_ijk, coses_ijk_d_delta_ij, coses_ijk_d_delta_ik }
     }
 }
 
@@ -2278,14 +2427,6 @@ mod p_spline {
 mod f_spline {
     use super::*;
 
-    // FIXME:
-    //
-    // The fitting data for the F spline is a terror to behold.
-    // Brenner's table also contains numerous suspicious-looking things (i.e. possible errors)
-    // that I don't want to have to fret over right now.
-    //
-    // For that reason, we don't actually currently use the tricubic splines, and instead just
-    // check for a few special cases.
     pub(super) type Output = f64;
     pub(super) struct Input<'a> {
         pub params: &'a Params,
