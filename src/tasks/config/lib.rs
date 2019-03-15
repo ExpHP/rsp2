@@ -563,6 +563,7 @@ pub struct PotentialReboNew {
 pub enum PotentialReboNewParams {
     Brenner,
     Lammps,
+    LammpsFavata,
 }
 
 #[derive(Serialize, Deserialize)]

@@ -203,6 +203,7 @@ impl PotentialBuilder<CommonMeta> for Rebo {
             let cfg::PotentialReboNew { params } = me.cfg;
             let params = match params {
                 cfg::PotentialReboNewParams::Lammps => rebo_imp::Params::new_lammps(),
+                cfg::PotentialReboNewParams::LammpsFavata => rebo_imp::Params::new_favata(),
                 cfg::PotentialReboNewParams::Brenner => rebo_imp::Params::new_brenner(),
             };
 
