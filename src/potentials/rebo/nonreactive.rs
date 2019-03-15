@@ -306,6 +306,9 @@ mod params {
         /// The G splines (functions of bond angle) are also different, solved from
         /// the parameters in the AIREBO paper.  (as a result, these are not quite
         /// identical to LAMMPS's splines, which were formatted to poor precision)
+        ///
+        /// These include Falvo's fixes for hydrocarbons that are not yet available
+        /// in lammps upstream.
         pub fn new_lammps() -> Self {
             let type_params_cc = TypeParams {
                 B: [
@@ -367,11 +370,21 @@ mod params {
             Params {
                 use_airebo_lambda: true,
                 G: Cow::Owned(splines::G::STUART),
-                P: Cow::Borrowed(&splines::P::FAVATA),
+                P: Cow::Borrowed(&splines::P::BRENNER),
                 F: Cow::Borrowed(&splines::F::LAMMPS),
                 T: Cow::Borrowed(&splines::T::STUART),
                 by_type,
             }
+        }
+
+        /// Same as `new_lammps`, but without Falvo's fixes.
+        ///
+        /// This reproduces bugs that exist in current versions of lammps
+        /// when using rebo on hydrocarbons.
+        pub fn new_favata() -> Self {
+            let mut params = Self::new_lammps();
+            params.P = Cow::Borrowed(&splines::P::FAVATA);
+            params
         }
     }
 }
@@ -2635,7 +2648,9 @@ mod input_tests {
 
         // Set this to false to let tests capture stdout
         let use_rayon = false; // FIXME: revert to true
-        let ref params = Params::new_lammps();
+
+        // Note: The bug in favata affects the test structure "wing-1".
+        let ref params = Params::new_favata();
 
         let in_path = Path::new(RESOURCE_DIR).join("structure").join(name).join("structure.vasp.xz");
         let out_path = Path::new(RESOURCE_DIR).join("rebo").join(name.to_string() + ".lmp.json.xz");
