@@ -7,11 +7,14 @@
 # You can *vaguely* approximate this with
 #      diff <(LC_ALL=C sort a.txt) <(LC_ALL=C sort b.txt)
 # but even that still sometimes gets confused.
+#
+# The comparison operator is a natural sort with some properties optimized
+# for our use case in debugging rsp2's potentials.  (e.g. whitespace is
+# normalized, and words that look like floats are compared using IEEE-754
+# semantics except that NaNs are grouped together).
+# Use together with `./filter-out`.
 
 import sys
-
-try: from natsort import natsorted
-except ImportError: natsorted = None
 
 try: import colored
 except ImportError: colored = None
@@ -23,17 +26,15 @@ def main():
     )
     p.add_argument('FILE_A')
     p.add_argument('FILE_B')
-    p.add_argument('-n', '--natural', help='give the results naturally sorted. (default is lexical)')
+    p.add_argument('-l', '--lexical', action='store_true', help='disable natural sorting and compare lines lexically')
     p.add_argument('-e', '--equal', action='store_true', help='include lines that are shared')
     p.add_argument('--color', choices=['never', 'always', 'auto'], default = 'auto')
     args = p.parse_args()
 
-    if args.natural:
-        if not natsorted:
-            die('please install the natsorted package')
-        get_sorted = natsorted
+    if args.lexical:
+        key_func = lambda a: a
     else:
-        get_sorted = sorted
+        key_func = natural_key
 
     if args.color == 'auto':
         use_color = sys.stdout.isatty() and colored is not None
@@ -46,38 +47,38 @@ def main():
     else:
         assert False, 'complete switch'
 
-    lines_a = get_sorted(list(open(args.FILE_A)))
-    lines_b = get_sorted(list(open(args.FILE_B)))
+    lines_a = sorted(open(args.FILE_A), key=key_func)
+    lines_b = sorted(open(args.FILE_B), key=key_func)
 
-    diff = sorted_diff(lines_a, lines_b, emit_eq=args.equal)
+    diff = sorted_diff(lines_a, lines_b, emit_eq=args.equal, key=key_func)
 
     format_diff(diff, use_color, file=sys.stdout)
 
-def sorted_diff(a, b, emit_eq):
-
+def sorted_diff(a, b, emit_eq, key=lambda a: a):
     DONE = object()
     def maybe_next(it):
         try:
-            return next(it)
+            value = next(it)
         except StopIteration:
-            return DONE
+            return DONE, None
+        return value, key(value)
 
     a = iter(a)
     b = iter(b)
-    next_a = maybe_next(a)
-    next_b = maybe_next(b)
+    next_a, key_a = maybe_next(a)
+    next_b, key_b = maybe_next(b)
     while next_a is not DONE and next_b is not DONE:
-        if next_a < next_b:
+        if key_a < key_b:
             yield ('<', next_a)
-            next_a = maybe_next(a)
-        elif next_a > next_b:
+            next_a, key_a = maybe_next(a)
+        elif key_a > key_b:
             yield ('>', next_b)
-            next_b = maybe_next(b)
-        elif next_a == next_b:
+            next_b, key_b = maybe_next(b)
+        elif key_a == key_b:
             if emit_eq:
                 yield ('=', next_a)
-            next_a = maybe_next(a)
-            next_b = maybe_next(b)
+            next_a, key_a = maybe_next(a)
+            next_b, key_b = maybe_next(b)
         else:
             raise ValueError("input does not obey a total order")
 
@@ -104,6 +105,23 @@ def format_diff(diff, use_color, file):
 
     for side, line in diff:
         print(side_formatter[side](line), file=file, end='')
+
+TYPE_FLOAT = 0
+TYPE_NAN = 1
+TYPE_STRING = 2
+def natural_key(s):
+    def natural_word(s):
+        try:
+            value = float(s)
+        except ValueError:
+            return (TYPE_STRING, s)
+
+        if value == value:
+            return (TYPE_FLOAT, value)
+        else:
+            return (TYPE_NAN, None)
+
+    return tuple([natural_word(word) for word in s.split()])
 
 def die(*args):
     print(*args, file=sys.stderr)
