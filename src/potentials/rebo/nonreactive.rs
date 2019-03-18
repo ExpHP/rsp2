@@ -1498,8 +1498,12 @@ mod bondorder_pi {
         let mut d_deltas_ik = sbvec_filled(V3::zero(), types_k.len());
         let mut d_deltas_jl = sbvec_filled(V3::zero(), types_l.len());
 
-        // First term has a T_ij prefactor, which is zero for non-CC bonds.
-        if (type_i, type_j) == (AtomType::Carbon, AtomType::Carbon) {
+        // First term has a T_ij prefactor, which is frequently zero.
+        // (it's only nonzero for CC bonds between two carbons of coordination number 3)
+        let T = t_spline::Input { params, type_i, type_j, tcoord_ij, tcoord_ji, xcoord_ij }.compute();
+        dbg!(dbg, "T: {:.9}", T);
+
+        if T != 0.0 {
 
             // NOTE: The AIREBO paper introduces cutoffs here:
             //
@@ -1522,7 +1526,7 @@ mod bondorder_pi {
             //        pointless; we just use a thmax that is smaller than 1, and apply the smooth
             //        cutoff around 0 degrees as well)
             const T_COS_0: f64 = 1.0 - 1e-11; // = -thmax
-            const T_COS_1: f64 = 0.95;        // = -thmin
+            const T_COS_1: f64 = 0.995;       // = -thmin
 
             // Because every ijk angle gets paired with every jil angle, we precompute all of these
             // cutoff factors right now.
@@ -1556,10 +1560,23 @@ mod bondorder_pi {
                     } else {
                         // (we could do a single switch on abs(cos_ijk) here but then we'd
                         //  also need to potentially fix the sign of the derivative)
-                        let (pcut, pcut_d_cos) = switch::poly5((T_COS_0, T_COS_1), coses_ijk[sbindex_ik]);
-                        let (mcut, mcut_d_cos) = switch::poly5((-T_COS_0, -T_COS_1), coses_ijk[sbindex_ik]);
-                        cutoffs_ijk.push(pcut * mcut);
-                        cutoffs_ijk_d_cos_ijk.push(pcut * mcut_d_cos + pcut_d_cos * mcut);
+                        let (pcut, pcut_d_cos) = switch::poly3((T_COS_0, T_COS_1), coses_ijk[sbindex_ik]);
+                        let (mcut, mcut_d_cos) = switch::poly3((-T_COS_0, -T_COS_1), coses_ijk[sbindex_ik]);
+
+                        let cut = pcut * mcut;
+                        let cut_d_cos = pcut * mcut_d_cos + pcut_d_cos * mcut;
+                        dbg!(dbg, "sincut: {:.9}", cut);
+
+                        if cut != 1.0 {
+                            warn_once!(
+                                "REBO: Found a bond angle near 0 or 180 degrees that has a nonzero \
+                                T coefficient. This is a rare circumstance with a nontrivial \
+                                implementation that may still have bugs."
+                            )
+                        }
+
+                        cutoffs_ijk.push(cut);
+                        cutoffs_ijk_d_cos_ijk.push(cut_d_cos);
                     }
                 }
                 (cutoffs_ijk, cutoffs_ijk_d_cos_ijk)
@@ -1628,9 +1645,6 @@ mod bondorder_pi {
                 } // for bond_jl
             } // for bond_ik
 
-            let T = t_spline::Input { params, type_i, type_j, tcoord_ij, tcoord_ji, xcoord_ij }.compute();
-            dbg!(dbg, "T: {:.9}", T);
-
             // Now add to the outer accumulators.
             // This is a convenient time to eliminate the cosines from our independent variables.
             value += T * sum;
@@ -1639,14 +1653,14 @@ mod bondorder_pi {
 
             for (sbindex_ik, &sum_d_cos_ijk) in sum_d_coses_ijk.iter().enumerate() {
                 if sbindex_ik != sbindex_ij {
-                    d_deltas_ik[sbindex_ik] += sum_d_cos_ijk * coses_ijk_d_delta_ik[sbindex_ik];
-                    d_deltas_ik[sbindex_ij] += sum_d_cos_ijk * coses_ijk_d_delta_ij[sbindex_ik];
+                    d_deltas_ik[sbindex_ik] += T * sum_d_cos_ijk * coses_ijk_d_delta_ik[sbindex_ik];
+                    d_deltas_ik[sbindex_ij] += T * sum_d_cos_ijk * coses_ijk_d_delta_ij[sbindex_ik];
                 }
             }
             for (sbindex_jl, &sum_d_cos_jil) in sum_d_coses_jil.iter().enumerate() {
                 if sbindex_jl != sbindex_ji {
-                    d_deltas_jl[sbindex_jl] += sum_d_cos_jil * coses_jil_d_delta_jl[sbindex_jl];
-                    d_deltas_jl[sbindex_ji] += sum_d_cos_jil * coses_jil_d_delta_ji[sbindex_jl];
+                    d_deltas_jl[sbindex_jl] += T * sum_d_cos_jil * coses_jil_d_delta_jl[sbindex_jl];
+                    d_deltas_jl[sbindex_ji] += T * sum_d_cos_jil * coses_jil_d_delta_ji[sbindex_jl];
                 }
             }
         }
