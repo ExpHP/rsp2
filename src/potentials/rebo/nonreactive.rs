@@ -1568,11 +1568,13 @@ mod bondorder_pi {
                         dbg!(dbg, "sincut: {:.9}", cut);
 
                         if cut != 1.0 {
+                            // Basically the only test for this is the unphysical structure
+                            // "carbon-chain-4-hydro" in the tests directory.
                             warn_once!(
                                 "REBO: Found a bond angle near 0 or 180 degrees that has a nonzero \
                                 T coefficient. This is a rare circumstance with a nontrivial \
                                 implementation that may still have bugs."
-                            )
+                            );
                         }
 
                         cutoffs_ijk.push(cut);
