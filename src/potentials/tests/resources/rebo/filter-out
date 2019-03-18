@@ -45,6 +45,8 @@ blacklist = [
   'note:',
   'right:',
   'failures:',
+  'warning:',
+  'error:',
 ]
 
 for line in sys.stdin:

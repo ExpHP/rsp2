@@ -15,7 +15,7 @@ pair_coeff * * CH.airebo-nonreactive C H
 #dump FB all local 1 dump.bond c_B[1] c_B[2] c_F[1] c_F[2] c_F[3]
 
 dump F all custom 1 dump.force id fx fy fz
-dump_modify F format line "%d %d %.16g %.16g %.16g"
+dump_modify F format line "%d %.16g %.16g %.16g"
 thermo_style custom pe
 thermo_modify lost error
 thermo_modify line multi format float %.16g
