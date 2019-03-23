@@ -39,9 +39,6 @@ pub trait FlatDiffFn: FnMut(&[f64]) -> FailResult<(f64, Vec<f64>)> {}
 
 impl<F> FlatDiffFn for F where F: FnMut(&[f64]) -> FailResult<(f64, Vec<f64>)> {}
 
-// Type aliases for the trait object types, to work around #23856
-pub type DynFlatDiffFn<'a> = dyn FlatDiffFn<Output=FailResult<(f64, Vec<f64>)>> + 'a;
-
 /// This is what gets passed around by very high level code to represent a
 /// potential function. Basically:
 ///
@@ -125,8 +122,8 @@ pub trait PotentialBuilder<Meta = CommonMeta>
     ///
     /// Because Boxes don't implement `Fn` traits for technical reasons,
     /// you will likely need to write `&mut *flat_diff_fn` in order to get
-    /// a `&mut DynFlatDiffFn`.
-    fn initialize_flat_diff_fn(&self, init_coords: &Coords, meta: Meta) -> FailResult<Box<DynFlatDiffFn<'static>>>
+    /// a `&mut dyn FlatDiffFn`.
+    fn initialize_flat_diff_fn(&self, init_coords: &Coords, meta: Meta) -> FailResult<Box<dyn FlatDiffFn>>
     where Meta: Clone + 'static
     {
         let mut diff_fn = self.initialize_diff_fn(init_coords, meta.clone())?;
@@ -255,7 +252,7 @@ where Meta: Clone + 'static,
     fn initialize_diff_fn(&self, coords: &Coords, meta: Meta) -> FailResult<Box<dyn DiffFn<Meta>>>
     { (**self).initialize_diff_fn(coords, meta) }
 
-    fn initialize_flat_diff_fn(&self, coords: &Coords, meta: Meta) -> FailResult<Box<DynFlatDiffFn<'static>>>
+    fn initialize_flat_diff_fn(&self, coords: &Coords, meta: Meta) -> FailResult<Box<dyn FlatDiffFn>>
     { (**self).initialize_flat_diff_fn(coords, meta) }
 
     fn initialize_bond_diff_fn(&self, init_coords: &Coords, meta: Meta) -> FailResult<Option<Box<dyn BondDiffFn<Meta>>>>
@@ -511,7 +508,7 @@ impl dyn PotentialBuilder {
 
 pub struct Rsp2MinimizeDiffFnShim {
     pub ndim: usize,
-    pub diff_fn: Box<DynFlatDiffFn<'static>>
+    pub diff_fn: Box<dyn FlatDiffFn>
 }
 
 impl<'a> rsp2_minimize::test::n_dee::OnceDifferentiable for Rsp2MinimizeDiffFnShim {

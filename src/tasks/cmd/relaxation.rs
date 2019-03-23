@@ -14,7 +14,7 @@
 
 use crate::{FailResult, FailOk};
 use crate::filetypes::stored_structure::StoredStructure;
-use crate::potential::{self, PotentialBuilder, DiffFn, BondDiffFn, DynFlatDiffFn};
+use crate::potential::{self, PotentialBuilder, DiffFn, BondDiffFn, FlatDiffFn};
 use crate::meta::{self, prelude::*};
 use crate::hlist_aliases::*;
 use crate::math::basis::{Basis3, EvDirection};
@@ -614,7 +614,7 @@ fn flat_constrained_position(
 // There will be one coordinate for each eigenvector.
 fn constrained_diff_fn<'a>(
     // operates on 3N coords
-    flat_3n_diff_fn: &'a mut DynFlatDiffFn<'a>,
+    flat_3n_diff_fn: &'a mut dyn FlatDiffFn,
     // K values, K <= 3N
     flat_init_pos: &'a [f64],
     // K eigenvectors
