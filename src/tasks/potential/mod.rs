@@ -487,6 +487,11 @@ impl dyn PotentialBuilder {
                 let pot = self::lammps::Builder::new(trial_dir, on_demand, threading, update_style, axis_mask, lammps_pot);
                 Box::new(pot)
             },
+            cfg::PotentialKind::KolmogorovCrespiFull(cfg) => {
+                let lammps_pot = self::lammps::KolmogorovCrespiFull::from(cfg);
+                let pot = self::lammps::Builder::new(trial_dir, on_demand, threading, update_style, axis_mask, lammps_pot);
+                Box::new(pot)
+            },
             cfg::PotentialKind::KolmogorovCrespiZNew(cfg) => {
                 let cfg = cfg.clone();
                 let parallel = threading == &cfg::Threading::Rayon;

@@ -998,7 +998,7 @@ pub mod periodic {
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ComponentLabel(
     // There is no guarantee that these are numbered contiguously from zero,
-    // so we don't publicly expose this, and instead force consumers to use
+    // so we don't readily expose this, and instead prefer that consumers use
     // the PartialOrd or Hash impls.
     usize,
 );
@@ -1013,6 +1013,12 @@ impl fmt::Display for ComponentLabel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(&self.0, f)
     }
+}
+
+impl ComponentLabel {
+    /// Get this component label, represented as an integer whose value is less than the
+    /// total number of graph nodes (but no other properties are assured)
+    pub fn into_arbitrary_integer(self) -> usize { self.0 }
 }
 
 impl ComponentLabel {

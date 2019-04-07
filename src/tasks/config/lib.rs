@@ -462,6 +462,7 @@ pub enum PotentialKind {
     #[serde(rename = "airebo")] Airebo(PotentialAirebo),
     #[serde(rename = "kc-z")] KolmogorovCrespiZ(PotentialKolmogorovCrespiZ),
     #[serde(rename = "kc-z-new")] KolmogorovCrespiZNew(PotentialKolmogorovCrespiZNew),
+    #[serde(rename = "kc-full")] KolmogorovCrespiFull(PotentialKolmogorovCrespiFull),
     #[serde(rename = "rebo-new")] ReboNew(PotentialReboNew),
     /// V = 0
     #[serde(rename = "test-func-zero")] TestZero,
@@ -508,6 +509,21 @@ pub struct PotentialKolmogorovCrespiZ {
     pub cutoff_interval: Nullable<f64>,
 }
 fn _potential_kolmogorov_crespi_z__rebo() -> bool { true }
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub struct PotentialKolmogorovCrespiFull {
+    // NOTE: some defaults are not here because they are defined in rsp2_tasks,
+    //       which depends on this crate
+    #[serde(default = "_potential_kolmogorov_crespi_full__rebo")]
+    pub rebo: bool,
+    /// Cutoff radius (Angstrom?)
+    pub cutoff: OrDefault<f64>,
+    /// Enable taper function.
+    pub taper: OrDefault<bool>,
+}
+fn _potential_kolmogorov_crespi_full__rebo() -> bool { true }
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]

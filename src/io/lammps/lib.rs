@@ -102,6 +102,7 @@ pub struct Lammps<P: Potential> {
     // See the documentation of `build` for more info.
     original_num_atoms: usize,
     original_init_info: InitInfo,
+    original_molecule_ids: Option<Vec<usize>>,
 
     // Determines the next command for updating.
     update_fsm: UpdateFsm,
@@ -448,6 +449,12 @@ pub trait Potential {
     /// species; but for a potential like 'kolmogorov/crespi/z', atom types must be
     /// carefully assigned to prevent interactions between non-adjacent layers.
     fn atom_types(&self, coords: &Coords, meta: &Self::Meta) -> Vec<AtomType>;
+
+    /// Assign molecule ids to each atom.
+    ///
+    /// This should always return `None`, or always return `Some(_)`.  If it returns
+    /// `None`, molecule ids will not be included in the atom style.
+    fn molecule_ids(&self, coords: &Coords, meta: &Self::Meta) -> Option<Vec<usize>>;
 }
 
 impl<'a, M: Clone> Potential for Box<dyn Potential<Meta=M> + 'a> {
@@ -458,6 +465,9 @@ impl<'a, M: Clone> Potential for Box<dyn Potential<Meta=M> + 'a> {
 
     fn atom_types(&self, coords: &Coords, meta: &Self::Meta) -> Vec<AtomType>
     { (&**self).atom_types(coords, meta) }
+
+    fn molecule_ids(&self, coords: &Coords, meta: &Self::Meta) -> Option<Vec<usize>>
+    { (&**self).molecule_ids(coords, meta) }
 }
 
 impl<'a, M: Clone> Potential for &'a (dyn Potential<Meta=M> + 'a) {
@@ -468,6 +478,9 @@ impl<'a, M: Clone> Potential for &'a (dyn Potential<Meta=M> + 'a) {
 
     fn atom_types(&self, coords: &Coords, meta: &Self::Meta) -> Vec<AtomType>
     { (&**self).atom_types(coords, meta) }
+
+    fn molecule_ids(&self, coords: &Coords, meta: &Self::Meta) -> Option<Vec<usize>>
+    { (&**self).molecule_ids(coords, meta) }
 }
 
 //-------------------------------------------
@@ -532,14 +545,22 @@ impl<P: Potential> Lammps<P>
         let original_num_atoms = coords.num_atoms();
         let original_init_info = potential.init_info(&coords, &meta);
         let original_atom_types = potential.atom_types(&coords, &meta);
+        let original_molecule_ids = potential.molecule_ids(&coords, &meta);
 
-        let ptr = Self::_from_builder(builder, &original_init_info, &coords, &original_atom_types)?;
+        let ptr = Self::_from_builder(
+            builder,
+            &original_init_info,
+            &coords,
+            &original_atom_types,
+            original_molecule_ids.as_ref().map(|x| &x[..]),
+        )?;
         Lammps {
             ptr: std::cell::RefCell::new(ptr),
             structure: MaybeDirty::new_dirty((coords, meta)),
             potential,
             original_init_info,
             original_num_atoms,
+            original_molecule_ids,
             auto_adjust_lattice: builder.auto_adjust_lattice,
             update_fsm: builder.update_style.initial_fsm(),
             data_trace_dir: builder.data_trace_dir.clone(),
@@ -554,6 +575,7 @@ impl<P: Potential> Lammps<P>
         init_info: &InitInfo,
         coords: &Coords,
         atom_types: &[AtomType],
+        molecule_ids: Option<&[usize]>,
     ) -> FailResult<Box<dyn LowLevelApi>>
     {Ok({
         use std::io::prelude::*;
@@ -610,6 +632,10 @@ impl<P: Potential> Lammps<P>
             "atom_modify sort 0 0.0",       // don't reorder atoms during simulation
         ])?;
 
+        if let Some(_) = molecule_ids {
+            lmp.commands(&["fix RSP2_HasMolIds all property/atom mol"])?;
+        }
+
         // (mostly) garbage initial lattice
         lmp.commands(&[
             "boundary p p p",               // (p)eriodic, (f)ixed, (s)hrinkwrap
@@ -651,6 +677,11 @@ impl<P: Potential> Lammps<P>
                 coords.to_carts().unvee(),
                 atom_types.iter().map(|ty| ty.value()).collect(),
             )?;
+
+            if let Some(molecule_ids) = molecule_ids {
+                let molecule_ids = molecule_ids.iter().map(|&x| x as _).collect();
+                unsafe { lmp.scatter_atoms_i("molecule".to_string(), molecule_ids)?; }
+            }
 
             // Resume logging.
             if let Some(log_file) = &builder.append_log {
@@ -846,6 +877,7 @@ impl<P: Potential> Lammps<P> {
         }
 
         let InitInfo { masses, pair_style, pair_coeffs } = self.potential.init_info(coords, meta);
+        let molecule_ids = self.potential.molecule_ids(coords, meta);
         let Lammps {
             original_num_atoms,
             original_init_info: InitInfo {
@@ -853,6 +885,7 @@ impl<P: Potential> Lammps<P> {
                 pair_style: ref original_pair_style,
                 pair_coeffs: ref original_pair_coeffs,
             },
+            ref original_molecule_ids,
             ..
         } = *self;
 
@@ -860,6 +893,7 @@ impl<P: Potential> Lammps<P> {
         c.check("number of atom types has", original_masses.len(), masses.len())?;
         c.check("number of atoms has", original_num_atoms, coords.num_atoms())?;
         c.check("masses have", original_masses, &masses)?;
+        c.check("molecule ids have", original_molecule_ids, &molecule_ids)?;
         c.check("pair_style command has", original_pair_style, &pair_style)?;
         c.check("pair_coeff commands have", original_pair_coeffs, &pair_coeffs)?;
     })}
@@ -1039,6 +1073,9 @@ pub mod potential {
             pair_style: PairStyle::named("none"),
             pair_coeffs: vec![],
         }}
+
+        fn molecule_ids(&self, _: &Coords, _: &Self::Meta) -> Option<Vec<usize>>
+        { Option::None }
     }
 }
 

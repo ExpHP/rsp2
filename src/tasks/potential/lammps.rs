@@ -42,6 +42,8 @@ use rsp2_lammps_wrap::INSTANCE_LOCK;
 
 const DEFAULT_KC_Z_CUTOFF: f64 = 14.0; // (Angstrom?)
 const DEFAULT_KC_Z_MAX_LAYER_SEP: f64 = 4.5; // Angstrom
+const DEFAULT_KC_FULL_CUTOFF: f64 = 14.0; // (Angstrom?)
+const DEFAULT_KC_FULL_TAPER: bool = true;
 
 const DEFAULT_AIREBO_LJ_SIGMA:    f64 = 3.0; // (cutoff, x3.4 A)
 const DEFAULT_AIREBO_LJ_ENABLED:      bool = true;
@@ -441,6 +443,8 @@ mod airebo {
     impl LammpsPotential for Airebo {
         type Meta = CommonMeta;
 
+        fn molecule_ids(&self, _: &Coords, _: &CommonMeta) -> Option<Vec<usize>> { None }
+
         fn atom_types(&self, _: &Coords, meta: &CommonMeta) -> Vec<AtomType>
         {
             let elements: meta::SiteElements = meta.pick();
@@ -452,37 +456,9 @@ mod airebo {
         }
 
         fn init_info(&self, _: &Coords, meta: &CommonMeta) -> InitInfo {
-            let elements: meta::SiteElements = meta.pick();
-            let masses: meta::SiteMasses = meta.pick();
-
-            let only_unique_mass = |target_elem| {
-                let iter = {
-                    zip_eq!(&elements[..], &masses[..])
-                        .filter(|&(&elem, _)| elem == target_elem)
-                        .map(|(_, &mass)| mass)
-                };
-
-                match only_unique_value(iter) {
-                    OnlyUniqueResult::Ok(meta::Mass(mass)) => mass,
-                    OnlyUniqueResult::NoValues => {
-                        // It is unlikely that this value will ever come into play (atoms of
-                        // this element would need to be introduced afterwards), and if their
-                        // mass does not match the value supplied here it will fail.
-                        //
-                        // For now I think I'd rather have it universally fail in such cases,
-                        // forcing us to update this code and add a way to read the values from
-                        // config here if this situation arises.
-                        f64::from_bits(0xdeadbeef) // absurd value
-                    },
-                    OnlyUniqueResult::Conflict(_, _) => {
-                        panic!("different masses for same element not yet supported by Airebo");
-                    },
-                }
-            };
-
             let masses = vec![
-                only_unique_mass(consts::HYDROGEN),
-                only_unique_mass(consts::CARBON),
+                only_unique_mass(meta, consts::HYDROGEN),
+                only_unique_mass(meta, consts::CARBON),
             ];
             let pair_style = match *self {
                 Airebo::Airebo { lj_sigma, lj_enabled, torsion_enabled, omp } => {
@@ -509,8 +485,6 @@ mod airebo {
             InitInfo { masses, pair_style, pair_coeffs }
         }
     }
-
-    fn boole(b: bool) -> u32 { b as _ }
 }
 
 pub use self::kc_z::KolmogorovCrespiZ;
@@ -580,6 +554,8 @@ mod kc_z {
 
     impl LammpsPotential for KolmogorovCrespiZ {
         type Meta = CommonMeta;
+
+        fn molecule_ids(&self, _: &Coords, _: &CommonMeta) -> Option<Vec<usize>> { None }
 
         // FIXME: We should use layers from metadata, now that they can be
         //        carried around more naturally, but:
@@ -743,6 +719,122 @@ mod kc_z {
     }
 }
 
+
+pub use self::kc_full::KolmogorovCrespiFull;
+mod kc_full {
+    use super::*;
+
+    /// Uses `pair_style kolmogorov/crespi/full`.
+    #[derive(Debug, Clone, Default)]
+    pub struct KolmogorovCrespiFull {
+        rebo: bool,
+        taper: bool,
+        cutoff_end: f64,
+    }
+
+    impl<'a> From<&'a cfg::PotentialKolmogorovCrespiFull> for KolmogorovCrespiFull {
+        fn from(cfg: &'a cfg::PotentialKolmogorovCrespiFull) -> Self {
+            let cfg::PotentialKolmogorovCrespiFull {
+                rebo, taper, cutoff,
+            } = *cfg;
+            KolmogorovCrespiFull {
+                rebo,
+                cutoff_end: cutoff.unwrap_or(DEFAULT_KC_FULL_CUTOFF),
+                taper: taper.unwrap_or(DEFAULT_KC_FULL_TAPER),
+            }
+        }
+    }
+
+    impl KolmogorovCrespiFull {
+        // NOTE: This ends up getting called stupidly often, but I don't think
+        //       it is expensive enough to be a real cause for concern.
+        fn find_molecules(&self, _: &Coords, meta: &CommonMeta) -> Vec<usize>
+        {
+            let bonds: Option<meta::FracBonds> = meta.pick();
+            match bonds {
+                Some(bonds) => {
+                    bonds.to_periodic_graph().connected_components_by_site()
+                        .into_iter().map(|x| x.into_arbitrary_integer())
+                        .collect()
+                },
+
+                // FIXME: This does not let us optimize parameters
+                //        before generating the bond graph when using this potential.
+                None => panic!("\
+                    Attempted to compute kolmogorov/crespi/full before generating a bond graph. \
+                    (probably due to an attempt to optimize parameters; either provide a bond \
+                    graph or don't do that)
+                "),
+            }
+        }
+    }
+
+    impl LammpsPotential for KolmogorovCrespiFull {
+        type Meta = CommonMeta;
+
+        fn molecule_ids(&self, coords: &Coords, meta: &CommonMeta) -> Option<Vec<usize>> {
+            Some(self.find_molecules(coords, meta))
+        }
+
+        // FIXME: We should use layers from metadata, now that they can be
+        //        carried around more naturally, but:
+        //
+        //        * We need a way to verify that the layers were taken
+        //          specifically along the Z axis.
+        //        * We need a way to identify the vacuum separation gap.
+        //
+        fn atom_types(&self, _: &Coords, meta: &CommonMeta) -> Vec<AtomType>
+        {
+            let elements: meta::SiteElements = meta.pick();
+            elements.iter().map(|elem| match elem.symbol() {
+                "H" => AtomType::new(1),
+                "C" => AtomType::new(2),
+                sym => panic!("Unexpected element in Airebo: {}", sym),
+            }).collect()
+        }
+
+        fn init_info(&self, _: &Coords, meta: &CommonMeta) -> InitInfo
+        {
+            let masses = vec![
+                only_unique_mass(meta, consts::HYDROGEN),
+                only_unique_mass(meta, consts::CARBON),
+            ];
+
+            let mut overlay = Overlay::new();
+            if self.rebo {
+                overlay.push(overlay::Item {
+                    pair_style: PairStyle::named("rebo"),
+                    pair_coeffs: vec![{
+                        PairCoeff::new(.., ..)
+                            .arg("CH.airebo")
+                            .args(&vec!["H", "C"])
+                    }],
+                });
+            }
+
+            overlay.push(overlay::Item {
+                pair_style: {
+                    PairStyle::named("kolmogorov/crespi/full")
+                        .arg(self.cutoff_end)
+                        .arg(boole(self.taper))
+                },
+                pair_coeffs: vec![{
+                    PairCoeff::new(.., ..)
+                        .arg(match self.taper {
+                            true => "CH.KC",
+                            false => "CH_taper.KC",
+                        })
+                        .args(&vec!["H", "C"])
+                }],
+            });
+
+            let (pair_style, pair_coeffs) = overlay.init_info();
+
+            InitInfo { masses, pair_style, pair_coeffs }
+        }
+    }
+}
+
 // util for compressing atom type properties
 enum OnlyUniqueResult<T> {
     Ok(T),
@@ -762,3 +854,33 @@ fn only_unique_value<T: PartialEq>(iter: impl IntoIterator<Item=T>) -> OnlyUniqu
         OnlyUniqueResult::NoValues
     }
 }
+
+fn only_unique_mass(meta: &CommonMeta, target_elem: meta::Element) -> f64 {
+    let elements: meta::SiteElements = meta.pick();
+    let masses: meta::SiteMasses = meta.pick();
+
+    let iter = {
+        zip_eq!(&elements[..], &masses[..])
+            .filter(|&(&elem, _)| elem == target_elem)
+            .map(|(_, &mass)| mass)
+    };
+
+    match only_unique_value(iter) {
+        OnlyUniqueResult::Ok(meta::Mass(mass)) => mass,
+        OnlyUniqueResult::NoValues => {
+            // It is unlikely that this value will ever come into play (atoms of
+            // this element would need to be introduced afterwards), and if their
+            // mass does not match the value supplied here it will fail.
+            //
+            // For now I think I'd rather have it universally fail in such cases,
+            // forcing us to update this code and add a way to read the values from
+            // config here if this situation arises.
+            f64::from_bits(0xdeadbeef) // absurd value
+        },
+        OnlyUniqueResult::Conflict(_, _) => {
+            panic!("different masses for same element not yet supported by Airebo");
+        },
+    }
+}
+
+fn boole(b: bool) -> u32 { b as _ }
