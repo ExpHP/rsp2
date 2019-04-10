@@ -5,6 +5,8 @@ pub struct Airebo;
 impl Potential for Airebo {
     type Meta = Vec<&'static str>;
 
+    fn molecule_ids(&self, _: &Coords, _: &Vec<&'static str>) -> Option<Vec<usize>> { None }
+
     fn atom_types(&self, _: &Coords, meta: &Vec<&'static str>) -> Vec<AtomType> {
         meta.iter().map(|&elem| match elem {
             "C" => AtomType::new(1),
