@@ -74,7 +74,7 @@ script:
 before_cache:
 - $TRAVIS_BUILD_DIR/travis/prune-target.sh
 - $TRAVIS_BUILD_DIR/travis/cargo-cache.sh store
-- du -hs ~/cache/* || true
+- du --max-depth=3 ~/cache || true
 
 cache:
   # 'cache: cargo' and 'cache: ccache' cannot be used with 'language: python'
