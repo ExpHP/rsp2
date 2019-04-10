@@ -72,6 +72,7 @@ script:
 - cargo test --all $RSP2_FEATURES --release -- --ignored
 
 before_cache:
+- $TRAVIS_BUILD_DIR/travis/prune-target.sh
 - $TRAVIS_BUILD_DIR/travis/cargo-cache.sh store
 - du -hs ~/cache/* || true
 
