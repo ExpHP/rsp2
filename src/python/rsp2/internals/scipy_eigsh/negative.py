@@ -51,6 +51,7 @@ def main_from_rust():
               shift_invert_attempts=shift_invert_attempts,
               plain_ncv=DEFAULT_NCV, # FIXME add to input json from rust
               shift_invert_ncv=DEFAULT_NCV, # FIXME add to input json from rust
+              use_fallback=True, # FIXME add to input json from rust
               max_solutions=DEFAULT_MAX_SOLUTIONS, # FIXME add to input json from rust
               search_solutions=None, # FIXME add to input json from rust
               )
@@ -66,11 +67,12 @@ def main_from_cli():
     p = argparse.ArgumentParser()
     p.add_argument('DYNMAT', help='dynmat file (.npz, .json, .json.gz, ...)')
     p.add_argument('--output', '-o', type=str, required=True)
-    p.add_argument(
-        '--dense', type=bool, default=False,
-        help="Use dense eigenvalue solver."
-    )
+    p.add_argument('--dense', action='store_true', help="Use dense eigenvalue solver.")
     p.add_argument('--shift-invert-attempts', type=int, default=DEFAULT_SHIFT_INVERT_ATTEMPTS)
+    p.add_argument(
+        '--no-fallback', dest='use_fallback', action='store_false',
+        help="Disable non-shift-invert-based fallback method."
+    )
     p.add_argument(
         '--max-solutions', type=int, default=DEFAULT_MAX_SOLUTIONS,
         help="max number of solutions to seek"
@@ -101,6 +103,7 @@ def main_from_cli():
         shift_invert_ncv=args.shift_invert_ncv,
         plain_ncv=args.plain_ncv,
         max_solutions=args.max_solutions,
+        use_fallback=args.use_fallback,
         search_solutions=args.search_solutions,
     )
     if len(evals):
@@ -115,6 +118,7 @@ def run(m: scipy.sparse.bsr_matrix,
         shift_invert_ncv: int,
         plain_ncv: int,
         max_solutions: int,
+        use_fallback: bool,
         search_solutions: tp.Optional[int],
         ):
     """
@@ -136,10 +140,13 @@ def run(m: scipy.sparse.bsr_matrix,
             if not all(acousticness(v) > 1. - 1e-3 for v in esols[1]):
                 return esols
 
-        return try_regular(m,
-                           max_solutions=search_solutions,
-                           ncv=plain_ncv,
-                           )
+        if use_fallback:
+            return try_regular(m,
+                               max_solutions=search_solutions,
+                               ncv=plain_ncv,
+                               )
+        else:
+            raise RuntimeError('Failed to diagonalize matrix!')
 
     # Cutting out other solutions
     evals, evecs = inner()
