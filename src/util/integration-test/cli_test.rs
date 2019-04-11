@@ -154,13 +154,14 @@ impl CliTest {
             let mut args = cmd;
             let bin = args.remove(0);
 
-            Command::new(&bin)
-                .args(&args)
-                .current_dir(&tmp)
-                // capture for the test harness
-                .stdout({ let f: File = FileWrite::create(&stdout_path)?.into(); f})
-                .stderr({ let f: File = FileWrite::create(&stderr_path)?.into(); f})
-                .status()?
+            let mut cmd = Command::new(&bin);
+            cmd.args(&args);
+            cmd.current_dir(&tmp);
+            // capture for the test harness
+            cmd.stdout({ let f: File = FileWrite::create(&stdout_path)?.into(); f});
+            cmd.stderr({ let f: File = FileWrite::create(&stderr_path)?.into(); f});
+            println!("Running {:?}", cmd);
+            cmd.status()?
         };
         print!("{}", FileRead::read(stdout_path)?.read_string()?);
         eprint!("{}", FileRead::read(stderr_path)?.read_string()?);

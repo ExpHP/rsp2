@@ -47,7 +47,7 @@ def to_path(path, obj):
         },
     )
 
-def to_dict(m):
+def to_dict(m, path=None):
     assert isinstance(m, scipy.sparse.bsr_matrix)
     assert m.data.shape[1:] == (3,3)
     assert all(x % 3 == 0 for x in m.shape)
