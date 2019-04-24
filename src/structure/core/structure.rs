@@ -69,6 +69,22 @@ impl Coords {
     pub fn new(lattice: Lattice, coords: CoordsKind) -> Self {
         Self { lattice, coords }
     }
+
+    /// Create an isolated molecule, using a cubic cell with `vacuum_sep`
+    /// padding between images on each axis.
+    pub fn from_molecule(carts: &[V3], vacuum_sep: f64) -> Self {
+        if carts.is_empty() {
+            return Coords::new(Lattice::cubic(vacuum_sep), CoordsKind::Carts(vec![]));
+        }
+
+        let V3(dims) = V3::from_fn(|i| {
+            carts.iter().fold(std::f64::NEG_INFINITY, |acc, v| acc.max(v[i]))
+            - carts.iter().fold(std::f64::INFINITY, |acc, v| acc.min(v[i]))
+            + vacuum_sep
+        });
+
+        Coords::new(Lattice::diagonal(&dims), CoordsKind::Carts(carts.to_vec()))
+    }
 }
 
 //---------------------------------------

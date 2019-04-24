@@ -87,6 +87,7 @@ pub enum StructureFileType {
     Poscar,
     LayersYaml,
     StoredStructure,
+    Xyz,
 }
 
 pub enum EvLoopStructureKind {
@@ -1616,6 +1617,30 @@ pub(crate) fn read_optimizable_structure(
     let out_layers: Option<meta::SiteLayers>;
     let out_sc_mats: Option<meta::LayerScMatrices>;
     match file_format {
+        StructureFileType::Xyz => {
+            use rsp2_structure_io::Xyz;
+
+            let Xyz { carts, elements, .. } = Load::load(input.as_path())?;
+            out_elements = elements.into();
+            out_masses = masses_by_config(mass_cfg, out_elements.clone())?;
+
+            let vacuum_sep = 30.0;
+            let coords = Coords::from_molecule(&carts, vacuum_sep);
+
+            if let Some(cfg) = layer_cfg {
+                let layers = perform_layer_search(cfg, &coords)?;
+                // Technically no scaling should ever be needed for XYZ files,
+                // but this is the type we return...
+                out_coords = ScalableCoords::from_layer_search_results(coords, cfg, &layers);
+                out_layers = Some(layers.by_atom().into_iter().map(Layer).collect::<Vec<_>>().into());
+                // XYZ is not periodic
+                out_sc_mats = None;
+            } else {
+                out_coords = ScalableCoords::from_unlayered(coords);
+                out_layers = None;
+                out_sc_mats = None;
+            }
+        },
         StructureFileType::Poscar => {
             use rsp2_structure_io::Poscar;
 

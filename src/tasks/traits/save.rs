@@ -14,7 +14,7 @@ use crate::traits::AsPath;
 use crate::meta::Element;
 
 use rsp2_structure::Coords;
-use rsp2_structure_io::Poscar;
+use rsp2_structure_io::{Poscar, Xyz};
 use path_abs::{FileRead, FileWrite};
 use std::borrow::Borrow;
 use std::io::BufReader;
@@ -88,5 +88,13 @@ impl Load for Poscar {
     {
         let file = BufReader::new(FileRead::read(path.as_path())?);
         Ok(Poscar::from_buf_reader(file)?)
+    }
+}
+
+impl Load for Xyz {
+    fn load(path: impl AsPath) -> FailResult<Xyz>
+    {
+        let file = BufReader::new(FileRead::read(path.as_path())?);
+        Ok(Xyz::from_buf_reader(file)?)
     }
 }

@@ -59,6 +59,12 @@ gen_each!{
             where Self: FromFn<F>, F: FnMut(usize) -> B,
             { FromFn::from_fn(f) }
 
+            /// Construct a fixed-size vector from a function on indices.
+            #[inline(always)]
+            pub fn try_from_fn<B, E, F>(f: F) -> Result<Self, E>
+            where Self: TryFromFn<F, E>, F: FnMut(usize) -> Result<B, E>,
+            { TryFromFn::try_from_fn(f) }
+
             /// Get the inner product of two vectors.
             ///
             /// It is recommended you write this as `V3::dot(a, b)`, rather than `a.dot(b)`.
@@ -253,6 +259,33 @@ gen_each!{
             #[inline]
             fn from_fn(f: F) -> Self
             { $Vn(::rsp2_array_utils::arr_from_fn(f)) }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+
+/// Implementation detail of the free function `vee::try_rom_fn`.
+///
+/// > **_Fuggedaboudit._**
+///
+/// Without this, the free function `try_from_fn` could not be generic over different
+/// sizes of V.
+pub trait TryFromFn<F, E>: Sized {
+    fn try_from_fn(f: F) -> Result<Self, E>;
+}
+
+gen_each!{
+    @{Vn}
+    for_each!(
+        {$Vn:ident}
+    ) => {
+        impl<X, F, E> TryFromFn<F, E> for $Vn<X>
+          where F: FnMut(usize) -> Result<X, E>,
+        {
+            #[inline]
+            fn try_from_fn(f: F) -> Result<$Vn<X>, E>
+            { ::rsp2_array_utils::try_arr_from_fn(f).map($Vn) }
         }
     }
 }

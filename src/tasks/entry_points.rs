@@ -270,6 +270,7 @@ impl OptionalFileType {
                 match path.extension().and_then(|s| s.to_str()) {
                     Some("yaml") => StructureFileType::LayersYaml,
                     Some("vasp") => StructureFileType::Poscar,
+                    Some("xyz") => StructureFileType::Xyz,
                     _ => default,
                 }
             } else if meta.is_dir() {
