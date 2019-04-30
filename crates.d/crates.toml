@@ -51,6 +51,7 @@ rsp2-soa-ops        = "src/util/soa-ops"
 rsp2-newtype-indices = "src/util/newtype-indices"
 rsp2-python         = "src/python"
 rsp2-potentials     = "src/potentials"
+rsp2-dftbplus       = "src/io/dftbplus"
 #!!INSERTION POINT FOR NEW CRATES!!#
 
 #--------------------------------------------
@@ -113,6 +114,7 @@ stack = "0.3"
 xz2 = "0.1.6"
 objekt = "0.1.1"
 rayon-cond = "0.1.0"
+dftbplus-sys = { git = "https://github.com/ExpHP/dftbplus-sys", tag = "v0.0.1" }
 
 #--------------------------------------------
 # Always optimize some crates when they appear as dependencies.
