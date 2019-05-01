@@ -464,6 +464,7 @@ pub enum PotentialKind {
     #[serde(rename = "kc-z-new")] KolmogorovCrespiZNew(PotentialKolmogorovCrespiZNew),
     #[serde(rename = "kc-full")] KolmogorovCrespiFull(PotentialKolmogorovCrespiFull),
     #[serde(rename = "rebo-new")] ReboNew(PotentialReboNew),
+    #[serde(rename = "dftb+")] DftbPlus(PotentialDftbPlus),
     /// V = 0
     #[serde(rename = "test-func-zero")] TestZero,
     /// Arranges atoms into a chain along the first lattice vector.
@@ -585,6 +586,24 @@ pub enum PotentialReboNewParams {
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
+pub struct PotentialDftbPlus {
+    /// An HSD file embedded as a multiline string.
+    ///
+    /// Please omit `Geometry` and `Driver`.
+    ///
+    /// Also, notice that rsp2 will always supply `Periodic = Yes`, even for isolated
+    /// molecules.  For these, you will want to supply `KPointsAndWeights { 0.0 0.0 0.0 1.0 }`
+    /// in the `Hamiltonian` section.
+    ///
+    /// Be aware that when `dftb+` is run, it will be run in a temporary directory,
+    /// breaking all relative paths in the document.  For this reason, you must use
+    /// absolute paths.
+    pub hsd: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case")]
 pub enum EigenvectorChase {
     OneByOne,
     Cg(Cg),
@@ -672,8 +691,6 @@ pub enum PhononDispFinder {
     },
 
     /// Use built-in methods to compute the displacements.
-    ///
-    /// This isn't very clever, and is maybe comparable to phonopy's `DIAG = .FALSE.`
     ///
     /// **Cannot be used with `eigensolver: phonopy`.**
     Rsp2 {
@@ -812,6 +829,11 @@ fn _ev_loop__fail() -> bool { true }
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
+/// Masses by element.
+///
+/// **Note:** Even though this appears as by-element in the config file, rsp2 internally
+/// stores masses by site, and that is what it also writes to `.structure` directories.
+/// When a `.structure` directory provides masses, those take precedence over the config file.
 pub struct Masses(pub HashMap<String, f64>);
 
 // --------------------------------------------------------

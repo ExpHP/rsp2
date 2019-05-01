@@ -79,7 +79,7 @@ impl<P: Clone> Builder<P>
         update_style: &cfg::LammpsUpdateStyle,
         processor_axis_mask: &[bool; 3],
         potential: P,
-    ) -> Self {
+    ) -> FailResult<Self> {
         let mut inner = InnerBuilder::new();
         if let Some(trial_dir) = trial_dir {
             inner.append_log(trial_dir.join("lammps.log"));
@@ -113,15 +113,17 @@ impl<P: Clone> Builder<P>
                 // At least, not without adding support for custom communicators to lammps-wrap.
                 //
                 // (but why bother? clearly, the user intended to use MPI!)
-                panic!("Must use threading = \"lammps\" when using multiple MPI processes.");
+                bail!("Must use threading = \"lammps\" when using multiple MPI processes.");
             }
         }
 
         let allow_blocking = false;
         let processor_axis_mask = *processor_axis_mask;
 
-        Builder { inner, allow_blocking, potential, processor_axis_mask }
-            .parallel(*threading == cfg::Threading::Lammps)
+        Ok({
+            Builder { inner, allow_blocking, potential, processor_axis_mask }
+                .parallel(*threading == cfg::Threading::Lammps)
+        })
     }
 
     pub(crate) fn parallel(&self, parallel: bool) -> Self {
@@ -175,6 +177,9 @@ impl<M: Clone + 'static, P: LammpsPotential<Meta=M> + Clone + Send + Sync + 'sta
         Ok(Box::new(MyDiffFn::<M>(lmp)) as Box<_>)
     }
 
+    // For displacements, we delegate the computation to ::rsp2_lammps_wrap::DispFn,
+    // which communicates data to lammps in a different manner which is optimized specifically
+    // for this purpose. (basically guaranteeing no neighbor list rebuilds)
     pub(crate) fn lammps_disp_fn(&self, coords: &Coords, meta: M) -> FailResult<Box<dyn DispFn>>
     {
         struct MyDispFn<Q: LammpsPotential>(::rsp2_lammps_wrap::DispFn<Q>);
@@ -590,6 +595,8 @@ mod kc_z {
             );
 
             let masses: Vec<f64> = {
+                use crate::util::{only_unique_value, OnlyUniqueResult};
+
                 let layer_part = Part::from_ord_keys(layers.by_atom());
                 let m = masses.to_vec()
                     .into_unlabeled_partitions(&layer_part)
@@ -835,27 +842,9 @@ mod kc_full {
     }
 }
 
-// util for compressing atom type properties
-enum OnlyUniqueResult<T> {
-    Ok(T),
-    Conflict(T, T),
-    NoValues,
-}
-fn only_unique_value<T: PartialEq>(iter: impl IntoIterator<Item=T>) -> OnlyUniqueResult<T> {
-    let mut iter = iter.into_iter();
-    if let Some(first) = iter.next() {
-        for x in iter {
-            if x != first {
-                return OnlyUniqueResult::Conflict(first, x);
-            }
-        }
-        OnlyUniqueResult::Ok(first)
-    } else {
-        OnlyUniqueResult::NoValues
-    }
-}
-
 fn only_unique_mass(meta: &CommonMeta, target_elem: meta::Element) -> f64 {
+    use crate::util::{only_unique_value, OnlyUniqueResult};
+
     let elements: meta::SiteElements = meta.pick();
     let masses: meta::SiteMasses = meta.pick();
 

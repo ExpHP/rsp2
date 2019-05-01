@@ -15,7 +15,11 @@ path = "lib.rs"
 
 [dependencies]
 dftbplus-sys = { git = "https://github.com/ExpHP/dftbplus-sys", tag = "v0.0.1" }
+failure = "0.1.2"
+
+rsp2-structure = { path = "../../structure" }
+rsp2-array-types = { path = "../../util/array-types" }
 
 [features]
-nightly = ["beta"]
-beta = []
+nightly = ["beta", "rsp2-array-types/nightly", "rsp2-structure/nightly"]
+beta = ["rsp2-array-types/beta", "rsp2-structure/beta"]

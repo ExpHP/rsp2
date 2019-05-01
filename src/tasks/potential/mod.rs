@@ -425,7 +425,7 @@ impl dyn PotentialBuilder {
         trial_dir: &TrialDir,
         on_demand: Option<LammpsOnDemand>,
         cfg: &cfg::Settings,
-    ) -> Box<dyn PotentialBuilder> {
+    ) -> FailResult<Box<dyn PotentialBuilder>> {
         Self::from_config_parts(
             Some(trial_dir),
             on_demand,
@@ -443,7 +443,7 @@ impl dyn PotentialBuilder {
         update_style: &cfg::LammpsUpdateStyle,
         axis_mask: &[bool; 3], // HACK; lammps should have its own section
         config: &cfg::Potential,
-    ) -> Box<dyn PotentialBuilder> {
+    ) -> FailResult<Box<dyn PotentialBuilder>> {
         match config {
             cfg::Potential::Single(cfg) => {
                 PotentialBuilder::single_from_config_parts(trial_dir, on_demand, threading, update_style, axis_mask, &cfg)
@@ -453,12 +453,14 @@ impl dyn PotentialBuilder {
                     cfgs.into_iter()
                         // (we simply cannot support LammpsOnDemand here)
                         .map(|cfg| PotentialBuilder::single_from_config_parts(trial_dir, None, threading, update_style, axis_mask, &cfg))
+                        .collect::<FailResult<Vec<_>>>()?
+                        .into_iter()
                 };
                 let first = match iter.next() {
-                    None => return Box::new(self::test_functions::Zero),
+                    None => return Ok(Box::new(self::test_functions::Zero)),
                     Some(x) => x,
                 };
-                iter.fold(first, |a, b| Box::new(helper::Sum(a, b)))
+                Ok(iter.fold(first, |a, b| Box::new(helper::Sum(a, b))))
             },
         }
     }
@@ -470,40 +472,50 @@ impl dyn PotentialBuilder {
         update_style: &cfg::LammpsUpdateStyle,
         axis_mask: &[bool; 3], // HACK; lammps should have its own section
         config: &cfg::PotentialKind,
-    ) -> Box<dyn PotentialBuilder> {
+    ) -> FailResult<Box<dyn PotentialBuilder>> {
         match config {
             cfg::PotentialKind::Rebo(cfg) => {
                 let lammps_pot = self::lammps::Airebo::from(cfg);
-                let pot = self::lammps::Builder::new(trial_dir, on_demand, threading, update_style, axis_mask, lammps_pot);
-                Box::new(pot)
+                let pot = self::lammps::Builder::new(trial_dir, on_demand, threading, update_style, axis_mask, lammps_pot)?;
+                Ok(Box::new(pot))
             }
             cfg::PotentialKind::Airebo(cfg) => {
                 let lammps_pot = self::lammps::Airebo::from(cfg);
-                let pot = self::lammps::Builder::new(trial_dir, on_demand, threading, update_style, axis_mask, lammps_pot);
-                Box::new(pot)
+                let pot = self::lammps::Builder::new(trial_dir, on_demand, threading, update_style, axis_mask, lammps_pot)?;
+                Ok(Box::new(pot))
             },
             cfg::PotentialKind::KolmogorovCrespiZ(cfg) => {
                 let lammps_pot = self::lammps::KolmogorovCrespiZ::from(cfg);
-                let pot = self::lammps::Builder::new(trial_dir, on_demand, threading, update_style, axis_mask, lammps_pot);
-                Box::new(pot)
+                let pot = self::lammps::Builder::new(trial_dir, on_demand, threading, update_style, axis_mask, lammps_pot)?;
+                Ok(Box::new(pot))
             },
             cfg::PotentialKind::KolmogorovCrespiFull(cfg) => {
                 let lammps_pot = self::lammps::KolmogorovCrespiFull::from(cfg);
-                let pot = self::lammps::Builder::new(trial_dir, on_demand, threading, update_style, axis_mask, lammps_pot);
-                Box::new(pot)
+                let pot = self::lammps::Builder::new(trial_dir, on_demand, threading, update_style, axis_mask, lammps_pot)?;
+                Ok(Box::new(pot))
             },
             cfg::PotentialKind::KolmogorovCrespiZNew(cfg) => {
                 let cfg = cfg.clone();
                 let parallel = threading == &cfg::Threading::Rayon;
-                Box::new(self::homestyle::KolmogorovCrespiZ { cfg, parallel })
+                Ok(Box::new(self::homestyle::KolmogorovCrespiZ { cfg, parallel }))
             },
             cfg::PotentialKind::ReboNew(cfg) => {
                 let cfg = cfg.clone();
                 let parallel = threading == &cfg::Threading::Rayon;
-                Box::new(self::homestyle::Rebo { cfg, parallel })
+                Ok(Box::new(self::homestyle::Rebo { cfg, parallel }))
             },
-            cfg::PotentialKind::TestZero => Box::new(self::test_functions::Zero),
-            cfg::PotentialKind::TestChainify => Box::new(self::test_functions::Chainify),
+            cfg::PotentialKind::DftbPlus(cfg) => {
+                #[cfg(not(feature = "dftbplus-support"))] {
+                    let _ = cfg; // suppress warning
+                    bail!("The dftb+ potential requires rsp2 to be built with DFTB+ support.");
+                }
+
+                #[cfg(feature = "dftbplus-support")] {
+                    Ok(Box::new(self::dftbplus::Builder::new(trial_dir, cfg)?))
+                }
+            },
+            cfg::PotentialKind::TestZero => Ok(Box::new(self::test_functions::Zero)),
+            cfg::PotentialKind::TestChainify => Ok(Box::new(self::test_functions::Chainify)),
         }
     }
 }
@@ -537,3 +549,5 @@ mod homestyle;
 
 mod lammps;
 
+#[cfg(feature = "dftbplus-support")]
+mod dftbplus;

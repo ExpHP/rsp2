@@ -70,6 +70,29 @@ pub(crate) fn index_of_shortest(carts: &[V3], tol: f64) -> Option<usize>
 
 //--------------------------------------------------------
 
+// util for compressing atom type properties
+pub(crate) enum OnlyUniqueResult<T> {
+    Ok(T),
+    Conflict(T, T),
+    NoValues,
+}
+
+pub(crate) fn only_unique_value<T: PartialEq>(iter: impl IntoIterator<Item=T>) -> OnlyUniqueResult<T> {
+    let mut iter = iter.into_iter();
+    if let Some(first) = iter.next() {
+        for x in iter {
+            if x != first {
+                return OnlyUniqueResult::Conflict(first, x);
+            }
+        }
+        OnlyUniqueResult::Ok(first)
+    } else {
+        OnlyUniqueResult::NoValues
+    }
+}
+
+//--------------------------------------------------------
+
 pub(crate) use self::lockfile::{LockfilePath, LockfileGuard};
 mod lockfile {
     use crate::FailResult;

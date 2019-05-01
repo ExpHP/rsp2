@@ -121,7 +121,7 @@ impl TrialDir {
         stop_after_dynmat: bool,
     ) -> FailResult<()>
     {Ok({
-        let pot = PotentialBuilder::from_root_config(&self, on_demand, &settings);
+        let pot = PotentialBuilder::from_root_config(&self, on_demand, &settings)?;
 
         let (optimizable_coords, meta) = {
             read_optimizable_structure(
@@ -979,7 +979,7 @@ impl TrialDir {
             &settings.lammps_update_style,
             &settings.lammps_processor_axis_mask,
             &settings.potential,
-        );
+        )?;
 
         let [xmin, xmax] = settings.xlim;
         let [ymin, ymax] = settings.ylim;
@@ -1081,7 +1081,7 @@ impl TrialDir {
         settings: &Settings,
     ) -> FailResult<()>
     {Ok({
-        let pot = PotentialBuilder::from_root_config(&self, on_demand, &settings);
+        let pot = PotentialBuilder::from_root_config(&self, on_demand, &settings)?;
 
         let (coords, meta) = self.read_stored_structure_data(&self.structure_path(EvLoopStructureKind::Final))?;
 
@@ -1114,7 +1114,7 @@ impl TrialDir {
         stored: StoredStructure,
     ) -> FailResult<()>
     {Ok({
-        let pot = PotentialBuilder::from_root_config(&self, on_demand, &settings);
+        let pot = PotentialBuilder::from_root_config(&self, on_demand, &settings)?;
 
         // !!!!!!!!!!!!!!!!!
         //  FIXME FIXME BAD
@@ -1224,7 +1224,7 @@ pub(crate) fn run_plot_vdw(
 
     let lammps_update_style = cfg::LammpsUpdateStyle::Fast { sync_positions_every: 1 };
     let processor_axis_mask = [true; 3];
-    let pot = PotentialBuilder::from_config_parts(None, on_demand, &threading, &lammps_update_style, &processor_axis_mask, pot);
+    let pot = PotentialBuilder::from_config_parts(None, on_demand, &threading, &lammps_update_style, &processor_axis_mask, pot)?;
 
     let lattice = {
         let a = rs.iter().fold(0.0, |a, &b| f64::max(a, b)) + 20.0;
@@ -1275,7 +1275,7 @@ pub(crate) fn run_converge_vdw(
 
     let lammps_update_style = cfg::LammpsUpdateStyle::Fast { sync_positions_every: 1 };
     let processor_axis_mask = [true; 3];
-    let pot = PotentialBuilder::from_config_parts(None, on_demand, &threading, &lammps_update_style, &processor_axis_mask, pot);
+    let pot = PotentialBuilder::from_config_parts(None, on_demand, &threading, &lammps_update_style, &processor_axis_mask, pot)?;
 
     let lattice = Lattice::orthorhombic(40.0, 40.0, 40.0);
     let direction = {
@@ -1478,7 +1478,7 @@ impl TrialDir {
         use crate::cmd::EvLoopStructureKind::*;
         use crate::filetypes::Eigensols;
 
-        let pot = PotentialBuilder::from_root_config(&self, on_demand, &settings);
+        let pot = PotentialBuilder::from_root_config(&self, on_demand, &settings)?;
 
         let (coords, meta) = self.read_stored_structure_data(&self.structure_path(PreEvChase(iteration)))?;
         let Eigensols {
