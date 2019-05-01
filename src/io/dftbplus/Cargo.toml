@@ -14,12 +14,14 @@ edition = "2018"
 path = "lib.rs"
 
 [dependencies]
-dftbplus-sys = { git = "https://github.com/ExpHP/dftbplus-sys", tag = "v0.0.1" }
-failure = "0.1.2"
-
 rsp2-structure = { path = "../../structure" }
 rsp2-array-types = { path = "../../util/array-types" }
+rsp2-fs-util = { path = "../../util/fs" }
+
+dftbplus-sys = { git = "https://github.com/ExpHP/dftbplus-sys", tag = "v0.0.1" }
+failure = "0.1.2"
+slice-of-array = "0.2.1"
 
 [features]
-nightly = ["beta", "rsp2-array-types/nightly", "rsp2-structure/nightly"]
-beta = ["rsp2-array-types/beta", "rsp2-structure/beta"]
+nightly = ["beta", "rsp2-array-types/nightly", "rsp2-fs-util/nightly", "rsp2-structure/nightly"]
+beta = ["rsp2-array-types/beta", "rsp2-fs-util/beta", "rsp2-structure/beta"]

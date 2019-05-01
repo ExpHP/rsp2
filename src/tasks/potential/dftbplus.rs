@@ -96,7 +96,7 @@ impl PotentialBuilder<CommonMeta> for Builder {
                     "};
                 }
 
-                dftb.set_coords(coords.clone())?;
+                dftb.set_coords(coords)?;
 
                 let value = dftb.compute_value()?;
                 let grad = dftb.compute_grad()?;

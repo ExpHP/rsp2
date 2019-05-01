@@ -9,11 +9,13 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 path = "lib.rs"
 
 [dependencies]
-!!dftbplus-sys
-!!failure
-
 !!rsp2-structure
 !!rsp2-array-types
+!!rsp2-fs-util
+
+!!dftbplus-sys
+!!failure
+!!slice-of-array
 
 [features]
 !!NIGHTLY-FEATURE-LINE
