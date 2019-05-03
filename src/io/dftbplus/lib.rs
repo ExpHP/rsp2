@@ -13,7 +13,7 @@
 
 use dftbplus_sys as ffi;
 
-use rsp2_structure::{Coords, Element};
+use rsp2_structure::{Coords, CoordsKind, Lattice, Element};
 use rsp2_array_types::V3;
 use rsp2_fs_util as fsx;
 
@@ -72,7 +72,6 @@ mod low_level {
 
             // FIXME: how to detect errors that occur in DFTB+?
             // It looks to me like we are helplessly doomed to invoke undefined behavior...
-            println!("========== Init DFTB+ ========");
             unsafe { ffi::dftbp_init(&mut p_dftb, output_path.as_ptr()); }
             unsafe { ffi::dftbp_get_input_from_file(&mut p_dftb, input_path.as_ptr(), &mut p_input); }
             unsafe { ffi::dftbp_process_input(&mut p_dftb, &mut p_input); }
@@ -141,7 +140,6 @@ mod low_level {
 
     impl Drop for Instance {
         fn drop(&mut self) {
-            println!("========== Drop DFTB+ ========");
             unsafe { ffi::dftbp_final(&mut self.p_dftb); }
         }
     }
@@ -175,6 +173,13 @@ impl Builder {
     pub fn elements(&mut self, elements: &[Element]) -> &mut Self
     { self.elements = Some(elements.to_vec()); self }
 
+    /// Coordinates in the file sent to DFTB+ during initialization, which are not
+    /// necessarily used during any computation.
+    ///
+    /// Setting these can drastically improve performance, and may affect the
+    /// computed forces.
+    ///
+    /// (TODO: Figure out why!)
     pub fn initial_coords(&mut self, coords: &Coords) -> &mut Self
     { self.initial_coords = Some(coords.clone()); self }
 
@@ -202,7 +207,9 @@ impl DftbPlus {
         let Builder { hsd, elements, initial_coords, append_log } = builder;
 
         let elements = elements.as_ref().expect("Elements were not set on DftbPlus builder!");
-        let initial_coords = initial_coords.as_ref().expect("Initial coords were not set on DftbPlus builder!");
+        let initial_coords = initial_coords.clone().unwrap_or_else(|| {
+            Coords::new(Lattice::eye(), CoordsKind::Carts(vec![V3::zero(); elements.len()]))
+        });
 
         let outfile_name = {
             append_log.as_ref().map_or_else(|| PathBuf::from("/dev/null"), ToOwned::to_owned)
@@ -214,7 +221,7 @@ impl DftbPlus {
 
         {
             let mut file = fsx::create(&primary_input_path)?;
-            write!(&mut file, r#"\
+            write!(&mut file, r#"
 <<+ "{tmp}/user.hsd"
 <<+ "{tmp}/generated.hsd"
 "#, tmp=tempdir.path().display())?;
@@ -228,7 +235,7 @@ impl DftbPlus {
         {
             let mut file = fsx::create(tempdir.path().join("generated.hsd"))?;
             writeln!(&mut file, "{}", StructureHsd {
-                coords: initial_coords,
+                coords: &initial_coords,
                 elements: elements,
                 prefix: Some("!"),
             })?;
