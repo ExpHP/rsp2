@@ -27,14 +27,14 @@
 #[macro_use]
 extern crate serde_derive;
 
-use serde; // FIXME: cargo fix artifact ???
-use rsp2_minimize; // FIXME: cargo fix artifact ???
+use serde::de::{self, IntoDeserializer};
 
 #[macro_use]
 extern crate log;
 
 use std::io::Read;
 use std::collections::HashMap;
+use std::fmt;
 use failure::Error;
 
 /// Provides an alternative to serde_yaml::from_reader where all of the
@@ -446,7 +446,7 @@ pub enum EnergyPlotEvIndices {
     These(usize, usize),
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize)]
 #[derive(Debug, Clone, PartialEq)]
 #[serde(untagged)]
 pub enum Potential {
@@ -454,6 +454,41 @@ pub enum Potential {
     Sum(Vec<PotentialKind>),
 }
 derive_yaml_read!{Potential}
+
+// Manual impl, because #[derive(Deserialize)] on untagged enums discard
+// all error messages.
+impl<'de> de::Deserialize<'de> for Potential {
+    fn deserialize<D: de::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct MyVisitor;
+        impl<'de> de::Visitor<'de> for MyVisitor {
+            type Value = Potential;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                write!(formatter, "a potential or array of potentials")
+            }
+
+            fn visit_seq<A: de::SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+                let mut vec = vec![];
+                while let Some(pot) = seq.next_element()? {
+                    vec.push(pot);
+                }
+                Ok(Potential::Sum(vec))
+            }
+
+            fn visit_str<E: de::Error>(self, s: &str) -> Result<Self::Value, E> {
+                de::Deserialize::deserialize(s.into_deserializer())
+                    .map(Potential::Single)
+            }
+
+            fn visit_map<A: de::MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {
+                de::Deserialize::deserialize(de::value::MapAccessDeserializer::new(map))
+                    .map(Potential::Single)
+            }
+        }
+
+        deserializer.deserialize_any(MyVisitor)
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
