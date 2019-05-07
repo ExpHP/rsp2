@@ -18,4 +18,5 @@ phonons:
       save-bands: false
 
 bond-radius: 1.8
-lammps-processor-axis-mask: [true, true, false]
+lammps:
+  processor-axis-mask: [true, true, false]

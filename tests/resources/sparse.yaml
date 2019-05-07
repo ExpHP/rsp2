@@ -9,4 +9,5 @@ scale-ranges:
     #    range: [0.95, 1.05]
 
 bond-radius: 1.8
-lammps-processor-axis-mask: [true, true, false]
+lammps:
+  processor-axis-mask: [true, true, false]
