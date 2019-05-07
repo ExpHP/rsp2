@@ -1107,6 +1107,20 @@ impl Settings {
             &mut self._deprecated_lammps_settings,
         );
 
+        match self.phonons.eigensolver {
+            PhononEigenSolver::Phonopy { .. } => {
+                warn!("`eigensolver: phonopy` is deprecated and will eventually be removed.");
+            },
+            _ => {},
+        }
+
+        match self.phonons.disp_finder {
+            PhononDispFinder::Phonopy { .. } => {
+                warn!("`disp-finder: phonopy` is deprecated and will eventually be removed.");
+            },
+            _ => {},
+        }
+
         // Bail out much earlier on some incompatible settings.
         match (&self.phonons.eigensolver, &self.phonons.disp_finder) {
             (PhononEigenSolver::Phonopy { .. }, PhononDispFinder::Rsp2 { .. }) => {
