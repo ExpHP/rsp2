@@ -19,8 +19,8 @@ rsp2-minimize = { path = "../../minimize" }
 
 log = "0.4"
 failure = "0.1.2"
-serde = { version = "1.0.88", features = ["rc"] }
-serde_derive = "1.0.88"
+serde = { version = "1.0.91", features = ["rc"] }
+serde_derive = "1.0.91"
 serde_yaml = "0.7"
 serde_ignored = "0.0.4"
 

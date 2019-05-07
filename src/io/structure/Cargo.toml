@@ -19,8 +19,8 @@ itertools = "0.7"
 failure = "0.1.2"
 vasp-poscar = "0.1.1"
 log = "0.4"
-serde = { version = "1.0.88", features = ["rc"] }
-serde_derive = "1.0.88"
+serde = { version = "1.0.91", features = ["rc"] }
+serde_derive = "1.0.91"
 serde_yaml = "0.7"
 
 rsp2-structure = { path = "../../structure" }

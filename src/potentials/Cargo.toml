@@ -34,9 +34,9 @@ log = "0.4"
 
 [dev-dependencies]
 rsp2-structure-io = { path = "../io/structure" }
-serde = { version = "1.0.88", features = ["rc"] }
+serde = { version = "1.0.91", features = ["rc"] }
 serde_json = "1"
-serde_derive = "1.0.88"
+serde_derive = "1.0.91"
 rand = "0.3"
 xz2 = "0.1.6"
 
