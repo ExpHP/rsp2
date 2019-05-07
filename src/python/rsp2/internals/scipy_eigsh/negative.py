@@ -44,6 +44,7 @@ def main_from_rust():
     m = dynmat.from_dict(d.pop('matrix'))
     shift_invert_attempts = d.pop('shift-invert-attempts')
     dense = d.pop('dense')
+    max_solutions = d.pop('max-solutions')
     assert not d
 
     out = run(m,
@@ -52,7 +53,7 @@ def main_from_rust():
               plain_ncv=DEFAULT_NCV, # FIXME add to input json from rust
               shift_invert_ncv=DEFAULT_NCV, # FIXME add to input json from rust
               use_fallback=True, # FIXME add to input json from rust
-              max_solutions=DEFAULT_MAX_SOLUTIONS, # FIXME add to input json from rust
+              max_solutions=max_solutions,
               search_solutions=None, # FIXME add to input json from rust
               )
 
@@ -67,15 +68,19 @@ def main_from_cli():
     p = argparse.ArgumentParser()
     p.add_argument('DYNMAT', help='dynmat file (.npz, .json, .json.gz, ...)')
     p.add_argument('--output', '-o', type=str, required=True)
-    p.add_argument('--dense', action='store_true', help="Use dense eigenvalue solver.")
+    p.add_argument(
+        '--dense', action='store_true',
+        help="Use a dense eigenvalue solver. Almost all other options will be "
+             "ignored in this case."
+    )
     p.add_argument('--shift-invert-attempts', type=int, default=DEFAULT_SHIFT_INVERT_ATTEMPTS)
     p.add_argument(
         '--no-fallback', dest='use_fallback', action='store_false',
         help="Disable non-shift-invert-based fallback method."
     )
     p.add_argument(
-        '--max-solutions', type=int, default=DEFAULT_MAX_SOLUTIONS,
-        help="max number of solutions to seek"
+        '--max-solutions', type=int, default=None,
+        help="max number of solutions to seek. Default is 12 unless --dense is given."
     )
     p.add_argument(
         '--shift-invert-ncv', type=int, default=DEFAULT_NCV,
@@ -89,11 +94,18 @@ def main_from_cli():
     )
     p.add_argument(
         '--search-solutions', type=int, default=None,
-        help="ask"
+        help="actually ask the sparse solver for this many solutions instead "
+             "of --max-solutions.  The sparse solver can converge much, much "
+             "faster when a few hundred solutions are requested rather than "
+             "just 12."
     )
     args = p.parse_args()
 
-    if args.search_solutions is not None and args.search_solutions < args.max_solutions:
+    if (not args.dense
+            and args.search_solutions is not None
+            and args.max_solutions is not None
+            and args.search_solutions < args.max_solutions
+    ):
         p.error("--max-solutions must not exceed --search-solutions")
 
     evals, evecs = run(
@@ -113,25 +125,32 @@ def main_from_cli():
         sys.exit(1)
 
 def run(m: scipy.sparse.bsr_matrix,
-        dense: tp.Optional[bool],
+        dense: bool,
         shift_invert_attempts: int,
         shift_invert_ncv: int,
         plain_ncv: int,
-        max_solutions: int,
+        max_solutions: tp.Optional[int],
         use_fallback: bool,
         search_solutions: tp.Optional[int],
         ):
     """
     A suitable entry point from pure python code.
     """
+    if max_solutions is None:
+        if dense:
+            max_solutions = m.shape[0]
+        else:
+            max_solutions = DEFAULT_MAX_SOLUTIONS
+
     if search_solutions is None:
         search_solutions = max_solutions
 
     # Logic for deciding when to use shift invert results
     def inner():
         if dense:
-            return try_dense(m)
-        elif shift_invert_attempts:
+            return try_dense(m, max_solutions)
+
+        if shift_invert_attempts:
             esols = try_shift_invert(m,
                                      max_solutions=search_solutions,
                                      shift_invert_attempts=shift_invert_attempts,
@@ -355,13 +374,13 @@ def try_regular(m, *, max_solutions, ncv):
         auto_adjust_ncv=True,
     )
 
-def try_dense(m):
+def try_dense(m, max_solutions: int):
     info('trace: trying dense eigenvalue solver')
 
     # note: order for returned eigenvalues is the same as 'SA'
     # note: raises LinAlgError if the eigenvalue computation does not converge
     evals, evecs = np.linalg.eigh(m.todense())
-    return evals, evecs.T
+    return evals[:max_solutions], evecs.T[:max_solutions]
 
 if __name__ == '__main__':
     main_from_rust()

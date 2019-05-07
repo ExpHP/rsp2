@@ -89,6 +89,7 @@ mod scripts {
     #[serde(rename_all = "kebab-case")]
     pub(super) struct Negative {
         pub(super) matrix: crate::math::dynmat::Cereal,
+        pub(super) max_solutions: usize,
         pub(super) shift_invert_attempts: u32,
         pub(super) dense: bool,
     }
@@ -166,14 +167,15 @@ impl DynamicalMatrix {
     /// Requesting more than this number of eigensolutions will fail.
     ///
     /// (inherent limitation of the method used by ARPACK)
-    pub fn max_sparse_eigensolutions(&self) -> usize {
-        3 * self.0.dim.0 - 1
-    }
+    pub fn max_sparse_eigensolutions(&self) -> usize
+    { 3 * self.num_atoms() - 1 }
+
+    pub fn num_atoms(&self) -> usize
+    { self.0.dim.0 }
 
     /// Clip `how_many` for the max possible value for sparse solver methods.
-    pub fn clip_how_many(&self, how_many: usize) -> usize {
-        usize::min(how_many, self.max_sparse_eigensolutions())
-    }
+    pub fn clip_how_many(&self, how_many: usize) -> usize
+    { usize::min(how_many, self.max_sparse_eigensolutions()) }
 
     /// Intended to be used during relaxation.
     ///
@@ -183,12 +185,30 @@ impl DynamicalMatrix {
     ///
     /// If none of the modes produced are negative, then it is safe (-ish) to assume that the matrix
     /// has no such eigenmodes.  (At least, that is the intent!)
-    pub fn compute_negative_eigensolutions(&self, shift_invert_attempts: u32, dense: bool) -> FailResult<(Vec<f64>, Basis3)> {
+    pub fn compute_negative_eigensolutions(
+        &self,
+        max_solutions: usize,
+        shift_invert_attempts: u32,
+    ) -> FailResult<(Vec<f64>, Basis3)> {
         trace!("Computing most negative eigensolutions.");
         scripts::Negative {
+            max_solutions,
             shift_invert_attempts,
-            dense,
-            matrix: self.cereal()
+            dense: false,
+            matrix: self.cereal(),
+        }.invoke()
+    }
+
+    /// Intended to be used during relaxation.
+    ///
+    /// Produce all eigensolutions.
+    pub fn compute_eigensolutions_dense(&self) -> FailResult<(Vec<f64>, Basis3)> {
+        trace!("Computing most negative eigensolutions.");
+        scripts::Negative {
+            max_solutions: 3 * self.num_atoms(),
+            shift_invert_attempts: 0, // unused
+            dense: true,
+            matrix: self.cereal(),
         }.invoke()
     }
 

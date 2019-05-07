@@ -610,7 +610,8 @@ pub struct PotentialReboNew {
 }
 
 #[derive(Serialize, Deserialize)]
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
+#[derive(Copy)]
 #[serde(rename_all = "kebab-case")]
 pub enum PotentialReboNewParams {
     Brenner,
@@ -695,19 +696,49 @@ pub enum PhononEigenSolver {
         save_bands: bool,
     },
 
+    // FIXME: This should be split into two separate eigensolvers 'Sparse' and 'Dense',
+    //        but it seems tricky to rewrite the code in rsp2_tasks::cmd that matches on it
+    //        without introducing code duplication.  What a mess...
+    //
     /// Diagonalize the dynamical matrix using ARPACK through Scipy or Numpy
     /// (dense). Aliased to 'sparse' for backwards compatibility.
     #[serde(rename_all = "kebab-case")]
     #[serde(alias = "sparse")]
     Rsp2 {
-        #[serde(default = "_phonon_eigen_solver__rsp2__shift_invert_attempts")]
-        shift_invert_attempts: u32,
+        /// Use a dense matrix eigensolver.
+        /// This can be more reliable than the sparse eigensolver,
+        /// and may even be faster (if you can afford the memory!).
+        ///
+        /// `shift_invert_attempts` and `how_many` will be ignored.
+        /// It will always produce all eigensolutions.
         #[serde(default = "_phonon_eigen_solver__rsp2__dense")]
         dense: bool,
+
+        /// The sparse eigensolver first attempts to perform shift-invert mode with a shift
+        /// of zero.  This can converge much faster (especially when large, negative modes exist).
+        ///
+        /// This method is numerically unreliable due to the presence of acoustic modes near zero,
+        /// hence it is performed multiple times (taking advantage of random elements in ARPACK)
+        /// and nonsensical modes are ignored.
+        ///
+        /// When none of the shift-inversion attempts produce any non-acoustic negative modes,
+        /// the sparse eigensolver falls back to non-shift-invert mode, which is far more reliable.
+        #[serde(default = "_phonon_eigen_solver__rsp2__shift_invert_attempts")]
+        shift_invert_attempts: u32,
+
+        /// How many eigensolutions the sparse eigensolver should seek.
+        ///
+        /// The sparse eigensolver is incapable of producing all eigensolutions.
+        ///
+        /// The most negative eigenvalues will be sought first.
+        /// Fewer will be sought if the number of atoms is insufficient.
+        #[serde(default = "_phonon_eigen_solver__rsp2__how_many")]
+        how_many: usize,
     },
 }
 fn _phonon_eigen_solver__phonopy__save_bands() -> bool { false }
 fn _phonon_eigen_solver__rsp2__shift_invert_attempts() -> u32 { 4 }
+fn _phonon_eigen_solver__rsp2__how_many() -> usize { 12 }
 fn _phonon_eigen_solver__rsp2__dense() -> bool { false }
 
 #[derive(Serialize, Deserialize)]
@@ -760,12 +791,30 @@ pub enum SupercellSpec {
     Dim([u32; 3]),
 }
 
+/// A high-level control of how multiple cores are used.
+///
+/// This flag was highly ill-conceived and will hopefully one day be replaced.
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all="kebab-case")]
 pub enum Threading {
+    /// The rust code will only compute one potential at a time,
+    /// allowing LAMMPS to use as many cores as it pleases.
     Lammps,
+
+    /// This currently does two things:
+    ///
+    /// * during force sets generation, rsp2 will work on multiple displaced structures
+    ///   in parallel.
+    /// * Enables parallel code in `rebo-new` and `kc-z-new`
+    ///
+    /// ...it should probably stop doing one of those two things. (FIXME!)
+    ///
+    /// (on the bright side, thanks to rayon's design, this doesn't necessarily result in
+    ///  wasted CPU time on blocked threads; but it might increase cache misses)
     Rayon,
+
+    /// Everything (or almost everything) should run in serial.
     Serial,
 }
 
