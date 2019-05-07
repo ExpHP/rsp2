@@ -23,7 +23,10 @@ use crate::ui::cli_deserialize::CliDeserialize;
 use crate::util::ext_traits::{ArgMatchesExt};
 use crate::filetypes::{StoredStructure, Eigensols};
 
+use rsp2_tasks_config as cfg;
 use rsp2_lammps_wrap::LammpsOnDemand;
+
+use cfg::{ValidatedSettings, ValidatedEnergyPlotSettings};
 
 use clap;
 use path_abs::{PathDir, PathFile, PathAbs};
@@ -317,7 +320,7 @@ fn _rsp2_acgsd(
         let mut trial = TrialDir::create_new(dir_args)?;
         logfile.start(PathFile::new(trial.new_logfile_path()?)?)?;
 
-        let settings = trial.read_base_settings()?;
+        let ValidatedSettings(settings) = trial.read_base_settings()?;
         trial.run_relax_with_eigenvectors(mpi_on_demand, &settings, filetype, &input, stop_after_dynmat)
     });
 }
@@ -343,7 +346,7 @@ pub fn after_diagonalization(bin_name: &str, version: VersionInfo) -> ! {
 
         logfile.start(PathFile::new(trial.new_logfile_path()?)?)?;
 
-        let settings = match overrides {
+        let ValidatedSettings(settings) = match overrides {
             Some(overrides) => {
                 let save_path = trial.modified_settings_path(iteration);
                 trial.read_modified_settings(overrides, Some(&save_path))?
@@ -378,7 +381,7 @@ pub fn shear_plot(bin_name: &str, version: VersionInfo) -> ! {
         let mut trial = TrialDir::create_new(dir_args)?;
         logfile.start(PathFile::new(trial.new_logfile_path()?)?)?;
 
-        let settings = trial.read_base_settings()?;
+        let ValidatedEnergyPlotSettings(settings) = trial.read_base_settings()?;
         trial.run_energy_surface(mpi_on_demand, &settings, &input)
     });
 }
@@ -399,7 +402,7 @@ pub fn save_bands_after_the_fact(bin_name: &str, version: VersionInfo) -> ! {
         let mut trial = TrialDir::from_existing(&trial)?;
         logfile.start(PathFile::new(trial.new_logfile_path()?)?)?;
 
-        let settings = trial.read_base_settings()?;
+        let ValidatedSettings(settings) = trial.read_base_settings()?;
         trial.run_save_bands_after_the_fact(mpi_on_demand, &settings)
     });
 }
@@ -421,7 +424,7 @@ pub fn rerun_analysis(bin_name: &str, version: VersionInfo) -> ! {
 
         logfile.start(PathFile::new(trial.new_logfile_path()?)?)?;
 
-        let settings = trial.read_base_settings()?;
+        let ValidatedSettings(settings) = trial.read_base_settings()?;
         trial.rerun_ev_analysis(mpi_on_demand, &settings, structure)
     });
 }

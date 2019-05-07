@@ -430,8 +430,7 @@ impl dyn PotentialBuilder {
             Some(trial_dir),
             on_demand,
             &cfg.threading,
-            &cfg.lammps_update_style,
-            &cfg.lammps_processor_axis_mask,
+            &cfg.lammps,
             &cfg.potential,
         )
     }
@@ -440,19 +439,18 @@ impl dyn PotentialBuilder {
         trial_dir: Option<&TrialDir>,
         on_demand: Option<LammpsOnDemand>,
         threading: &cfg::Threading,
-        update_style: &cfg::LammpsUpdateStyle,
-        axis_mask: &[bool; 3], // HACK; lammps should have its own section
+        lammps: &cfg::Lammps,
         config: &cfg::Potential,
     ) -> FailResult<Box<dyn PotentialBuilder>> {
         match config {
             cfg::Potential::Single(cfg) => {
-                PotentialBuilder::single_from_config_parts(trial_dir, on_demand, threading, update_style, axis_mask, &cfg)
+                PotentialBuilder::single_from_config_parts(trial_dir, on_demand, threading, lammps, &cfg)
             },
             cfg::Potential::Sum(cfgs) => {
                 let mut iter = {
                     cfgs.into_iter()
                         // (we simply cannot support LammpsOnDemand here)
-                        .map(|cfg| PotentialBuilder::single_from_config_parts(trial_dir, None, threading, update_style, axis_mask, &cfg))
+                        .map(|cfg| PotentialBuilder::single_from_config_parts(trial_dir, None, threading, lammps, &cfg))
                         .collect::<FailResult<Vec<_>>>()?
                         .into_iter()
                 };
@@ -469,29 +467,28 @@ impl dyn PotentialBuilder {
         trial_dir: Option<&TrialDir>,
         on_demand: Option<LammpsOnDemand>,
         threading: &cfg::Threading,
-        update_style: &cfg::LammpsUpdateStyle,
-        axis_mask: &[bool; 3], // HACK; lammps should have its own section
+        lammps: &cfg::Lammps,
         config: &cfg::PotentialKind,
     ) -> FailResult<Box<dyn PotentialBuilder>> {
         match config {
             cfg::PotentialKind::Rebo(cfg) => {
                 let lammps_pot = self::lammps::Airebo::from(cfg);
-                let pot = self::lammps::Builder::new(trial_dir, on_demand, threading, update_style, axis_mask, lammps_pot)?;
+                let pot = self::lammps::Builder::new(trial_dir, on_demand, threading, lammps, lammps_pot)?;
                 Ok(Box::new(pot))
             }
             cfg::PotentialKind::Airebo(cfg) => {
                 let lammps_pot = self::lammps::Airebo::from(cfg);
-                let pot = self::lammps::Builder::new(trial_dir, on_demand, threading, update_style, axis_mask, lammps_pot)?;
+                let pot = self::lammps::Builder::new(trial_dir, on_demand, threading, lammps, lammps_pot)?;
                 Ok(Box::new(pot))
             },
             cfg::PotentialKind::KolmogorovCrespiZ(cfg) => {
                 let lammps_pot = self::lammps::KolmogorovCrespiZ::from(cfg);
-                let pot = self::lammps::Builder::new(trial_dir, on_demand, threading, update_style, axis_mask, lammps_pot)?;
+                let pot = self::lammps::Builder::new(trial_dir, on_demand, threading, lammps, lammps_pot)?;
                 Ok(Box::new(pot))
             },
             cfg::PotentialKind::KolmogorovCrespiFull(cfg) => {
                 let lammps_pot = self::lammps::KolmogorovCrespiFull::from(cfg);
-                let pot = self::lammps::Builder::new(trial_dir, on_demand, threading, update_style, axis_mask, lammps_pot)?;
+                let pot = self::lammps::Builder::new(trial_dir, on_demand, threading, lammps, lammps_pot)?;
                 Ok(Box::new(pot))
             },
             cfg::PotentialKind::KolmogorovCrespiZNew(cfg) => {

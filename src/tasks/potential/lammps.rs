@@ -76,10 +76,13 @@ impl<P: Clone> Builder<P>
         trial_dir: Option<&TrialDir>,
         on_demand: Option<LammpsOnDemand>,
         threading: &cfg::Threading,
-        update_style: &cfg::LammpsUpdateStyle,
-        processor_axis_mask: &[bool; 3],
+        lammps_cfg: &cfg::Lammps,
         potential: P,
     ) -> FailResult<Self> {
+        let cfg::Lammps { update_style, processor_axis_mask } = lammps_cfg;
+        let update_style = update_style.as_ref();
+        let processor_axis_mask = processor_axis_mask.as_ref();
+
         let mut inner = InnerBuilder::new();
         if let Some(trial_dir) = trial_dir {
             inner.append_log(trial_dir.join("lammps.log"));

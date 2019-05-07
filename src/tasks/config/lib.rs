@@ -31,6 +31,8 @@ use serde::de::{self, IntoDeserializer};
 
 #[macro_use]
 extern crate log;
+#[macro_use]
+extern crate failure;
 
 use std::io::Read;
 use std::collections::HashMap;
@@ -100,13 +102,44 @@ derive_yaml_read!{::serde_yaml::Value}
 /// outside of this module. (e.g. in the implementation of `Default` or `new` for a builder
 /// somewhere)
 pub type OrDefault<T> = Option<T>;
+
 /// Alias used for `Option<T>` to indicate that omitting this field has special meaning.
 pub type Nullable<T> = Option<T>;
+
+/// Newtype around `Option<T>` for fields that are guaranteed to be `Some` after the
+/// config is validated. Used for e.g. the new location of a deprecated field so that
+/// it can fall back to reading from the old location.
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct Filled<T>(Option<T>);
+impl<T> Filled<T> {
+    fn default() -> Self { Filled(None) }
+
+    pub fn into_inner(self) -> T { self.0.unwrap() }
+    pub fn as_ref(&self) -> &T { self.0.as_ref().unwrap() }
+    pub fn as_mut(&mut self) -> &mut T { self.0.as_mut().unwrap() }
+}
+
+impl<T> From<T> for Filled<T> {
+    fn from(x: T) -> Self { Filled(Some(x)) }
+}
 
 // (this also exists solely for codegen reasons)
 fn value_from_str(r: &str) -> Result<::serde_yaml::Value, Error>
 { serde_yaml::from_str(r).map_err(Into::into) }
 
+/// Root settings object.
+///
+/// This is what you should deserialize.
+#[derive(Serialize)]
+#[derive(Debug, Clone, PartialEq)]
+pub struct ValidatedSettings(pub Settings);
+
+/// Raw deserialized form of settings.
+///
+/// You shouldn't deserialize this type directly; deserialize `ValidatedSettings` instead,
+/// so that additional validation and filling of defaults can be performed.
+/// (e.g. incompatible settings, or options whose defaults depend on others)
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
@@ -181,16 +214,39 @@ pub struct Settings {
     #[serde(default)]
     pub ev_loop: EvLoop,
 
-    // FIXME there should be a general lammps section
     #[serde(default)]
-    pub lammps_update_style: LammpsUpdateStyle,
-    #[serde(default = "_settings__lammps_processor_axis_mask")]
-    pub lammps_processor_axis_mask: [bool; 3],
+    #[serde(flatten)]
+    pub _deprecated_lammps_settings: DeprecatedLammpsSettings,
+
+    /// See the type for documentation.
+    #[serde(default)]
+    pub lammps: Lammps,
 }
-derive_yaml_read!{Settings}
+derive_yaml_read!{ValidatedSettings}
+
+impl<'de> de::Deserialize<'de> for ValidatedSettings {
+    fn deserialize<D: de::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let cereal: Settings = de::Deserialize::deserialize(deserializer)?;
+
+        cereal.validate().map_err(de::Error::custom)
+    }
+}
+
+// intended to be `#[serde(flatten)]`-ed into other types
+#[derive(Default)]
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub struct DeprecatedLammpsSettings {
+    #[serde(default)]
+    #[serde(rename = "lammps-update-style")]
+    pub lammps_update_style: Option<LammpsUpdateStyle>,
+    #[serde(default)]
+    #[serde(rename = "lammps-processor-axis-mask")]
+    pub lammps_processor_axis_mask: Option<[bool; 3]>,
+}
 
 fn _settings__update_large_neighbor_lists() -> bool { true }
-fn _settings__lammps_processor_axis_mask() -> [bool; 3] { [true; 3] }
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
@@ -457,6 +513,10 @@ pub struct LayerSearch {
 }
 derive_yaml_read!{LayerSearch}
 
+#[derive(Serialize)]
+#[derive(Debug, Clone, PartialEq)]
+pub struct ValidatedEnergyPlotSettings(pub EnergyPlotSettings);
+
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
@@ -473,12 +533,22 @@ pub struct EnergyPlotSettings {
 
     pub potential: Potential,
 
-    // FIXME there should be a general lammps section
     #[serde(default)]
-    pub lammps_update_style: LammpsUpdateStyle,
-    pub lammps_processor_axis_mask: [bool; 3],
+    #[serde(flatten)]
+    pub _deprecated_lammps_settings: DeprecatedLammpsSettings,
+
+    #[serde(default)]
+    pub lammps: Lammps,
 }
-derive_yaml_read!{EnergyPlotSettings}
+derive_yaml_read!{ValidatedEnergyPlotSettings}
+
+impl<'de> de::Deserialize<'de> for ValidatedEnergyPlotSettings {
+    fn deserialize<D: de::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let cereal: EnergyPlotSettings = de::Deserialize::deserialize(deserializer)?;
+
+        cereal.validate().map_err(de::Error::custom)
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
@@ -867,31 +937,6 @@ pub enum Threading {
     Serial,
 }
 
-#[derive(Serialize, Deserialize)]
-#[derive(Debug, Clone, PartialEq)]
-#[serde(rename_all="kebab-case")]
-pub enum LammpsUpdateStyle {
-    /// Use `run 0` to notify LAMMPS of updates.
-    Safe,
-    /// (Experimental) Use `run 1 pre no post no` to notify LAMMPS of updates.
-    ///
-    /// To make this a bit safer, the delay on neighbor update checks is removed.
-    /// (However, if an atom is not at the same image where LAMMPS would prefer to find it,
-    /// then the optimization is defeated, and neighbor lists will end up being built
-    /// every step...)
-    #[serde(rename_all="kebab-case")]
-    Fast {
-        sync_positions_every: u32,
-    },
-    /// (Debug) Use a custom `run _ pre _ post _` to notify LAMMPS of updates.
-    #[serde(rename_all="kebab-case")]
-    Run {
-        n: u32, pre: bool, post: bool, sync_positions_every: u32,
-    },
-}
-impl Default for LammpsUpdateStyle {
-    fn default() -> Self { LammpsUpdateStyle::Safe }
-}
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
@@ -981,6 +1026,44 @@ pub struct Masses(pub HashMap<String, f64>);
 
 // --------------------------------------------------------
 
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub struct Lammps {
+    #[serde(default = "Filled::default")]
+    pub processor_axis_mask: Filled<[bool; 3]>,
+    #[serde(default = "Filled::default")]
+    pub update_style: Filled<LammpsUpdateStyle>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
+#[serde(rename_all="kebab-case")]
+pub enum LammpsUpdateStyle {
+    /// Use `run 0` to notify LAMMPS of updates.
+    Safe,
+    /// (Experimental) Use `run 1 pre no post no` to notify LAMMPS of updates.
+    ///
+    /// To make this a bit safer, the delay on neighbor update checks is removed.
+    /// (However, if an atom is not at the same image where LAMMPS would prefer to find it,
+    /// then the optimization is defeated, and neighbor lists will end up being built
+    /// every step...)
+    #[serde(rename_all="kebab-case")]
+    Fast {
+        sync_positions_every: u32,
+    },
+    /// (Debug) Use a custom `run _ pre _ post _` to notify LAMMPS of updates.
+    #[serde(rename_all="kebab-case")]
+    Run {
+        n: u32, pre: bool, post: bool, sync_positions_every: u32,
+    },
+}
+impl Default for LammpsUpdateStyle {
+    fn default() -> Self { LammpsUpdateStyle::Safe }
+}
+
+// --------------------------------------------------------
+
 impl Default for Threading {
     fn default() -> Self { Threading::Lammps }
 }
@@ -990,6 +1073,10 @@ impl Default for EvLoop {
 }
 
 impl Default for AcousticSearch {
+    fn default() -> Self { from_empty_mapping().unwrap() }
+}
+
+impl Default for Lammps {
     fn default() -> Self { from_empty_mapping().unwrap() }
 }
 
@@ -1003,11 +1090,68 @@ fn test_defaults()
     let _ = Threading::default();
     let _ = EvLoop::default();
     let _ = AcousticSearch::default();
+    let _ = Lammps::default();
 }
 
 fn from_empty_mapping<T: for<'de> serde::Deserialize<'de>>() -> serde_yaml::Result<T> {
     use serde_yaml::{from_value, Value, Mapping};
     from_value(Value::Mapping(Mapping::new()))
+}
+
+// --------------------------------------------------------
+
+impl Settings {
+    pub fn validate(mut self) -> Result<ValidatedSettings, Error> {
+        fill_lammps_from_deprecated(
+            &mut self.lammps,
+            &mut self._deprecated_lammps_settings,
+        );
+
+        // Bail out much earlier on some incompatible settings.
+        match (&self.phonons.eigensolver, &self.phonons.disp_finder) {
+            (PhononEigenSolver::Phonopy { .. }, PhononDispFinder::Rsp2 { .. }) => {
+                bail!("`eigensolver: phonopy` and `disp-finder: rsp2` are incompatible!");
+            },
+            _ => {},
+        }
+
+        Ok(ValidatedSettings(self))
+    }
+}
+
+impl EnergyPlotSettings {
+    pub fn validate(mut self) -> Result<ValidatedEnergyPlotSettings, Error> {
+        fill_lammps_from_deprecated(
+            &mut self.lammps,
+            &mut self._deprecated_lammps_settings,
+        );
+        Ok(ValidatedEnergyPlotSettings(self))
+    }
+}
+
+fn fill_lammps_from_deprecated(
+    new: &mut Lammps,
+    old: &mut DeprecatedLammpsSettings,
+) {
+    let Lammps { processor_axis_mask, update_style } = new;
+
+    if let Some(value) = old.lammps_processor_axis_mask.take() {
+        warn!("\
+            `lammps-processor-axis-mask` is deprecated. \
+            It now lives at `lammps.processor-axis-mask`.\
+        ");
+        processor_axis_mask.0.get_or_insert(value);
+    }
+    processor_axis_mask.0.get_or_insert([true; 3]);
+
+    if let Some(value) = old.lammps_update_style.take() {
+        warn!("\
+            `lammps-update-style` is deprecated. \
+            It now lives at `lammps.update-style`.\
+        ");
+        update_style.0.get_or_insert(value);
+    }
+    update_style.0.get_or_insert_with(Default::default);
 }
 
 // --------------------------------------------------------
