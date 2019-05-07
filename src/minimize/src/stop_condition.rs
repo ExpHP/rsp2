@@ -37,8 +37,11 @@ pub trait ShouldStop<T> {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[derive(Serialize, Deserialize)]
 pub enum LogicalExpression<T> {
+    /// Succeed as soon as any of the subconditions are met.
     #[serde(rename = "any")]
     Any(Vec<T>),
+
+    /// Succeed when all subconditions are simultaneously met.
     #[serde(rename = "all")]
     All(Vec<T>),
 }

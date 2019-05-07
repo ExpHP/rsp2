@@ -114,22 +114,51 @@ pub struct Settings {
     #[serde(default)]
     pub threading: Threading,
 
+    /// Specifies the potential to be used.
+    ///
+    /// See [`PotentialKind`] for the list of possibilities.
     pub potential: Potential,
 
     // (FIXME: weird name)
+    /// Used to optimize lattice parameters prior to relaxation.
+    ///
+    /// See the type for documentation.
     #[serde(default)]
     pub scale_ranges: ScaleRanges,
 
+    /// Names of parameters, using the same letter for parameters that should scale together.
+    ///
+    /// This is used to enable optimization of lattice vector lengths during CG,
+    /// if the potential supports it. (optimization of cell angles is not supported)
+    ///
+    /// Note that the same letter does **not** mean that the lengths must be *equal;*
+    /// it simply means that their ratio of lengths will be preserved.
+    /// Use `null` (or equivalently `~`) for parameters that should not be scaled.
+    /// (e.g. vacuum separation)
+    ///
+    /// # Example:
+    ///
+    /// ```yaml
+    /// # e.g. graphite
+    /// parameters: [a, a, c]
+    ///
+    /// # e.g. chain along z
+    /// parameters: [~, ~, c]
+    /// ```
     #[serde(default)]
     pub parameters: Nullable<Parameters>,
 
+    /// See the type for documentation.
     #[serde(default)]
     pub acoustic_search: AcousticSearch,
 
+    /// See the type for documentation.
     pub cg: Cg,
 
+    /// See the type for documentation.
     pub phonons: Phonons,
 
+    /// See the type for documentation.
     pub ev_chase: EigenvectorChase,
 
     /// `None` disables layer search.
@@ -144,9 +173,11 @@ pub struct Settings {
     // FIXME move
     pub layer_gamma_threshold: f64,
 
+    /// See the type for documentation.
     #[serde(default)]
     pub masses: Nullable<Masses>,
 
+    /// See the type for documentation.
     #[serde(default)]
     pub ev_loop: EvLoop,
 
@@ -165,7 +196,9 @@ fn _settings__lammps_processor_axis_mask() -> [bool; 3] { [true; 3] }
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub struct ScaleRanges {
+    /// TODO: Document
     pub scalables: Vec<Scalable>,
+
     /// How many times to repeat the process of relaxing all parameters.
     ///
     /// This may yield better results if one of the parameters relaxed
@@ -176,6 +209,8 @@ pub struct ScaleRanges {
     /// Warn if the optimized value of a parameter falls within this amount of
     /// the edge of the search window (relative to the search window size),
     /// which likely indicates that the search window was not big enough.
+    ///
+    /// If null (`~`), no check is performed.
     #[serde(default="_scale_ranges__warn_threshold")]
     pub warn_threshold: Nullable<f64>,
 
@@ -339,14 +374,21 @@ pub enum ScalableRange {
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all="kebab-case")]
 pub struct Cg {
+    /// CG stop conditions use a little DSL.
+    ///
+    /// `any` and `all` can be arbitrarily nested.
     #[serde()]
     pub stop_condition: CgStopCondition,
     #[serde(default)]
     pub flavor: CgFlavor,
     #[serde(default)]
     pub on_ls_failure: CgOnLsFailure,
+
+    /// Clip initial guesses for linesearch at this value each iteration.
     #[serde(default = "_cg__alpha_guess_first")]
     pub alpha_guess_first: f64,
+
+    /// Initial guess for linesearch on the very first iteration.
     #[serde(default)]
     pub alpha_guess_max: f64,
 }
@@ -783,11 +825,18 @@ pub enum PhononDispFinderRsp2Directions {
     Survey,
 }
 
+/// Specifies a supercell.
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all="kebab-case")]
 pub enum SupercellSpec {
+    /// Create a diagonal supercell where the length of the first vector
+    /// is at least `A`, the length of the second vector is at least `B`, and etc.
+    /// (angstroms)
     Target([f64; 3]),
+
+    /// Create a diagonal supercell with `n` images along the first vector,
+    /// `m` images along the second, and `l` images along the third.
     Dim([u32; 3]),
 }
 
@@ -895,15 +944,25 @@ pub enum NormalizationMode {
     AtomMax,
 }
 
+/// Options describing the ev-loop.
+///
+/// This is the outermost loop that alternates between relaxation and
+/// diagonalization of the dynamical matrix at gamma.
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub struct EvLoop {
-    // Relaxation stops after all EVs are positive this many times
+    /// Exit after all eigenvalues are positive for this many consecutive ev-loop iterations.
     #[serde(default = "_ev_loop__min_positive_iter")]
     pub min_positive_iter: u32,
+
+    /// Give up after this many iterations.
     #[serde(default = "_ev_loop__max_iter")]
     pub max_iter: u32,
+
+    /// Return a nonzero exit code when we reach max-iter.
+    ///
+    /// Default is false because there can be unanticipated rotational modes.
     #[serde(default = "_ev_loop__fail")]
     pub fail: bool,
 }

@@ -249,17 +249,22 @@ pub mod stop_condition {
         /// (negative is useful when alternating between CG and other methods
         ///  of minimization)
         #[serde(rename = "value-delta")] ValueDelta {
+            /// Relative difference.
             #[serde(rename = "rel-greater-than")] delta: f64,
             #[serde(rename =        "steps-ago")] steps_ago: u32,
         },
-        /// Max absolute value of grad.
+
+        /// Succeed when max absolute value of gradient dips below a threshold.
         #[serde(rename =    "grad-max")] GradientMax(f64),
-        /// Norm of grad for the current structure.
-        /// (Beware, this scales with sqrt(N)...)
+
+        /// Succeed when norm of grad for the current structure dips below a threshold.
+        /// (Not recommended; the value scales with sqrt(N)...)
         #[serde(rename =   "grad-norm")] GradientNorm(f64),
-        /// Norm of grad, rescaled as an intensive property.
+
+        /// Like `grad-norm`, but rescaled as an intensive property.
         #[serde(rename =    "grad-rms")] GradientRms(f64),
-        /// The number of full iterations that have occurred.
+
+        /// Succeed once this many iterations have occurred.
         #[serde(rename =  "iterations")] Iterations(u64),
     }
 
