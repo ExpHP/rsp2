@@ -37,7 +37,6 @@ pub(crate) mod python;
 use crate::{FailResult, FailOk};
 use rsp2_tasks_config::{self as cfg, Settings, NormalizationMode, SupercellSpec};
 use crate::traits::{AsPath, Load, Save};
-use crate::phonopy::{DirWithBands, DirWithForces};
 use rsp2_lammps_wrap::LammpsOnDemand;
 
 use crate::meta::{self, prelude::*};
@@ -150,17 +149,6 @@ impl TrialDir {
             &original_coords, meta.sift(),
         )?;
 
-        // FIXME: Prior to the addition of the sparse solver, the code used to do something like:
-        //
-        //       let _do_not_drop_the_bands_dir = final_bands_dir
-        //
-        // IIRC, this unsightly hack was to allow RSP2_SAVETEMP to recover bands directories if code
-        // after ev_analysis info panics, even if save_bands is disabled.
-        //
-        // Unfortunately, the addition of a second solver has only made this more convoluted,
-        // and so now the guard is an option. (`None` when the sparse solver is used)
-        let _do_not_drop_the_bands_dir: Option<DirWithBands<Box<dyn AsPath>>>;
-
         let (coords, ev_analysis) = {
             use self::cfg::PhononEigenSolver::*;
 
@@ -182,7 +170,6 @@ impl TrialDir {
                     let (coords, ev_analysis, final_iteration) = {
                         do_ev_loop!(InternalDiagonalizer { dense, shift_invert_attempts, how_many })?
                     };
-                    _do_not_drop_the_bands_dir = None;
 
                     // HACK: Put last gamma dynmat at a predictable path.
                     let final_iteration = final_iteration.expect("ev-loop should have iterations!");
@@ -733,10 +720,6 @@ fn do_force_sets_at_disps_for_sparse(
     force_sets
 })}
 
-//-----------------------------------
-
-const Q_GAMMA: V3 = V3([0.0, 0.0, 0.0]);
-
 //=================================================================
 
 impl TrialDir {
@@ -744,31 +727,15 @@ impl TrialDir {
         self,
         on_demand: Option<LammpsOnDemand>,
         settings: &cfg::EnergyPlotSettings,
-        input: &PathDir,
+        _input: &PathDir,
     ) -> FailResult<()>
     {Ok({
-        // support either a force dir or a bands dir as input
-        let bands_dir = match DirWithBands::from_existing(input.to_path_buf()) {
-            // accept a bands dir
-            Ok(dir) => dir.boxed(),
-            Err(e) => {
-                // try computing gamma bands from a force dir
-                use crate::phonopy::MissingFileError;
-
-                // bail out on anything other than MissingFileError
-                // (this check is awkwardly written; I couldn't see a better way
-                //  to handle borrow-checking correctly)
-                let _ = e.downcast::<MissingFileError>()?;
-                DirWithForces::from_existing(&input)?
-                    .build_bands()
-                    .eigenvectors(true)
-                    .compute(&[Q_GAMMA])?
-                    .boxed()
-            },
-        };
-
-        let (coords, meta) = bands_dir.structure()?;
-        let (evals, evecs) = bands_dir.eigensystem_at(Q_GAMMA)?;
+        // (IIFEs to silence dead code warnings.)
+        let (coords, meta): (Coords, CommonMeta) = {|| unimplemented!("\
+            rsp2-shear-plot has not yet been fixed to accept non-phonopy-based \
+            input files.\
+        ")}();
+        let (evals, evecs): (Vec<f64>, Basis3) = {|| unreachable!()}();
 
         let plot_ev_indices = {
             use rsp2_tasks_config::EnergyPlotEvIndices::*;
