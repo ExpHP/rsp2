@@ -31,7 +31,6 @@ use serde::de::{self, IntoDeserializer};
 
 #[macro_use]
 extern crate log;
-#[macro_use]
 extern crate failure;
 
 use std::io::Read;
@@ -789,25 +788,24 @@ pub struct Phonons {
     /// right eigensolutions at gamma, it might indicate a bug in rsp2's potentials)
     pub supercell: SupercellSpec,
 }
-fn _phonons__eigensolver() -> PhononEigenSolver { PhononEigenSolver::Phonopy { save_bands: _phonon_eigen_solver__phonopy__save_bands() } }
-fn _phonons__disp_finder() -> PhononDispFinder { PhononDispFinder::Phonopy { diag: _phonon_disp_finder__phonopy__diag() } }
+fn _phonons__eigensolver() -> PhononEigenSolver {
+    PhononEigenSolver::Rsp2 {
+        dense: _phonon_eigen_solver__rsp2__dense(),
+        shift_invert_attempts: _phonon_eigen_solver__rsp2__shift_invert_attempts(),
+        how_many: _phonon_eigen_solver__rsp2__how_many(),
+    }
+}
+fn _phonons__disp_finder() -> PhononDispFinder {
+    PhononDispFinder::Rsp2 {
+        directions: _phonon_disp_finder__rsp2__directions()
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub enum PhononEigenSolver {
-    /// Diagonalize the dynamical matrix by having phonopy compute `band.hdf5`,
-    /// computing all eigensolutions.
-    ///
-    /// **Cannot be used with `disp-finder: rsp2`.**
-    #[serde(rename_all = "kebab-case")]
-    Phonopy {
-        /// Save the directory from the last phonopy computation,
-        /// which may contain incomprehensibly large files.
-        #[serde(default = "_phonon_eigen_solver__phonopy__save_bands")]
-        save_bands: bool,
-    },
-
+    Phonopy(AlwaysFail<MessagePhononEigenSolverPhonopy>),
     // FIXME: This should be split into two separate eigensolvers 'Sparse' and 'Dense',
     //        but it seems tricky to rewrite the code in rsp2_tasks::cmd that matches on it
     //        without introducing code duplication.  What a mess...
@@ -853,24 +851,19 @@ fn _phonon_eigen_solver__rsp2__shift_invert_attempts() -> u32 { 4 }
 fn _phonon_eigen_solver__rsp2__how_many() -> usize { 12 }
 fn _phonon_eigen_solver__rsp2__dense() -> bool { false }
 
+#[derive(Serialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct MessagePhononEigenSolverPhonopy;
+impl FailMessage for MessagePhononEigenSolverPhonopy {
+    const FAIL_MESSAGE: &'static str = "`phonon.eigen-solver: phonopy` is no longer implemented";
+}
+
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub enum PhononDispFinder {
-    /// Use `phonopy --disp` to compute the displacements.
-    ///
-    /// Phonopy is battle-tested and fairly clever at choosing displacements, but has
-    /// difficulty handling larger structures (>800 atoms).
-    #[serde(rename_all = "kebab-case")]
-    Phonopy {
-        /// Phonopy's DIAG option. This makes it select fewer displacements.
-        #[serde(default = "_phonon_disp_finder__phonopy__diag")]
-        diag: bool,
-    },
-
+    Phonopy(AlwaysFail<MessagePhononDispFinderPhonopy>),
     /// Use built-in methods to compute the displacements.
-    ///
-    /// **Cannot be used with `eigensolver: phonopy`.**
     Rsp2 {
         #[serde(default = "_phonon_disp_finder__rsp2__directions")]
         directions: PhononDispFinderRsp2Directions,
@@ -879,13 +872,26 @@ pub enum PhononDispFinder {
 fn _phonon_disp_finder__phonopy__diag() -> bool { true }
 fn _phonon_disp_finder__rsp2__directions() -> PhononDispFinderRsp2Directions { PhononDispFinderRsp2Directions::Diag }
 
+#[derive(Serialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct MessagePhononDispFinderPhonopy;
+impl FailMessage for MessagePhononDispFinderPhonopy {
+    const FAIL_MESSAGE: &'static str = "`phonon.disp-finder: phonopy` is no longer implemented";
+}
+
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all="kebab-case")]
 pub enum PhononDispFinderRsp2Directions {
     /// Comparable to phonopy with `DIAG = .FALSE.`
+    ///
+    /// Every displacement will be along a lattice vector.
+    /// Symmetry will still be used to reduce the amount required.
     Axial,
     /// Comparable to phonopy with `DIAG = .TRUE.`
+    ///
+    /// Some displacements may be along directions like e.g. `a + b`, `a - b`, or `a + b + c`.
+    /// This reduces the number of displacements that need to be computed.
     Diag,
     /// (Experimental) Diagonal displacements with fractional coords up to 2.
     #[serde(rename = "diag-2")]
@@ -1064,6 +1070,26 @@ impl Default for LammpsUpdateStyle {
 
 // --------------------------------------------------------
 
+#[derive(Serialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct AlwaysFail<T>(pub Never, pub std::marker::PhantomData<T>);
+
+#[derive(Serialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Never {}
+
+impl<'de, T: FailMessage> de::Deserialize<'de> for AlwaysFail<T> {
+    fn deserialize<D: de::Deserializer<'de>>(_: D) -> Result<Self, D::Error> {
+        Err(de::Error::custom(T::FAIL_MESSAGE))
+    }
+}
+
+pub trait FailMessage {
+    const FAIL_MESSAGE: &'static str;
+}
+
+// --------------------------------------------------------
+
 impl Default for Threading {
     fn default() -> Self { Threading::Lammps }
 }
@@ -1106,28 +1132,6 @@ impl Settings {
             &mut self.lammps,
             &mut self._deprecated_lammps_settings,
         );
-
-        match self.phonons.eigensolver {
-            PhononEigenSolver::Phonopy { .. } => {
-                warn!("`eigensolver: phonopy` is deprecated and will eventually be removed.");
-            },
-            _ => {},
-        }
-
-        match self.phonons.disp_finder {
-            PhononDispFinder::Phonopy { .. } => {
-                warn!("`disp-finder: phonopy` is deprecated and will eventually be removed.");
-            },
-            _ => {},
-        }
-
-        // Bail out much earlier on some incompatible settings.
-        match (&self.phonons.eigensolver, &self.phonons.disp_finder) {
-            (PhononEigenSolver::Phonopy { .. }, PhononDispFinder::Rsp2 { .. }) => {
-                bail!("`eigensolver: phonopy` and `disp-finder: rsp2` are incompatible!");
-            },
-            _ => {},
-        }
 
         Ok(ValidatedSettings(self))
     }

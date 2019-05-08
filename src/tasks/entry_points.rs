@@ -386,27 +386,6 @@ pub fn shear_plot(bin_name: &str, version: VersionInfo) -> ! {
     });
 }
 
-// %% CRATES: binary: rsp2-save-bands-after-the-fact %%
-pub fn save_bands_after_the_fact(bin_name: &str, version: VersionInfo) -> ! {
-    wrap_main(version, |logfile, mpi_on_demand| {
-        let (app, de) = CliDeserialize::augment_clap_app({
-            clap::App::new(bin_name)
-                .args(&[
-                    arg!( trial_dir=TRIAL_DIR "existing trial directory"),
-                ])
-        });
-        let matches = app.get_matches();
-        let () = de.resolve_args(&matches)?;
-
-        let trial = PathDir::new(matches.expect_value_of("trial_dir"))?;
-        let mut trial = TrialDir::from_existing(&trial)?;
-        logfile.start(PathFile::new(trial.new_logfile_path()?)?)?;
-
-        let ValidatedSettings(settings) = trial.read_base_settings()?;
-        trial.run_save_bands_after_the_fact(mpi_on_demand, &settings)
-    });
-}
-
 // %% CRATES: binary: rsp2-rerun-analysis %%
 pub fn rerun_analysis(bin_name: &str, version: VersionInfo) -> ! {
     wrap_main(version, |logfile, mpi_on_demand| {
@@ -499,25 +478,6 @@ pub fn bond_test(bin_name: &str, version: VersionInfo) -> ! {
 
         println!(); // flush, dammit
         Ok(())
-    });
-}
-
-// %% CRATES: binary: rsp2-dynmat-test %%
-pub fn dynmat_test(bin_name: &str, version: VersionInfo) -> ! {
-    wrap_main(version, |logfile, _mpi_on_demand| {
-        let (app, de) = CliDeserialize::augment_clap_app({
-            clap::App::new(bin_name)
-                .args(&[
-                    arg!( input=PHONOPY_DIR ""),
-                ])
-        });
-        let matches = app.get_matches();
-        let () = de.resolve_args(&matches)?;
-        let input = PathDir::new(matches.expect_value_of("input"))?;
-
-        logfile.disable(); // no trial dir
-
-        crate::cmd::run_dynmat_test(&input)
     });
 }
 

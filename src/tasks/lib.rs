@@ -55,6 +55,7 @@ mod util;
 #[macro_use]
 mod traits;
 mod cmd;
+#[allow(unused)]
 mod phonopy;
 pub mod math;
 mod ui;

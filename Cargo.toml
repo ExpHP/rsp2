@@ -37,10 +37,6 @@ name = "rsp2-converge-vdw"
 path = "src/binary-shims/rsp2-converge-vdw.rs"
 
 [[bin]]
-name = "rsp2-dynmat-test"
-path = "src/binary-shims/rsp2-dynmat-test.rs"
-
-[[bin]]
 name = "rsp2-library-paths"
 path = "src/binary-shims/rsp2-library-paths.rs"
 
@@ -55,10 +51,6 @@ path = "src/binary-shims/rsp2-plot-vdw.rs"
 [[bin]]
 name = "rsp2-rerun-analysis"
 path = "src/binary-shims/rsp2-rerun-analysis.rs"
-
-[[bin]]
-name = "rsp2-save-bands-after-the-fact"
-path = "src/binary-shims/rsp2-save-bands-after-the-fact.rs"
 
 [[bin]]
 name = "rsp2-shear-plot"

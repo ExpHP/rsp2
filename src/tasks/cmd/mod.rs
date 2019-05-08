@@ -37,7 +37,7 @@ pub(crate) mod python;
 use crate::{FailResult, FailOk};
 use rsp2_tasks_config::{self as cfg, Settings, NormalizationMode, SupercellSpec};
 use crate::traits::{AsPath, Load, Save};
-use crate::phonopy::{DirWithBands, DirWithDisps, DirWithForces};
+use crate::phonopy::{DirWithBands, DirWithForces};
 use rsp2_lammps_wrap::LammpsOnDemand;
 
 use crate::meta::{self, prelude::*};
@@ -49,7 +49,7 @@ use crate::math::{
 };
 use self::acoustic_search::ModeKind;
 
-use path_abs::{PathAbs, PathArc, PathFile, PathDir};
+use path_abs::{PathAbs, PathFile, PathDir};
 use rsp2_structure::consts::CARBON;
 use rsp2_slice_math::{vnorm};
 
@@ -61,7 +61,6 @@ use rsp2_structure::{
     layer::LayersPerUnitCell,
     bonds::FracBonds,
 };
-use crate::phonopy::Builder as PhonopyBuilder;
 
 use rsp2_fs_util::{rm_rf, hard_link};
 
@@ -78,9 +77,6 @@ use itertools::Itertools;
 use crate::hlist_aliases::*;
 use crate::potential::{PotentialBuilder, DiffFn, CommonMeta};
 use crate::traits::save::Json;
-use crate::threading::Threading;
-
-const SAVE_BANDS_DIR: &'static str = "gamma-bands";
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub enum StructureFileType {
@@ -181,17 +177,7 @@ impl TrialDir {
             }
 
             match settings.phonons.eigensolver {
-                Phonopy { save_bands } => {
-                    let save_bands = match save_bands {
-                        true => Some(self.save_bands_dir()),
-                        false => None,
-                    };
-                    let (coords, ev_analysis, final_bands_dir) = {
-                        do_ev_loop!(PhonopyDiagonalizer { save_bands })?
-                    };
-                    _do_not_drop_the_bands_dir = Some(final_bands_dir);
-                    (coords, ev_analysis)
-                },
+                Phonopy(cfg::AlwaysFail(impossiburu, _)) => match impossiburu {},
                 Rsp2 { dense, shift_invert_attempts, how_many } => {
                     let (coords, ev_analysis, final_iteration) = {
                         do_ev_loop!(InternalDiagonalizer { dense, shift_invert_attempts, how_many })?
@@ -326,84 +312,6 @@ impl TrialDir {
     { Load::load(self.join(dir.as_path())) }
 }
 
-struct PhonopyDiagonalizer {
-    save_bands: Option<PathAbs>,
-}
-impl EvLoopDiagonalizer for PhonopyDiagonalizer {
-    // I think this is used to keep TempDir bands alive after diagonalization, so that
-    //  they can be recovered by RSP2_TEMPDIR if a panic occurs, even without `save_bands`.
-    // (to be honest, the code has gone through so many changes in requirements that I can
-    //  no longer remember; I just put this here to preserve behavior during a refactor.)
-    type ExtraOut = DirWithBands<Box<dyn AsPath>>;
-
-    fn do_post_relaxation_computations(
-        &self,
-        _trial: &TrialDir,
-        settings: &Settings,
-        pot: &dyn PotentialBuilder,
-        stored: &StoredStructure,
-        _stop_after_dynmat: bool, // HACK
-        _iteration: Option<Iteration>,
-    ) -> FailResult<(Vec<f64>, Basis3, DirWithBands<Box<dyn AsPath>>)>
-    {Ok({
-        let meta = stored.meta();
-        let coords = stored.coords.clone();
-
-        let phonopy = phonopy_builder_from_settings(&settings.phonons, coords.lattice());
-        match settings.phonons.disp_finder {
-            cfg::PhononDispFinder::Phonopy { diag } => {
-                let _ = diag; // already handled during builder construction
-            },
-            cfg::PhononDispFinder::Rsp2 { .. } => {
-                bail!("'disp-finder: rsp2' and 'eigensolver: phonopy' are incompatible");
-            },
-        }
-
-        let bands_dir = self.create_bands_dir(&settings.threading, pot, &phonopy, &coords, meta.sift())?;
-        let (evals, evecs) = bands_dir.eigensystem_at(Q_GAMMA)?;
-
-        (evals, evecs, bands_dir)
-    })}
-
-    fn allow_unfold_bands(&self) -> bool {
-        // phonopy diagonalizer is only ever used on small systems
-        true
-    }
-}
-
-impl PhonopyDiagonalizer {
-    // Create a DirWithBands that may or may not be a TempDir (based on config)
-    fn create_bands_dir(
-        &self,
-        cfg_threading: &cfg::Threading,
-        pot: &dyn PotentialBuilder,
-        phonopy: &PhonopyBuilder,
-        coords: &Coords,
-        meta: HList3<
-            meta::SiteElements,
-            meta::SiteMasses,
-            Option<meta::FracBonds>,
-        >,
-    ) -> FailResult<DirWithBands<Box<dyn AsPath>>>
-    {Ok({
-        let disp_dir = phonopy.displacements(coords, meta.sift())?;
-        let force_sets = do_force_sets_at_disps_for_phonopy(pot, cfg_threading, &disp_dir)?;
-
-        let bands_dir = disp_dir
-            .make_force_dir(&force_sets)?
-            .build_bands()
-            .eigenvectors(true)
-            .compute(&[Q_GAMMA])?;
-
-        if let Some(save_dir) = &self.save_bands {
-            rm_rf(save_dir)?;
-            bands_dir.relocate(save_dir.clone())?.boxed()
-        } else {
-            bands_dir.boxed()
-        }
-    })}
-}
-
 struct InternalDiagonalizer {
     shift_invert_attempts: u32,
     how_many: usize,
@@ -427,7 +335,7 @@ impl EvLoopDiagonalizer for InternalDiagonalizer {
             meta::SiteElements,
             meta::SiteMasses,
             Option<meta::SiteLayers>,
-            Option<meta::FracBonds>
+            Option<meta::FracBonds>,
         > = stored.meta().sift();
 
         let compute_deperms = |coords: &_, cart_ops: &_| {
@@ -454,17 +362,7 @@ impl EvLoopDiagonalizer for InternalDiagonalizer {
         //    (and even if BandsBuilder was made more lenient to allow reordering, we would still
         //     have the silly problem that `PhonopyDiagonalizer` needs the `DirWithDisps`)
         let (super_coords, prim_displacements, sc, cart_ops) = match settings.phonons.disp_finder {
-            cfg::PhononDispFinder::Phonopy { diag: _ } => {
-                let phonopy = phonopy_builder_from_settings(&settings.phonons, prim_coords.lattice());
-                let disp_dir = phonopy.displacements(prim_coords, prim_meta.sift())?;
-
-                let crate::phonopy::Rsp2StyleDisplacements {
-                    super_coords, sc, prim_displacements, ..
-                } = disp_dir.rsp2_style_displacements()?;
-
-                let cart_ops = disp_dir.symmetry()?;
-                (super_coords, prim_displacements, sc, cart_ops)
-            },
+            cfg::PhononDispFinder::Phonopy(cfg::AlwaysFail(never, _)) => match never { },
             cfg::PhononDispFinder::Rsp2 { ref directions } => {
                 use self::python::SpgDataset;
 
@@ -694,7 +592,6 @@ fn visualize_sparse_force_sets(
     }
 })}
 
-
 // wrapper around the gamma_system_analysis module which handles all the newtype conversions
 fn run_gamma_system_analysis(
     coords: &Coords,
@@ -800,55 +697,10 @@ impl TrialDir {
     })}
 }
 
-fn phonopy_builder_from_settings(
-    settings: &cfg::Phonons,
-    lattice: &Lattice,
-) -> PhonopyBuilder {
-    let mut phonopy = {
-        PhonopyBuilder::new()
-            .symmetry_tolerance(settings.symmetry_tolerance)
-            .conf("DISPLACEMENT_DISTANCE", format!("{:e}", settings.displacement_distance))
-            .supercell_dim(settings.supercell.dim_for_unitcell(lattice))
-    };
-    if let cfg::PhononDispFinder::Phonopy { diag } = settings.disp_finder {
-        phonopy = phonopy.diagonal_disps(diag);
-    }
-    phonopy
-}
-
-fn do_force_sets_at_disps_for_phonopy<P: AsPath + Send + Sync>(
-    pot: &dyn PotentialBuilder,
-    threading: &cfg::Threading,
-    disp_dir: &DirWithDisps<P>,
-) -> FailResult<Vec<Vec<V3>>>
-{Ok({
-    use std::io::prelude::*;
-
-    trace!("Computing forces at displacements");
-
-    let counter = crate::util::AtomicCounter::new();
-    let num_displacements = disp_dir.displacements().len();
-    let (initial_coords, meta) = disp_dir.superstructure();
-
-    let force_sets = use_potential_maybe_with_rayon(
-        pot,
-        initial_coords,
-        meta.sift(),
-        (threading == &cfg::Threading::Rayon).into(),
-        disp_dir.displaced_coord_sets().collect::<Vec<_>>(),
-        move |diff_fn: &mut dyn DiffFn<_>, meta, coords: Coords| FailOk({
-            let i = counter.inc();
-            eprint!("\rdisp {} of {}", i + 1, num_displacements);
-            std::io::stderr().flush().unwrap();
-
-            diff_fn.compute_force(&coords, meta)?
-        }),
-    )?;
-    eprintln!();
-    trace!("Done computing forces at displacements");
-    force_sets
-})}
-
+// FIXME: rename.
+//
+// Also notice that the rsp2 eigensolver apparently never did disps in parallel,
+// because I wanted to make it reuse the DispFn.
 fn do_force_sets_at_disps_for_sparse(
     pot: &dyn PotentialBuilder,
     _threading: &cfg::Threading,
@@ -881,48 +733,9 @@ fn do_force_sets_at_disps_for_sparse(
     force_sets
 })}
 
-// use a potential on many similar structures, possibly using Rayon.
-//
-// When rayon is not used, a single DiffFn is reused.
-fn use_potential_maybe_with_rayon<Inputs, Input, F, Output>(
-    pot: &dyn PotentialBuilder,
-    coords_for_initialize: &Coords,
-    meta: CommonMeta,
-    threading: Threading,
-    inputs: Inputs,
-    compute: F,
-) -> FailResult<Vec<Output>>
-where
-    Input: Send,
-    Output: Send,
-    Inputs: IntoIterator<Item=Input>,
-    Inputs: rayon::iter::IntoParallelIterator<Item=Input>,
-    F: Fn(&mut dyn DiffFn<CommonMeta>, CommonMeta, Input) -> FailResult<Output> + Sync + Send,
-{ match threading {
-    Threading::Parallel => {
-        use rayon::prelude::*;
-        let get_meta = meta.sendable();
-        inputs.into_par_iter()
-            .map(|x| compute(&mut pot.one_off(), get_meta(), x))
-            .collect()
-    },
-    Threading::Serial => {
-        // save the cost of repeated DiffFn initialization since we don't need Send.
-        let mut diff_fn = pot.initialize_diff_fn(coords_for_initialize, meta.clone())?;
-        inputs.into_iter()
-            .map(|x| compute(&mut diff_fn, meta.clone(), x))
-            .collect()
-    },
-}}
-
 //-----------------------------------
 
-// HACK:
-// These are only valid for a hexagonal system represented
-// with the [[a, 0], [-a/2, a sqrt(3)/2]] lattice convention
-#[allow(unused)] const Q_GAMMA: V3 = V3([0.0, 0.0, 0.0]);
-#[allow(unused)] const Q_K: V3 = V3([1f64/3.0, 1.0/3.0, 0.0]);
-#[allow(unused)] const Q_K_PRIME: V3 = V3([2.0 / 3f64, 2.0 / 3f64, 0.0]);
+const Q_GAMMA: V3 = V3([0.0, 0.0, 0.0]);
 
 //=================================================================
 
@@ -1082,38 +895,6 @@ extension_trait! {
 //=================================================================
 
 impl TrialDir {
-    pub(crate) fn run_save_bands_after_the_fact(
-        self,
-        on_demand: Option<LammpsOnDemand>,
-        settings: &Settings,
-    ) -> FailResult<()>
-    {Ok({
-        let pot = PotentialBuilder::from_root_config(&self, on_demand, &settings)?;
-
-        let (coords, meta) = self.read_stored_structure_data(&self.structure_path(EvLoopStructureKind::Final))?;
-
-        let phonopy = phonopy_builder_from_settings(&settings.phonons, coords.lattice());
-
-        // NOTE: there is no information needed from settings.phonons.eigensolver, so we can freely
-        //       run this binary this even on computations that originally used sparse methods.
-        PhonopyDiagonalizer {
-            save_bands: Some(self.save_bands_dir()),
-        }.create_bands_dir(&settings.threading, &pot, &phonopy, &coords, meta.sift())?;
-    })}
-}
-
-impl TrialDir {
-    pub fn save_bands_dir(&self) -> PathAbs
-    {
-        let path: PathArc = self.join(SAVE_BANDS_DIR).into();
-        assert!(path.is_absolute());
-        PathAbs::mock(path) // FIXME self.join ought to give a PathAbs to begin with
-    }
-}
-
-//=================================================================
-
-impl TrialDir {
     pub(crate) fn rerun_ev_analysis(
         self,
         on_demand: Option<LammpsOnDemand>,
@@ -1150,16 +931,7 @@ impl TrialDir {
             }
 
             match settings.phonons.eigensolver {
-                Phonopy { save_bands } => {
-                    let save_bands = match save_bands {
-                        true => Some(self.save_bands_dir()),
-                        false => None,
-                    };
-                    let (evals, evecs, _) = {
-                        use_diagonalizer!(PhonopyDiagonalizer { save_bands })?
-                    };
-                    (evals, evecs)
-                },
+                Phonopy(cfg::AlwaysFail(never, _)) => match never {},
                 Rsp2 { shift_invert_attempts, dense, how_many } => {
                     let (evals, evecs, _) = {
                         use_diagonalizer!(InternalDiagonalizer { dense, shift_invert_attempts, how_many } )?
@@ -1327,87 +1099,6 @@ pub(crate) fn run_converge_vdw(
             &path.with_density(density),
         );
         println!("# {} {} {}", density, work, d_value);
-    }
-})}
-
-//=================================================================
-
-// FIXME refactor once it's working, this is way too long
-pub(crate) fn run_dynmat_test(phonopy_dir: &PathDir) -> FailResult<()>
-{Ok({
-    // Make a supercell, and determine how our ordering of the supercell differs from phonopy.
-    let forces_dir = DirWithForces::from_existing(phonopy_dir)?;
-    let disp_dir = DirWithDisps::from_existing(phonopy_dir)?;
-    let crate::phonopy::Rsp2StyleDisplacements {
-        super_coords, sc, perm_from_phonopy, ..
-    } = disp_dir.rsp2_style_displacements()?;
-
-    let (_, prim_meta) = disp_dir.primitive_structure()?;
-    let space_group = disp_dir.symmetry()?;
-
-    let space_group_deperms: Vec<_> = {
-        rsp2_structure::find_perm::spacegroup_deperms(
-            &super_coords,
-            &space_group,
-            1e-1, // FIXME should be slightly larger than configured tol,
-                  //       but I forgot where that is stored.
-        )?
-    };
-
-    let (force_sets, super_displacements): (Vec<_>, Vec<_>) = {
-        let crate::phonopy::ForceSets {
-            force_sets: phonopy_force_sets,
-            displacements: phonopy_super_displacements,
-        } = forces_dir.force_sets()?;
-
-        zip_eq!(phonopy_force_sets, phonopy_super_displacements)
-            .map(|(fset, (phonopy_displaced, disp))| {
-                let displaced = perm_from_phonopy.permute_index(phonopy_displaced);
-                let fset = {
-                    fset.into_iter().enumerate()
-                        .map(|(atom, force)| (perm_from_phonopy.permute_index(atom), force))
-                        .collect()
-                };
-                (fset, (displaced, disp))
-            }).unzip()
-    };
-
-    let cart_rots: Vec<_> = {
-        space_group.iter().map(|c| c.cart_rot()).collect()
-    };
-
-    trace!("Computing designated rows of force constants...");
-    let force_constants = crate::math::dynmat::ForceConstants::compute_required_rows(
-        &super_displacements,
-        &force_sets,
-        &cart_rots,
-        &space_group_deperms,
-        &sc,
-    ).unwrap();
-    trace!("Done computing designated rows of force constants.");
-
-    {
-//        let dense = force_constants.permuted_by(&perm_to_phonopy).to_dense_matrix();
-//        println!("{:?}", dense); // FINALLY: THE MOMENT OF TRUTH
-    }
-
-    {
-        trace!("Computing dynamical matrix...");
-        let our_dynamical_matrix = force_constants.gamma_dynmat(&sc, prim_meta.pick()).hermitianize();
-        trace!("Done computing dynamical matrix.");
-        println!("{:?}", our_dynamical_matrix.0.to_coo().map(|c| c.0).into_dense());
-
-        trace!("Computing eigensolutions...");
-        let shift_invert_attempts = 4;
-        let max_solutions = 12;
-        let (low, _low_basis) = our_dynamical_matrix.compute_negative_eigensolutions(max_solutions, shift_invert_attempts)?;
-        let (high, _high_basis) = our_dynamical_matrix.compute_most_extreme_eigensolutions(3)?;
-        trace!("Done computing eigensolutions...");
-
-        println!("{:?}", low);
-        println!("{:?}", high);
-        let _ = our_dynamical_matrix;
-
     }
 })}
 

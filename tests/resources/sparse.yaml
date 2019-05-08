@@ -7,6 +7,9 @@ scale-ranges:
     #    axis-mask: [1, 1, 0]
     #    guess: 1.00
     #    range: [0.95, 1.05]
+phonons:
+  eigensolver.~~REPLACE~~:
+    sparse: {}
 
 bond-radius: 1.8
 lammps:
