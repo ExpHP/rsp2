@@ -1,9 +1,10 @@
-use ::rsp2_integration_test::{CliTest, filetypes, resource};
+use ::rsp2_integration_test::{CliTest, filetypes, resource, cli_test};
 
 #[ignore] // This test is expensive; use `cargo test -- --ignored` to run it!
 #[test]
 fn simple_test() {
-    CliTest::cargo_binary("rsp2")
+    let env = cli_test::Environment::init();
+    CliTest::cargo_binary(&env, "rsp2")
         .arg("-c").arg(resource("defaults.yaml"))
         .arg("-c").arg(resource("simple.yaml"))
         .arg(resource("simple.vasp").as_path())
@@ -33,7 +34,8 @@ fn simple_test() {
 #[ignore] // This test is expensive; use `cargo test -- --ignored` to run it!
 #[test]
 fn simple_test_rust() {
-    CliTest::cargo_binary("rsp2")
+    let env = cli_test::Environment::init();
+    CliTest::cargo_binary(&env, "rsp2")
         .arg("-c").arg(resource("defaults.yaml"))
         .arg("-c").arg(resource("simple-rust.yaml"))
         .arg(resource("simple.vasp").as_path())
@@ -57,7 +59,8 @@ fn simple_test_rust() {
 #[ignore] // This test is expensive; use `cargo test -- --ignored` to run it!
 #[test]
 fn simple_test_optimize() {
-    CliTest::cargo_binary("rsp2")
+    let env = cli_test::Environment::init();
+    CliTest::cargo_binary(&env, "rsp2")
         .arg("-c").arg(resource("defaults.yaml"))
         .arg("-c").arg(resource("simple-relax-optimize.yaml"))
         .arg(resource("simple.vasp").as_path())

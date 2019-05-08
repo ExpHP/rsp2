@@ -67,7 +67,7 @@ clap = "2"
 chrono = "0.4"
 either = "1"
 fern = { version = "0.5", features = ["colored"] }
-env_logger = "0.5.10"
+env_logger = "0.6.1"
 extension-trait = "0.1.2"
 failure = "0.1.2"
 itertools = "0.7"

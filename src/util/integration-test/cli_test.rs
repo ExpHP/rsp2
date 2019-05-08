@@ -30,8 +30,11 @@ pub struct CliTest {
     checker_index: usize, // where 'after_run's end and 'checkers' begin
 }
 
-impl Default for CliTest {
-    fn default() -> Self {
+pub type DirChecker = Box<dyn Fn(&PathDir) -> Result<()>>;
+pub type AfterRun = Box<dyn Fn(&PathDir) -> Result<()>>;
+
+impl CliTest {
+    pub fn new(_env: &Environment) -> Self {
         CliTest {
             cmd: vec![
                 "cargo",
@@ -48,18 +51,13 @@ impl Default for CliTest {
             checker_index: 0,
         }
     }
-}
 
-pub type DirChecker = Box<dyn Fn(&PathDir) -> Result<()>>;
-pub type AfterRun = Box<dyn Fn(&PathDir) -> Result<()>>;
-
-impl CliTest {
-    pub fn cargo_binary(name: impl AsRef<OsStr>) -> Self {
+    pub fn cargo_binary(_env: &Environment, name: impl AsRef<OsStr>) -> Self {
         let manifest_dir = PathDir::current_dir().unwrap();
 
         let test = CliTest {
             cmd: vec![],
-            ..Self::default()
+            ..Self::new(_env)
         };
 
         // Yep, we peek directly into `target`, because strangely enough this
@@ -113,7 +111,7 @@ impl CliTest {
         let checker = move |dir: &PathDir| {
             let actual = T::read_file(&dir.join(&path_in_trial))?;
             let expected = T::read_file(&expected_path)?;
-            check_against_with_diff(&actual, &expected, other.clone());
+            check_against_with_diff(&expected, &actual, other.clone());
             Ok(())
         };
         self.check(checker)
@@ -187,30 +185,75 @@ pub trait CheckFile: Sized + Debug + PartialEq + std::panic::RefUnwindSafe {
 }
 
 #[cfg(feature = "test-diff")]
-fn check_against_with_diff<T: CheckFile>(a: &T, b: &T, other: T::OtherArgs) {
+fn check_against_with_diff<T: CheckFile>(old: &T, new: &T, other: T::OtherArgs) {
     // Let check_against use things like `assert_close!` that might panic.
-    let result = std::panic::catch_unwind(move || a.check_against(b, other));
+    let result = std::panic::catch_unwind(move || old.check_against(new, other));
 
     // If it did panic, throw that panic away and get a colorful character diff
     // on the Debug output from pretty_assertions.  This can help one get a quick
     // overview of how many decimal places are accurate throughout the entire file.
     if let Err(_) = result {
-        let mention_save_tmp = match std::env::var("RSP2_SAVETEMP") {
-            Err(::std::env::VarError::NotPresent) => {
-                "  If the change looks reasonable, use RSP2_SAVETEMP=some-location \
-                to recover the failed tempdir and copy the new file over into tests/resources."
-            },
-            _ => "",
-        };
-        assert_eq!(
-            a, b,
-            "Showing diff from pretty_assertion.{}", mention_save_tmp,
-        );
-        panic!("check_against failed but assert_eq succeeded?!");
+        let _guard = DoAfterPanic(|| {
+            if std::env::var("RSP2_SAVETEMP") == Err(::std::env::VarError::NotPresent) {
+                // Tell the user the next step towards blessing the new output.
+                eprintln!();
+                eprintln!("               The above panic should have printed a diff.");
+                eprintln!("  If the change looks reasonable, use RSP2_SAVETEMP=some-location to recover");
+                eprintln!("      the failed tempdir and copy the new file over into tests/resources.");
+            }
+        });
+        // Use pretty_assertions
+        assert_eq!(old, new);
     }
 }
 
 #[cfg(not(feature = "test-diff"))]
-fn check_against_with_diff<T: CheckFile>(a: &T, b: &T, other: T::OtherArgs) {
-    a.check_against(b, other)
+fn check_against_with_diff<T: CheckFile>(old: &T, new: &T, other: T::OtherArgs) {
+    let _guard = DoAfterPanic(|| {
+        // Tell the user the next step towards blessing the new output.
+        eprintln!();
+        eprintln!("  If the above panic occurred while comparing new output to old, ");
+        eprintln!("    please try rerunning the test with '--features test-diff'.");
+    });
+    old.check_against(new, other)
+}
+
+// Call a function during unwind.
+//
+// It will be called after the panic handler (which is what usually prints the panic message and
+// backtrace), making this a great way to ensure that a message appears at the very end of a
+// test's captured STDERR.
+struct DoAfterPanic<F: FnMut()>(F);
+
+impl<F: FnMut()> Drop for DoAfterPanic<F> {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            (self.0)()
+        }
+    }
+}
+
+/// Proof of the global environment for a test case having been set up.
+pub struct Environment(());
+
+static ENVIRONMENT_ONCE: std::sync::Once = std::sync::Once::new();
+
+impl Environment {
+    /// Set up the global environment for the test case.
+    ///
+    /// Most notably, this sets up a logger that prints to the captured stderr.
+    ///
+    /// Because this is used for test cases of CLI binaries, most of the log output
+    /// you see in a test case is not actually from this (it is from the binary's
+    /// stderr!).  However, this is needed to print the messages from `RSP2_SAVETEMP`
+    /// that save the entire temp dir in which a test case was executed.
+    pub fn init() -> Self {
+        ENVIRONMENT_ONCE.call_once(|| {
+            env_logger::Builder::new()
+                .is_test(true)
+                .filter_level(log::LevelFilter::Info)
+                .init();
+        });
+        Environment(())
+    }
 }

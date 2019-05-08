@@ -16,6 +16,8 @@ path = "lib.rs"
 !!rsp2-assert-close
 !!rsp2-python
 
+!!env-logger
+!!log
 !!serde
 !!serde-json
 !!serde-derive

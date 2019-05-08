@@ -30,7 +30,7 @@ rsp2-util-macros = { path = "../util/macros" }
 failure = "0.1.2"
 
 [dev-dependencies]
-env_logger = "0.5.10"
+env_logger = "0.6.1"
 
 [features]
 nightly = ["beta", "rsp2-array-utils/nightly", "rsp2-assert-close/nightly", "rsp2-slice-math/nightly", "rsp2-util-macros/nightly"]
