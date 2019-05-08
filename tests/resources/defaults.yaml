@@ -45,7 +45,8 @@ phonons:
     rsp2:
       directions: survey
   eigensolver:
-    sparse: {}
+    rsp2:
+      dense: true
 
 layer-gamma-threshold: 0.2
 

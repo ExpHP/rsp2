@@ -17,10 +17,10 @@ parameters: ['a', 'a', null]
 
 phonons:
   disp-finder.~~REPLACE~~:
-    phonopy: {}
+    rsp2: {}
   eigensolver.~~REPLACE~~:
-    phonopy:
-      save-bands: false
+    rsp2:
+      dense: true
 
 bond-radius: 1.8
 lammps:

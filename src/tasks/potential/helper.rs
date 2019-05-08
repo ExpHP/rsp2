@@ -56,8 +56,12 @@ where
         Ok(Some(Box::new(Sum(a_diff_fn, b_diff_fn))))
     }
 
-    fn initialize_disp_fn(&self, _: &Coords, _: M) -> FailResult<Box<dyn DispFn>>
-    { unimplemented!("should use DispFns of sub potentials, rather than DefaultDispFn") }
+    fn initialize_disp_fn(&self, coords: &Coords, meta: M) -> FailResult<Box<dyn DispFn>>
+    {
+        let a_disp_fn = self.0.initialize_disp_fn(coords, meta.clone())?;
+        let b_disp_fn = self.1.initialize_disp_fn(coords, meta.clone())?;
+        Ok(Box::new(Sum(a_disp_fn, b_disp_fn)))
+    }
 
     fn _eco_mode(&self, cont: &mut dyn FnMut())
     { (self.0)._eco_mode(&mut || (self.1)._eco_mode(cont)) }
@@ -106,6 +110,27 @@ where
     }
 }
 
+impl<A, B> DispFn for Sum<A, B>
+where
+    A: DispFn,
+    B: DispFn,
+{
+    fn compute_dense_force(&mut self, disp: (usize, V3)) -> FailResult<Vec<V3>>
+    {
+        let a_force = self.0.compute_dense_force(disp)?;
+        let b_force = self.1.compute_dense_force(disp)?;
+        Ok(zip_eq!(a_force, b_force).map(|(a, b)| a + b).collect())
+    }
+
+    fn compute_sparse_force_delta(&mut self, disp: (usize, V3)) -> FailResult<BTreeMap<usize, V3>>
+    {
+        let mut out = self.0.compute_sparse_force_delta(disp)?;
+        for (key, value) in self.1.compute_sparse_force_delta(disp)? {
+            *out.entry(key).or_insert(V3::zero()) += value;
+        }
+        Ok(out)
+    }
+}
 
 //--------------------------------
 
