@@ -183,8 +183,8 @@ impl Lattice {
     /// Rotate into a form where the first vector points entirely along x, and the
     /// second vector is in the xy-plane.
     ///
-    /// This is the form required by LAMMPS.  This form makes the lattice matrix lower
-    /// triangular in RSP2's convention.
+    /// This is the form required by LAMMPS and `V_Sim`.  This form makes the lattice
+    /// matrix lower triangular in RSP2's convention.
     ///
     /// If the input cell is left-handed, the output will also be left-handed; however
     /// it is not specified which of the 3 diagonal elements will be negative.

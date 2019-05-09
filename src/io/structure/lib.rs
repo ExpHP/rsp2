@@ -26,5 +26,6 @@ mod poscar;
 pub use crate::xyz::Xyz;
 mod xyz;
 
+pub mod v_sim;
 pub mod layers_yaml;
 pub mod assemble;

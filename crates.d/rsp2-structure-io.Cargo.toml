@@ -17,6 +17,7 @@ path = "lib.rs"
 !!serde
 !!serde-derive
 !!serde-yaml
+!!num-complex
 
 !!rsp2-structure
 !!rsp2-array-types
