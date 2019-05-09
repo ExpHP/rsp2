@@ -171,17 +171,6 @@ def make_macro_lookup(vcs_safe, fail):
         user_conf = read_master_user_config(fail)
         root_name = get_root_package(fail)
 
-        class WorkspaceMembersAsPathdepsMacro(NoArgMacro):
-            def expand_noarg(self, **_ignored):
-                lines = []
-                for (name, path) in crates.items():
-                    if name != root_name:
-                        lines.append(f'{name} = {{ path = "{path}" }}')
-                return '\n'.join(lines)
-
-            def internal_deps(self):
-                return [name for name in crates if name != root_name]
-
         class MaybeItsAWorkspaceMacro(NoArgMacro):
             def expand_noarg(self, **_ignored):
                 # This is unfortunate. The Cargo.toml files should not depend on
@@ -220,9 +209,6 @@ exclude = ["./scripts"]
         lookup_d = {
             # name = "crate-name"
             'CRATE-NAME-LINE': CrateNameLineMacro(),
-
-            # generates all lines for our own crates in the root crate's dependencies
-            'WORKSPACE-MEMBERS-AS-PATH-DEPS': WorkspaceMembersAsPathdepsMacro(),
 
             # [workspace].  Or not.
             'MAYBE-ITS-A-WORKSPACE': MaybeItsAWorkspaceMacro(),
@@ -550,11 +536,18 @@ class New:
         if (path / root_rel_src_toml_path(name)).exists():
             fail(f'crate "{name}" already exists')
 
-        # Insert a line to crates.toml without destroying formatting
+        # Insert a line to crates.toml and the root package Cargo.toml
+        # without destroying formatting
         # (do this now for earlier exits on error)
+        root_name = get_root_package(fail=fail)
+        root_path = root_rel_src_toml_path(root_name)
+        with open(root_path) as f:
+            root_lines = list(f)
+        root_lines = master_config_textual_add(root_path, root_lines, f'!!{name}\n', fail=fail)
+
         with open(MASTER_CFG_PATH) as f:
-            lines = list(f)
-        lines = master_config_textual_add(lines, f'{name} = "{path}"\n', fail=fail)
+            master_lines = list(f)
+        master_lines = master_config_textual_add(MASTER_CFG_PATH, master_lines, f'{name} = "{path}"\n', fail=fail)
 
         # make the directory
         path.mkdir()
@@ -571,8 +564,11 @@ class New:
                 'gpl': LICENSE_COMMENT_GPL,
             }[license])
 
+        with open_tmp(root_path) as f:
+            f.writelines(root_lines)
+
         with open_tmp(MASTER_CFG_PATH) as f:
-            f.writelines(lines)
+            f.writelines(master_lines)
 
         # regenerate
         Gen.run_like_function(fail)
@@ -922,13 +918,13 @@ def search_for_root(fail):
     fail('Cannot find workspace root!')
 
 # set a path for one of our crates, by plaintext search
-def master_config_textual_add(lines, line, fail):
+def master_config_textual_add(path, lines, line, fail):
     lines = list(lines)
     stripped = [x.strip() for x in lines]
     try: i = stripped.index(INSERTION_POINT_TEXT)
     except ValueError:
         fail(f'''
-Failed to find the new crate insertion point in '{MASTER_CFG_PATH}'
+Failed to find the new crate insertion point in '{path}'
 It should look like the following:
     {INSERTION_POINT_TEXT}
 '''[:-1])

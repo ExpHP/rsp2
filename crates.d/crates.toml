@@ -52,6 +52,7 @@ rsp2-python         = "src/python"
 rsp2-potentials     = "src/potentials"
 rsp2-dftbplus       = "src/io/dftbplus"
 #!!INSERTION POINT FOR NEW CRATES!!#
+# (do not edit the above line!)
 
 #--------------------------------------------
 # Versions for external dependencies, so that we don't have
