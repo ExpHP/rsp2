@@ -8,6 +8,16 @@ import typing as tp
 from scipy import interpolate as scint
 from scipy import sparse
 from pymatgen import Structure
+
+try:
+    import rsp2
+except ImportError:
+    info = lambda s: print(s, file=sys.stderr)
+    info('Please add the following to your PYTHONPATH:')
+    info('  (rsp2 source root)/scripts')
+    info('  (rsp2 source root)/src/python')
+    sys.exit(1)
+
 from rsp2.io import eigensols, structure_dir, dwim
 
 DEFAULT_TOL = 1e-2
@@ -20,7 +30,12 @@ def main():
 
     import argparse
 
-    parser = argparse.ArgumentParser(description="Unfold phonon eigenvectors")
+    parser = argparse.ArgumentParser(
+        description="Unfold phonon eigenvectors",
+        epilog=
+            'Uses the method of P. B. Allen et al., "Recovering hidden Bloch character: '
+            'Unfolding electrons, phonons, and slabs", Phys Rev B, 87, 085322.',
+        )
 
     parser.add_argument('--verbose', action='store_true')
     parser.add_argument('--debug', action='store_true')
