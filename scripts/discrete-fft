@@ -1,0 +1,122 @@
+#!/usr/bin/env python3
+
+import sys
+import json
+import numpy as np
+import scipy.interpolate as interp
+from pymatgen import Structure
+
+from rsp2.io import dwim, structure_dir
+
+__all__ = []
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("STRUCTURE_DIR", help='structure directory produced from a run on layers.yaml')
+    args = parser.parse_args()
+
+    sdir = structure_dir.from_path(args.STRUCTURE_DIR)
+
+    layer_mask = np.array(sdir.layers) == 0
+    lattice = sdir.structure.lattice.matrix
+    fracs = sdir.structure.frac_coords[layer_mask]
+    species = np.array(sdir.structure.species, dtype=object)[layer_mask]
+
+    # For FFT input, we look at the Z displacement in fractional space.
+    #
+    # To produce data on a grid, we interpolate the surface produced by the
+    # coordinate-data that we have.
+    #
+    # For continuity at the boundaries, create a supercell that includes points
+    # in cells that neighbor the interpolated cell.
+    superstructure = Structure(lattice, species, fracs)
+    superstructure.make_supercell([[3,0,0],[0,3,0],[0,0,1]])
+    super_carts = superstructure.cart_coords - np.array([1,1,0]) @ lattice
+    super_fracs_in_prim = super_carts @ np.linalg.inv(lattice)
+
+    assert super_fracs_in_prim.min() + 1e-7 > -1.0
+    assert super_fracs_in_prim.min() - 1e-7 < +0.0
+    assert super_fracs_in_prim.max() + 1e-7 > +1.0
+    assert super_fracs_in_prim.max() - 1e-7 < +2.0
+
+    # Produce a sampling grid with points in (0,0,0) (inclusive)
+    # to (1,1,1) (exclusive)
+    GRAPHENE_UNIT_CELL_LENGTH = 2.45
+    GRID_POINT_DENSITY = 40 # make at least this many points per side of a unit cell (approximate)
+
+    dims = np.linalg.norm(lattice, axis=1)[:2] / GRAPHENE_UNIT_CELL_LENGTH
+    dims *= GRID_POINT_DENSITY
+    dims = np.ceil(dims)
+    dims = np.array(dims, dtype=int)
+    spacings = 1 / dims
+
+    points = super_fracs_in_prim[:, :2]
+    values = super_carts[:, 2]
+    values -= values.min()
+
+    fft_input = interp.griddata(
+        points=points,
+        values=values,
+        xi=indices(dims) / dims,
+        method='linear',
+    ).reshape(*dims)
+
+    kpoint_values = np.fft.fft2(fft_input)
+    kpoint_values[0, 0] = 0
+
+    NUM_BEST = 20
+
+    axis_freqs = [np.fft.fftfreq(dim, spacing) for (dim, spacing) in zip(dims, spacings)]
+    kpoint_frac_ks = cartesian_product(axis_freqs).reshape(tuple(dims) + (2,))
+    kpoint_cart_ks = kpoint_frac_ks @ np.linalg.inv(lattice).T[:2, :2]
+
+    best_indices = np.argsort(kpoint_values.flatten())
+    best_multi_indices = tuple(x[-NUM_BEST:][::-1] for x in np.unravel_index(best_indices, dims))
+    for x, dim in zip(best_multi_indices, dims):
+        flip_mask = np.absolute(x - dim) < x
+        x[flip_mask] = (x - dim)[flip_mask]
+
+    best_kpoint_cart_ks = kpoint_cart_ks[best_multi_indices]
+    best_kpoint_values = kpoint_values[best_multi_indices]
+
+    json.dump({
+        "kpoint-index": np.vstack(best_multi_indices).T.tolist(),
+        "kpoint-cart": best_kpoint_cart_ks.tolist(),
+        "value": np.absolute(best_kpoint_values).tolist(),
+    }, fp=sys.stdout)
+
+    floats_to_image('tmp.png', fft_input, zero=True)
+    floats_to_image('out.png', np.absolute(np.fft.fftshift(kpoint_values)))
+
+def floats_to_image(path, data, zero=False):
+    from PIL import Image
+
+    if zero:
+        data = data - data.min()
+    max = data.max()
+    if max != 0:
+        data /= data.max()
+    data *= 255
+    data = data.round()
+    data = np.array(data, dtype=np.dtype('B'))
+
+    Image.fromarray(data, 'L').save(path)
+
+def indices(dims):
+    return cartesian_product([np.arange(0, d) for d in dims])
+
+def cartesian_product(arrs):
+    return np.vstack([x.flatten() for x in np.broadcast_arrays(*np.ix_(*arrs))]).T
+
+#----------------------------------------------------------
+
+def die(*args, **kw):
+    print(*args, **kw, file=sys.stderr)
+    sys.exit(1)
+
+#----------------------------------------------------------
+
+if __name__ == '__main__':
+    main()
