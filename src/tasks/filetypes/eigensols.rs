@@ -62,7 +62,7 @@ impl Raw {
     }
 }
 
-fn eigenvalue_to_frequency(val: f64) -> f64 {
+fn eigenvalue_to_frequency(val: Eigenvalue) -> Frequency {
     f64::sqrt(f64::abs(val)) * f64::signum(val) * SQRT_EIGENVALUE_TO_WAVENUMBER
 }
 

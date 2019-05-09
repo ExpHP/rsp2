@@ -68,6 +68,7 @@ indoc = "0.2.3"
 lapacke = "0.1.4"
 lapack-src = { version = "0.1.4", features = ["openblas"] }
 num-traits = "0.2.3"
+num-complex = "0.2.1"
 num_cpus = "1.8"
 mpi = { version = "0.5.4", optional = true }
 stack = "0.3"

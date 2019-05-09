@@ -88,7 +88,7 @@ impl TrialDir {
                 &settings, pot, meta.sift(), iteration, coords,
             )?;
 
-            let (evals, evecs, out_iteration) = {
+            let (freqs, evecs, out_iteration) = {
                 let subdir = self.structure_path(EvLoopStructureKind::PreEvChase(iteration));
                 let stored = self.read_stored_structure(&subdir)?;
                 self.do_post_relaxation_computations(
@@ -101,7 +101,7 @@ impl TrialDir {
 
             let (ev_analysis, coords, did_chasing) = {
                 self.do_ev_loop_stuff_after_diagonalization(
-                    &settings, pot, meta.sift(), iteration, coords, &evals, &evecs,
+                    &settings, pot, meta.sift(), iteration, coords, &freqs, &evecs,
                 )?
             };
 
@@ -167,12 +167,12 @@ impl TrialDir {
         >,
         iteration: Iteration,
         coords: Coords,
-        evals: &Vec<f64>,
+        freqs: &Vec<f64>,
         evecs: &Basis3,
     ) -> FailResult<(GammaSystemAnalysis, Coords, DidEvChasing)>
     {Ok({
         let classifications = super::acoustic_search::perform_acoustic_search(
-            pot, evals, evecs,
+            pot, freqs, evecs,
             &coords, meta.sift(),
             &settings.acoustic_search,
         )?;
@@ -184,7 +184,7 @@ impl TrialDir {
         };
 
         let ev_analysis = super::run_gamma_system_analysis(
-            &coords, meta.sift(), evals, evecs, Some(classifications),
+            &coords, meta.sift(), freqs, evecs, Some(classifications),
             unfold_bands,
         )?;
         {
@@ -192,9 +192,51 @@ impl TrialDir {
             write_eigen_info_for_machines(&ev_analysis, file)?;
             write_eigen_info_for_humans(&ev_analysis, &mut |s| FailOk(info!("{}", s)))?;
         }
-        let (coords, did_chasing) = self.maybe_do_ev_chasing(
-            settings, pot, coords, meta.sift(), &ev_analysis, evals, evecs,
-        )?;
+
+        let bad_directions: Vec<_> = {
+            let classifications = ev_analysis.ev_classifications.as_ref().expect("(bug) always computed!");
+            izip!(1.., freqs, &evecs.0, &classifications.0)
+                .filter(|&(_, _, _, kind)| kind == &super::acoustic_search::ModeKind::Imaginary)
+                .map(|(i, &freq, evec, _)| {
+                    let name = format!("band {} ({})", i, freq);
+                    let direction = EvDirection::from_eigenvector(evec, meta.sift());
+                    (name, freq, direction)
+                }).collect()
+        };
+
+        if let Some(animate_settings) = settings.animate.as_ref() {
+            let all_guys = {
+                zip_eq!(freqs, &evecs.0)
+                    .map(|(&freq, evec)| (freq, EvDirection::from_eigenvector(evec, meta.sift())))
+            };
+            let bad_guys = {
+                bad_directions.iter()
+                    .map(|&(_, freq, ref dir)| (freq, dir.clone()))
+            };
+            let result = self.write_animations(
+                animate_settings,
+                &coords, meta.sift(), iteration,
+                bad_guys, all_guys,
+            );
+
+            // not the end of the world if this failed
+            if let Err(e) = result {
+                warn!("Error while writing animations: {}", e);
+            }
+        }
+
+        let (coords, did_chasing) = {
+            match bad_directions.len() {
+                0 => (coords, DidEvChasing(false)),
+                n => {
+                    trace!("Chasing {} bad eigenvectors...", n);
+                    let structure = do_eigenvector_chase(
+                        pot, &settings.ev_chase, coords, meta.sift(), &bad_directions[..],
+                    )?;
+                    (structure, DidEvChasing(true))
+                },
+            }
+        };
         self.write_stored_structure(
             &self.structure_path(EvLoopStructureKind::PostEvChase(iteration)),
             &format!("Structure after eigenmode-chasing round {}", iteration),
@@ -202,41 +244,6 @@ impl TrialDir {
         )?;
         warn_on_improvable_lattice_params(pot, &coords, meta.sift())?;
         (ev_analysis, coords, did_chasing)
-    })}
-
-    fn maybe_do_ev_chasing(
-        &self,
-        settings: &Settings,
-        pot: &dyn PotentialBuilder,
-        coords: Coords,
-        meta: potential::CommonMeta,
-        ev_analysis: &GammaSystemAnalysis,
-        evals: &[f64],
-        evecs: &Basis3,
-    ) -> FailResult<(Coords, DidEvChasing)>
-    {Ok({
-        use super::acoustic_search::ModeKind;
-        let bad_directions: Vec<_> = {
-            let classifications = ev_analysis.ev_classifications.as_ref().expect("(bug) always computed!");
-            izip!(1.., evals, &evecs.0, &classifications.0)
-                .filter(|&(_, _, _, kind)| kind == &ModeKind::Imaginary)
-                .map(|(i, freq, evec, _)| {
-                    let name = format!("band {} ({})", i, freq);
-                    let direction = EvDirection::from_eigenvector(evec, meta.sift());
-                    (name, direction)
-                }).collect()
-        };
-
-        match bad_directions.len() {
-            0 => (coords, DidEvChasing(false)),
-            n => {
-                trace!("Chasing {} bad eigenvectors...", n);
-                let structure = do_eigenvector_chase(
-                    pot, &settings.ev_chase, coords, meta.sift(), &bad_directions[..],
-                )?;
-                (structure, DidEvChasing(true))
-            }
-        }
     })}
 }
 
@@ -252,7 +259,6 @@ pub enum EvLoopStatus {
     ItsBadGuys(&'static str),
 }
 
-// just a named bool for documentation
 pub struct DidEvChasing(pub bool);
 
 impl EvLoopFsm {
@@ -487,12 +493,12 @@ fn do_eigenvector_chase(
     chase_settings: &cfg::EigenvectorChase,
     mut coords: Coords,
     meta: potential::CommonMeta,
-    bad_directions: &[(String, EvDirection)],
+    bad_directions: &[(String, f64, EvDirection)],
 ) -> FailResult<Coords>
 {Ok({
     match chase_settings {
         cfg::EigenvectorChase::OneByOne => {
-            for (name, dir) in bad_directions {
+            for (name, _, dir) in bad_directions {
                 let dir = dir.as_real_checked();
                 let (alpha, new_coords) = do_minimize_along_evec(pot, coords, meta.sift(), dir)?;
                 info!("Optimized along {}, a = {:e}", name, alpha);
@@ -502,7 +508,7 @@ fn do_eigenvector_chase(
             coords
         },
         cfg::EigenvectorChase::Cg(cg_settings) => {
-            let bad_directions = bad_directions.iter().map(|(_, dir)| dir.clone());
+            let bad_directions = bad_directions.iter().map(|(_, _, dir)| dir.clone());
             do_cg_along_evecs(pot, cg_settings, coords, meta.sift(), bad_directions)?
         },
     }

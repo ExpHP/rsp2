@@ -23,7 +23,7 @@ pub struct VSimAscii<
     Comment = String,
     Coord = Coords,
     Elements = Vec<Element>,
-    Metadata = VSimMetadata,
+    Metadata = AsciiMetadata,
 > {
     /// The first line of the file.
     pub comment: Comment,
@@ -37,7 +37,7 @@ where
     Comment: AsRef<str>,
     Coord: Borrow<Coords>,
     Elements: AsRef<[Element]>,
-    Metadata: Borrow<VSimMetadata>,
+    Metadata: Borrow<AsciiMetadata>,
 {
     /// Writes a .ascii to an open file.
     pub fn to_writer(&self, mut w: impl Write) -> FailResult<()> {
@@ -52,12 +52,12 @@ where
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct VSimMetadata {
+pub struct AsciiMetadata {
     phonons: Vec<Phonon>,
     labels: Option<Vec<String>>,
 }
 
-impl VSimMetadata {
+impl AsciiMetadata {
     pub fn new() -> Self { Default::default() }
 
     pub fn clear_labels(&mut self) -> &mut Self
@@ -78,7 +78,7 @@ impl VSimMetadata {
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Phonon {
-    pub kpoint_frac: V3,
+    pub qpoint_frac: V3,
 
     /// Wavenumber (cm^-1).
     ///
@@ -96,7 +96,7 @@ fn dump(
     title: &str,
     coords: &Coords,
     elements: &[Element],
-    metadata: &VSimMetadata,
+    metadata: &AsciiMetadata,
 ) -> FailResult<()> {
     if title.contains('\r') || title.contains('\n') {
         bail!("V_Sim ascii header comment cannot contain newline.")
@@ -123,7 +123,7 @@ fn dump(
     // Rest can be reordered however.
     writeln!(w, "#keyword: reduced")?; // coords are fractional
 
-    let VSimMetadata { labels, phonons } = metadata;
+    let AsciiMetadata { labels, phonons } = metadata;
     for (i, (V3([fa, fb, fc]), &elem)) in zip_eq!(fracs, elements).enumerate() {
         if let Some(labels) = labels {
             writeln!(w, " {:e} {:e} {:e} {} {}", fa, fb, fc, elem.symbol(), &labels[i])?;
@@ -132,8 +132,8 @@ fn dump(
         }
     }
 
-    for &Phonon { kpoint_frac, energy, ref displacements } in phonons {
-        let V3([kx, ky, kz]) = kpoint_frac;
+    for &Phonon { qpoint_frac, energy, ref displacements } in phonons {
+        let V3([kx, ky, kz]) = qpoint_frac;
 
         writeln!(w, "#metaData: qpt=[{:e};{:e};{:e}; {:e} \\", kx, ky, kz, energy)?;
         assert_eq!(displacements.len(), coords.len());

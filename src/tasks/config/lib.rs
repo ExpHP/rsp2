@@ -217,6 +217,10 @@ pub struct Settings {
     #[serde(default)]
     pub unfold_bands: Option<UnfoldBands>,
 
+    /// `None` disables animations.
+    #[serde(default)]
+    pub animate: Option<Animate>,
+
     #[serde(default)]
     #[serde(flatten)]
     pub _deprecated_lammps_settings: DeprecatedLammpsSettings,
@@ -919,6 +923,40 @@ pub enum PhononDispFinderRsp2Directions {
     /// (Debug) Try all three of them and report how many they find, in an attempt
     /// to answer the question "is diag-2 worthless?"
     Survey,
+}
+
+/// Output normal modes each iteration of the ev loop, for visualization purposes.
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub struct Animate {
+    #[serde(default = "_animate__which")]
+    pub which: AnimateWhich,
+    #[serde(default = "_animate__format")]
+    pub format: AnimateFormat,
+}
+fn _animate__which() -> AnimateWhich { AnimateWhich::Negative }
+fn _animate__format() -> AnimateFormat { AnimateFormat::VSim {} }
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum AnimateWhich {
+    /// Write only those non-acoustic modes with negative eigenvalues.
+    Negative,
+
+    /// Write all modes.
+    ///
+    /// Be careful; for large structures, this could easily consume gigabytes of data.
+    All,
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum AnimateFormat {
+    /// `V_sim`'s `.ascii` text format.
+    VSim {},
 }
 
 /// Specifies a supercell.

@@ -14,7 +14,7 @@ use crate::traits::AsPath;
 use crate::meta::Element;
 
 use rsp2_structure::Coords;
-use rsp2_structure_io::{Poscar, Xyz};
+use rsp2_structure_io::{Poscar, Xyz, v_sim::{self, VSimAscii}};
 use path_abs::{FileRead, FileWrite};
 use std::borrow::Borrow;
 use std::io::BufReader;
@@ -97,4 +97,15 @@ impl Load for Xyz {
         let file = BufReader::new(FileRead::read(path.as_path())?);
         Ok(Xyz::from_buf_reader(file)?)
     }
+}
+
+impl<Comment, Coord, Elements, Metadata> Save for VSimAscii<Comment, Coord, Elements, Metadata>
+where
+    Comment: AsRef<str>,
+    Coord: Borrow<Coords>,
+    Elements: AsRef<[Element]>,
+    Metadata: Borrow<v_sim::AsciiMetadata>,
+{
+    fn save(&self, path: impl AsPath) -> FailResult<()>
+    { Ok(self.to_writer(FileWrite::create(path.as_path())?)?) }
 }

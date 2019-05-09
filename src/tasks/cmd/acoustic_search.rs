@@ -86,7 +86,7 @@ impl fmt::Display for Colorful {
 
 pub(crate) fn perform_acoustic_search(
     pot: &dyn PotentialBuilder,
-    eigenvalues: &[f64],
+    frequencies: &[f64],
     eigenvectors: &Basis3,
     coords: &Coords,
     meta: HList3<
@@ -109,9 +109,9 @@ pub(crate) fn perform_acoustic_search(
         imaginary_fdot_threshold,
     } = settings;
 
-    let zero_index = eigenvalues.iter().position(|&x| x >=  0.0).unwrap_or(eigenvalues.len());
+    let zero_index = frequencies.iter().position(|&x| x >=  0.0).unwrap_or(frequencies.len());
 
-    let mut kinds = vec![None; eigenvalues.len()];
+    let mut kinds = vec![None; frequencies.len()];
 
     { // quickly spot translational modes
 
@@ -120,7 +120,7 @@ pub(crate) fn perform_acoustic_search(
             // Surely, the frequencies of the acoustic modes must be less than this:
             const HARD_LIMIT: f64 = 10.0;
 
-            eigenvalues.iter().position(|&x| x >= HARD_LIMIT).unwrap_or(eigenvalues.len())
+            frequencies.iter().position(|&x| x >= HARD_LIMIT).unwrap_or(frequencies.len())
         };
 
         let mut t_end = zero_index;
@@ -142,7 +142,7 @@ pub(crate) fn perform_acoustic_search(
 
         // Everything after the last translational or negative mode is vibrational.
         kinds.truncate(t_end);
-        kinds.resize(eigenvalues.len(), Some(ModeKind::Vibrational));
+        kinds.resize(frequencies.len(), Some(ModeKind::Vibrational));
     }
 
     // look at the negative eigenvectors for rotations and true imaginary modes
@@ -183,7 +183,7 @@ pub(crate) fn perform_acoustic_search(
         }
 
         let ddot = vdot(&d_grad_l, &d_grad_r);
-        trace!("Examining mode {} ({:.7}) (ddot = {:.6})...", i + 1, eigenvalues[i], ddot);
+        trace!("Examining mode {} ({:.7}) (ddot = {:.6})...", i + 1, frequencies[i], ddot);
         match ddot {
             dot if dot < -1.001 || 1.001 < dot => panic!("bad unit vector dot"),
             dot if dot <= -rotational_fdot_threshold => {
@@ -195,7 +195,7 @@ pub(crate) fn perform_acoustic_search(
                     // This mode *could* be piecewise translational, which we don't support.
                     warn!(
                         "Could not classify mode at frequency {} (fdot = {:.6})!",
-                        eigenvalues[i], dot,
+                        frequencies[i], dot,
                     );
                 }
                 uncertain_indices.push(i);

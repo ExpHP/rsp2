@@ -433,7 +433,7 @@ pub fn sparse_analysis(bin_name: &str, version: VersionInfo) -> ! {
             logfile.start(PathFile::create(path)?)?; // (NOTE: create does not truncate)
         }
 
-        let (evals, evecs) = {
+        let (freqs, evecs) = {
             let path = PathFile::new(matches.expect_value_of("eigensols"))?;
             let Eigensols { frequencies, eigenvectors } = Load::load(path)?;
             (frequencies, eigenvectors)
@@ -442,7 +442,7 @@ pub fn sparse_analysis(bin_name: &str, version: VersionInfo) -> ! {
         // reminder: does not fail on existing
         let outdir = PathDir::create(matches.expect_value_of("output"))?;
 
-        let analysis = crate::cmd::run_sparse_analysis(structure, &evals, &evecs)?;
+        let analysis = crate::cmd::run_sparse_analysis(structure, &freqs, &evecs)?;
 
         crate::cmd::write_ev_analysis_output_files(&outdir, &analysis)?;
         Ok(())
