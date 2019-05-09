@@ -2,11 +2,15 @@
 **/*.rs.bk
 **/.vscode
 **/.idea
-**/Cargo.lock
 **/cmake-build-debug
 **/__pycache__
 perf.data*
 log.lammps
+
+# No library lockfiles if any exist,
+# but keep the root one for our binaries.
+**/Cargo.lock
+!/Cargo.lock
 
 .subcrate-cfg
 .secret-test-dir
