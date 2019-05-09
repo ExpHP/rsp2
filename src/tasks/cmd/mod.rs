@@ -458,11 +458,11 @@ impl TrialDir {
         let (evals, evecs) = {
             pot.eco_mode(|| { // don't let MPI processes compete with python's threads
                 match settings.phonons.eigensolver {
-                    cfg::PhononEigenSolver::Phonopy(cfg::AlwaysFail(never, _)) => match never {},
-                    cfg::PhononEigenSolver::Rsp2 { dense: true, .. } => {
+                    cfg::PhononEigensolver::Phonopy(cfg::AlwaysFail(never, _)) => match never {},
+                    cfg::PhononEigensolver::Rsp2 { dense: true, .. } => {
                         dynmat.compute_eigensolutions_dense()
                     },
-                    cfg::PhononEigenSolver::Rsp2 { dense: false, how_many, shift_invert_attempts } => {
+                    cfg::PhononEigensolver::Rsp2 { dense: false, how_many, shift_invert_attempts } => {
                         dynmat.compute_negative_eigensolutions(
                             how_many,
                             shift_invert_attempts,

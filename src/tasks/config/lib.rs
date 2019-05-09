@@ -787,7 +787,7 @@ pub struct Phonons {
     pub disp_finder: PhononDispFinder,
 
     #[serde(default = "_phonons__eigensolver")]
-    pub eigensolver: PhononEigenSolver,
+    pub eigensolver: PhononEigensolver,
 
     /// Supercell used for force constants.
     ///
@@ -808,8 +808,8 @@ pub struct Phonons {
     /// right eigensolutions at gamma, it might indicate a bug in rsp2's potentials)
     pub supercell: SupercellSpec,
 }
-fn _phonons__eigensolver() -> PhononEigenSolver {
-    PhononEigenSolver::Rsp2 {
+fn _phonons__eigensolver() -> PhononEigensolver {
+    PhononEigensolver::Rsp2 {
         dense: _phonon_eigen_solver__rsp2__dense(),
         shift_invert_attempts: _phonon_eigen_solver__rsp2__shift_invert_attempts(),
         how_many: _phonon_eigen_solver__rsp2__how_many(),
@@ -824,8 +824,8 @@ fn _phonons__disp_finder() -> PhononDispFinder {
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
-pub enum PhononEigenSolver {
-    Phonopy(AlwaysFail<MessagePhononEigenSolverPhonopy>),
+pub enum PhononEigensolver {
+    Phonopy(AlwaysFail<MessagePhononEigensolverPhonopy>),
     // FIXME: This should be split into two separate eigensolvers 'Sparse' and 'Dense',
     //        but it seems tricky to rewrite the code in rsp2_tasks::cmd that matches on it
     //        without introducing code duplication.  What a mess...
@@ -873,8 +873,8 @@ fn _phonon_eigen_solver__rsp2__dense() -> bool { false }
 
 #[derive(Serialize)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct MessagePhononEigenSolverPhonopy;
-impl FailMessage for MessagePhononEigenSolverPhonopy {
+pub struct MessagePhononEigensolverPhonopy;
+impl FailMessage for MessagePhononEigensolverPhonopy {
     const FAIL_MESSAGE: &'static str = "`phonon.eigen-solver: phonopy` is no longer implemented";
 }
 
