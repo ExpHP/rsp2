@@ -26,7 +26,6 @@ pub(crate) mod trial;
 
 pub(crate) use crate::filetypes::stored_structure::StoredStructure;
 
-use self::relaxation::EvLoopDiagonalizer;
 pub(crate) use self::relaxation::DidEvChasing;
 mod relaxation;
 mod acoustic_search;
@@ -150,38 +149,22 @@ impl TrialDir {
         )?;
 
         let (coords, ev_analysis) = {
-            use self::cfg::PhononEigenSolver::*;
+            let (coords, ev_analysis, final_iteration) = {
+                self.do_main_ev_loop(
+                    settings, &*pot, original_coords, meta.sift(),
+                    stop_after_dynmat,
+                )?
+            };
 
-            // macro to simulate a generic closure.
-            // (we can't use dynamic polymorphism due to the differing associated types)
-            macro_rules! do_ev_loop {
-                ($diagonalizer:expr) => {{
-                    let diagonalizer = $diagonalizer;
-                    self.do_main_ev_loop(
-                        settings, &*pot, diagonalizer, original_coords, meta.sift(),
-                        stop_after_dynmat,
-                    )
-                }}
-            }
+            // HACK: Put last gamma dynmat at a predictable path.
+            let final_iteration = final_iteration.expect("ev-loop should have iterations!");
+            rm_rf(self.join("gamma-dynmat.json"))?;
+            hard_link(
+                self.gamma_dynmat_path(final_iteration),
+                self.final_gamma_dynmat_path(),
+            )?;
 
-            match settings.phonons.eigensolver {
-                Phonopy(cfg::AlwaysFail(impossiburu, _)) => match impossiburu {},
-                Rsp2 { dense, shift_invert_attempts, how_many } => {
-                    let (coords, ev_analysis, final_iteration) = {
-                        do_ev_loop!(InternalDiagonalizer { dense, shift_invert_attempts, how_many })?
-                    };
-
-                    // HACK: Put last gamma dynmat at a predictable path.
-                    let final_iteration = final_iteration.expect("ev-loop should have iterations!");
-                    rm_rf(self.join("gamma-dynmat.json"))?;
-                    hard_link(
-                        self.gamma_dynmat_path(final_iteration),
-                        self.final_gamma_dynmat_path(),
-                    )?;
-
-                    (coords, ev_analysis)
-                },
-            }
+            (coords, ev_analysis)
         };
 
         self.write_stored_structure(
@@ -297,19 +280,9 @@ impl TrialDir {
     /// Relative paths are intepreted relative to the trial directory.
     fn read_stored_structure(&self, dir: impl AsPath) -> FailResult<StoredStructure>
     { Load::load(self.join(dir.as_path())) }
-}
-
-struct InternalDiagonalizer {
-    shift_invert_attempts: u32,
-    how_many: usize,
-    dense: bool,
-}
-impl EvLoopDiagonalizer for InternalDiagonalizer {
-    type ExtraOut = Option<Iteration>;
 
     fn do_post_relaxation_computations(
         &self,
-        _trial: &TrialDir,
         settings: &Settings,
         pot: &dyn PotentialBuilder,
         stored: &StoredStructure,
@@ -317,6 +290,13 @@ impl EvLoopDiagonalizer for InternalDiagonalizer {
         iteration: Option<Iteration>,
     ) -> FailResult<(Vec<f64>, Basis3, Option<Iteration>)>
     {Ok({
+        // FIXME: A great deal of logic in here exists for dealing with supercells,
+        //        which are pointless when we only compute at the gamma point.
+        //
+        //        I don't want to tear those considerations out since it was difficult to write,
+        //        but it ought to be factored out somehow to be less in your face, and especially
+        //        so that it isn't in a function that is clearly related to relaxation.
+
         let prim_coords = &stored.coords;
         let prim_meta: HList4<
             meta::SiteElements,
@@ -336,18 +316,6 @@ impl EvLoopDiagonalizer for InternalDiagonalizer {
             )
         };
 
-        // (FIXME)
-        // Q: Gee, golly ExpHP! Why does 'eigensolver: sparse' need to care about 'disp_finder'?
-        //    Couldn't this be factored out so that these two config sections are handled more
-        // orthogonally?
-        //
-        // A: Because AHHHHHHHHHGGGHGHGH
-        // A: Because, if you look closely, the two eigensolvers actually use different schemes for
-        //    ordering the sites in the supercell. `eigensolver: phonopy` needs to use the same
-        //    order that phonopy uses, because that's what `BandsBuilder` takes, while
-        //    `eigensolver: sparse` requires order to match the conventions set by SupercellToken.
-        //    (and even if BandsBuilder was made more lenient to allow reordering, we would still
-        //     have the silly problem that `PhonopyDiagonalizer` needs the `DirWithDisps`)
         let (super_coords, prim_displacements, sc, cart_ops) = match settings.phonons.disp_finder {
             cfg::PhononDispFinder::Phonopy(cfg::AlwaysFail(never, _)) => match never { },
             cfg::PhononDispFinder::Rsp2 { ref directions } => {
@@ -383,6 +351,7 @@ impl EvLoopDiagonalizer for InternalDiagonalizer {
             },
         };
 
+        // Generate supercell metadata by repeating the unit cell metadata.
         let super_meta = {
             // macro to generate a closure, because generic closures don't exist
             macro_rules! f {
@@ -390,7 +359,8 @@ impl EvLoopDiagonalizer for InternalDiagonalizer {
                     sc.replicate(&x[..]).into()
                 }};
             }
-            // replicating the primitive cell bonds is not worth the trouble
+
+            // deriving these from the primitive cell bonds is not worth the trouble
             let super_bonds = settings.bond_radius.map(|bond_radius| FailOk({
                 Rc::new(FracBonds::from_brute_force(&super_coords, bond_radius)?)
             })).fold_ok()?;
@@ -410,6 +380,7 @@ impl EvLoopDiagonalizer for InternalDiagonalizer {
                 })
                 .collect()
         };
+
         trace!("num spacegroup ops: {}", cart_ops.len());
         trace!("num displacements:  {}", super_displacements.len());
         let force_sets = do_force_sets_at_disps_for_sparse(
@@ -432,7 +403,7 @@ impl EvLoopDiagonalizer for InternalDiagonalizer {
 
         if log_enabled!(target: "rsp2_tasks::special::visualize_sparse_forces", log::Level::Trace) {
             visualize_sparse_force_sets(
-                &_trial,
+                self,
                 &super_coords,
                 &super_displacements,
                 &super_deperms,
@@ -463,11 +434,11 @@ impl EvLoopDiagonalizer for InternalDiagonalizer {
         // this function finishes.
         if let Some(iteration) = iteration {
             // we can't write NPZ easily from rust, so write JSON and convert via python
-            Json(dynmat.cereal()).save(_trial.uncompressed_gamma_dynmat_path(iteration))?;
+            Json(dynmat.cereal()).save(self.uncompressed_gamma_dynmat_path(iteration))?;
 
             crate::cmd::python::convert::dynmat(
-                _trial.uncompressed_gamma_dynmat_path(iteration),
-                _trial.gamma_dynmat_path(iteration),
+                self.uncompressed_gamma_dynmat_path(iteration),
+                self.gamma_dynmat_path(iteration),
                 crate::cmd::python::convert::Mode::Delete,
             )?;
         }
@@ -486,26 +457,23 @@ impl EvLoopDiagonalizer for InternalDiagonalizer {
         trace!("Diagonalizing dynamical matrix");
         let (evals, evecs) = {
             pot.eco_mode(|| { // don't let MPI processes compete with python's threads
-                if self.dense {
-                    dynmat.compute_eigensolutions_dense()
-                } else {
-                    dynmat.compute_negative_eigensolutions(
-                        self.how_many,
-                        self.shift_invert_attempts,
-                    )
+                match settings.phonons.eigensolver {
+                    cfg::PhononEigenSolver::Phonopy(cfg::AlwaysFail(never, _)) => match never {},
+                    cfg::PhononEigenSolver::Rsp2 { dense: true, .. } => {
+                        dynmat.compute_eigensolutions_dense()
+                    },
+                    cfg::PhononEigenSolver::Rsp2 { dense: false, how_many, shift_invert_attempts } => {
+                        dynmat.compute_negative_eigensolutions(
+                            how_many,
+                            shift_invert_attempts,
+                        )
+                    },
                 }
             })?
         };
         trace!("Done diagonalizing dynamical matrix");
         (evals, evecs, iteration)
     })}
-
-    fn allow_unfold_bands(&self) -> bool {
-        // sparse diagonalizer is used on large systems where UnfoldProbs is prohibitively
-        // expensive to compute, and it's not even very useful when we're only looking at
-        // imaginary/acoustic modes.
-        false
-    }
 }
 
 // HACK
@@ -616,7 +584,7 @@ fn run_gamma_system_analysis(
         ev_frequencies: Some(EvFrequencies(evals.to_vec())),
         ev_eigenvectors: Some(EvEigenvectors(evecs.clone())),
         bonds: cart_bonds.map(Bonds),
-        permission_to_unfold_bands: if unfold_bands { Some(PermissionToUnfoldBands) } else { None },
+        request_to_unfold_bands: if unfold_bands { Some(RequestToUnfoldBands) } else { None },
     }.compute()
 }
 
@@ -871,46 +839,11 @@ impl TrialDir {
     {Ok({
         let pot = PotentialBuilder::from_root_config(&self, on_demand, &settings)?;
 
-        // !!!!!!!!!!!!!!!!!
-        //  FIXME FIXME BAD
-        // !!!!!!!!!!!!!!!!!
-        // The logic of constructing a Diagonalizer from a config is copied and pasted
-        // from the code that uses do_ev_loop.  The only way to make this DRY is to
-        // make a trait that simulates `for<T: EvLoopDiagonalizer> Fn(T) -> (B, T::ExtraOut)`
-        // with a generic associated method
-        //
-        // (UPDATE: I tried that and it wasn't enough, because the main code couldn't recover
-        //          the bands_dir without being able to dispatch based on the Diagonalizer type.
-        //          Maybe we just need to give up on the associated type (the purpose of which
-        //          is currently just to facilitate debugging a bit)).
-        //
-        let (evals, evecs) = {
-            use self::cfg::PhononEigenSolver::*;
-
-            // macro to simulate a generic closure.
-            // (we can't use dynamic polymorphism due to the differing associated types)
-            macro_rules! use_diagonalizer {
-                ($diagonalizer:expr) => {{
-                    $diagonalizer.do_post_relaxation_computations(
-                        &self, settings, &*pot, &stored, false, None,
-                    )
-                }}
-            }
-
-            match settings.phonons.eigensolver {
-                Phonopy(cfg::AlwaysFail(never, _)) => match never {},
-                Rsp2 { shift_invert_attempts, dense, how_many } => {
-                    let (evals, evecs, _) = {
-                        use_diagonalizer!(InternalDiagonalizer { dense, shift_invert_attempts, how_many } )?
-                    };
-                    (evals, evecs)
-                },
-            }
+        let (evals, evecs, _) = {
+            self.do_post_relaxation_computations(
+                settings, &*pot, &stored, false, None,
+            )?
         };
-        // ^^^^^^^^^^^^^^^
-        // !!!!!!!!!!!!!!!!!
-        //  FIXME FIXME BAD
-        // !!!!!!!!!!!!!!!!!
 
         trace!("============================");
         trace!("Finished diagonalization");
@@ -1071,48 +1004,6 @@ pub(crate) fn run_converge_vdw(
 
 //=================================================================
 
-// #[allow(warnings)]
-// pub fn make_force_sets(
-//     conf: Option<&AsRef<Path>>,
-//     poscar: &AsRef<Path>,
-//     outdir: &AsRef<Path>,
-// ) -> Result<()>
-// {ok({
-//     use rsp2_structure_io::poscar;
-//     use std::io::BufReader;
-
-//     let potential = panic!("TODO: potential in make_force_sets");
-//     unreachable!();
-
-//     let mut phonopy = PhonopyBuilder::new();
-//     if let Some(conf) = conf {
-//         phonopy = phonopy.conf_from_file(BufReader::new(open(conf)?))?;
-//     }
-
-//     let structure = poscar::load(open(poscar)?)?;
-
-//     let pot = LammpsBuilder::new(&cfg::Threading::Lammps, &potential);
-
-//     create_dir(&outdir)?;
-//     {
-//         // dumb/lazy solution to ensuring all output files go in the dir
-//         let cwd_guard = push_dir(outdir)?;
-//         GlobalLogger::default()
-//             .path("rsp2.log")
-//             .apply()?;
-
-//         poscar::dump(create("./input.vasp")?, "", &structure)?;
-
-//         let disp_dir = phonopy.displacements(&structure)?;
-//         let force_sets = do_force_sets_at_disps(&pot, &cfg::Threading::Rayon, &disp_dir)?;
-//         disp_dir.make_force_dir_in_dir(&force_sets, ".")?;
-
-//         cwd_guard.pop()?;
-//     }
-// })}
-
-//=================================================================
-
 impl TrialDir {
     /// Used to figure out which iteration we're on when starting from the
     /// post-diagonalization part of the EV loop for sparse.
@@ -1156,13 +1047,9 @@ impl TrialDir {
             eigenvectors: evecs,
         } = Load::load(self.join(self.eigensols_path(iteration)))?;
 
-        // this binary is only ever used with the sparse diagonalizer
-        let allow_unfold_bands = false;
-
         let (_, coords, did_ev_chasing) = self.do_ev_loop_stuff_after_diagonalization(
             settings, &pot, meta.sift(), iteration,
             coords, &evals, &evecs,
-            allow_unfold_bands,
         )?;
 
         if let DidEvChasing(true) = did_ev_chasing {

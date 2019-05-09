@@ -126,7 +126,6 @@ where
     {
         let mut larger = self.0.compute_sparse_force_delta(disp)?;
         let mut smaller = self.1.compute_sparse_force_delta(disp)?;
-
         if larger.len() < smaller.len() {
             std::mem::swap(&mut larger, &mut smaller);
         }

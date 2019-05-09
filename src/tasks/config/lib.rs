@@ -213,6 +213,10 @@ pub struct Settings {
     #[serde(default)]
     pub ev_loop: EvLoop,
 
+    /// `None` disables band unfolding.
+    #[serde(default)]
+    pub unfold_bands: Option<UnfoldBands>,
+
     #[serde(default)]
     #[serde(flatten)]
     pub _deprecated_lammps_settings: DeprecatedLammpsSettings,
@@ -423,6 +427,22 @@ pub enum ScalableRange {
     Exact {
         value: f64,
     },
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
+#[serde(rename_all="kebab-case")]
+pub enum UnfoldBands {
+    /// Use a method based on Zheng, Fawei; Zhang, Ping (2017).
+    /// "Phonon Unfolding: A program for unfolding phonon dispersions of materials",
+    ///   Mendeley Data, v1 http://dx.doi.org/10.17632/3hpx6zmxhg.1
+    ///
+    /// This has not been used much lately, and I lack confidence in the correctness of its
+    /// implementation. My honest suggestion is: don't bother.
+    ///
+    /// Allen's method (2013) is vastly superior, but is not currently integrated into the rsp2
+    /// binaries. See the standalone script `scripts/unfold.py` in the rsp2 source root.
+    Zheng {}
 }
 
 #[derive(Serialize, Deserialize)]

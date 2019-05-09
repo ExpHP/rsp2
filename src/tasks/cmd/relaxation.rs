@@ -61,11 +61,10 @@ impl TrialDir {
     ///       and is not designed to be called multiple times.
     ///
     /// The `ExtraOut` returned is the one from the final iteration.
-    pub(crate) fn do_main_ev_loop<ExtraOut>(
+    pub(crate) fn do_main_ev_loop(
         &self,
         settings: &Settings,
         pot: &dyn PotentialBuilder,
-        diagonalizer: impl EvLoopDiagonalizer<ExtraOut=ExtraOut>,
         original_coords: Coords,
         meta: HList5<
             meta::SiteElements,
@@ -75,7 +74,7 @@ impl TrialDir {
             Option<meta::FracBonds>,
         >,
         stop_after_dynmat: bool, // HACK
-    ) -> FailResult<(Coords, GammaSystemAnalysis, ExtraOut)>
+    ) -> FailResult<(Coords, GammaSystemAnalysis, Option<Iteration>)>
     {
         let mut from_coords = original_coords;
         let mut loop_state = EvLoopFsm::new(&settings.ev_loop);
@@ -89,11 +88,11 @@ impl TrialDir {
                 &settings, pot, meta.sift(), iteration, coords,
             )?;
 
-            let (evals, evecs, extra_out) = {
+            let (evals, evecs, out_iteration) = {
                 let subdir = self.structure_path(EvLoopStructureKind::PreEvChase(iteration));
                 let stored = self.read_stored_structure(&subdir)?;
-                diagonalizer.do_post_relaxation_computations(
-                    &self, settings, pot, &stored, stop_after_dynmat, Some(iteration),
+                self.do_post_relaxation_computations(
+                    settings, pot, &stored, stop_after_dynmat, Some(iteration),
                 )?
             };
 
@@ -103,7 +102,6 @@ impl TrialDir {
             let (ev_analysis, coords, did_chasing) = {
                 self.do_ev_loop_stuff_after_diagonalization(
                     &settings, pot, meta.sift(), iteration, coords, &evals, &evecs,
-                    diagonalizer.allow_unfold_bands(),
                 )?
             };
 
@@ -113,7 +111,7 @@ impl TrialDir {
                     continue;
                 },
                 EvLoopStatus::Done => {
-                    return Ok((coords, ev_analysis, extra_out));
+                    return Ok((coords, ev_analysis, out_iteration));
                 },
                 EvLoopStatus::ItsBadGuys(msg) => {
                     bail!("{}", msg);
@@ -171,7 +169,6 @@ impl TrialDir {
         coords: Coords,
         evals: &Vec<f64>,
         evecs: &Basis3,
-        allow_unfold_bands: bool,
     ) -> FailResult<(GammaSystemAnalysis, Coords, DidEvChasing)>
     {Ok({
         let classifications = super::acoustic_search::perform_acoustic_search(
@@ -180,9 +177,15 @@ impl TrialDir {
             &settings.acoustic_search,
         )?;
         trace!("Computing eigensystem info");
+
+        let unfold_bands = match settings.unfold_bands {
+            None => false,
+            Some(cfg::UnfoldBands::Zheng {}) => true,
+        };
+
         let ev_analysis = super::run_gamma_system_analysis(
             &coords, meta.sift(), evals, evecs, Some(classifications),
-            allow_unfold_bands,
+            unfold_bands,
         )?;
         {
             let file = self.create_file(format!("eigenvalues.{:02}", iteration))?;
