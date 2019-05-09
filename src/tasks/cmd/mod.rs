@@ -1072,7 +1072,7 @@ impl TrialDir {
                 if !eigensols.exists() {
                     bail!("\
                         {}: does not exist.  Did you perform diagonalization? \
-                        (try the python module rsp2.cli.negative_modes)
+                        (try the python module rsp2.cli.negative_modes)\
                     ", eigensols.nice())
                 }
                 return Ok(iteration);
@@ -1147,7 +1147,7 @@ pub fn run_make_supercell(
         // TODO: support this properly.
         warn!("\
             Layer SC matrices will be lost.  This means that some layer-specific data won't \
-            be included in rsp2's output. (like band unfolding)
+            be included in rsp2's output. (like band unfolding)\
         ");
     };
 
