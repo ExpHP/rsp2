@@ -124,11 +124,17 @@ where
 
     fn compute_sparse_force_delta(&mut self, disp: (usize, V3)) -> FailResult<BTreeMap<usize, V3>>
     {
-        let mut out = self.0.compute_sparse_force_delta(disp)?;
-        for (key, value) in self.1.compute_sparse_force_delta(disp)? {
-            *out.entry(key).or_insert(V3::zero()) += value;
+        let mut larger = self.0.compute_sparse_force_delta(disp)?;
+        let mut smaller = self.1.compute_sparse_force_delta(disp)?;
+
+        if larger.len() < smaller.len() {
+            std::mem::swap(&mut larger, &mut smaller);
         }
-        Ok(out)
+
+        for (key, value) in smaller {
+            *larger.entry(key).or_insert(V3::zero()) += value;
+        }
+        Ok(larger)
     }
 }
 
