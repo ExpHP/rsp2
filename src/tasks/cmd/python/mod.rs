@@ -126,8 +126,9 @@ where
         };
         // for debugging
         std::fs::write(tmp.path().join("_py_stdout"), &stdout)?;
-        let value = serde_json::from_str(&stdout[..])?;
 
+        // Handle errors in python before attempting to parse the output
+        // (as it is likely empty on error)
         if !child.wait()?.success() {
             let extra = match crate::stderr::is_log_enabled() {
                 true => "check the log for a python backtrace",
@@ -138,7 +139,7 @@ where
 
         let _ = stderr_worker.join();
 
-        value
+        serde_json::from_str(&stdout[..])?
     }))?.1 // tmp.try_with_recovery(...)
 })}
 

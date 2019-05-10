@@ -40,6 +40,7 @@ def main_from_rust():
 
     Communicates through JSON over the standard IO streams.
     """
+    info('trace: sending dynmat from rust to python')
     d = json.load(sys.stdin)
     m = dynmat.from_dict(d.pop('matrix'))
     shift_invert_attempts = d.pop('shift-invert-attempts')
@@ -57,8 +58,9 @@ def main_from_rust():
               search_solutions=None, # FIXME add to input json from rust
               )
 
+    info('trace: sending eigensolutions from python to rust')
     json.dump(eigensols.to_cereal(out), sys.stdout)
-    print(file=sys.stdout)
+    print(file=sys.stdout) # newline
 
 def main_from_cli():
     """
@@ -108,7 +110,7 @@ def main_from_cli():
     ):
         p.error("--max-solutions must not exceed --search-solutions")
 
-    evals, evecs = run(
+    out = run(
         m=dynmat.from_path(args.DYNMAT),
         dense=args.dense,
         shift_invert_attempts=args.shift_invert_attempts,
@@ -118,11 +120,7 @@ def main_from_cli():
         use_fallback=args.use_fallback,
         search_solutions=args.search_solutions,
     )
-    if len(evals):
-        eigensols.to_path(args.output, (evals, evecs))
-    else:
-        print("No solutions found!", file=sys.stderr)
-        sys.exit(1)
+    eigensols.to_path(args.output, out)
 
 def run(m: scipy.sparse.bsr_matrix,
         dense: bool,
@@ -169,6 +167,8 @@ def run(m: scipy.sparse.bsr_matrix,
 
     # Cutting out other solutions
     evals, evecs = inner()
+    if not len(evals):
+        raise RuntimeError('No solutions found!')
     return evals[:max_solutions], evecs[:max_solutions]
 
 # As an optimization, begin by using shift-invert mode, which can converge
@@ -375,7 +375,7 @@ def try_regular(m, *, max_solutions, ncv):
     )
 
 def try_dense(m, max_solutions: int):
-    info('trace: trying dense eigenvalue solver')
+    info('trace: using dense eigensolver')
 
     # note: order for returned eigenvalues is the same as 'SA'
     # note: raises LinAlgError if the eigenvalue computation does not converge
