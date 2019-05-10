@@ -81,11 +81,12 @@ pub struct SpgDataset {
     lattice: Option<Lattice>,
 
     #[serde(rename = "number")]
-    pub space_group_number: u32,
+    pub spacegroup_number: u32,
     #[serde(rename = "international")]
     pub international_symbol: String,
 
-    pub pointgroup: String,
+    #[serde(rename = "pointgroup")]
+    pub point_group: String,
 
     pub hall_number: u32,
     #[serde(rename = "hall")]

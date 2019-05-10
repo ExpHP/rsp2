@@ -331,8 +331,15 @@ impl TrialDir {
                         let elements: meta::SiteElements = prim_meta.pick();
                         elements.iter().map(|e| e.atomic_number()).collect()
                     };
-                    SpgDataset::compute(prim_coords, &atom_types, settings.phonons.symmetry_tolerance)?
-                        .cart_ops()
+
+                    let spg = SpgDataset::compute(
+                        prim_coords,
+                        &atom_types,
+                        settings.phonons.symmetry_tolerance,
+                    )?;
+                    info!(" Spacegroup: {} ({})", spg.international_symbol, spg.spacegroup_number);
+                    info!("Point group: {}", spg.point_group);
+                    spg.cart_ops()
                 };
 
                 trace!("Computing deperms in primitive cell");
