@@ -41,7 +41,7 @@ rsp2-dftbplus = { path = "../io/dftbplus", optional = true }
 
 clap = "2"
 slice-of-array = "0.2.1"
-rsp2-kets = { version = "0.3.6", git = "https://github.com/ExpHP/rsp2-kets", features = ["serde"] }
+rsp2-kets = { tag = "v0.4.0", git = "https://github.com/ExpHP/rsp2-kets", features = ["serde"] }
 rand = "0.3"
 log = "0.4"
 env_logger = "0.6.1"
