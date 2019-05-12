@@ -13,9 +13,19 @@ path = "lib.rs"
 !!rsp2-array-types
 !!rsp2-fs-util
 
-!!dftbplus-sys
+!!dftbplus-sys { optional = true }
 !!failure
 !!slice-of-array
 
 [features]
+default = []
+
+# Note: You MUST enable this to use anything from the crate.
+#
+# It is disabled by default only so that `cargo test --all` can
+# be run in the rsp2 souce root without forcibly attempting to
+# link to libdftb+.
+# (alas, `cargo test --all --no-default-features` doesn't disable it)
+dftbplus-support = ["dftbplus-sys"]
+
 !!NIGHTLY-FEATURE-LINE

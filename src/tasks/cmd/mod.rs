@@ -495,13 +495,17 @@ impl TrialDir {
         bad_directions: impl IntoIterator<Item=(f64, EvDirection)>,
         all_directions: impl IntoIterator<Item=(f64, EvDirection)>,
     ) -> FailResult<()> {Ok({
-        let cfg::Animate { format, which } = animate_settings;
+        let &cfg::Animate { ref format, ref which, max_count } = animate_settings;
 
         let mode_info: Vec<(f64, EvDirection)> = {
             match which {
                 cfg::AnimateWhich::All => all_directions.into_iter().collect(),
                 cfg::AnimateWhich::Negative => bad_directions.into_iter().collect(),
             }
+        };
+        let mode_info = match max_count {
+            None => &mode_info[..],
+            Some(count) => &mode_info[..usize::min(count, mode_info.len())],
         };
 
         let out_path = self.animation_path(iteration, format);
@@ -510,7 +514,7 @@ impl TrialDir {
                 use rsp2_structure_io::v_sim;
 
                 let mut metadata = v_sim::AsciiMetadata::new();
-                for (frequency, direction) in mode_info {
+                for &(frequency, ref direction) in mode_info {
                     metadata.add_phonon(v_sim::Phonon {
                         qpoint_frac: V3::zero(),
                         energy: frequency,

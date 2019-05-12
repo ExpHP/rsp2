@@ -18,10 +18,20 @@ rsp2-structure = { path = "../../structure" }
 rsp2-array-types = { path = "../../util/array-types" }
 rsp2-fs-util = { path = "../../util/fs" }
 
-dftbplus-sys = { git = "https://github.com/ExpHP/dftbplus-sys", tag = "v0.0.1" }
+dftbplus-sys = { git = "https://github.com/ExpHP/dftbplus-sys", tag = "v0.0.1", optional = true }
 failure = "0.1.2"
 slice-of-array = "0.2.1"
 
 [features]
+default = []
+
+# Note: You MUST enable this to use anything from the crate.
+#
+# It is disabled by default only so that `cargo test --all` can
+# be run in the rsp2 souce root without forcibly attempting to
+# link to libdftb+.
+# (alas, `cargo test --all --no-default-features` doesn't disable it)
+dftbplus-support = ["dftbplus-sys"]
+
 nightly = ["beta", "rsp2-array-types/nightly", "rsp2-fs-util/nightly", "rsp2-structure/nightly"]
 beta = ["rsp2-array-types/beta", "rsp2-fs-util/beta", "rsp2-structure/beta"]

@@ -8,6 +8,10 @@
 ** Be aware that not all of rsp2 is provided under this permissive license, **
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
+#![cfg(feature = "dftbplus-support")]
+#![cfg_attr(not(feature = "dftbplus-support"), doc(
+r#"This crate does not export any items unless built with the feature "dftbplus-support.","#
+))]
 #![allow(unused_unsafe)]
 #![deny(unused_must_use)]
 

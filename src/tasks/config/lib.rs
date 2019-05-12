@@ -934,6 +934,13 @@ pub struct Animate {
     pub which: AnimateWhich,
     #[serde(default = "_animate__format")]
     pub format: AnimateFormat,
+    /// Include no more than this many eigenvectors.  This is a safeguard against
+    /// the possibility of an unexpectedly large number of negative eigenvalues
+    /// being found.
+    ///
+    /// When null, unlimited.
+    #[serde(default)]
+    pub max_count: Option<usize>,
 }
 fn _animate__which() -> AnimateWhich { AnimateWhich::Negative }
 fn _animate__format() -> AnimateFormat { AnimateFormat::VSim {} }

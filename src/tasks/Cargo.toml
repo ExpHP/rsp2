@@ -20,7 +20,7 @@ path = "lib.rs"
 rsp2-tasks-config = { path = "config" }
 
 rsp2-lammps-wrap = { path = "../io/lammps" }
-lammps-sys = { rev = "6bba3ad", git = "https://github.com/ExpHP/lammps-sys", features = ["package-manybody", "package-user-misc", "package-user-omp"] }
+lammps-sys = { version = "0.5.2", features = ["package-manybody", "package-user-misc", "package-user-omp"] }
 
 rsp2-minimize = { path = "../minimize" }
 rsp2-structure = { path = "../structure", features = ["serde-support"] }
@@ -37,7 +37,7 @@ rsp2-assert-close = { path = "../util/assert-close" }
 rsp2-linalg = { path = "../linalg" }
 rsp2-newtype-indices = { path = "../util/newtype-indices" }
 rsp2-python = { path = "../python" }
-rsp2-dftbplus = { path = "../io/dftbplus", optional = true }
+rsp2-dftbplus = { path = "../io/dftbplus", optional = true, default-features = false }
 
 clap = "2"
 slice-of-array = "0.2.1"
@@ -90,4 +90,4 @@ beta = ["rsp2-array-types/beta", "rsp2-array-utils/beta", "rsp2-assert-close/bet
 # see https://github.com/rust-lang/cargo/issues/1286 (problem and proposal)
 #     https://github.com/rust-lang/cargo/issues/5565 (tracking issue, of sorts)
 mpi-support = ["mpi", "rsp2-lammps-wrap/mpi-support"]
-dftbplus-support = ["rsp2-dftbplus"]
+dftbplus-support = ["rsp2-dftbplus", "rsp2-dftbplus/dftbplus-support"]
