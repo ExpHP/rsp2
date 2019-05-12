@@ -37,3 +37,7 @@ for subdir in debug release; do
         fi
     done
 done
+
+echo
+echo "Remaining stuff"
+du --max-depth=3 --all "$target" || true
