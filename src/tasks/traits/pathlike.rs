@@ -11,9 +11,7 @@
 
 use crate::FailResult;
 use std::path::Path;
-use std::io::Result as IoResult;
 use std::path::PathBuf;
-use rsp2_fs_util::TempDir;
 use path_abs::{FileRead, FileWrite};
 
 /// AsRef<Path> with more general impls on smart pointer types.
@@ -105,66 +103,3 @@ as_path_impl!{
 impl<'p, P: AsPath + ?Sized> AsPath for &'p P
 { fn as_path(&self) -> &Path { P::as_path(self) } }
 
-/// Trait for types that own a temporary directory, which can be
-/// released (to prevent automatic deletion) or explicitly closed
-/// to catch IO errors (which would be ignored on drop).
-///
-/// This is really just an implementation detail, and you should not
-/// worry about it. All types that implement this expose `close()`
-/// and `relocate()` inherent methods that you should use instead.
-pub trait HasTempDir: AsPath + Sized {
-    /// Provides `TempDir::close` in generic contexts
-    fn temp_dir_close(self) -> IoResult<()>;
-    /// Provides `TempDir::into_path` in generic contexts
-    fn temp_dir_into_path(self) -> PathBuf;
-    /// Provides `TempDir::recover` in generic contexts
-    fn temp_dir_recover(self);
-
-    /// Provides `TempDir::try_with_recovery` in generic contexts
-    fn temp_dir_try_with_recovery<B, E, F>(self, f: F) -> Result<(Self, B), E>
-    where F: FnOnce(&Self) -> Result<B, E> {
-        match f(&self) {
-            Ok(x) => Ok((self, x)),
-            Err(e) => {
-                self.temp_dir_recover();
-                Err(e)
-            }
-        }
-    }
-}
-
-impl HasTempDir for TempDir {
-    fn temp_dir_close(self) -> IoResult<()> { self.close() }
-    fn temp_dir_into_path(self) -> PathBuf { self.into_path() }
-    fn temp_dir_recover(self) { self.recover() }
-}
-
-#[cfg(test)]
-#[deny(unused)]
-mod tests {
-    use super::*;
-    use crate::phonopy::DirWithBands;
-
-    // check use cases I need to work
-    #[test]
-    #[should_panic(expected = "compiletest")]
-    fn things_expected_to_impl_aspath() {
-        use std::rc::Rc;
-        use std::sync::Arc;
-
-        (|| panic!("This is a compiletest"))();
-
-        // clonable TempDirs
-        let x: DirWithBands<TempDir> = (|| panic!())();
-        let x = x.map_dir(Rc::new);
-        let _ = x.clone();
-
-        // sharable TempDirs
-        let x: DirWithBands<TempDir> = (|| panic!())();
-        let x = x.map_dir(Arc::new);
-        let _: &(dyn Send + Sync) = &x;
-
-        // erased types, for conditional deletion
-        let _: DirWithBands<Box<dyn AsPath>> = x.map_dir(|e| Box::new(e) as _);
-    }
-}
