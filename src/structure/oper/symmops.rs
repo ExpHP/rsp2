@@ -503,11 +503,7 @@ mod tests {
     {
         // graphene lattice
         let half_r3 = 0.5 * f64::sqrt(3.0);
-        let lattice = Lattice::new(&(2.4 * &mat::from_array([
-            [ 1.0,     0.0, 0.0],
-            [-0.5, half_r3, 0.0],
-            [ 0.0,     0.0, 1.0],
-        ])));
+        let lattice = graphene_lattice();
         // threefold rotation
         let op = IntRot::from(&[
             [-1, 1, 0],

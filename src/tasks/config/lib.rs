@@ -916,6 +916,9 @@ pub enum PhononDispFinderRsp2Directions {
     ///
     /// Some displacements may be along directions like e.g. `a + b`, `a - b`, or `a + b + c`.
     /// This reduces the number of displacements that need to be computed.
+    ///
+    /// Currently there is a known bug that sometimes makes this less effective than Phonopy's
+    /// implementation.
     Diag,
     /// (Experimental) Diagonal displacements with fractional coords up to 2.
     #[serde(rename = "diag-2")]

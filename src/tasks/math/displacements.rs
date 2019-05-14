@@ -264,3 +264,93 @@ fn is_lindep_with(vs: &[V3<i32>], v: V3<i32>) -> bool {
         &_      => false,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rsp2_structure::{CoordsKind, Element};
+    use rsp2_array_types::{Envee};
+    use crate::FailResult;
+    use crate::cmd::python::SpgDataset;
+
+    const TOL: f64 = 1e-3;
+    const DISTANCE: f64 = 1e-4;
+
+    fn get_actual_displacements(
+        directions: &cfg::PhononDispFinderRsp2Directions,
+        coords: &Coords,
+        elements: &[Element],
+
+    ) -> FailResult<Vec<(usize, V3)>> {
+        let atom_types: Vec<u32> = {
+            elements.iter().map(|e| e.atomic_number()).collect()
+        };
+        let cart_ops = {
+            let spg = SpgDataset::compute(&coords, &atom_types, TOL)?;
+            assert_eq!(spg.spacegroup_number, 164);
+            spg.cart_ops()
+        };
+
+        let deperms = rsp2_structure::find_perm::spacegroup_deperms(&coords, &cart_ops, 3.0 * TOL)?;
+        let stars = crate::math::stars::compute_stars(&deperms);
+        let int_ops = cart_ops.iter().map(|c| {
+            c.int_rot(coords.lattice()).expect("bad operator from spglib!?")
+        });
+        Ok(super::compute_displacements(directions, int_ops, &stars, &coords, DISTANCE))
+    }
+
+    fn compare(actual: &[(usize, V3)], expected: &[(usize, V3)]) {
+        for ((site_actual, v_actual), (site_expected, v_expected)) in zip_eq!(actual, expected) {
+            println!("({}, {})", site_actual, v_actual);
+            assert_eq!(site_actual, site_expected);
+            assert_close!(v_actual.0, v_expected.0);
+        }
+        println!();
+    }
+
+    #[test]
+    fn ab_blg() -> FailResult<()> {
+        let coords = Coords::new(
+            Lattice::from([
+                [2.4192432809928756, 0.0, 0.0],
+                [-1.2096216404964378, 2.095126139274645, 0.0],
+                [0.0, 0.0, 12.0],
+            ]),
+            CoordsKind::Carts(vec![
+                [0.0, 0.0, 0.0],
+                [1.2096216404964378, 0.6983753797582152, 0.0],
+                [0.0, 0.0, 3.392],
+                [-1.2096216404964378, -0.6983753797582152, 3.392],
+            ].envee()),
+        );
+        let elements = vec![Element::CARBON; 4];
+        let [a, _b, c] = coords.lattice().vectors();
+
+        // axial
+        let actual = get_actual_displacements(&from_json!("axial"), &coords, &elements)?;
+        let expected = vec![
+            (0, DISTANCE * a.unit()),
+            (0, DISTANCE * c.unit()),
+            (0, DISTANCE * -c.unit()),
+            (1, DISTANCE * a.unit()),
+            (1, DISTANCE * c.unit()),
+            (1, DISTANCE * -c.unit()),
+        ];
+        compare(&actual, &expected);
+
+        // diag
+        // NOTE: Phonopy performs better here and only gets 4 displacements!
+        let actual = get_actual_displacements(&from_json!("diag"), &coords, &elements)?;
+        let expected = vec![
+            (0, DISTANCE * a.unit()),
+            (0, DISTANCE * (a + c).unit()),
+            (0, DISTANCE * -(a + c).unit()),
+            (1, DISTANCE * a.unit()),
+            (1, DISTANCE * (a + c).unit()),
+            (1, DISTANCE * -(a + c).unit()),
+        ];
+        compare(&actual, &expected);
+
+        Ok(())
+    }
+}
