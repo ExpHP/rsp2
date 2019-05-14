@@ -56,11 +56,6 @@ where
         })();
 
         result.unwrap_or_else(|e| {
-            // HACK
-            if let Some(crate::cmd::StoppedAfterDynmat) = e.downcast_ref() {
-                return;
-            }
-
             show_errors(e);
             exit(1);
         });

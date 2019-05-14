@@ -84,7 +84,7 @@ impl TrialDir {
             let coords = from_coords;
             let iteration = loop_state.iteration;
 
-            let coords = self.do_ev_loop_stuff_before_diagonalization(
+            let coords = self.do_ev_loop_stuff_before_dynmat(
                 &settings, pot, meta.sift(), iteration, coords,
             )?;
 
@@ -121,7 +121,7 @@ impl TrialDir {
         }
     }
 
-    pub(in crate::cmd) fn do_ev_loop_stuff_before_diagonalization(
+    pub(in crate::cmd) fn do_ev_loop_stuff_before_dynmat(
         &self,
         settings: &Settings,
         pot: &dyn PotentialBuilder,

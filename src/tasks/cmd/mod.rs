@@ -1118,7 +1118,7 @@ impl TrialDir {
             // FIXME: This is confusing and side-effectful.
             //        File-saving should be done at the highest level possible, not in a function
             //        called from multiple places.
-            let _coords_already_saved = self.do_ev_loop_stuff_before_diagonalization(
+            let _coords_already_saved = self.do_ev_loop_stuff_before_dynmat(
                 settings, &pot, meta.sift(), Iteration(iteration.0 + 1), coords,
             )?;
         }
@@ -1130,7 +1130,23 @@ impl TrialDir {
                 DidEvChasing(false) => writeln!(f, "0")?,
             }
         }
-        Ok(did_ev_chasing)
+
+        let subdir = self.structure_path(EvLoopStructureKind::PreEvChase(iteration));
+        let stored = self.read_stored_structure(&subdir)?;
+        let stop_after_dynmat = true;
+        match self.do_post_relaxation_computations(
+            settings, &pot, &stored, stop_after_dynmat, Some(iteration),
+        ) {
+            // Thanks to stop_after_dynmat, the function will never return Ok
+            Ok(_) => unreachable!(),
+            Err(e) => {
+                if let Some(StoppedAfterDynmat) = e.downcast_ref() {
+                    Ok(did_ev_chasing)
+                } else {
+                    Err(e)
+                }
+            },
+        }
     }
 }
 
