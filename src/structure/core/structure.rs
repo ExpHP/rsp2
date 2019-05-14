@@ -436,7 +436,6 @@ fn dumb_nearest_distance(
     frac_a: &V3,
     frac_b: &V3,
 ) -> f64 {
-    use crate::CoordsKind;
     let diff = (frac_a - frac_b).map(|x| x - x.round());
 
     let mut diffs = Vec::with_capacity(27);

@@ -74,8 +74,7 @@ impl Tol {
 
 #[inline(always)] // hopefully encourage LLVM to do crazy bit math for constant moduli
 #[cfg(feature = "nightly")]
-#[inline(always)]
-pub(crate) fn mod_euc(a: i32, b: i32) -> i32 { i32::mod_euc(a, b) }
+pub(crate) fn mod_euc(a: i32, b: i32) -> i32 { i32::rem_euclid(a, b) }
 
 #[inline(always)] // hopefully encourage LLVM to do crazy bit math for constant moduli
 #[cfg(not(feature = "nightly"))]

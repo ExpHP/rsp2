@@ -413,7 +413,6 @@ pub mod n_dee {
         where D: OnceDifferentiable,
         {
             use itertools::Itertools;
-            use rsp2_slice_math::{v,V,vdot};
             path.iter().tuple_windows().map(|(cur, prev)| {
                 let V(mid) = (v(cur) + v(prev)) / 2.0;
                 let V(displacement) = v(cur) - v(prev);
