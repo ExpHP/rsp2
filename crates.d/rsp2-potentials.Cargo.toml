@@ -27,8 +27,11 @@ path = "lib.rs"
 !!rayon-cond
 !!log
 
-[dev-dependencies]
+# This should be a dev-dependency, but see this bug:
+# https://github.com/rust-lang/cargo/issues/6915
 !!rsp2-structure-io
+
+[dev-dependencies]
 !!serde
 !!serde-json
 !!serde-derive

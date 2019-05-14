@@ -19,15 +19,16 @@ rsp2-structure = { path = "../../structure", features = ["serde-support"] }
 rsp2-array-types = { path = "../../util/array-types", features = ["serde-support"] }
 lammps-sys = { version = "0.5.2", features = ["exceptions", "package-user-omp"] }
 
+# This should be a dev-dependency, but see this bug:
+# https://github.com/rust-lang/cargo/issues/6915
+rsp2-assert-close = { path = "../../util/assert-close" }
+
 log = "0.4"
 lazy_static = "0.2"
 chrono = "0.4"
 failure = "0.1.2"
 slice-of-array = "0.2.1"
 mpi = { version = "0.5.4", optional = true }
-
-[dev-dependencies]
-rsp2-assert-close = { path = "../../util/assert-close" }
 
 [[example]]
 name = "airebo"

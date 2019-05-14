@@ -32,8 +32,11 @@ rayon = "1.0.1"
 rayon-cond = "0.1.0"
 log = "0.4"
 
-[dev-dependencies]
+# This should be a dev-dependency, but see this bug:
+# https://github.com/rust-lang/cargo/issues/6915
 rsp2-structure-io = { path = "../io/structure" }
+
+[dev-dependencies]
 serde = { version = "1.0.91", features = ["rc"] }
 serde_json = "1"
 serde_derive = "1.0.91"
