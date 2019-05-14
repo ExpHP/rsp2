@@ -18,17 +18,11 @@ if [ "$1" = store ]; then
         rm -rf target
     )
 
-    # Maximize reuse of build artefacts by using previously built versions
-    # of crates whenever possible.
-    cp $TRAVIS_BUILD_DIR/Cargo.lock $CACHE
-
     # Don't cache ~/.cargo as Travis docs recommend against caching downloads.
     #
     # Don't worry; when .cargo is lost, the packages are re-downloaded, but not
     # rebuilt so long as the stuff in target/ is good.
 elif [ "$1" = load ]; then
-    cp $CACHE/Cargo.lock $TRAVIS_BUILD_DIR
-
     rm -rf $TRAVIS_BUILD_DIR/target
     cp $CACHE/target.tar $TRAVIS_BUILD_DIR
     (
