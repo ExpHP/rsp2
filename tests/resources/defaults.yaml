@@ -13,8 +13,8 @@ cg:
           rel-greater-than: 0
           steps-ago: 10
       - iterations: 100
-  alpha-guess-max: 1e-1
-  alpha-guess-first: 1e-2
+  alpha-guess-max: 1e-1  # A
+  alpha-guess-first: 1e-2  # A
 
 ev-loop:
   min-positive-iter: 1
@@ -26,7 +26,7 @@ ev-chase:
       any:
         - value-delta:
             rel-greater-than: 0
-            steps-ago: 10
+            steps-ago: 5
         - iterations: 100
     alpha-guess-max: 1e-1
     alpha-guess-first: 1e-2
@@ -40,14 +40,7 @@ phonons:
   supercell: {target: [0, 0, 0]}
   symmetry-tolerance: 1e-2
   displacement-distance: 1e-4
-
   disp-finder:
-    rsp2:
-      directions: survey
-  eigensolver:
-    rsp2:
-      dense: true
+    rsp2: {}
 
 layer-gamma-threshold: 0.2
-
-# lammps-processor-axis-mask: [true, true, true]

@@ -1,3 +1,5 @@
+# NOTE: apply this after defaults.yaml
+
 potential:
   - kc-z-new:
       cutoff: 14
@@ -11,9 +13,7 @@ scale-ranges:
 parameters: null
 
 phonons:
-  disp-finder.~~REPLACE~~:
-    rsp2: {}
-  eigensolver.~~REPLACE~~:
+  eigensolver:
     rsp2:
       dense: true
 

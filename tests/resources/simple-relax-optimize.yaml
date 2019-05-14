@@ -1,3 +1,5 @@
+# NOTE: apply this after defaults.yaml
+
 potential:
   - kc-z-new:
       cutoff: 14
@@ -13,12 +15,10 @@ scale-ranges:
         value: 0.95
 
 # enable optimization during relaxation
-parameters: ['a', 'a', null]
+parameters: [a, a, ~]
 
 phonons:
-  disp-finder.~~REPLACE~~:
-    rsp2: {}
-  eigensolver.~~REPLACE~~:
+  eigensolver:
     rsp2:
       dense: true
 

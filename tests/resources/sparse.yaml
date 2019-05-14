@@ -1,14 +1,14 @@
+# NOTE: apply this after defaults.yaml
+
 potential:
   kc-z:
     cutoff: 14
+
 scale-ranges:
   scalables: []
-    #- parameter:
-    #    axis-mask: [1, 1, 0]
-    #    guess: 1.00
-    #    range: [0.95, 1.05]
+
 phonons:
-  eigensolver.~~REPLACE~~:
+  eigensolver:
     sparse: {}
 
 bond-radius: 1.8

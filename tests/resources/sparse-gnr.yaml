@@ -1,13 +1,13 @@
+# NOTE: apply this after defaults.yaml
+
 potential:
   rebo: {}
+
 scale-ranges:
   scalables: []
-    #- parameter:
-    #    axis-mask: [1, 1, 0]
-    #    guess: 1.00
-    #    range: [0.95, 1.05]
+
 phonons:
-  eigensolver.~~REPLACE~~:
+  eigensolver:
     sparse: {}
 
 acoustic-search:
