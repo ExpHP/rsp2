@@ -10,6 +10,9 @@ phonons:
   eigensolver.~~REPLACE~~:
     sparse: {}
 
+acoustic-search:
+  expected-non-translations: 1
+
 bond-radius: 1.8
 lammps:
   processor-axis-mask: [true, true, false]
