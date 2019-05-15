@@ -1096,46 +1096,47 @@ impl TrialDir {
         &self,
         on_demand: Option<LammpsOnDemand>,
         settings: &Settings,
-        iteration: Iteration,
+        prev_iteration: Iteration,
     ) -> FailResult<DidEvChasing> {
         use crate::cmd::EvLoopStructureKind::*;
         use crate::filetypes::Eigensols;
 
         let pot = PotentialBuilder::from_root_config(&self, on_demand, &settings)?;
 
-        let (coords, meta) = self.read_stored_structure_data(&self.structure_path(PreEvChase(iteration)))?;
+        let (coords, meta) = self.read_stored_structure_data(&self.structure_path(PreEvChase(prev_iteration)))?;
         let Eigensols {
             frequencies: freqs,
             eigenvectors: evecs,
-        } = Load::load(self.join(self.eigensols_path(iteration)))?;
+        } = Load::load(self.join(self.eigensols_path(prev_iteration)))?;
 
         let (_, coords, did_ev_chasing) = self.do_ev_loop_stuff_after_diagonalization(
-            settings, &pot, meta.sift(), iteration,
+            settings, &pot, meta.sift(), prev_iteration,
             coords, &freqs, &evecs,
         )?;
 
-        if let DidEvChasing(true) = did_ev_chasing {
-            // FIXME: This is confusing and side-effectful.
-            //        File-saving should be done at the highest level possible, not in a function
-            //        called from multiple places.
-            let _coords_already_saved = self.do_ev_loop_stuff_before_dynmat(
-                settings, &pot, meta.sift(), Iteration(iteration.0 + 1), coords,
-            )?;
-        }
-
         {
-            let mut f = self.create_file(format!("did-ev-chasing-{:02}", iteration))?;
+            let mut f = self.create_file(format!("did-ev-chasing-{:02}", prev_iteration))?;
             match did_ev_chasing {
                 DidEvChasing(true) => writeln!(f, "1")?,
                 DidEvChasing(false) => writeln!(f, "0")?,
             }
         }
 
-        let subdir = self.structure_path(EvLoopStructureKind::PreEvChase(iteration));
+        let next_iteration = Iteration(prev_iteration.0 + 1);
+        if let DidEvChasing(true) = did_ev_chasing {
+            // FIXME: This is confusing and side-effectful.
+            //        File-saving should be done at the highest level possible, not in a function
+            //        called from multiple places.
+            let _coords_already_saved = self.do_ev_loop_stuff_before_dynmat(
+                settings, &pot, meta.sift(), next_iteration, coords,
+            )?;
+        }
+
+        let subdir = self.structure_path(EvLoopStructureKind::PreEvChase(next_iteration));
         let stored = self.read_stored_structure(&subdir)?;
         let stop_after_dynmat = true;
         match self.do_post_relaxation_computations(
-            settings, &pot, &stored, stop_after_dynmat, Some(iteration),
+            settings, &pot, &stored, stop_after_dynmat, Some(next_iteration),
         ) {
             // Thanks to stop_after_dynmat, the function will never return Ok
             Ok(_) => unreachable!(),
