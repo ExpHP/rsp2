@@ -105,6 +105,7 @@ pub struct RamanTensor {
 }
 
 impl RamanTensor {
+    pub fn tensor(&self) -> &M33 { &self.tensor }
     pub fn integrate_intensity(
         &self,
         light_polarization: &LightPolarization,

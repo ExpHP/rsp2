@@ -187,18 +187,21 @@ pub(crate) fn write_ev_analysis_output_files(
 ) -> FailResult<()>
 {Ok({
     use path_abs::FileWrite;
+    use rsp2_array_types::M33;
 
     if let (Some(frequency), Some(raman)) = (&eva.ev_frequencies, &eva.ev_raman_tensors) {
         #[derive(Serialize)]
         #[serde(rename_all = "kebab-case")]
         struct Output {
             frequency: Vec<f64>,
+            raman_tensor: Vec<M33>,
             average_3d: Vec<f64>,
             backscatter: Vec<f64>,
         }
         use crate::math::bond_polarizability::LightPolarization::*;
         serde_json::to_writer(FileWrite::create(dir.join("raman.json"))?, &Output {
             frequency: frequency.0.to_vec(),
+            raman_tensor: raman.0.iter().map(|t| t.tensor().clone()).collect(),
             average_3d: raman.0.iter().map(|t| t.integrate_intensity(&Average)).collect(),
             backscatter: raman.0.iter().map(|t| t.integrate_intensity(&BackscatterZ)).collect(),
         })?;
