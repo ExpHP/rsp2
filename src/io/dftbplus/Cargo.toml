@@ -21,6 +21,7 @@ rsp2-fs-util = { path = "../../util/fs" }
 dftbplus-sys = { git = "https://github.com/ExpHP/dftbplus-sys", tag = "v0.0.1", optional = true }
 failure = "0.1.2"
 slice-of-array = "0.2.1"
+log = "0.4"
 
 [features]
 default = []

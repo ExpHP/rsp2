@@ -1045,6 +1045,7 @@ version = "0.1.0"
 dependencies = [
  "dftbplus-sys 0.0.1 (git+https://github.com/ExpHP/dftbplus-sys?tag=v0.0.1)",
  "failure 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "log 0.4.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "rsp2-array-types 0.1.0",
  "rsp2-fs-util 0.1.0",
  "rsp2-structure 0.1.0",

@@ -15,6 +15,9 @@ r#"This crate does not export any items unless built with the feature "dftbplus-
 #![allow(unused_unsafe)]
 #![deny(unused_must_use)]
 
+#[macro_use]
+extern crate log;
+
 use dftbplus_sys as ffi;
 
 use rsp2_structure::{Coords, CoordsKind, Lattice, Element};
@@ -28,9 +31,13 @@ use std::path::{Path, PathBuf};
 use std::os::raw::c_double;
 use std::fmt;
 use std::mem;
+use log::Level;
 
 const ANGSTROM_TO_BOHR: f64 = 1.8897259886;
 const HARTREE_TO_EV: f64 = 27.21138602;
+
+pub const API_TRACE_TARGET: &'static str = concat!(module_path!(), "::c_api");
+pub const API_TRACE_LEVEL: Level = Level::Trace;
 
 pub type FailResult<T> = Result<T, failure::Error>;
 
@@ -55,6 +62,10 @@ impl fmt::Display for Hsd {
 mod low_level {
     use super::*;
 
+    macro_rules! api_trace {
+        ($($t:tt)*) => { log!(target: crate::API_TRACE_TARGET, crate::API_TRACE_LEVEL, $($t)*) };
+    }
+
     #[derive(Debug)]
     pub struct Instance {
         p_dftb: ffi::DftbPlus,
@@ -68,6 +79,9 @@ mod low_level {
         ) -> FailResult<Self> {
             // The backing memory for these can be safely deallocated at the end
             // because dftb+ copies the strings.
+            let input_path_display = input_path.display();
+            let output_path_display = output_path.display();
+
             let input_path = path_to_c_string(&input_path)?;
             let output_path = path_to_c_string(&output_path)?;
 
@@ -76,15 +90,22 @@ mod low_level {
 
             // FIXME: how to detect errors that occur in DFTB+?
             // It looks to me like we are helplessly doomed to invoke undefined behavior...
+            api_trace!("dftbp_init({:p}, \"{}\");", &p_dftb, output_path_display);
             unsafe { ffi::dftbp_init(&mut p_dftb, output_path.as_ptr()); }
+
+            api_trace!("dftbp_get_input_from_file({:p}, \"{}\", {:p});", &p_dftb, input_path_display, &p_input);
             unsafe { ffi::dftbp_get_input_from_file(&mut p_dftb, input_path.as_ptr(), &mut p_input); }
+
+            api_trace!("dftbp_process_input({:p}, {:p});", &p_dftb, &p_input);
             unsafe { ffi::dftbp_process_input(&mut p_dftb, &mut p_input); }
 
             Ok(Instance { p_dftb, p_input })
         }
 
         fn num_atoms(&mut self) -> usize {
-            unsafe { ffi::dftbp_get_nr_atoms(&mut self.p_dftb) as usize }
+            let out = unsafe { ffi::dftbp_get_nr_atoms(&mut self.p_dftb) as usize };
+            api_trace!("dftbp_get_nr_atoms({:p}); -> {}", &self.p_dftb, out);
+            out
         }
 
         /// Units: Angstrom
@@ -99,6 +120,24 @@ mod low_level {
             };
             let carts = angstroms_to_bohrs(&coords.to_carts());
             let lattice_vecs = angstroms_to_bohrs(coords.lattice().vectors());
+
+            if log_enabled!(target: API_TRACE_TARGET, API_TRACE_LEVEL) {
+                use std::fmt::Write;
+
+                let mut s = String::new();
+                writeln!(s, "dftbp_set_coords_and_lattice_vecs({:p}, {{", &self.p_dftb)?;
+
+                for V3([x, y, z]) in &carts {
+                    writeln!(s, "  {}, {}, {},", x, y, z)?;
+                }
+                writeln!(s, "}}, {{")?;
+
+                for V3([x, y, z]) in &lattice_vecs {
+                    writeln!(s, "  {}, {}, {},", x, y, z)?;
+                }
+                writeln!(s, "}}")?;
+                api_trace!("{}", s);
+            }
 
             unsafe {
                 ffi::dftbp_set_coords_and_lattice_vecs(
@@ -118,6 +157,8 @@ mod low_level {
                 ffi::dftbp_get_energy(&mut self.p_dftb, &mut hartree);
             }
 
+            api_trace!("dftbp_get_energy({:p}, _); -> {}", &self.p_dftb, hartree);
+
             Ok(hartree as f64 * HARTREE_TO_EV)
         }
 
@@ -125,6 +166,7 @@ mod low_level {
         pub fn get_grad(&mut self) -> FailResult<Vec<V3>> {
             let mut hartree_per_bohr = vec![V3([std::f64::NAN as c_double; 3]); self.num_atoms()];
 
+            api_trace!("dftbp_get_gradients({:p}, _); -> (data)", &self.p_dftb);
             unsafe {
                 ffi::dftbp_get_gradients(
                     &mut self.p_dftb,
@@ -144,6 +186,7 @@ mod low_level {
 
     impl Drop for Instance {
         fn drop(&mut self) {
+            api_trace!("dftbp_final({:p});", &self.p_dftb);
             unsafe { ffi::dftbp_final(&mut self.p_dftb); }
         }
     }
