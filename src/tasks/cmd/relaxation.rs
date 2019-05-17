@@ -13,7 +13,6 @@
 ** ********************************************************************** */
 
 use crate::{FailResult, FailOk};
-use crate::filetypes::stored_structure::StoredStructure;
 use crate::potential::{self, PotentialBuilder, DiffFn, BondDiffFn, FlatDiffFn};
 use crate::meta::{self, prelude::*};
 use crate::hlist_aliases::*;
@@ -35,32 +34,9 @@ use rsp2_minimize::{cg};
 
 use std::rc::Rc;
 
-pub trait EvLoopDiagonalizer {
-    type ExtraOut;
-
-    fn do_post_relaxation_computations(
-        &self,
-        // (even if no impl uses the TrialDir, it is passed around so that files can easily be
-        //  written for debugging purposes)
-        trial: &TrialDir,
-        settings: &cfg::Settings,
-        pot: &dyn PotentialBuilder,
-        stored: &StoredStructure,
-        stop_after_dynmat: bool, // HACK
-        // HACK: Used to set the filename for saving the gamma dynmat.
-        //       That shouldn't even be a responsibility of the function, but IIRC it does this
-        //       for easier debugging in case an error occurs shortly after computing the matrix
-        iteration: Option<Iteration>, // HACK
-    ) -> FailResult<(Vec<f64>, Basis3, Self::ExtraOut)>;
-
-    fn allow_unfold_bands(&self) -> bool;
-}
-
 impl TrialDir {
     /// NOTE: This writes to fixed filepaths in the trial directory
     ///       and is not designed to be called multiple times.
-    ///
-    /// The `ExtraOut` returned is the one from the final iteration.
     pub(crate) fn do_main_ev_loop(
         &self,
         settings: &Settings,
@@ -74,7 +50,7 @@ impl TrialDir {
             Option<meta::FracBonds>,
         >,
         stop_after_dynmat: bool, // HACK
-    ) -> FailResult<(Coords, GammaSystemAnalysis, Option<Iteration>)>
+    ) -> FailResult<(Coords, GammaSystemAnalysis, Iteration)>
     {
         let mut from_coords = original_coords;
         let mut loop_state = EvLoopFsm::new(&settings.ev_loop);
@@ -88,7 +64,7 @@ impl TrialDir {
                 &settings, pot, meta.sift(), iteration, coords,
             )?;
 
-            let (freqs, evecs, out_iteration) = {
+            let (freqs, evecs) = {
                 let subdir = self.structure_path(EvLoopStructureKind::PreEvChase(iteration));
                 let stored = self.read_stored_structure(&subdir)?;
                 self.do_post_relaxation_computations(
@@ -111,7 +87,7 @@ impl TrialDir {
                     continue;
                 },
                 EvLoopStatus::Done => {
-                    return Ok((coords, ev_analysis, out_iteration));
+                    return Ok((coords, ev_analysis, iteration));
                 },
                 EvLoopStatus::ItsBadGuys(msg) => {
                     bail!("{}", msg);

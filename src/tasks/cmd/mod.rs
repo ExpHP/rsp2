@@ -158,7 +158,6 @@ impl TrialDir {
             };
 
             // HACK: Put last gamma dynmat at a predictable path.
-            let final_iteration = final_iteration.expect("ev-loop should have iterations!");
             rm_rf(self.join("gamma-dynmat.json"))?;
             hard_link(
                 self.gamma_dynmat_path(final_iteration),
@@ -291,8 +290,9 @@ impl TrialDir {
         pot: &dyn PotentialBuilder,
         stored: &StoredStructure,
         stop_after_dynmat: bool,
+        // If not provided, no dynmat will be written.
         iteration: Option<Iteration>,
-    ) -> FailResult<(Vec<f64>, Basis3, Option<Iteration>)>
+    ) -> FailResult<(Vec<f64>, Basis3)>
     {Ok({
         // FIXME: A great deal of logic in here exists for dealing with supercells,
         //        which are pointless when we only compute at the gamma point.
@@ -483,7 +483,7 @@ impl TrialDir {
             })?
         };
         trace!("Done diagonalizing dynamical matrix");
-        (freqs, evecs, iteration)
+        (freqs, evecs)
     })}
 
     fn write_animations(
@@ -904,7 +904,7 @@ impl TrialDir {
     {Ok({
         let pot = PotentialBuilder::from_root_config(&self, on_demand, &settings)?;
 
-        let (freqs, evecs, _) = {
+        let (freqs, evecs) = {
             self.do_post_relaxation_computations(
                 settings, &*pot, &stored, false, None,
             )?
