@@ -64,13 +64,9 @@ impl TrialDir {
                 &settings, pot, meta.sift(), iteration, coords,
             )?;
 
-            let (freqs, evecs) = {
-                let subdir = self.structure_path(EvLoopStructureKind::PreEvChase(iteration));
-                let stored = self.read_stored_structure(&subdir)?;
-                self.do_post_relaxation_computations(
-                    settings, pot, &stored, stop_after_dynmat, Some(iteration),
-                )?
-            };
+            let (freqs, evecs) = self.do_post_relaxation_computations(
+                settings, pot, &coords, meta.sift(), stop_after_dynmat, Some(iteration),
+            )?;
 
             trace!("============================");
             trace!("Finished diagonalization");

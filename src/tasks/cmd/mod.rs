@@ -288,7 +288,13 @@ impl TrialDir {
         &self,
         settings: &Settings,
         pot: &dyn PotentialBuilder,
-        stored: &StoredStructure,
+        prim_coords: &Coords,
+        prim_meta: HList4<
+            meta::SiteElements,
+            meta::SiteMasses,
+            Option<meta::SiteLayers>,
+            Option<meta::FracBonds>,
+        >,
         stop_after_dynmat: bool,
         // If not provided, no dynmat will be written.
         iteration: Option<Iteration>,
@@ -300,14 +306,6 @@ impl TrialDir {
         //        I don't want to tear those considerations out since it was difficult to write,
         //        but it ought to be factored out somehow to be less in your face, and especially
         //        so that it isn't in a function that is clearly related to relaxation.
-
-        let prim_coords = &stored.coords;
-        let prim_meta: HList4<
-            meta::SiteElements,
-            meta::SiteMasses,
-            Option<meta::SiteLayers>,
-            Option<meta::FracBonds>,
-        > = stored.meta().sift();
 
         let compute_deperms = |coords: &_, cart_ops: &_| {
             rsp2_structure::find_perm::spacegroup_deperms(
@@ -906,7 +904,7 @@ impl TrialDir {
 
         let (freqs, evecs) = {
             self.do_post_relaxation_computations(
-                settings, &*pot, &stored, false, None,
+                settings, &*pot, &stored.coords, stored.meta().sift(), false, None,
             )?
         };
 
@@ -1112,7 +1110,7 @@ impl TrialDir {
             eigenvectors: evecs,
         } = Load::load(self.join(self.eigensols_path(prev_iteration)))?;
 
-        let (_, coords, did_ev_chasing) = self.do_ev_loop_stuff_after_diagonalization(
+        let (_, mut coords, did_ev_chasing) = self.do_ev_loop_stuff_after_diagonalization(
             settings, &pot, meta.sift(), prev_iteration,
             coords, &freqs, &evecs,
         )?;
@@ -1127,19 +1125,14 @@ impl TrialDir {
 
         let next_iteration = Iteration(prev_iteration.0 + 1);
         if let DidEvChasing(true) = did_ev_chasing {
-            // FIXME: This is confusing and side-effectful.
-            //        File-saving should be done at the highest level possible, not in a function
-            //        called from multiple places.
-            let _coords_already_saved = self.do_ev_loop_stuff_before_dynmat(
+            coords = self.do_ev_loop_stuff_before_dynmat(
                 settings, &pot, meta.sift(), next_iteration, coords,
             )?;
         }
 
-        let subdir = self.structure_path(EvLoopStructureKind::PreEvChase(next_iteration));
-        let stored = self.read_stored_structure(&subdir)?;
         let stop_after_dynmat = true;
         match self.do_post_relaxation_computations(
-            settings, &pot, &stored, stop_after_dynmat, Some(next_iteration),
+            settings, &pot, &coords, meta.sift(), stop_after_dynmat, Some(next_iteration),
         ) {
             // Thanks to stop_after_dynmat, the function will never return Ok
             Ok(_) => unreachable!(),
