@@ -326,7 +326,10 @@ impl TrialDir {
                 // larger than SYMPREC because the coords we see may may be slightly
                 // different from what spglib saw, but not so large that we risk pairing
                 // the wrong atoms
-                settings.phonons.symmetry_tolerance * 3.0,
+                //
+                // The 1e-15 is in case symprec = 0, as we want to ensure it can still find the
+                // permutation for the identity operator.
+                settings.phonons.symmetry_tolerance * 3.0 + 1e-15,
             )
         };
 
@@ -338,20 +341,23 @@ impl TrialDir {
                 let sc_dim = settings.phonons.supercell.dim_for_unitcell(prim_coords.lattice());
                 let (super_coords, sc) = rsp2_structure::supercell::diagonal(sc_dim).build(prim_coords);
 
-                trace!("Computing symmetry");
-                let cart_ops = {
+                let symprec = settings.phonons.symmetry_tolerance;
+                let cart_ops = if symprec == 0.0 {
+                    trace!("Not computing symmetry (symmetry-tolerance = 0)");
+                    info!(" Spacegroup: P1 (1)");
+                    info!("Point group: 1");
+                    vec![CartOp::eye()]
+                } else {
+                    trace!("Computing symmetry");
                     let atom_types: Vec<u32> = {
                         let elements: meta::SiteElements = prim_meta.pick();
                         elements.iter().map(|e| e.atomic_number()).collect()
                     };
 
-                    let spg = SpgDataset::compute(
-                        prim_coords,
-                        &atom_types,
-                        settings.phonons.symmetry_tolerance,
-                    )?;
+                    let spg = SpgDataset::compute(prim_coords, &atom_types, symprec)?;
                     info!(" Spacegroup: {} ({})", spg.international_symbol, spg.spacegroup_number);
                     info!("Point group: {}", spg.point_group);
+
                     spg.cart_ops()
                 };
 

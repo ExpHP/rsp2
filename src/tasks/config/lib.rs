@@ -784,6 +784,7 @@ pub enum EigenvectorChase {
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub struct Phonons {
+    /// If a value of 0 is used, symmetry will not be sought.
     pub symmetry_tolerance: f64,
     pub displacement_distance: f64,
 
