@@ -192,17 +192,34 @@ where
     /// (or else it might deadlock, or cause MPI to abort, or somesuch).  Ideally, this method
     /// would take `&mut self` to signify this limitation, but that would require a massive design
     /// overhaul for `PotentialBuilder`, soooo...... *just be careful.*
-    pub fn eco_mode<B>(&self, cont: impl FnOnce() -> B) -> B {
+    pub fn eco_mode<B>(&self, cont: impl FnOnce(EcoModeProof<'_>) -> B) -> B {
         let mut cont = Some(cont);
         let mut out = None;
         let mut cont_as_fn_mut = || {
             let cont = cont.take().expect("(BUG!) _eco_mode called continuation twice!");
-            out = Some(cont());
+            out = Some(cont(EcoModeProof::assume()));
         };
         self._eco_mode(&mut cont_as_fn_mut);
 
         out.expect("(BUG!) _eco_mode failed to call continuation!")
     }
+}
+
+//-------------------------------------
+
+/// A function may take one of these as an argument to declare that it wishes
+/// for `eco_mode` to be active. (e.g. because it wants to begin something that is
+/// multithreaded and does not want other processes to compete for CPU time)
+///
+/// This acts as just a speed bump, and can be circumvented if necessary by calling
+/// `EcoModeProof::assume()` to construct one out of thin air.
+///
+/// (a caller would need to do this if e.g. they have no PotentialBuilder to begin with!)
+#[derive(Debug, Clone, Copy)]
+pub struct EcoModeProof<'a>(&'a ());
+
+impl<'a> EcoModeProof<'a> {
+    pub fn assume() -> Self { EcoModeProof(&()) }
 }
 
 //-------------------------------------

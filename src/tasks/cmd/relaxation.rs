@@ -64,9 +64,17 @@ impl TrialDir {
                 &settings, pot, meta.sift(), iteration, coords,
             )?;
 
-            let (freqs, evecs) = self.do_post_relaxation_computations(
-                settings, pot, &coords, meta.sift(), stop_after_dynmat, Some(iteration),
-            )?;
+            let dynmat = self.do_compute_dynmat(settings, pot, &coords, meta.sift())?;
+            self.write_dynmat(&dynmat, iteration)?;
+
+            // rsp2-acgsd-and-dynmat stops here
+            if stop_after_dynmat {
+                return Err(super::StoppedAfterDynmat.into());
+            }
+
+            let (freqs, evecs) = pot.eco_mode(|eco_proof| {
+                self.do_diagonalize_dynmat(settings, dynmat, eco_proof)
+            })?;
 
             trace!("============================");
             trace!("Finished diagonalization");

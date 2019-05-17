@@ -43,7 +43,7 @@ use crate::util::ext_traits::{OptionResultExt, PathNiceExt};
 use crate::math::{
     basis::{Basis3, EvDirection},
     bands::{ScMatrix},
-    dynmat::{ForceConstants},
+    dynmat::{ForceConstants, DynamicalMatrix},
 };
 use self::acoustic_search::ModeKind;
 
@@ -74,7 +74,7 @@ use std::{
 use num_complex::Complex64;
 use itertools::Itertools;
 use crate::hlist_aliases::*;
-use crate::potential::{PotentialBuilder, DiffFn, CommonMeta};
+use crate::potential::{PotentialBuilder, DiffFn, CommonMeta, EcoModeProof};
 use crate::traits::save::Json;
 
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -284,7 +284,22 @@ impl TrialDir {
     fn read_stored_structure(&self, dir: impl AsPath) -> FailResult<StoredStructure>
     { Load::load(self.join(dir.as_path())) }
 
-    fn do_post_relaxation_computations(
+    fn write_dynmat(
+        &self,
+        dynmat: &DynamicalMatrix,
+        iteration: Iteration,
+    ) -> FailResult<()> {
+        // we can't write NPZ easily from rust, so write JSON and convert via python
+        Json(dynmat.cereal()).save(self.uncompressed_gamma_dynmat_path(iteration))?;
+
+        crate::cmd::python::convert::dynmat(
+            self.uncompressed_gamma_dynmat_path(iteration),
+            self.gamma_dynmat_path(iteration),
+            crate::cmd::python::convert::Mode::Delete,
+        )
+    }
+
+    fn do_compute_dynmat(
         &self,
         settings: &Settings,
         pot: &dyn PotentialBuilder,
@@ -295,10 +310,7 @@ impl TrialDir {
             Option<meta::SiteLayers>,
             Option<meta::FracBonds>,
         >,
-        stop_after_dynmat: bool,
-        // If not provided, no dynmat will be written.
-        iteration: Option<Iteration>,
-    ) -> FailResult<(Vec<f64>, Basis3)>
+    ) -> FailResult<DynamicalMatrix>
     {Ok({
         // FIXME: A great deal of logic in here exists for dealing with supercells,
         //        which are pointless when we only compute at the gamma point.
@@ -432,31 +444,19 @@ impl TrialDir {
 
         trace!("Computing sparse dynamical matrix");
 
-        let dynmat = {
-            force_constants
-                .gamma_dynmat(&sc, prim_meta.pick())
-                .hermitianize()
-        };
-        // HACK
-        // Nasty side-effect, but it's best to write this now (rather than letting the caller
-        // take care of it) so that it is there for debugging if we run into an error before
-        // this function finishes.
-        if let Some(iteration) = iteration {
-            // we can't write NPZ easily from rust, so write JSON and convert via python
-            Json(dynmat.cereal()).save(self.uncompressed_gamma_dynmat_path(iteration))?;
+        force_constants
+            .gamma_dynmat(&sc, prim_meta.pick())
+            .hermitianize()
+    })}
 
-            crate::cmd::python::convert::dynmat(
-                self.uncompressed_gamma_dynmat_path(iteration),
-                self.gamma_dynmat_path(iteration),
-                crate::cmd::python::convert::Mode::Delete,
-            )?;
-        }
-        // EVEN NASTIER HACK
-        // ...I'd let this speak for itself, but it really can't.
-        if stop_after_dynmat {
-            return Err(StoppedAfterDynmat.into());
-        }
-
+    fn do_diagonalize_dynmat(
+        &self,
+        settings: &Settings,
+        dynmat: DynamicalMatrix,
+        // don't let MPI processes compete with python's threads
+        _: EcoModeProof<'_>,
+    ) -> FailResult<(Vec<f64>, Basis3)>
+    {Ok({
         {
             let max_size = (|(a, b)| a * b)(dynmat.0.dim);
             let nnz = dynmat.0.nnz();
@@ -465,20 +465,18 @@ impl TrialDir {
         }
         trace!("Diagonalizing dynamical matrix");
         let (freqs, evecs) = {
-            pot.eco_mode(|| { // don't let MPI processes compete with python's threads
-                match settings.phonons.eigensolver {
-                    cfg::PhononEigensolver::Phonopy(cfg::AlwaysFail(never, _)) => match never {},
-                    cfg::PhononEigensolver::Rsp2 { dense: true, .. } => {
-                        dynmat.compute_eigensolutions_dense()
-                    },
-                    cfg::PhononEigensolver::Rsp2 { dense: false, how_many, shift_invert_attempts } => {
-                        dynmat.compute_negative_eigensolutions(
-                            how_many,
-                            shift_invert_attempts,
-                        )
-                    },
-                }
-            })?
+            match settings.phonons.eigensolver {
+                cfg::PhononEigensolver::Phonopy(cfg::AlwaysFail(never, _)) => match never {},
+                cfg::PhononEigensolver::Rsp2 { dense: true, .. } => {
+                    dynmat.compute_eigensolutions_dense()?
+                },
+                cfg::PhononEigensolver::Rsp2 { dense: false, how_many, shift_invert_attempts } => {
+                    dynmat.compute_negative_eigensolutions(
+                        how_many,
+                        shift_invert_attempts,
+                    )?
+                },
+            }
         };
         trace!("Done diagonalizing dynamical matrix");
         (freqs, evecs)
@@ -902,11 +900,13 @@ impl TrialDir {
     {Ok({
         let pot = PotentialBuilder::from_root_config(&self, on_demand, &settings)?;
 
-        let (freqs, evecs) = {
-            self.do_post_relaxation_computations(
-                settings, &*pot, &stored.coords, stored.meta().sift(), false, None,
-            )?
-        };
+        let dynmat = self.do_compute_dynmat(
+            settings, &*pot, &stored.coords, stored.meta().sift(),
+        )?;
+        // Don't write the dynamical matrix; unclear where to put it.
+        let (freqs, evecs) = pot.eco_mode(|eco_proof| {
+            self.do_diagonalize_dynmat(&settings, dynmat, eco_proof)
+        })?;
 
         trace!("============================");
         trace!("Finished diagonalization");
@@ -1130,20 +1130,10 @@ impl TrialDir {
             )?;
         }
 
-        let stop_after_dynmat = true;
-        match self.do_post_relaxation_computations(
-            settings, &pot, &coords, meta.sift(), stop_after_dynmat, Some(next_iteration),
-        ) {
-            // Thanks to stop_after_dynmat, the function will never return Ok
-            Ok(_) => unreachable!(),
-            Err(e) => {
-                if let Some(StoppedAfterDynmat) = e.downcast_ref() {
-                    Ok(did_ev_chasing)
-                } else {
-                    Err(e)
-                }
-            },
-        }
+        let dynmat = self.do_compute_dynmat(settings, &pot, &coords, meta.sift())?;
+        self.write_dynmat(&dynmat, next_iteration)?;
+
+        Ok(did_ev_chasing)
     }
 }
 
