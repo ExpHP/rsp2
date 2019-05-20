@@ -1,3 +1,5 @@
+dist: xenial
+
 # We declare this a python project because it is easier to install arbitrary
 # versions of rust to the virtual machine than it is to install arbitrary
 # versions of python.  rsp2 requires python 3.6+, and non-python environments
@@ -12,7 +14,7 @@ python: 3.6
 addons:
   apt:
     packages:
-    - gfortran
+    - gfortran-5
     - stow
     - libopenblas-dev # for dftb+
 
