@@ -14,25 +14,27 @@ addons:
     packages:
     - gfortran
     - stow
+    - libopenblas-dev # for dftb+
 
 env:
   global:
   - OPENMPI_VERSION=3.1.2
   - OPENMPI_VERSION_SHORT=3.1
+  - DFTBPLUS_REV=9b980bdaaa187db5f7602f583dd406899a8a8155
   - LAMMPS_POTENTIALS=$HOME/lammps/potentials
   - RUSTUP_HOME=$HOME/deps
   - CARGO_HOME=$HOME/deps
 
 matrix:
   include:
-    - name: MPI
-      env: RUST_VERSION=stable RSP2_FEATURES=--features=mpi-support
-    - name: Without MPI
+    - name: Without Features
       env: RUST_VERSION=stable RSP2_FEATURES=--no-default-features
-    - name: Nightly (MPI)
-      env: RUST_VERSION=nightly RSP2_FEATURES=--features=mpi-support,nightly
+    - name: With Features
+      env: RUST_VERSION=stable RSP2_FEATURES=--features=mpi-support,dftbplus-support
+    - name: Nightly (With Features)
+      env: RUST_VERSION=nightly RSP2_FEATURES=--features=mpi-support,dftbplus-support,nightly
   allow_failures:
-    - name: Nightly (MPI)
+    - name: Nightly (With Features)
 
 install:
 - pwd
@@ -44,6 +46,7 @@ install:
 - export PATH="$HOME/deps/bin:$PATH"
 - export LIBRARY_PATH="$HOME/deps/lib:$PYTHON_LIB:$LIBRARY_PATH"
 - export LD_LIBRARY_PATH="$HOME/deps/lib:$PYTHON_LIB:$LD_LIBRARY_PATH"
+- export PKG_CONFIG_PATH="$HOME/deps/lib/pkgconfig:$PKG_CONFIG_PATH"
 
 - python -c "import sysconfig; print('\n'.join(map(repr,sorted(sysconfig.get_config_vars().items()))))"
 - curl -sL https://static.rust-lang.org/rustup.sh -o ~/build/rustup.sh
@@ -59,7 +62,12 @@ install:
 - pip install --progress-bar=off phonopy==1.13.0.64 # rsp2 does not yet support 1.13.2
 - pip install --progress-bar=off pymatgen
 
-- $TRAVIS_BUILD_DIR/travis/install-openmpi.sh
+- if [[ $RSP2_FEATHRES == *mpi-support* ]]; then
+    $TRAVIS_BUILD_DIR/travis/install-openmpi.sh
+  fi
+- if [[ $RSP2_FEATURES == *dftbplus-support* ]]; then
+    $TRAVIS_BUILD_DIR/travis/install-dftbplus.sh
+  fi
 
 # get potentials
 - git clone https://github.com/lammps/lammps $HOME/lammps --depth=1
@@ -67,9 +75,9 @@ install:
 - $TRAVIS_BUILD_DIR/travis/cargo-cache.sh load
 
 script:
-- cargo build --all $RSP2_FEATURES
+# --release because a debug build is too slow to do the --ignored tests
 - cargo build --all $RSP2_FEATURES --release
-- cargo test --all $RSP2_FEATURES
+- cargo test --all $RSP2_FEATURES --release
 - cargo test --all $RSP2_FEATURES --release -- --ignored
 
 before_cache:
