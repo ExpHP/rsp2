@@ -57,4 +57,3 @@ HERE
 }
 
 stow -t $HOME/deps -d $(dirname $CACHE) $(basename $CACHE)
-ldconfig -r $HOME/deps
