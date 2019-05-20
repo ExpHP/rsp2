@@ -62,12 +62,8 @@ install:
 - pip install --progress-bar=off phonopy==1.13.0.64 # rsp2 does not yet support 1.13.2
 - pip install --progress-bar=off pymatgen
 
-- if [[ $RSP2_FEATHRES == *mpi-support* ]]; then
-    $TRAVIS_BUILD_DIR/travis/install-openmpi.sh
-  fi
-- if [[ $RSP2_FEATURES == *dftbplus-support* ]]; then
-    $TRAVIS_BUILD_DIR/travis/install-dftbplus.sh
-  fi
+- if [[ $RSP2_FEATHRES == *mpi-support* ]]; then $TRAVIS_BUILD_DIR/travis/install-openmpi.sh; fi
+- if [[ $RSP2_FEATURES == *dftbplus-support* ]]; then $TRAVIS_BUILD_DIR/travis/install-dftbplus.sh; fi
 
 # get potentials
 - git clone https://github.com/lammps/lammps $HOME/lammps --depth=1
