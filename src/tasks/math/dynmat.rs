@@ -685,6 +685,18 @@ impl DynamicalMatrix {
             row_ptr: self.0.row_ptr.raw.to_vec(),
         }
     }
+
+    pub fn from_cereal(cereal: Cereal) -> FailResult<Self> {
+        let csr = RawCsr {
+            dim: cereal.dim,
+            val: cereal.complex_blocks,
+            col: index_cast(cereal.col),
+            row_ptr: Indexed::from_raw(cereal.row_ptr),
+        };
+        csr.validate()?;
+
+        Ok(DynamicalMatrix(csr))
+    }
 }
 
 #[derive(Deserialize, Serialize)]
@@ -743,6 +755,43 @@ mod complex_33 {
         fn add_assign(&mut self, Complex33(real, imag): Complex33) {
             self.0 += real;
             self.1 += imag;
+        }
+    }
+}
+
+mod io_impls {
+    use super::*;
+    use crate::traits::{Save, Load, AsPath, save::Json};
+    use rsp2_fs_util::TempDir;
+
+    impl Load for crate::math::dynmat::DynamicalMatrix {
+        /// Read a dynamical matrix in any format supported by the rsp2.io python module.
+        fn load(path: impl AsPath) -> FailResult<Self> {
+            let tmp = TempDir::new("rsp2")?;
+            let uncompressed_path = tmp.path().join("uncompressed-dynmat.json");
+
+            crate::cmd::python::convert::dynmat(
+                path, &uncompressed_path,
+                crate::cmd::python::convert::Mode::Delete,
+            )?;
+
+            let Json(cereal) = Load::load(&uncompressed_path)?;
+            DynamicalMatrix::from_cereal(cereal)
+        }
+    }
+
+    impl Save for crate::math::dynmat::DynamicalMatrix {
+        /// Read a dynamical matrix in any format supported by the rsp2.io python module.
+        fn save(&self, path: impl AsPath) -> FailResult<()> {
+            let tmp = TempDir::new("rsp2")?;
+            let uncompressed_path = tmp.path().join("uncompressed-dynmat.json");
+
+            Json(self.cereal()).save(&uncompressed_path)?;
+
+            crate::cmd::python::convert::dynmat(
+                uncompressed_path, path,
+                crate::cmd::python::convert::Mode::Delete,
+            )
         }
     }
 }

@@ -573,7 +573,7 @@ mod helper;
 
 mod homestyle;
 
-mod lammps;
+pub(crate) mod lammps;
 
 #[cfg(feature = "dftbplus-support")]
 mod dftbplus;

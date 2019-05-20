@@ -418,9 +418,12 @@ pub fn sparse_analysis(bin_name: &str, version: VersionInfo) -> ! {
         let (app, de) = CliDeserialize::augment_clap_app({
             clap::App::new(bin_name)
                 .args(&[
-                    arg!( dir=DIR "structure in directory format"),
+                    arg!( structure=STRUCTUREDIR "structure in directory format"),
                     arg!( eigensols=EIGENSOLS "eigensolutions file"),
-                    arg!(*output [--output][-o]=EIGENSOLS "output directory. Existing files will be clobbered."),
+                    arg!(*output [--output][-o]=EIGENSOLS "\
+                        output directory. This can be the trial directory. Existing analysis \
+                        output files will be clobbered.\
+                    "),
                     arg!( log [--log]=LOGFILE "append to this logfile"),
                 ])
         });
@@ -443,6 +446,46 @@ pub fn sparse_analysis(bin_name: &str, version: VersionInfo) -> ! {
         let outdir = PathDir::create(matches.expect_value_of("output"))?;
 
         let analysis = crate::cmd::run_sparse_analysis(structure, &freqs, &evecs)?;
+
+        crate::cmd::write_ev_analysis_output_files(&outdir, &analysis)?;
+        Ok(())
+    });
+}
+
+// FIXME yet another *-analysis entry point.
+//       This one takes the dynamical matrix as input, and requires access to the settings file.
+// %% CRATES: binary: rsp2-sparse-analysis %%
+pub fn dynmat_analysis(bin_name: &str, version: VersionInfo) -> ! {
+    wrap_main(version, |logfile, mpi_on_demand| {
+        let (app, de) = CliDeserialize::augment_clap_app({
+            clap::App::new(bin_name)
+                .args(&[
+                    arg!( structure=STRUCTUREDIR "structure in directory format"),
+                    arg!( dynmat=DYNMAT "dynmat.npz"),
+                    arg!(*output [--output][-o]=OUTDIR "\
+                        output directory. This can be the trial directory. Existing analysis \
+                        output files will be clobbered.\
+                    "),
+                    arg!( log [--log]=LOGFILE "append to this logfile"),
+                ])
+        });
+        let matches = app.get_matches();
+        let ConfigArgs(config) = de.resolve_args(&matches)?;
+
+        let structure = StoredStructure::load(matches.expect_value_of("dir"))?;
+
+        if let Some(path) = matches.value_of("log") {
+            logfile.start(PathFile::create(path)?)?; // (NOTE: create does not truncate)
+        }
+
+        let dynmat = Load::load(PathFile::new(matches.expect_value_of("dynmat"))?)?;
+
+        // reminder: does not fail on existing
+        let outdir = PathDir::create(matches.expect_value_of("output"))?;
+
+        let ValidatedSettings(settings) = config.deserialize()?;
+
+        let analysis = crate::cmd::run_dynmat_analysis(&settings, structure, mpi_on_demand, dynmat)?;
 
         crate::cmd::write_ev_analysis_output_files(&outdir, &analysis)?;
         Ok(())

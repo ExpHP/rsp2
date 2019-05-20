@@ -75,7 +75,6 @@ use num_complex::Complex64;
 use itertools::Itertools;
 use crate::hlist_aliases::*;
 use crate::potential::{PotentialBuilder, DiffFn, CommonMeta, EcoModeProof};
-use crate::traits::save::Json;
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub enum StructureFileType {
@@ -284,21 +283,6 @@ impl TrialDir {
     fn read_stored_structure(&self, dir: impl AsPath) -> FailResult<StoredStructure>
     { Load::load(self.join(dir.as_path())) }
 
-    fn write_dynmat(
-        &self,
-        dynmat: &DynamicalMatrix,
-        iteration: Iteration,
-    ) -> FailResult<()> {
-        // we can't write NPZ easily from rust, so write JSON and convert via python
-        Json(dynmat.cereal()).save(self.uncompressed_gamma_dynmat_path(iteration))?;
-
-        crate::cmd::python::convert::dynmat(
-            self.uncompressed_gamma_dynmat_path(iteration),
-            self.gamma_dynmat_path(iteration),
-            crate::cmd::python::convert::Mode::Delete,
-        )
-    }
-
     fn do_compute_dynmat(
         &self,
         settings: &Settings,
@@ -454,40 +438,41 @@ impl TrialDir {
             .gamma_dynmat(&sc, prim_meta.pick())
             .hermitianize()
     })}
+}
 
-    fn do_diagonalize_dynmat(
-        &self,
-        settings: &Settings,
-        dynmat: DynamicalMatrix,
-        // don't let MPI processes compete with python's threads
-        _: EcoModeProof<'_>,
-    ) -> FailResult<(Vec<f64>, Basis3)>
-    {Ok({
-        {
-            let max_size = (|(a, b)| a * b)(dynmat.0.dim);
-            let nnz = dynmat.0.nnz();
-            let density = nnz as f64 / max_size as f64;
-            trace!("nnz: {} out of {} blocks (matrix density: {:.3e})", nnz, max_size, density);
+fn do_diagonalize_dynmat(
+    settings: &Settings,
+    dynmat: DynamicalMatrix,
+    // don't let MPI processes compete with python's threads
+    _: EcoModeProof<'_>,
+) -> FailResult<(Vec<f64>, Basis3)>
+{Ok({
+    {
+        let max_size = (|(a, b)| a * b)(dynmat.0.dim);
+        let nnz = dynmat.0.nnz();
+        let density = nnz as f64 / max_size as f64;
+        trace!("nnz: {} out of {} blocks (matrix density: {:.3e})", nnz, max_size, density);
+    }
+    trace!("Diagonalizing dynamical matrix");
+    let (freqs, evecs) = {
+        match settings.phonons.eigensolver {
+            cfg::PhononEigensolver::Phonopy(cfg::AlwaysFail(never, _)) => match never {},
+            cfg::PhononEigensolver::Rsp2 { dense: true, .. } => {
+                dynmat.compute_eigensolutions_dense()?
+            },
+            cfg::PhononEigensolver::Rsp2 { dense: false, how_many, shift_invert_attempts } => {
+                dynmat.compute_negative_eigensolutions(
+                    how_many,
+                    shift_invert_attempts,
+                )?
+            },
         }
-        trace!("Diagonalizing dynamical matrix");
-        let (freqs, evecs) = {
-            match settings.phonons.eigensolver {
-                cfg::PhononEigensolver::Phonopy(cfg::AlwaysFail(never, _)) => match never {},
-                cfg::PhononEigensolver::Rsp2 { dense: true, .. } => {
-                    dynmat.compute_eigensolutions_dense()?
-                },
-                cfg::PhononEigensolver::Rsp2 { dense: false, how_many, shift_invert_attempts } => {
-                    dynmat.compute_negative_eigensolutions(
-                        how_many,
-                        shift_invert_attempts,
-                    )?
-                },
-            }
-        };
-        trace!("Done diagonalizing dynamical matrix");
-        (freqs, evecs)
-    })}
+    };
+    trace!("Done diagonalizing dynamical matrix");
+    (freqs, evecs)
+})}
 
+impl TrialDir {
     fn write_animations(
         &self,
         animate_settings: &cfg::Animate,
@@ -615,7 +600,7 @@ fn visualize_sparse_force_sets(
 })}
 
 // wrapper around the gamma_system_analysis module which handles all the newtype conversions
-fn run_gamma_system_analysis(
+fn do_gamma_system_analysis(
     coords: &Coords,
     meta: HList5<
         meta::SiteElements,
@@ -911,7 +896,7 @@ impl TrialDir {
         )?;
         // Don't write the dynamical matrix; unclear where to put it.
         let (freqs, evecs) = pot.eco_mode(|eco_proof| {
-            self.do_diagonalize_dynmat(&settings, dynmat, eco_proof)
+            do_diagonalize_dynmat(&settings, dynmat, eco_proof)
         })?;
 
         trace!("============================");
@@ -924,7 +909,7 @@ impl TrialDir {
 
         trace!("Computing eigensystem info");
 
-        let ev_analysis = run_gamma_system_analysis(
+        let ev_analysis = do_gamma_system_analysis(
             &stored.coords, stored.meta().sift(),
             &freqs, &evecs, Some(classifications),
             true, // unfold bands
@@ -945,7 +930,7 @@ pub(crate) fn run_sparse_analysis(
 ) -> FailResult<GammaSystemAnalysis>
 {Ok({
     trace!("Computing eigensystem info");
-    let ev_analysis = run_gamma_system_analysis(
+    let ev_analysis = do_gamma_system_analysis(
         &structure.coords,
         structure.meta().sift(),
         &freqs, &evecs,
@@ -957,6 +942,31 @@ pub(crate) fn run_sparse_analysis(
 
     ev_analysis
 })}
+
+pub(crate) fn run_dynmat_analysis(
+    settings: &Settings,
+    structure: StoredStructure,
+    on_demand: Option<LammpsOnDemand>,
+    dynmat: DynamicalMatrix,
+) -> FailResult<GammaSystemAnalysis>
+{
+    eco_mode_without_potential(settings, on_demand, |eco_proof| Ok({
+        let (freqs, evecs) = do_diagonalize_dynmat(settings, dynmat, eco_proof)?;
+
+        trace!("Computing eigensystem info");
+        let ev_analysis = do_gamma_system_analysis(
+            &structure.coords,
+            structure.meta().sift(),
+            &freqs, &evecs,
+            None,  // ev_classifications
+            false, // unfold_bands
+        )?;
+
+        write_eigen_info_for_humans(&ev_analysis, &mut |s| FailOk(info!("{}", s)))?;
+
+        ev_analysis
+    }))
+}
 
 //=================================================================
 
@@ -1137,7 +1147,7 @@ impl TrialDir {
         }
 
         let dynmat = self.do_compute_dynmat(settings, &pot, &coords, meta.sift())?;
-        self.write_dynmat(&dynmat, next_iteration)?;
+        dynmat.save(self.gamma_dynmat_path(next_iteration))?;
 
         Ok(did_ev_chasing)
     }
@@ -1393,6 +1403,42 @@ fn masses_by_config(
         .collect::<Result<Vec<_>, _>>()?.into()
 })}
 
+// Run a callback in eco mode without needing to create a PotentialBuilder.
+fn eco_mode_without_potential<B, F>(
+    settings: &Settings,
+    on_demand: Option<LammpsOnDemand>,
+    continuation: F,
+) -> FailResult<B>
+where F: FnOnce(EcoModeProof<'_>) -> FailResult<B>,
+{
+    // can't use rsp2_lammps_wrap::potential::None due to Meta type mismatch
+    //
+    // FIXME: This is dumb; creating a dummy potential just so we can make a builder
+    // so we can call this method. LammpsOnDemand should expose an `eco_mode` method.
+    #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+    pub struct NoPotential;
+    impl rsp2_lammps_wrap::Potential for NoPotential {
+        type Meta = CommonMeta;
+
+        fn atom_types(&self, _: &Coords, _: &Self::Meta) -> Vec<rsp2_lammps_wrap::AtomType>
+        { unreachable!() }
+
+        fn init_info(&self, _: &Coords, _: &Self::Meta) -> rsp2_lammps_wrap::InitInfo
+        { unreachable!() }
+
+        fn molecule_ids(&self, _: &Coords, _: &Self::Meta) -> Option<Vec<usize>>
+        { unreachable!() }
+    }
+
+    let trial_dir = None;
+    let pot: &dyn PotentialBuilder = &crate::potential::lammps::Builder::new(
+        trial_dir, on_demand, &settings.threading, &settings.lammps,
+        NoPotential,
+    )?;
+
+    pot.eco_mode(|eco_proof| continuation(eco_proof))
+}
+
 /// Heuristically accept either a trial directory, or a structure directory within one
 pub(crate) fn resolve_trial_or_structure_path(
     path: &PathAbs,
@@ -1430,9 +1476,6 @@ impl TrialDir {
 
     pub fn modified_settings_path(&self, iteration: Iteration) -> PathBuf
     { self.join(format!("ev-loop-modes-{:02}.yaml", iteration)) }
-
-    pub fn uncompressed_gamma_dynmat_path(&self, iteration: Iteration) -> PathBuf
-    { self.join(format!("gamma-dynmat-{:02}.json", iteration)) }
 
     pub fn gamma_dynmat_path(&self, iteration: Iteration) -> PathBuf
     { self.join(format!("gamma-dynmat-{:02}.npz", iteration)) }

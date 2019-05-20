@@ -17,6 +17,7 @@ use crate::potential::{self, PotentialBuilder, DiffFn, BondDiffFn, FlatDiffFn};
 use crate::meta::{self, prelude::*};
 use crate::hlist_aliases::*;
 use crate::math::basis::{Basis3, EvDirection};
+use crate::traits::Save;
 
 use super::trial::TrialDir;
 use super::GammaSystemAnalysis;
@@ -65,7 +66,7 @@ impl TrialDir {
             )?;
 
             let dynmat = self.do_compute_dynmat(settings, pot, &coords, meta.sift())?;
-            self.write_dynmat(&dynmat, iteration)?;
+            dynmat.save(self.gamma_dynmat_path(iteration))?;
 
             // rsp2-acgsd-and-dynmat stops here
             if stop_after_dynmat {
@@ -73,7 +74,7 @@ impl TrialDir {
             }
 
             let (freqs, evecs) = pot.eco_mode(|eco_proof| {
-                self.do_diagonalize_dynmat(settings, dynmat, eco_proof)
+                super::do_diagonalize_dynmat(settings, dynmat, eco_proof)
             })?;
 
             trace!("============================");
@@ -163,7 +164,7 @@ impl TrialDir {
             Some(cfg::UnfoldBands::Zheng {}) => true,
         };
 
-        let ev_analysis = super::run_gamma_system_analysis(
+        let ev_analysis = super::do_gamma_system_analysis(
             &coords, meta.sift(), freqs, evecs, Some(classifications),
             unfold_bands,
         )?;

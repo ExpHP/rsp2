@@ -330,6 +330,14 @@ impl Builder {
     pub fn update_style(&mut self, value: UpdateStyle) -> &mut Self
     { self.update_style = value; self }
 
+    // FIXME: The Builder is a really awkward and inappropriate location for this.
+    // Ideally it would be on LammpsOnDemand, but it was embedded into the builder so
+    // that rsp2_tasks doesn't need to carry around an extra piece of environment.
+    //
+    /// Run a continuation in "eco mode," causing the other processes to stop competing
+    /// for CPU time.
+    ///
+    /// This only has an effect after a `LammpsOnDemand` has been set using `on_demand`.
     pub fn eco_mode(&self, cont: &mut dyn FnMut())
     { self.make_instance.0.eco_mode(cont) }
 
