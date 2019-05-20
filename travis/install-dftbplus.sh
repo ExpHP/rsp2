@@ -31,7 +31,7 @@ CACHE=$HOME/cache/dftbplus-${DFTBPLUS_REV}
     # install_api is a bit messy and incomplete.
     rm "$INCLUDEDIR"/*.mod # don't need all these fortran modules
     install -Dm644 LICENSE "$DATAROOTDIR/licenses/dftbplus/LICENSE"
-    install -Dm644 api/mm/dftbplus.h "$INSTALLDIR/dftbplus.h"
+    install -Dm644 api/mm/dftbplus.h "$PREFIX/dftbplus.h"
     install -D _build/external/xmlf90/libxmlf90.a "$LIBDIR/libxmlf90.a"
 
     mkdir -p "$LIBDIR/pkgconfig"
