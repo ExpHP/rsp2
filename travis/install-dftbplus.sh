@@ -41,7 +41,7 @@ lib_other_c=$OTHERLIBS_C
 api_version=$API_VERSION
 git_version=$GIT_VERSION
 
-prefix=/usr/local
+prefix=$PREFIX
 exec_prefix=\${prefix}
 libdir=\${exec_prefix}/lib
 includedir=\${prefix}/include
