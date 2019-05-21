@@ -26,6 +26,8 @@ pub mod cli_test;
 pub mod filetypes;
 pub use self::cli_test::{CheckFile, CliTest};
 
+pub use self::cli_test::Result;
+
 // used to make queries into tests/resources dryer, with quicker error messages on nonexistent paths
 pub fn resource(path: &str) -> PathBuf {
     let dir = path_abs::PathDir::new("tests/resources").unwrap_or_else(|e| panic!(e));

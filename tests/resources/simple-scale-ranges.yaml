@@ -1,0 +1,29 @@
+# NOTE: apply this after defaults.yaml
+
+potential:
+  - kc-z-new:
+      cutoff: 14
+      cutoff-length: 0 # simulate lammps' quirks
+  - rebo-new:
+      params: lammps
+
+# enable optimization before relaxation
+scale-ranges:
+  scalables:
+    - parameter:
+        axis-mask: [1, 1, 0]
+        guess: 2.46
+        range: [2.38, 2.54]
+    - uniform-layer-sep:
+        guess: 3.38
+        range: [3.15, 3.55]
+
+# disable optimization during relaxation
+parameters: ~
+
+phonons:
+  eigensolver:
+    rsp2:
+      dense: true
+
+bond-radius: 1.8

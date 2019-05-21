@@ -1,8 +1,8 @@
-use ::rsp2_integration_test::{CliTest, filetypes, resource, cli_test};
+use ::rsp2_integration_test::{CliTest, filetypes, resource, cli_test, Result};
 
 #[test]
 #[ignore] // This test is expensive; use `cargo test -- --ignored` to run it!
-fn gnr_test() {
+fn gnr_test() -> Result<()> {
     let env = cli_test::Environment::init();
     CliTest::cargo_binary(&env, "rsp2")
         .arg("-c").arg(resource("defaults.yaml"))
@@ -20,5 +20,5 @@ fn gnr_test() {
                 abs_tol: 1e-1,
             },
         )
-        .run().unwrap();
+        .run()
 }

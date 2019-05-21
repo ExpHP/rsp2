@@ -62,11 +62,13 @@ pub(crate) fn optimize_layer_parameters(
     // cause different values to be chosen for the earlier parameters.
     for _ in 0..settings.repeat_count {
         for &Scalable { ref name, ref spec, ref setter } in &scalables {
-            trace!("Optimizing {}", name);
-
             let best = match *spec {
-                cfg::ScalableRange::Exact { value } => value,
+                cfg::ScalableRange::Exact { value } => {
+                    trace!("Fixing {} at {}", name, value);
+                    value
+                },
                 cfg::ScalableRange::Search { guess: _, range } => {
+                    trace!("Optimizing {}", name);
                     let best = Golden::new()
                         .stop_condition(&from_json!({"interval-size": 1e-7}))
                         .run(range, |a| {
