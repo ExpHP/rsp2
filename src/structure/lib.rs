@@ -40,9 +40,9 @@ pub use crate::algo::layer;
 
 mod core;
 mod algo;
-mod oper;
 mod util;
 mod element;
+mod symmops;
 
 //---------------------------
 // public reexports; API
@@ -56,7 +56,7 @@ pub use crate::algo::find_perm::Missing;
 pub use crate::element::Element;
 pub use crate::element::consts as consts;
 
-pub use crate::oper::symmops::{IntRot, CartOp};
+pub use crate::symmops::{IntRot, CartOp};
 
 pub mod miller {
     //! Utilities for working with Miller indices of planes.
