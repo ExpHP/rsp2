@@ -37,6 +37,10 @@ name = "rsp2-converge-vdw"
 path = "src/binary-shims/rsp2-converge-vdw.rs"
 
 [[bin]]
+name = "rsp2-dynmat-analysis"
+path = "src/binary-shims/rsp2-dynmat-analysis.rs"
+
+[[bin]]
 name = "rsp2-library-paths"
 path = "src/binary-shims/rsp2-library-paths.rs"
 

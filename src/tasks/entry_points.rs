@@ -454,7 +454,7 @@ pub fn sparse_analysis(bin_name: &str, version: VersionInfo) -> ! {
 
 // FIXME yet another *-analysis entry point.
 //       This one takes the dynamical matrix as input, and requires access to the settings file.
-// %% CRATES: binary: rsp2-sparse-analysis %%
+// %% CRATES: binary: rsp2-dynmat-analysis %%
 pub fn dynmat_analysis(bin_name: &str, version: VersionInfo) -> ! {
     wrap_main(version, |logfile, mpi_on_demand| {
         let (app, de) = CliDeserialize::augment_clap_app({
