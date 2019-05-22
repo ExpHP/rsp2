@@ -187,13 +187,11 @@ impl<M: Clone + 'static, P: LammpsPotential<Meta=M> + Clone + Send + Sync + 'sta
     {
         struct MyDispFn<Q: LammpsPotential>(::rsp2_lammps_wrap::DispFn<Q>);
         impl<Mm: Clone + 'static, Q: LammpsPotential<Meta=Mm>> DispFn for MyDispFn<Q> {
-            fn compute_dense_force(&mut self, disp: (usize, V3)) -> FailResult<Vec<V3>>
-            { self.0.compute_force_at_disp(disp) }
-
             fn compute_sparse_force_delta(&mut self, disp: (usize, V3)) -> FailResult<BTreeMap<usize, V3>>
             {
                 let orig_force = self.0.equilibrium_force();
-                helper::sparse_force_from_dense_deterministic(self, &orig_force, disp)
+                let final_force = self.0.compute_force_at_disp(disp)?;
+                Ok(helper::sparse_deltas_from_dense_deterministic(&orig_force, &final_force))
             }
         }
 

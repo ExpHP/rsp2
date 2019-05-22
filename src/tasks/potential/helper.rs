@@ -115,13 +115,6 @@ where
     A: DispFn,
     B: DispFn,
 {
-    fn compute_dense_force(&mut self, disp: (usize, V3)) -> FailResult<Vec<V3>>
-    {
-        let a_force = self.0.compute_dense_force(disp)?;
-        let b_force = self.1.compute_dense_force(disp)?;
-        Ok(zip_eq!(a_force, b_force).map(|(a, b)| a + b).collect())
-    }
-
     fn compute_sparse_force_delta(&mut self, disp: (usize, V3)) -> FailResult<BTreeMap<usize, V3>>
     {
         let mut larger = self.0.compute_sparse_force_delta(disp)?;
@@ -169,20 +162,17 @@ where Meta: Clone + 'static,
 impl<Meta> DispFn for DefaultDispFn<Meta>
 where Meta: Clone,
 {
-    fn compute_dense_force(&mut self, disp: (usize, V3)) -> FailResult<Vec<V3>>
-    {Ok({
-        let mut carts = self.equilibrium_carts.to_vec();
-        carts[disp.0] += disp.1;
-
-        let coords = CoordsKind::Carts(carts);
-        let coords = Coords::new(self.lattice.clone(), coords);
-        self.diff_fn.compute_force(&coords, self.meta.clone())?
-    })}
-
     fn compute_sparse_force_delta(&mut self, disp: (usize, V3)) -> FailResult<BTreeMap<usize, V3>>
     {
-        let orig_force = self.equilibrium_force.clone();
-        sparse_force_from_dense_deterministic(self, &orig_force, disp)
+        let final_force = {
+            let mut carts = self.equilibrium_carts.to_vec();
+            carts[disp.0] += disp.1;
+
+            let coords = CoordsKind::Carts(carts);
+            let coords = Coords::new(self.lattice.clone(), coords);
+            self.diff_fn.compute_force(&coords, self.meta.clone())?
+        };
+        Ok(sparse_deltas_from_dense_deterministic(&self.equilibrium_force, &final_force))
     }
 }
 
@@ -201,23 +191,14 @@ where Meta: Clone,
 ///
 /// Which is good, because it's tough to define an approximate scale for comparison
 /// here, as the forces are the end-result of catastrophic cancellations.
-pub fn sparse_force_from_dense_deterministic(
-    disp_fn: &mut dyn DispFn,
+pub fn sparse_deltas_from_dense_deterministic(
     original_force: &[V3],
-    disp: (usize, V3),
-) -> FailResult<BTreeMap<usize, V3>> {
-    let displaced_force = disp_fn.compute_dense_force(disp)?;
-
-    let diffs = {
-        zip_eq!(original_force, displaced_force).enumerate()
-            .map(|(atom, (old, new))| (atom, new - old))
-            .filter(|&(_, v)| v != V3::zero())
-
-        // this one is a closer approximation of phonopy, producing a dense matrix with
-        // just the new forces (assuming the old ones are zero)
-//                .map(|(atom, (_old, new))| (atom, new))
-    };
-    Ok(diffs.collect())
+    final_force: &[V3],
+) -> BTreeMap<usize, V3> {
+    zip_eq!(original_force, final_force).enumerate()
+        .map(|(atom, (old, new))| (atom, new - old))
+        .filter(|&(_, v)| v != V3::zero())
+        .collect()
 }
 
 //--------------------------------

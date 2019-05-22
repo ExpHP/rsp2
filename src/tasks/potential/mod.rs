@@ -413,25 +413,14 @@ pub fn ensure_only_carts(coords: &mut Coords) {
 /// pre-computed equilibrium forces. It may behave differently from a DiffFn in order to take
 /// advantage of reliable properties of the structures produced by displacements.
 pub trait DispFn {
-    // FIXME: This should be made optional.
-    /// Compute the total force after the displacement.
-    ///
-    /// The original structure may or may not be assumed to have zero total force.
-    fn compute_dense_force(&mut self, disp: (usize, V3)) -> FailResult<Vec<V3>>;
-
     /// Compute the change in force caused by the displacement, in a sparse representation.
     ///
     /// The original structure may or may not be assumed to have zero total force.
-    ///
-    /// This is not required to be identical to what one would obtain from `compute_dense_force`;
-    /// the two methods may differ in assumptions.
+    /// (most implementations do *not* assume zero force)
     fn compute_sparse_force_delta(&mut self, disp: (usize, V3)) -> FailResult<BTreeMap<usize, V3>>;
 }
 
 impl DispFn for Box<dyn DispFn> {
-    fn compute_dense_force(&mut self, disp: (usize, V3)) -> FailResult<Vec<V3>>
-    { (**self).compute_dense_force(disp) }
-
     fn compute_sparse_force_delta(&mut self, disp: (usize, V3)) -> FailResult<BTreeMap<usize, V3>>
     { (**self).compute_sparse_force_delta(disp) }
 }
