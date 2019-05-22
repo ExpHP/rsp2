@@ -311,9 +311,8 @@ impl TrialDir {
                 // different from what spglib saw, but not so large that we risk pairing
                 // the wrong atoms
                 //
-                // The 1e-15 is in case symprec = 0, as we want to ensure it can still find the
-                // permutation for the identity operator.
-                settings.phonons.symmetry_tolerance * 3.0 + 1e-15,
+                // the case of symmetry_tolerance = 0 is explicitly supported by the method
+                settings.phonons.symmetry_tolerance * 3.0,
             )
         };
 

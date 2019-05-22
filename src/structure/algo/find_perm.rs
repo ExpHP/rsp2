@@ -27,6 +27,8 @@ use failure::{Backtrace, Error};
 /// are not included in the list of operators.  Be aware that if the superlattice
 /// breaks symmetries of the primitive structure, those symmetries might not have
 /// a valid representation as a permutation (and the method will fail).
+///
+/// `tol = 0` is explicitly supported as long as you only seek the identity.
 //
 // (NOTE: currently, it actually fails even earlier, when trying to construct IntRot
 //        (which fails if and only if the superlattice breaks the symmetry).
@@ -59,6 +61,8 @@ pub fn spacegroup_coperms(
 /// are not included in the list of operators.  Be aware that if the superlattice
 /// breaks symmetries of the primitive structure, those symmetries might not have
 /// a valid representation as a permutation (and the method will fail).
+///
+/// `tol = 0` is explicitly supported as long as you only seek the identity.
 //
 // (NOTE: currently, it actually fails even earlier, when trying to construct IntRot
 //        (which fails if and only if the superlattice breaks the symmetry).
@@ -116,6 +120,17 @@ pub fn spacegroup_coperms_with_meta<M: Ord>(
         |a, b| a.then(b),
     );
 
+    // `transform_ops` must convert to cartesian and back, so it may introduce
+    // errors on the order of a few ULP into the fracs.  Add a bit more fuzz to
+    // the tolerance to account for this, scaling it with the lattice since the
+    // tolerance is applied in cartesian space.
+    //
+    // This ensures that the identity transformation can be found for tol = 0.
+    //
+    // 1e-12 was found to be large enough for matrices of sufficiently small skew,
+    // as verified by the unit tests.
+    let adjusted_tol = tol + 1e-12 * f64::cbrt(lattice.volume());
+
     tree.try_compute_homomorphism(
         // Generators: Do a (very expensive!) brute force search.
         |op_ind, _int_op| {
@@ -124,7 +139,7 @@ pub fn spacegroup_coperms_with_meta<M: Ord>(
                 lattice,
                 metadata, CoordsKind::Fracs(&from_fracs),
                 metadata, CoordsKind::Fracs(&to_fracs[..]),
-                tol,
+                adjusted_tol,
             )
         },
         // Other operators: Quickly compose the results from other operators.
@@ -407,6 +422,9 @@ mod tests {
     fn random_vec<T: Rand>(n: usize) -> Vec<T>
     { (0..n).map(|_| rand::random()).collect() }
 
+    fn random_range_vec(n: usize, (min, max): (f64, f64)) -> Vec<f64>
+    { (0..n).map(|_| min + (max - min) * rand::random::<f64>()).collect() }
+
     fn random_problem(n: usize) -> (Vec<V3>, Perm, Vec<V3>)
     {
         let original: Vec<[f64; 3]> = random_vec(n);
@@ -474,6 +492,26 @@ mod tests {
 
             assert_eq!(output, perm);
         }
+    }
+
+    #[test]
+    fn spacegroup_identity_at_tol_zero() {
+        //let n_test = 20000; // stress test
+        let n_test = 10;
+        let n_atom = 33;
+
+        std::iter::repeat_with(|| Lattice::random_uniform(200.0))
+            .filter(|lattice| !lattice.is_large_skew(0.0))
+            .take(n_test)
+            .for_each(|lattice| {
+                let fracs = random_range_vec(3 * n_atom, (-4.0, 4.0));
+                let ops = vec![CartOp::eye()];
+                let coords = Coords::new(lattice, CoordsKind::Fracs(fracs.nest().to_vec()));
+
+                let deperms = spacegroup_deperms(&coords, &ops, 0.0).unwrap();
+
+                assert_eq!(deperms, vec![Perm::eye(n_atom)]);
+            });
     }
 
     // FIXME known failure

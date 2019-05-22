@@ -214,6 +214,31 @@ impl Lattice {
             [m20, m21, m22],
         ])
     }
+
+    /// Determine if the lattice is highly skewed.
+    ///
+    /// More specifically, this returns true if there exist `i != k` such that:
+    ///
+    /// ```text
+    /// abs(b_i dot b_k) > b_i dot b_i
+    /// ```
+    ///
+    /// where `b_i` are the reciprocal basis vectors.
+    /// Adding some `fuzz` will cause more cells to be classified as not skewed.
+    pub(crate) fn is_large_skew(&self, fuzz: f64) -> bool {
+        let recip = self.reciprocal();
+        let recip_metric = recip.matrix() * &recip.matrix().t(); // matrix of dot products
+        for i in 0..3 {
+            for k in 0..3 {
+                if i != k {
+                    if f64::abs(recip_metric[i][k]) > recip_metric[i][i] * (1.0 + fuzz) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
 }
 
 /// Helper constructors

@@ -512,25 +512,16 @@ fn sufficiently_large_centered_supercell(
         //
         //                         abs(b_i dot b_k) <= b_i dot b_i
         //
-        let recip = lattice.reciprocal();
-        let recip_metric = recip.matrix() * &recip.matrix().t(); // matrix of dot products
-        for i in 0..3 {
-            for k in 0..3 {
-                if i != k {
-                    ensure!(
-                        // The fuzz is to allow matrices like this, where two faces tie.
-                        // (i.e. one of the rays exits through an edge of the parallelepiped):
-                        //
-                        //                     [[1 1 0], [0 1 0], [0 0 1]]
-                        //
-                        // (which is a useful lattice for test cases since it is unimodular)
-                        //                                                                   - ML
-                        f64::abs(recip_metric[i][k]) <= recip_metric[i][i] * (1.0 + 1e-4),
-                        "cell is too skewed for bond search"
-                    );
-                }
-            }
-        }
+        // This condition is `!Lattice::is_large_skew()`.
+        //
+        // The fuzz is to allow matrices like this, where two faces tie.
+        // (i.e. one of the rays exits through an edge of the parallelepiped):
+        //
+        //                     [[1 1 0], [0 1 0], [0 0 1]]
+        //
+        // (which is a useful lattice for test cases since it is unimodular)
+        //                                                                   - ML
+        ensure!(!lattice.is_large_skew(1e-4), "cell is too skewed for bond search");
 
         // Return the plane distances from the origin.
         Ok(V3::from_fn(|axis| 0.5 * lattice.plane_spacing(V3::axis_unit(axis))))
