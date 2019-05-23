@@ -1,10 +1,13 @@
 # NOTE: apply this after defaults.yaml
 
 potential:
-  rebo: {}
+  rebo-new:
+    params: lammps
 
 scale-ranges:
   scalables: []
+
+parameters: [a, ~, ~]
 
 phonons:
   eigensolver:

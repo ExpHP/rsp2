@@ -1,3 +1,9 @@
+# This is a set of default parameters shared by rsp2's unit tests
+# to make them easier to update.
+#
+# IMPORTANT:
+# The settings in here ARE NOT necessarily the default settings used by rsp2.
+
 # potential: (no default)
 
 scale-ranges:
@@ -35,10 +41,12 @@ ev-chase:
 threading: "lammps"
 
 phonons:
-  supercell: {target: [0, 0, 0]}
+  supercell: {target: [35, 35, 35]}
   symmetry-tolerance: 1e-2
   displacement-distance: 1e-4
   disp-finder:
     rsp2: {}
 
 layer-gamma-threshold: 0.2
+
+animate: {}
