@@ -159,16 +159,20 @@ pub trait PotentialBuilder<Meta = CommonMeta>
     where Meta: Clone + 'static,
     ;
 
-    /// default impl for initialize_disp_fn, which cannot be inlined because it needs `Self: Sized`.
+    /// Default impl for `initialize_disp_fn`, which cannot be inlined because it needs `Self: Sized`.
     ///
-    /// **This method exists solely for the convenience of implementors of the trait.** It should not
-    /// be overridden, and the only place it should ever be used is in the definition of
-    /// `initialize_disp_fn` in a trait impl.
+    /// **This method exists solely for the convenience of implementors of the trait.**
+    /// It should not be overridden, and the only place it should ever be used is in the definition
+    /// of `initialize_disp_fn` in a trait impl.
     fn _default_initialize_disp_fn(&self, coords: &Coords, meta: Meta) -> FailResult<Box<dyn DispFn>>
     where
         Meta: Clone + 'static,
         Self: Sized,
-    { Ok(Box::new(helper::DefaultDispFn::initialize(coords, meta, self)?)) }
+    {
+        let diff_fn = self.initialize_diff_fn(coords, meta.clone())?;
+        let disp_fn = helper::DefaultDispFn::initialize(coords, meta, diff_fn)?;
+        Ok(Box::new(disp_fn) as Box<_>)
+    }
 
     /// Convenience adapter for one-off computations.
     ///
@@ -379,10 +383,22 @@ pub struct BondGrad {
     pub cart_vector: V3,
     /// The gradient of a summand in the potential with respect to that vector.
     pub grad: V3,
-    pub minus_site: usize,
+    /// The site that experiences a gradient of `+grad`.
     pub plus_site: usize,
+    /// The site that experiences a gradient of `-grad`.
+    pub minus_site: usize,
 }
 
+/// A generally superior alternative to `DiffFn` that gives forces per bond.
+///
+/// Notable advantages:
+///
+/// * Enables optimization of lattice parameters.
+/// * In the future, may be used to guarantee that the dynamical matrix *never* needs a supercell,
+///   even away from the gamma point.
+///
+/// Not all potentials are capable of producing one of these.
+/// (those implemented by external codes typically only expose total forces).
 pub trait BondDiffFn<Meta> {
     fn compute(&mut self, coords: &Coords, meta: Meta) -> FailResult<(f64, Vec<BondGrad>)>;
 

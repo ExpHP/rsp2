@@ -144,6 +144,12 @@ where
 
 //--------------------------------
 
+/// A default implementation for `PotentialBuilder::initialize_disp_fn` in terms of a `DiffFn`.
+///
+/// It computes the dense forces at each displacement and subtracts the forces of the
+/// original coordinates.  Differences are suppressed from the result only where they are
+/// exactly zero (i.e. it is expected that the potential will produce identical forces
+/// for atoms far away from the displaced atom).
 pub struct DefaultDispFn<Meta> {
     // this is carts instead of Coords for the same reason that `ensure_only_carts` exists;
     // see that function
@@ -157,14 +163,12 @@ pub struct DefaultDispFn<Meta> {
 impl<Meta> DefaultDispFn<Meta>
 where Meta: Clone + 'static,
 {
-    pub fn initialize(equilibrium_coords: &Coords, meta: Meta, pot: &dyn PotentialBuilder<Meta>) -> FailResult<Self>
+    pub fn initialize(equilibrium_coords: &Coords, meta: Meta, mut diff_fn: Box<dyn DiffFn<Meta>>) -> FailResult<Self>
     {Ok({
         let lattice = equilibrium_coords.lattice().clone();
         let equilibrium_carts = equilibrium_coords.to_carts();
 
-        let equilibrium_coords = Coords::new(lattice.clone(), CoordsKind::Carts(equilibrium_carts.clone()));
-
-        let mut diff_fn = pot.initialize_diff_fn(&equilibrium_coords, meta.clone())?;
+        let equilibrium_coords = equilibrium_coords.with_carts(equilibrium_carts.clone());
         let equilibrium_force = diff_fn.compute_force(&equilibrium_coords, meta.clone())?;
 
         DefaultDispFn { lattice, equilibrium_carts, equilibrium_force, meta, diff_fn }
@@ -215,6 +219,120 @@ pub fn sparse_deltas_from_dense_deterministic(
 
 //--------------------------------
 
+pub use disp_fn_helper::DispFnHelper;
+pub mod disp_fn_helper {
+    use super::*;
+
+    /// A type that can help simplify `DispFn` implementations by remembering the equilibrium
+    /// coords and gradient.
+    ///
+    /// With this type, you only need to implement the `disp_fn_helper::`[`Callback`] trait
+    /// instead of `DispFn`.  The `Callback` trait is designed to be implemented by the same
+    /// type that implements `DiffFn` or `BondDiffFn`.
+    pub struct DispFnHelper<Meta, Other> {
+        equilibrium_coords: Coords,
+        equilibrium_grad: Option<Vec<V3>>,
+        equilibrium_bond_grad: Option<Vec<BondGrad>>,
+        meta: Meta,
+        other: Other,
+    }
+
+    struct MyDispFn<Meta, Other> {
+        builder: DispFnHelper<Meta, Other>,
+        diff_fn: Box<dyn Callback<Meta, Other>>,
+    }
+
+    impl<Meta> DispFnHelper<Meta, ()> {
+        pub fn new(equilibrium_coords: &Coords, meta: Meta) -> Self
+        { DispFnHelper {
+            equilibrium_coords: equilibrium_coords.clone(),
+            equilibrium_grad: None,
+            equilibrium_bond_grad: None,
+            other: (),
+            meta,
+        }}
+    }
+
+    impl<Meta, Other> DispFnHelper<Meta, Other> {
+        #[allow(unused)]
+        pub fn with_grad(mut self, grad: Vec<V3>) -> Self
+        { self.equilibrium_grad = Some(grad); self }
+
+        #[allow(unused)]
+        pub fn with_bond_grad(mut self, grad: Vec<BondGrad>) -> Self
+        { self.equilibrium_bond_grad = Some(grad); self }
+
+        pub fn with_other<NewOther>(self, other: NewOther) -> DispFnHelper<Meta, NewOther>
+        { DispFnHelper {
+            equilibrium_coords: self.equilibrium_coords,
+            equilibrium_grad: self.equilibrium_grad,
+            equilibrium_bond_grad: self.equilibrium_bond_grad,
+            meta: self.meta,
+            other,
+        }}
+    }
+
+    impl<Meta, Other> DispFnHelper<Meta, Other>
+    where
+        Meta: Clone + 'static,
+        Other: 'static,
+    {
+        pub fn build(self, diff_fn: impl Callback<Meta, Other> + 'static) -> Box<dyn DispFn>
+        { Box::new(MyDispFn {
+            builder: self,
+            diff_fn: Box::new(diff_fn),
+        })}
+    }
+
+    /// Data recorded about the equilibrium structure to make a `DispFn` easier to implement.
+    pub struct Context<'a, Meta, Other> {
+        pub equilibrium_coords: &'a Coords,
+        pub meta: Meta,
+        pub other: &'a Other,
+        /// This will be `Some(_)` only if `with_grad` was called on the `DispFnHelper`.
+        pub equilibrium_grad: Option<&'a [V3]>,
+        /// This will be `Some(_)` only if `with_bond_grad` was called on the `DispFnHelper`.
+        pub equilibrium_bond_grad: Option<&'a [BondGrad]>,
+        _no_complete_destructure: (),
+    }
+
+    /// Alternative to the `DispFn` trait that's generally easier to implement for a type that
+    /// already implements `DiffFn` or `BondDiffFn`.
+    ///
+    /// It will receive all of the context added to the `DispFnHelper` about the equilibrium
+    /// structure.
+    pub trait Callback<Meta, Other> {
+        fn compute_sparse_grad_delta(
+            &mut self,
+            context: Context<'_, Meta, Other>,
+            disp: (usize, V3),
+        ) -> FailResult<BTreeMap<usize, V3>>;
+    }
+
+    impl<Meta, Other> DispFn for MyDispFn<Meta, Other>
+    where Meta: Clone,
+    {
+        fn compute_sparse_force_delta(&mut self, disp: (usize, V3)) -> FailResult<BTreeMap<usize, V3>>
+        {Ok({
+            let context = Context {
+                equilibrium_coords: &self.builder.equilibrium_coords,
+                equilibrium_grad: self.builder.equilibrium_grad.as_ref().map(|x| &x[..]),
+                equilibrium_bond_grad: self.builder.equilibrium_bond_grad.as_ref().map(|x| &x[..]),
+                meta: self.builder.meta.clone(),
+                other: &self.builder.other,
+                _no_complete_destructure: (),
+            };
+
+            let grad = self.diff_fn.compute_sparse_grad_delta(context, disp)?;
+
+            // grad to force
+            grad.into_iter().map(|(i, grad)| (i, -grad)).collect()
+        })}
+    }
+}
+
+//--------------------------------
+
 /// Provides a default DiffFn that can be used by a potential that defines a BondDiffFn.
 pub struct DiffFnFromBondDiffFn<Meta>(Box<dyn BondDiffFn<Meta>>);
 
@@ -243,4 +361,15 @@ where Meta: Clone,
 
     fn check(&mut self, coords: &Coords, meta: Meta) -> FailResult<()>
     { self.0.check(coords, meta) }
+}
+
+//--------------------------------
+
+pub fn sparse_grad_from_bond_grad(bond_grads: impl IntoIterator<Item=BondGrad>) -> BTreeMap<usize, V3> {
+    let mut map = BTreeMap::new();
+    for item in bond_grads {
+        *map.entry(item.plus_site).or_insert_with(V3::zero) += item.grad;
+        *map.entry(item.minus_site).or_insert_with(V3::zero) -= item.grad;
+    }
+    map
 }
