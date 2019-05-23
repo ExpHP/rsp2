@@ -7,7 +7,7 @@ fn dynmat_lammps() -> Result<()> {
     CliTest::cargo_binary(&env, "rsp2")
         .arg("-c").arg(resource("defaults.yaml"))
         .arg("-c").arg(resource("sparse.yaml"))
-        .arg(resource("simple.vasp"))
+        .arg(resource("001-a-relaxed-kcz.vasp"))
         .arg("-o").arg("out")
         .check_file::<filetypes::Dynmat>(
             "out/gamma-dynmat.npz".as_ref(),
@@ -28,7 +28,7 @@ fn dynmat_rust() -> Result<()> {
     CliTest::cargo_binary(&env, "rsp2")
         .arg("-c").arg(resource("defaults.yaml"))
         .arg("-c").arg(resource("sparse-rust.yaml"))
-        .arg(resource("simple.vasp"))
+        .arg(resource("001-a-relaxed-kcz.vasp"))
         .arg("-o").arg("out")
         .check_file::<filetypes::Dynmat>(
             "out/gamma-dynmat.npz".as_ref(),
