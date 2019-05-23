@@ -196,6 +196,11 @@ fn graphene_denseforce_111() {
         "tests/resources/force-constants/graphene-111.fc.json",
         // * same dynmat output as for 771; a supercell should not be necessary
         //   for the dynamical matrix at gamma
+        //
+        // FIXME:
+        //   That is not true! If multiple images of an atom move in graphene,
+        //   it will affect the bond angle terms.
+        //   What's going on here?  How were these force constants obtained?
         "tests/resources/force-constants/graphene-gamma.dynmat.json",
         1e-10,
         1e-12,

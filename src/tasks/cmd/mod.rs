@@ -296,12 +296,13 @@ impl TrialDir {
         >,
     ) -> FailResult<DynamicalMatrix>
     {Ok({
-        // FIXME: A great deal of logic in here exists for dealing with supercells,
-        //        which are pointless when we only compute at the gamma point.
+        // FIXME:
+        //   A great deal of logic in here exists for dealing with supercells.
+        //   It ought to be factored out somehow to be less in your face,
+        //    so that this function doesn't have so many responsibilities.
         //
-        //        I don't want to tear those considerations out since it was difficult to write,
-        //        but it ought to be factored out somehow to be less in your face, and especially
-        //        so that it isn't in a function that is clearly related to relaxation.
+        //   (it already has the fairly big responsibility of chaining together
+        //    many utilities)
 
         let compute_deperms = |coords: &_, cart_ops: &_| {
             rsp2_structure::find_perm::spacegroup_deperms(

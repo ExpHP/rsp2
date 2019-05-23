@@ -35,8 +35,6 @@ ev-chase:
 threading: "lammps"
 
 phonons:
-  # no supercell is required for gamma dynamical matrix
-  #supercell: {target: [35, 35, 0]}
   supercell: {target: [0, 0, 0]}
   symmetry-tolerance: 1e-2
   displacement-distance: 1e-4

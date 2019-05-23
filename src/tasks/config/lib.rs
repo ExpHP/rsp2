@@ -800,17 +800,25 @@ pub struct Phonons {
     ///
     /// * Given an atom with index `p` in the primitive cell...
     /// * ... and an atom with index `s` in the supercell...
-    /// * ... `p` must interact with at most one image of `s` under the superlattice.
+    /// * ... there must be at most one image of `s` under the supercell lattice whose
+    ///   position affects the total force acting upon `p`.
     ///
-    /// The primary role of the supercell is to help ensure that multiple, distinct force
-    /// terms are computed when a primitive atom `p` interacts with multiple images of a
-    /// primitive atom `q` under the primitive lattice. (each image will have a different
-    /// phase factor in the dynamical matrix at nonzero `Q` points, and therefore must be
-    /// individually accounted for in the force constants)
+    /// The role of the supercell is twofold:
     ///
-    /// Strictly speaking, no supercell should be required for computing the dynamical
-    /// matrix at Gamma, even for small primitive cells. (If one is required to get the
-    /// right eigensolutions at gamma, it might indicate a bug in rsp2's potentials)
+    /// 1. To ensure that multiple, distinct force terms are computed when a primitive atom `p`
+    ///    interacts with multiple images of a primitive atom `q` under the primitive lattice.
+    ///    (so that each interaction may receive a different phase factor when computing the
+    ///     dynamical matrix at nonzero `Q` points; strictly speaking, this concern does not
+    ///     apply to `rsp2` as we only compute at the gamma point)
+    ///
+    /// 2. To isolate the effects of displacing one atom.  For most potentials, the implementation
+    ///    will simply construct the supercell, displace the `p` site in that cell, and compute the
+    ///    new forces.  This means that all images of `p` under the supercell will also move.
+    ///
+    /// Thanks to the second point, even gamma point requires a supercell for sufficiently small
+    /// structures.  For instance, in REBO computed on the primitive unit cell of graphite,
+    /// displacing one atom will also displace the atoms two bonds away, which would have an
+    /// undesirable impact on the bond angle terms.
     pub supercell: SupercellSpec,
 }
 fn _phonons__eigensolver() -> PhononEigensolver {
