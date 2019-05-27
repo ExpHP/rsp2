@@ -11,7 +11,7 @@ fn dynmat_lammps() -> Result<()> {
         .arg("-o").arg("out")
         .check_file::<filetypes::Dynmat>(
             "out/gamma-dynmat.npz".as_ref(),
-            resource("sparse-out/gamma-dynmat.npz").as_ref(),
+            resource("sparse-out/gamma-dynmat-lammps.npz").as_ref(),
             filetypes::DynmatTolerances {
                 rel_tol: 1e-9,
                 abs_tol: 1e-9,
@@ -32,7 +32,7 @@ fn dynmat_rust() -> Result<()> {
         .arg("-o").arg("out")
         .check_file::<filetypes::Dynmat>(
             "out/gamma-dynmat.npz".as_ref(),
-            resource("sparse-out/gamma-dynmat.npz").as_ref(),
+            resource("sparse-out/gamma-dynmat-rust.npz").as_ref(),
             filetypes::DynmatTolerances {
                 rel_tol: 1e-9,
                 abs_tol: 1e-9,

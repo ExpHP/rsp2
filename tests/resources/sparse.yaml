@@ -16,3 +16,6 @@ cg.stop-condition: true # stop immediately
 bond-radius: 1.8
 lammps:
   processor-axis-mask: [true, true, false]
+
+phonons.supercell.~~REPLACE~~:
+  target: [20, 20, 0]
