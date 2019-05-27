@@ -13,7 +13,6 @@ use crate::FailResult;
 
 use std::io::prelude::*;
 use std::borrow::Borrow;
-use itertools::Itertools;
 
 use rsp2_structure::{Element, Coords as Coords, Lattice, CoordsKind};
 use rsp2_array_types::{Envee, Unvee};
@@ -74,30 +73,14 @@ fn dump(
     elements: &[Element],
 ) -> FailResult<()>
 {
-    // FIXME replace with e.g. Poscar::set_site_symbols when available
-    let mut group_counts = vec![];
-    let mut group_symbols = vec![];
-    for (key, group) in &elements.iter().group_by(|typ| *typ) {
-        group_counts.push(group.count());
-        group_symbols.push(key.symbol().into());
-    }
-
-    // FIXME use Poscar builder when available
-    let poscar = imp::RawPoscar {
-        comment: title.into(),
-        scale: imp::ScaleLine::Factor(1.0),
-        lattice_vectors: coords.lattice().matrix().into_array(),
-        positions: vasp_poscar::Coords::Cart(coords.to_carts().unvee()),
-        group_symbols: Some(group_symbols),
-        group_counts,
-        velocities: None,
-        dynamics: None,
-    }.validate().map_err(|e| {
-        let e: vasp_poscar::failure::Error = e.into(); e.compat()
-    })?;
-
-    write!(w, "{}", poscar)?;
-
+    write!(w, "{}",
+        vasp_poscar::Builder::new()
+            .comment(title)
+            .lattice_vectors(coords.lattice().matrix().as_array())
+            .positions(vasp_poscar::Coords::Cart(coords.to_carts().unvee()))
+            .site_symbols(elements.iter().map(|&elem| elem.symbol()))
+            .build()?,
+    )?;
     Ok(())
 }
 
@@ -106,42 +89,38 @@ fn load_txt(f: &mut dyn BufRead) -> FailResult<Poscar>
 {
     use vasp_poscar::failure::ResultExt;
     let poscar = imp::Poscar::from_reader(f).compat()?;
-    let imp::RawPoscar {
-        scale, lattice_vectors, positions,
-        group_symbols, group_counts, comment,
-        ..
-    } = poscar.raw();
 
-    // FIXME use Poscar::scaled_lattice_vectors() once it is available
-    // FIXME use Poscar::scaled_cart_positions() once it is available
-    assert_eq!(scale, imp::ScaleLine::Factor(1.0));
-    let lattice = Lattice::from(&lattice_vectors);
-    let coords = match positions {
-        imp::Coords::Cart(p) => CoordsKind::Carts(p.envee()),
-        imp::Coords::Frac(p) => CoordsKind::Fracs(p.envee()),
+    let comment = poscar.comment().to_string();
+    let lattice = Lattice::from(&poscar.scaled_lattice_vectors());
+    let coords = match poscar.scaled_positions() {
+        imp::Coords::Cart(p) => CoordsKind::Carts(p.to_vec().envee()),
+        imp::Coords::Frac(p) => CoordsKind::Fracs(p.to_vec().envee()),
     };
 
     let group_elems = {
         // we need symbols, but prior to VASP 5 they were not even part of
         // the format, so some programs don't write them where they belong.
         // Sometimes they are used as the title comment (by phonopy, ASE...).
-        let group_symbols = group_symbols.unwrap_or_else(|| {
-            let symbols = comment.split_whitespace().map(|s| s.to_string()).collect::<Vec<_>>();
-            assert_eq!(
-                symbols.len(), group_counts.len(),
-                "Symbols must be given either in the standard location or the POSCAR comment.",
-            );
-            // pray for the best.  If they're not symbols, it is at least unlikely
-            // that the next step will erroneously "succeed"
-            symbols
-        });
+        let group_symbols = match poscar.group_symbols() {
+            Some(iter) => iter.map(|s| s.to_string()).collect(),
+            None => {
+                let words = poscar.comment().split_whitespace();
+                let symbols = words.map(|s| s.to_string()).collect::<Vec<_>>();
+                ensure!(
+                    symbols.len() == poscar.group_counts().len(),
+                    "Symbols must be given either in the standard location or the POSCAR comment."
+                );
+                // pray for the best.  If they're not the group symbols, it is at least
+                // unlikely that the next step will erroneously "succeed"
+                symbols
+            },
+        };
         group_symbols.into_iter()
             .map(|sym| Element::from_symbol(&sym))
             .collect::<Result<Vec<Element>, _>>()?
     };
 
-    // FIXME use Poscar method once available
-    let elements = izip!(group_counts, group_elems)
+    let elements = zip_eq!(poscar.group_counts(), group_elems)
         .flat_map(|(c, elem)| std::iter::repeat(elem).take(c))
         .collect::<Vec<_>>();
 

@@ -1225,7 +1225,6 @@ name = "rsp2-structure-io"
 version = "0.1.0"
 dependencies = [
  "failure 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)",
- "itertools 0.7.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.4.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "num-complex 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "rsp2-array-types 0.1.0",
@@ -1236,7 +1235,7 @@ dependencies = [
  "serde 1.0.91 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_derive 1.0.91 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_yaml 0.7.5 (registry+https://github.com/rust-lang/crates.io-index)",
- "vasp-poscar 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vasp-poscar 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -1573,7 +1572,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "vasp-poscar"
-version = "0.1.1"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "dtoa 0.4.3 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1841,7 +1840,7 @@ dependencies = [
 "checksum unindent 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)" = "834b4441326c660336850c5c0926cc20548e848967a5f57bc20c2b741c8d41f4"
 "checksum unreachable 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)" = "382810877fe448991dfc7f0dd6e3ae5d58088fd0ea5e35189655f84e6814fa56"
 "checksum utf8-ranges 1.0.2 (registry+https://github.com/rust-lang/crates.io-index)" = "796f7e48bef87609f7ade7e06495a87d5cd06c7866e6a5cbfceffc558a243737"
-"checksum vasp-poscar 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)" = "f4aa5ab3d31d7347c97258b7010ef3e3a1360b64e4ce2e34a5c1d10ef7e232c4"
+"checksum vasp-poscar 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)" = "5458d7689e35f4fcf6b861e23a71ca2a151e690ed283c73fc29d80174f51570c"
 "checksum vec_map 0.8.1 (registry+https://github.com/rust-lang/crates.io-index)" = "05c78687fb1a80548ae3250346c3db86a80a7cdd77bda190189f2d0a0987c81a"
 "checksum vergen 2.1.3 (registry+https://github.com/rust-lang/crates.io-index)" = "93fb2d57fbc535fcd45548c99b141d2d960995daaf04b864c4d9fe1ea011c819"
 "checksum version_check 0.1.4 (registry+https://github.com/rust-lang/crates.io-index)" = "7716c242968ee87e5542f8021178248f267f295a5c4803beae8b8b7fd9bc6051"

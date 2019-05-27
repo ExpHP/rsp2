@@ -10,7 +10,6 @@ description = "For parsing/writing dumb filetypes."
 path = "lib.rs"
 
 [dependencies]
-!!itertools
 !!failure
 !!vasp-poscar
 !!log
