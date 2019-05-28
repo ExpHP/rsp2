@@ -413,6 +413,7 @@ impl TrialDir {
         let super_deperms = compute_deperms(&super_coords, &cart_ops)?;
 
         if log_enabled!(target: "rsp2_tasks::special::visualize_sparse_forces", log::Level::Trace) {
+            trace!("Creating force log files for rsp2_tasks::special::visualize_sparse_forces=trace");
             visualize_sparse_force_sets(
                 self,
                 &super_coords,
@@ -433,10 +434,14 @@ impl TrialDir {
         )?;
 
         trace!("Computing sparse dynamical matrix");
+        let dynmat = {
+            force_constants
+                .gamma_dynmat(&sc, prim_meta.pick())
+                .hermitianize()
+        };
+        trace!("Done computing dynamical matrix");
 
-        force_constants
-            .gamma_dynmat(&sc, prim_meta.pick())
-            .hermitianize()
+        dynmat
     })}
 }
 

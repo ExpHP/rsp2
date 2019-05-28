@@ -353,6 +353,9 @@ impl<'ctx> Context<'ctx> {
                 let eqn_i = all_displacements.push(rotate_vector(self.displacements[disp].1));
 
                 for (&affected_atom, &cart_force) in &self.force_sets[disp] {
+                    if cart_force != cart_force {
+                        panic!("Force sets contain NaN!");
+                    }
                     let new_affected_atom = rotate_and_translate_atom(affected_atom);
                     let new_cart_force = rotate_vector(cart_force);
 
@@ -402,7 +405,11 @@ impl<'ctx> Context<'ctx> {
                 assert_ne!(prim, representative, "(BUG!) bad input to derive_rows_by_symmetry");
 
                 // any operator will do; all should produce the same data.
+                //
+                // TODO: maybe we should verify that the 3x3 FC matrix is (approximately)
+                //       invariant under the operations that map the site into itself?
                 let &oper = opers_from_rep.get(0).expect("(BUG!) was checked earlier");
+
                 // Visualize the operation described in the documentation of `get_corrected_rotate`.
                 //
                 // Performing this operation on a set of data would permute all indices according to the
@@ -613,6 +620,10 @@ impl ForceConstants {
             let (pos, val): (Vec<_>, Vec<_>) = iter.unzip();
             let (row, col) = pos.into_iter().unzip();
             let dim = (sc.num_primitive_atoms(), sc.num_primitive_atoms());
+
+            if val != val {
+                panic!("Dynamical matrix contains NaN!");
+            }
             RawCoo { dim, val, row, col }.into_csr()
         };
 
@@ -716,7 +727,7 @@ mod complex_33 {
     use super::*;
 
     // element type of the dynamical matrix, used to shoehorn it into a sparse matrix container
-    #[derive(Debug, Copy, Clone)]
+    #[derive(Debug, Copy, Clone, PartialEq)]
     #[derive(Serialize, Deserialize)]
     pub struct Complex33(pub M33, pub M33);
 
