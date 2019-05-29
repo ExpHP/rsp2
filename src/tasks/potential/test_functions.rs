@@ -236,21 +236,21 @@ mod tests {
             cg
         };
 
-        let mut flat_diff_fn = diff_fn.initialize_flat_diff_fn(&start, ()).unwrap();
+        let mut flat_diff_fn = diff_fn.initialize_cg_diff_fn(&start, ()).unwrap();
         let flat_diff_fn = &mut *flat_diff_fn;
 
         let data = cg.run(start.to_carts().flat(), &mut *flat_diff_fn).unwrap();
-        println!("DerpG: {:?}", flat_diff_fn(start.to_carts().flat()).unwrap().1);
+        println!("DerpG: {:?}", flat_diff_fn.compute(start.to_carts().flat()).unwrap().1);
         println!("NumrG: {:?}", rsp2_minimize::numerical::try_gradient(
             1e-7, None,
             start.to_carts().flat(),
-            |p| FailOk(flat_diff_fn(p)?.0),
+            |p| FailOk(flat_diff_fn.compute(p)?.0),
         ).unwrap());
         println!(" Grad: {:?}", data.gradient);
         println!("Numer: {:?}", rsp2_minimize::numerical::try_gradient(
             1e-7, None,
             &data.position,
-            |p| FailOk(flat_diff_fn(p)?.0),
+            |p| FailOk(flat_diff_fn.compute(p)?.0),
         ).unwrap());
         let final_carts = data.position.nest::<V3>().to_vec();
         let final_fracs = CoordsKind::Carts(final_carts).into_fracs(&lattice);

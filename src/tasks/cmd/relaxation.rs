@@ -13,7 +13,7 @@
 ** ********************************************************************** */
 
 use crate::{FailResult, FailOk};
-use crate::potential::{self, PotentialBuilder, DiffFn, BondDiffFn, FlatDiffFn};
+use crate::potential::{PotentialBuilder, DiffFn, BondDiffFn, DynCgDiffFn, CommonMeta};
 use crate::meta::{self, prelude::*};
 use crate::hlist_aliases::*;
 use crate::math::basis::{Basis3, EvDirection};
@@ -318,10 +318,10 @@ fn do_cg_relax(
     cg_settings: &cfg::Cg,
     // NOTE: takes ownership of coords because it is likely an accident to reuse them
     coords: Coords,
-    meta: potential::CommonMeta,
+    meta: CommonMeta,
 ) -> FailResult<Coords>
 {Ok({
-    let mut flat_diff_fn = pot.parallel(true).initialize_flat_diff_fn(&coords, meta.sift())?;
+    let mut flat_diff_fn = pot.parallel(true).initialize_cg_diff_fn(&coords, meta.sift())?;
     let relaxed_flat = {
         let (mut cg, stop_condition) = cg_builder_from_config(cg_settings);
         cg.stop_condition(stop_condition.to_function())
@@ -342,7 +342,7 @@ fn do_cg_relax_with_param_optimization_if_supported(
     parameters: Option<&cfg::Parameters>,
     // NOTE: takes ownership of coords because it is likely an accident to reuse them
     coords: Coords,
-    meta: potential::CommonMeta,
+    meta: CommonMeta,
 ) -> FailResult<Coords>
 {
     if let Some(parameters) = parameters {
@@ -363,10 +363,10 @@ fn do_cg_relax_with_param_optimization(
     cg_settings: &cfg::Cg,
     parameters: &cfg::Parameters,
     coords: &Coords,
-    meta: potential::CommonMeta,
+    meta: CommonMeta,
 ) -> FailResult<Option<Coords>>
 {Ok({
-    let mut bond_diff_fn = match pot.parallel(true).initialize_bond_diff_fn(&coords, meta.sift())? {
+    let bond_diff_fn = match pot.parallel(true).initialize_bond_diff_fn(&coords, meta.sift())? {
         None => return Ok(None),
         Some(f) => f,
     };
@@ -417,13 +417,32 @@ fn do_cg_relax_with_param_optimization(
          cg.run(
             &helper.flatten_coords(&coords),
             {
-                let helper = helper.clone();
-                move |flat_coords| {
-                    let ref coords = helper.unflatten_coords(flat_coords);
-                    let (value, bond_grads) = bond_diff_fn.compute(coords, meta.clone())?;
-                    let flat_grad = helper.flatten_grad(flat_coords, &bond_grads);
-                    FailOk((value, flat_grad))
+                struct Adapter {
+                    helper: Rc<RelaxationOptimizationHelper>,
+                    bond_diff_fn: Box<dyn BondDiffFn<CommonMeta>>,
+                    meta: CommonMeta,
                 }
+
+                impl cg::DiffFn for Adapter {
+                    type Error = failure::Error;
+
+                    fn compute(&mut self, flat_coords: &[f64]) -> Result<(f64, Vec<f64>), failure::Error> {
+                        let Adapter { ref helper, ref mut bond_diff_fn, ref meta } = *self;
+                        let ref coords = helper.unflatten_coords(flat_coords);
+                        let (value, bond_grads) = bond_diff_fn.compute(coords, meta.clone())?;
+                        let flat_grad = helper.flatten_grad(flat_coords, &bond_grads);
+                        Ok((value, flat_grad))
+                    }
+
+                    fn check(&mut self, flat_coords: &[f64]) -> Result<(), failure::Error> {
+                        let Adapter { ref helper, ref mut bond_diff_fn, ref meta } = *self;
+                        let ref coords = helper.unflatten_coords(flat_coords);
+                        bond_diff_fn.check(coords, meta.clone())
+                    }
+                }
+
+                let helper = helper.clone();
+                Adapter { helper, bond_diff_fn, meta }
             },
         ).unwrap().position
     };
@@ -473,7 +492,7 @@ fn do_eigenvector_chase(
     pot: &dyn PotentialBuilder,
     chase_settings: &cfg::EigenvectorChase,
     mut coords: Coords,
-    meta: potential::CommonMeta,
+    meta: CommonMeta,
     bad_directions: &[(String, f64, EvDirection)],
 ) -> FailResult<Coords>
 {Ok({
@@ -499,7 +518,7 @@ fn do_cg_along_evecs(
     pot: &dyn PotentialBuilder,
     cg_settings: &cfg::Cg,
     coords: Coords,
-    meta: potential::CommonMeta,
+    meta: CommonMeta,
     directions: impl IntoIterator<Item=EvDirection>,
 ) -> FailResult<Coords>
 {Ok({
@@ -511,14 +530,14 @@ fn _do_cg_along_evecs(
     pot: &dyn PotentialBuilder,
     cg_settings: &cfg::Cg,
     coords: Coords,
-    meta: potential::CommonMeta,
+    meta: CommonMeta,
     evecs: &[EvDirection],
 ) -> FailResult<Coords>
 {Ok({
     let flat_evecs: Vec<_> = evecs.iter().map(|ev| ev.as_real_checked().flat()).collect();
     let init_pos = coords.to_carts();
 
-    let mut flat_diff_fn = pot.parallel(true).initialize_flat_diff_fn(&coords, meta.sift())?;
+    let mut flat_diff_fn = pot.parallel(true).initialize_cg_diff_fn(&coords, meta.sift())?;
     let relaxed_coeffs = {
         let (mut cg, stop_condition) = cg_builder_from_config(cg_settings);
         cg.stop_condition(stop_condition.to_function())
@@ -536,11 +555,11 @@ fn _do_cg_along_evecs(
 fn do_minimize_along_evec(
     pot: &dyn PotentialBuilder,
     from_coords: Coords,
-    meta: potential::CommonMeta,
+    meta: CommonMeta,
     evec: &[V3],
 ) -> FailResult<(f64, Coords)>
 {Ok({
-    let mut diff_fn = pot.parallel(true).initialize_flat_diff_fn(&from_coords, meta.sift())?;
+    let mut diff_fn = pot.parallel(true).initialize_cg_diff_fn(&from_coords, meta.sift())?;
 
     let direction = &evec[..];
     let from_pos = from_coords.to_carts();
@@ -549,7 +568,7 @@ fn do_minimize_along_evec(
         pos
     };
     let alpha = rsp2_minimize::exact_ls(0.0, 1e-4, |alpha| {
-        let gradient = diff_fn(&pos_at_alpha(alpha))?.1;
+        let gradient = diff_fn.compute(&pos_at_alpha(alpha))?.1;
         let slope = vdot(&gradient[..], direction.flat());
         FailOk(::rsp2_minimize::exact_ls::Slope(slope))
     })??.alpha;
@@ -561,7 +580,7 @@ fn do_minimize_along_evec(
 fn warn_on_improvable_lattice_params(
     pot: &dyn PotentialBuilder,
     coords: &Coords,
-    meta: potential::CommonMeta,
+    meta: CommonMeta,
 ) -> FailResult<()>
 {Ok({
     const SCALE_AMT: f64 = 1e-6;
@@ -604,29 +623,49 @@ fn flat_constrained_position(
 // There will be one coordinate for each eigenvector.
 fn constrained_diff_fn<'a>(
     // operates on 3N coords
-    flat_3n_diff_fn: &'a mut dyn FlatDiffFn,
+    flat_3n_diff_fn: &'a mut DynCgDiffFn<'a>,
     // K values, K <= 3N
     flat_init_pos: &'a [f64],
     // K eigenvectors
     flat_evs: &'a [&[f64]],
-) -> Box<dyn FnMut(&[f64]) -> FailResult<(f64, Vec<f64>)> + 'a>
+) -> Box<DynCgDiffFn<'a>>
 {
-    Box::new(move |coeffs| Ok({
-        assert_eq!(coeffs.len(), flat_evs.len());
+    struct Adapter<'b> {
+        flat_init_pos: &'b [f64],
+        flat_3n_diff_fn: &'b mut DynCgDiffFn<'b>,
+        flat_evs: &'b [&'b [f64]],
+    }
 
-        // This is dead simple.
-        // The kth element of the new gradient is the slope along the kth ev.
-        // The change in position is a sum over contributions from each ev.
-        // These relationships have a simple expression in terms of
-        //   the matrix whose columns are the selected eigenvectors.
-        // (though the following is transposed for our row-centric formalism)
-        let flat_pos = flat_constrained_position(flat_init_pos, coeffs, flat_evs);
+    impl<'b> cg::DiffFn for Adapter<'b> {
+        type Error = failure::Error;
 
-        let (value, flat_grad) = flat_3n_diff_fn(&flat_pos)?;
+        fn compute(&mut self, coeffs: &[f64]) -> FailResult<(f64, Vec<f64>)>
+        {Ok({
+            let Adapter { flat_init_pos, flat_3n_diff_fn, flat_evs } = self;
 
-        let grad = dot_mat_vec_dumb(flat_evs, &flat_grad);
-        (value, grad)
-    }))
+            // This is dead simple.
+            // The kth element of the new gradient is the slope along the kth ev.
+            // The change in position is a sum over contributions from each ev.
+            // These relationships have a simple expression in terms of
+            //   the matrix whose columns are the selected eigenvectors.
+            // (though the following is transposed for our row-centric formalism)
+            let flat_pos = flat_constrained_position(flat_init_pos, coeffs, flat_evs);
+
+            let (value, flat_grad) = flat_3n_diff_fn.compute(&flat_pos)?;
+
+            let grad = dot_mat_vec_dumb(flat_evs, &flat_grad);
+            (value, grad)
+        })}
+
+        fn check(&mut self, coeffs: &[f64]) -> FailResult<()> {
+            let Adapter { flat_init_pos, flat_3n_diff_fn, flat_evs } = self;
+
+            let flat_pos = flat_constrained_position(flat_init_pos, coeffs, flat_evs);
+
+            flat_3n_diff_fn.check(&flat_pos)
+        }
+    }
+    Box::new(Adapter { flat_init_pos, flat_3n_diff_fn, flat_evs })
 }
 
 //----------------------

@@ -188,8 +188,12 @@ type TypeMap<T> = EnumMap<AtomType, T>;
 //       wrapping BondI is extremely useful to prevent accidental confusion between
 //       "site-bond" indices (indices into a SiteBondVec) and "bond" indices (unique
 //       indices for all bonds)
-newtype_index!{SiteI}
-newtype_index!{BondI}
+pub(crate) use self::newtype_indices::*;
+mod newtype_indices {
+    // mod so they aren't public
+    newtype_index!{SiteI}
+    newtype_index!{BondI}
+}
 
 pub use self::params::Params;
 mod params {
@@ -429,6 +433,11 @@ mod interactions {
     }
 
     impl Interactions {
+        /// Identify which pairs of atoms are close enough to interact and build a list of
+        /// interactions.
+        ///
+        /// This will warn or generate errors when bond lengths fall into the reactive regime,
+        /// as if the `check_distances` method was called.
         pub fn compute(
             params: &Params,
             coords: &Coords,
@@ -453,20 +462,10 @@ mod interactions {
                     let site_j = SiteI(frac_bond_ij.to);
                     let cart_vector = frac_bond_ij.cart_vector_using_cache(&cart_cache).unwrap();
 
-                    let params_ij = params.by_type[site_type[site_i]][site_type[site_j]];
-                    match cart_vector.norm() {
-                        r if r > params_ij.cutoff_region.1 => continue,
-                        r if r > params_ij.forbidden_region.1 => {
-                            reactive_warnings::log_nonbonded(params_ij.cutoff_region, r);
-                            continue
-                        },
-                        r if r >= params_ij.forbidden_region.0 => {
-                            bail!{"detected reaction in non-reactive REBO potential (r = {})", r};
-                        },
-                        r if r >= params_ij.cutoff_region.0 => {
-                            reactive_warnings::log_bonded(params_ij.cutoff_region, r);
-                        },
-                        _ => {},
+                    if let IsInteracting(false) = check_distance(
+                        params, cart_vector.norm(), (site_type[site_i], site_type[site_j]),
+                    )? {
+                        continue;
                     }
 
                     bond_source.push(site_i);
@@ -480,7 +479,6 @@ mod interactions {
                 }
                 bond_div.push(BondI(bond_target.len()));
             } // for node
-
 
             // Get the index of each bond's reverse.
             let mut bond_reverse_index = IndexVec::<BondI, _>::new();
@@ -530,50 +528,65 @@ mod interactions {
         pub fn num_sites(&self) -> usize { self.site_type.len() }
         pub fn num_bonds(&self) -> usize { self.bond_target.len() }
 
-        #[inline(always)] pub fn site_type(&self, site: SiteI) -> AtomType { self.site_type[site] }
-        #[inline(always)] pub fn bond_source(&self, bond: BondI) -> SiteI { self.bond_source[bond] }
-        #[inline(always)] pub fn bond_target(&self, bond: BondI) -> SiteI { self.bond_target[bond] }
-        #[inline(always)] pub fn bond_reverse_index(&self, bond: BondI) -> BondI { self.bond_reverse_index[bond] }
-        #[inline(always)] pub fn bond_image_diff(&self, bond: BondI) -> V3<i32> { self.bond_image_diff[bond] }
+        #[inline(always)] pub(crate) fn site_type(&self, site: SiteI) -> AtomType { self.site_type[site] }
+        #[inline(always)] pub(crate) fn bond_source(&self, bond: BondI) -> SiteI { self.bond_source[bond] }
+        #[inline(always)] pub(crate) fn bond_target(&self, bond: BondI) -> SiteI { self.bond_target[bond] }
+        #[inline(always)] pub(crate) fn bond_reverse_index(&self, bond: BondI) -> BondI { self.bond_reverse_index[bond] }
+        #[inline(always)] pub(crate) fn bond_image_diff(&self, bond: BondI) -> V3<i32> { self.bond_image_diff[bond] }
         /// index of a bond into a SiteBondVec for its source Site
-        #[inline(always)] pub fn bond_sbvec_index(&self, bond: BondI) -> usize {
+        #[inline(always)] pub(crate) fn bond_sbvec_index(&self, bond: BondI) -> usize {
             bond.0 - self.site_bond_range(self.bond_source[bond]).start
         }
 
         #[inline(always)]
-        pub fn bond_targets(&self, site: SiteI) -> impl ExactSizeIterator<Item=SiteI> + '_ {
+        pub(crate) fn bond_targets(&self, site: SiteI) -> impl ExactSizeIterator<Item=SiteI> + '_ {
             self.bonds(site).map(move |x| self.bond_target(x))
         }
 
         // NOTE: we often can't use this due to rayon
-        pub fn sites(&self) -> impl ExactSizeIterator<Item=SiteI> + '_ {
+        pub(crate) fn sites(&self) -> impl ExactSizeIterator<Item=SiteI> + '_ {
             (0..self.num_sites()).map(SiteI)
         }
 
-        pub fn bonds(&self, site: SiteI) -> impl ExactSizeIterator<Item=BondI> + '_ {
+        pub(crate) fn bonds(&self, site: SiteI) -> impl ExactSizeIterator<Item=BondI> + '_ {
             self.site_bond_range(site).map(BondI)
         }
 
         // Type-safe extraction of a "site-bond"-indexed slice of data from a vector of data
         // at all bonds.
-        pub fn site_bond_slice<'b, T>(&self, site: SiteI, data: &'b Indexed<BondI, [T]>) -> &'b [T] {
+        pub(crate) fn site_bond_slice<'b, T>(&self, site: SiteI, data: &'b Indexed<BondI, [T]>) -> &'b [T] {
             &data.raw[self.site_bond_range(site)]
         }
 
-        pub fn site_bond_slice_mut<'b, T>(&self, site: SiteI, data: &'b mut Indexed<BondI, [T]>) -> &'b mut [T] {
+        pub(crate) fn site_bond_slice_mut<'b, T>(&self, site: SiteI, data: &'b mut Indexed<BondI, [T]>) -> &'b mut [T] {
             &mut data.raw[self.site_bond_range(site)]
         }
 
-        pub fn site_bond_range(&self, site: SiteI) -> std::ops::Range<usize> {
+        pub(crate) fn site_bond_range(&self, site: SiteI) -> std::ops::Range<usize> {
             self.bond_div[site].0..self.bond_div[site.next()].0
         }
 
-        pub fn bond_is_canonical(&self, bond: BondI) -> bool {
+        pub(crate) fn bond_is_canonical(&self, bond: BondI) -> bool {
             FracBond {
                 from: self.bond_source[bond].0,
                 to: self.bond_target[bond].0,
                 image_diff: self.bond_image_diff[bond],
             }.is_canonical()
+        }
+    }
+
+    impl Interactions {
+        /// Check that all bond lengths are outside of the reactive regime.
+        ///
+        /// Prints warnings or returns `Err` on really bad cases, as configured in [`Params`].
+        pub fn check_distances(&self, params: &Params, coords: &Coords, use_rayon: bool) -> FailResult<()> {
+            let bond_deltas = compute_bond_deltas(coords, &self, use_rayon);
+            for (bond_ij, delta_ij) in bond_deltas.iter_enumerated() {
+                let type_i = self.site_type(self.bond_source(bond_ij));
+                let type_j = self.site_type(self.bond_target(bond_ij));
+                check_distance(params, delta_ij.norm(), (type_i, type_j))?;
+            }
+            Ok(())
         }
     }
 }
@@ -2624,6 +2637,34 @@ fn boole(cond: bool) -> f64 {
 }
 
 //-----------------------------------------------------------------------------
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+struct IsInteracting(bool);
+
+fn check_distance(
+    params: &Params,
+    distance: f64,
+    types: (AtomType, AtomType),
+) -> FailResult<IsInteracting>
+{
+    let params_ij = params.by_type[types.0][types.1];
+    match distance {
+        r if r > params_ij.cutoff_region.1 => Ok(IsInteracting(false)),
+        r if r > params_ij.forbidden_region.1 => {
+            reactive_warnings::log_nonbonded(params_ij.cutoff_region, r);
+            Ok(IsInteracting(false))
+        },
+        r if r >= params_ij.forbidden_region.0 => {
+            bail!{"detected reaction in non-reactive REBO potential (r = {})", r};
+            unreachable!();
+        },
+        r if r >= params_ij.cutoff_region.0 => {
+            reactive_warnings::log_bonded(params_ij.cutoff_region, r);
+            Ok(IsInteracting(true))
+        },
+        _ => Ok(IsInteracting(true)),
+    }
+}
 
 mod reactive_warnings {
     use super::*;

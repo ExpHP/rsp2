@@ -1076,9 +1076,9 @@ pub(crate) fn run_converge_vdw(
     println!("# Density Work DValue");
     for density in work::RefinementMode::Double.densities().take(20) {
         let work = work::compute_work_along_path(
-            crate::potential::Rsp2MinimizeDiffFnShim {
+            crate::potential::DiffFnWorkShim {
                 ndim: 6,
-                diff_fn: pot.initialize_flat_diff_fn(&get_coords(r_min), meta.sift())?,
+                diff_fn: pot.initialize_cg_diff_fn(&get_coords(r_min), meta.sift())?,
             },
             &path.with_density(density),
         );

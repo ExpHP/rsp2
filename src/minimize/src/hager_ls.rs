@@ -174,9 +174,7 @@ where F: FnMut(f64) -> Result<(f64, f64), E>,
         initial,
     }.linesearch(
         initial_alpha,
-        // FIXME change other methods to accept Box since their current
-        //  signatures are misleading and force us to do eta expansion here
-        &mut *compute,
+        &mut compute,
     ).map(|x| x.alpha)
 }
 
@@ -371,7 +369,7 @@ impl Hager {
         let out = match (cur.strictly_downhill(), self.reasonable_value(cur)) {
             (false, _) => (lo, cur),
             (true, true) => unreachable!(), // taken care of by above loop
-            (true, false) => match self.funky_loop_in_u3((lo, cur), &mut *compute)? {
+            (true, false) => match self.funky_loop_in_u3((lo, cur), compute)? {
                 Ok(ivl) => ivl,
                 Err(_) => {
                     // so... we COULD try to find another interval to search,
@@ -415,7 +413,7 @@ impl Hager {
             (false, _) => (lo, guess),     // condition (U1), p. 182
 
             // tough case; bisect until we have a good interval again.
-            (true, false) => match self.funky_loop_in_u3((lo, guess), &mut *compute)? {
+            (true, false) => match self.funky_loop_in_u3((lo, guess), compute)? {
                 Ok(ivl) => ivl,
                 Err(new_lo) => (new_lo, hi), // Today is just not our day, huh?
             },
@@ -503,7 +501,7 @@ impl Hager {
         };
 
         let first = compute(secant(lo, hi), How::DoubleSecant1)?;
-        let (new_lo, new_hi) = self.update_interval((lo, hi), first, &mut *compute)?;
+        let (new_lo, new_hi) = self.update_interval((lo, hi), first, compute)?;
         self.validate_opposite_slope((new_lo, new_hi));
 
         // Checks if either of the "easy cases" in update_interval were met.
@@ -535,7 +533,7 @@ impl Hager {
             //       but most should still trigger another assertion elsewhere.
             if second_alpha.is_finite() {
                 let second = compute(second_alpha, How::DoubleSecant2)?;
-                return self.update_interval((new_lo, new_hi), second, &mut *compute);
+                return self.update_interval((new_lo, new_hi), second, compute);
             }
         }
         // skip the second `update_interval`

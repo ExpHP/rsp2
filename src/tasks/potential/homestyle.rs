@@ -136,6 +136,9 @@ impl PotentialBuilder<CommonMeta> for KolmogorovCrespiZ {
                 let value = part_values.iter().sum();
                 Ok((value, bond_grads))
             }
+
+            fn check(&mut self, _: &Coords, _: CommonMeta) -> FailResult<()>
+            { Ok(()) }
         }
 
         fn_body(self, coords, meta)
@@ -231,6 +234,10 @@ impl PotentialBuilder<CommonMeta> for Rebo {
                     }).collect()
                 };
                 Ok((value, grad))
+            }
+
+            fn check(&mut self, coords: &Coords, _: CommonMeta) -> FailResult<()> {
+                self.interactions.check_distances(&self.params, coords, self.parallel)
             }
         }
 

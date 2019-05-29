@@ -546,7 +546,7 @@ impl Builder {
     ///
     /// This will exist alongside any previously existing output functions.
     pub fn output_fn(&mut self, f: impl BuildAlgorithmStateFn<Output=()> + 'static) -> &mut Self {
-        self.build_output_fns.push(Box::new(f));self
+        self.build_output_fns.push(Box::new(f)); self
     }
 
     /// Set up a "standard" output function that writes some formatted lines on each iteration.
@@ -741,31 +741,66 @@ pub struct Output {
     __no_full_destructure: (),
 }
 
-pub trait DiffFn<E>: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E> { }
-impl<E, F> DiffFn<E> for F
-where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E> { }
-
 impl Builder {
-    pub fn run<E, F: DiffFn<E>>(
+    pub fn run<F: DiffFn>(
         &self,
         initial_position: &[f64],
         compute: F,
-    ) -> Result<Output, Failure<E>>
-    where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
+    ) -> Result<Output, Failure<F::Error>>
     { cg(self, initial_position, compute) }
 }
+
+/// Represents an objective function with an analytically known gradient, to be minimized
+/// by conjugate gradient.
+///
+/// You can use a `fn(&[f64]) -> Result<(f64, Vec<f64>), E>` closure, but note that you
+/// must annotate the closure argument enough for Rust to see the higher-ranked lifetime.
+/// (i.e. `|pos: &_| ...`).
+pub trait DiffFn {
+    type Error;
+
+    /// Compute the value and gradient at a position.
+    fn compute(&mut self, pos: &[f64]) -> Result<(f64, Vec<f64>), Self::Error>;
+
+    /// This is called at the end of each line search.
+    ///
+    /// This gives the `DiffFn` an opportunity to check for properties that are required to
+    /// hold for any "realistic" position.  (whereas `compute` may frequently be called on
+    /// absurd positions that are speculatively produced by linesearch)
+    fn check(&mut self, _pos: &[f64]) -> Result<(), Self::Error> { Ok(()) }
+}
+
+impl<E, F> DiffFn for F
+where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>,
+{
+    type Error = E;
+
+    fn compute(&mut self, pos: &[f64]) -> Result<(f64, Vec<f64>), E>
+    { (*self)(pos) }
+}
+
+impl<E> DiffFn for &mut (dyn DiffFn<Error=E> + '_)
+{
+    type Error = E;
+
+    fn compute(&mut self, pos: &[f64]) -> Result<(f64, Vec<f64>), E>
+    { (**self).compute(pos) }
+
+    fn check(&mut self, pos: &[f64]) -> Result<(), E>
+    { (**self).check(pos) }
+}
+
+//==================================================================================================
 
 /// Perform conjugate gradient using the default configuration for CG-DESCENT, and with a
 /// stop condition that can be deserialized from JSON.
 ///
-/// See [`Builder::new_hager()`] for more information.
-pub fn cg_descent<E, F: DiffFn<E>>(
+/// See [`Builder::new_hager`] for more information.
+pub fn cg_descent<F: DiffFn>(
     stop_condition: &StopCondition,
     initial_position: &[f64],
     compute: F,
-) -> Result<Output, Failure<E>>
-where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
-{
+) -> Result<Output, Failure<F::Error>> {
     Builder::new_hager()
         .stop_condition(stop_condition.to_function())
         .run(initial_position, compute)
@@ -774,14 +809,12 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
 /// Perform conjugate gradient using the default configuration for ACGSD, and with a stop condition
 /// that can be deserialized from JSON.
 ///
-/// See [`Builder::new_acgsd()`] for more information.
-pub fn acgsd<E, F: DiffFn<E>>(
+/// See [`Builder::new_acgsd`] for more information.
+pub fn acgsd<F: DiffFn>(
     stop_condition: &StopCondition,
     initial_position: &[f64],
     compute: F,
-) -> Result<Output, Failure<E>>
-    where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
-{
+) -> Result<Output, Failure<F::Error>> {
     Builder::new_acgsd()
         .stop_condition(stop_condition.to_function())
         .run(initial_position, compute)
@@ -829,12 +862,11 @@ pub(crate) mod internal_types {
 }
 
 #[inline(never)]
-fn cg<E, F: DiffFn<E>>(
+fn cg<F: DiffFn>(
     builder: &Builder,
     initial_position: &[f64],
-    mut compute: F,
-) -> Result<Output, Failure<E>>
-where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
+    mut diff_fn: F,
+) -> Result<Output, Failure<F::Error>>
 {
     use self::internal_types::{Point, Saved, Last};
 
@@ -849,9 +881,9 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
         builder.build_output_fns.iter().map(|x| x.build()).collect()
     };
 
-    let mut compute_point = |position: &[f64]| {
+    let compute_point = |diff_fn: &mut dyn DiffFn<Error=F::Error>, position: &[f64]| {
         let position = position.to_vec();
-        let (value, gradient) = compute(&position).map_err(ComputeError)?;
+        let (value, gradient) = diff_fn.compute(&position).map_err(ComputeError)?;
         Ok(Point {position, value, gradient})
     };
 
@@ -861,7 +893,7 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
 
     // These are all updated only at the end of an iteration.
     let mut last_saved = {
-        let point = compute_point(initial_position)?;
+        let point = compute_point(&mut diff_fn, initial_position)?;
         let Point { position, value, gradient } = point;
         Saved { alpha: builder.alpha_guess_first, position, value, gradient }
     };
@@ -886,9 +918,9 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
 // /////////////////////////////////////////////////////////////////////////////
 
         // Compute at a position relative to saved.position
-        let mut compute_in_dir = |alpha, direction: &[f64]| {
+        let compute_in_dir = |diff_fn: &mut dyn DiffFn<Error=_>, alpha, direction: &[f64]| {
             let V(position): V<Vec<f64>> = v(&saved.position) + alpha * v(direction);
-            compute_point(&position)
+            compute_point(diff_fn, &position)
         };
 
         let warning = |msg: &str, alpha, point: Point|
@@ -1037,11 +1069,11 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
             //         is currently a bit messy and sometimes asks for a point
             //         more than once.  These are really issues with the linesearch,
             //         and ought not to be the caller's concern)
-            let mut memoized: Box<dyn FnMut(f64) -> Result<(f64, f64), ComputeError<E>>>
+            let mut memoized: Box<dyn FnMut(f64) -> Result<(f64, f64), ComputeError<F::Error>>>
                 = crate::util::cache::hash_memoize_result_by_key(
                     |&alpha| ordered_float::NotNan::new(alpha).unwrap(),
                     |alpha| {
-                        let point = compute_in_dir(alpha, &direction)?;
+                        let point = compute_in_dir(&mut diff_fn, alpha, &direction)?;
                         let slope = vdot(&point.gradient, &direction);
 
                         // update cache, checking values to predict which
@@ -1076,7 +1108,7 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
         }; // let next_alpha = { ... }
         let next_point = match next_alpha {
             a if a == ls_alpha => ls_point, // extraneous computation avoided!
-            a => compute_in_dir(a, &direction)?,
+            a => compute_in_dir(&mut diff_fn, a, &direction)?,
         };
 
         // if the linesearch failed, note it and try
@@ -1102,6 +1134,9 @@ where F: FnMut(&[f64]) -> Result<(f64, Vec<f64>), E>
                     saved.alpha, saved.to_point());
             }
         }
+
+        // Linesearch succeeded, so this position should be reasonable (read: not absurd).
+        diff_fn.check(&next_point.position).map_err(ComputeError)?;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Update quantities following the linesearch.                                //
@@ -1292,7 +1327,7 @@ mod tests {
             let output = super::cg_descent(
                 &from_json!({"grad-rms": 1e-8}),
                 &uniform_n(d, -max_coord, max_coord),
-                |p| Ok::<_,Never>(Trid(d).diff(p))
+                |p: &_| Ok::<_,Never>(Trid(d).diff(p))
             ).unwrap();
 
             assert_close!(rel=1e-5, output.value, Trid(d).min_value());
@@ -1327,7 +1362,8 @@ mod tests {
             // a point somewhere in the box whose corners are the atoms
             let start = urand::uniform_box(&point_1, &point_2);
             let stop_condition = from_json!({"grad-rms": 1e-10});
-            let output = super::cg_descent(&stop_condition, &start, |p| Ok::<_,Never>(diff.diff(p))).unwrap();
+            let diff_fn = |p: &_| Ok::<_,Never>(diff.diff(p));
+            let output = super::cg_descent(&stop_condition, &start, diff_fn).unwrap();
 
             assert_close!(rel=1e-12, output.value, -20.0);
         }

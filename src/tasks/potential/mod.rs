@@ -18,6 +18,7 @@ use crate::meta;
 use rsp2_structure::{Coords};
 use rsp2_tasks_config as cfg;
 use rsp2_array_types::{V3, Unvee};
+use rsp2_minimize::cg;
 use slice_of_array::prelude::*;
 use std::collections::BTreeMap;
 use crate::cmd::trial::TrialDir;
@@ -33,11 +34,10 @@ pub type CommonMeta = HList3<
     Option<meta::FracBonds>,
 >;
 
-/// Trait alias for a function producing flat potential and gradient,
-/// for compatibility with `rsp2_minimize`.
-pub trait FlatDiffFn: FnMut(&[f64]) -> FailResult<(f64, Vec<f64>)> {}
-
-impl<F> FlatDiffFn for F where F: FnMut(&[f64]) -> FailResult<(f64, Vec<f64>)> {}
+/// Trait object for [`CgDiffFn`].
+///
+/// (you can't use `dyn CgDiffFn` because `&mut dyn CgDiffFn` doesn't impl `cg::DiffFn`)
+pub type DynCgDiffFn<'a> = dyn cg::DiffFn<Error=failure::Error> + 'a;
 
 /// This is what gets passed around by very high level code to represent a
 /// potential function. Basically:
@@ -119,21 +119,39 @@ pub trait PotentialBuilder<Meta = CommonMeta>
     ///
     /// The structure given to this is used to supply the lattice and metadata.
     /// Also, some other data may be precomputed from it.
-    ///
-    /// Because Boxes don't implement `Fn` traits for technical reasons,
-    /// you will likely need to write `&mut *flat_diff_fn` in order to get
-    /// a `&mut dyn FlatDiffFn`.
-    fn initialize_flat_diff_fn(&self, init_coords: &Coords, meta: Meta) -> FailResult<Box<dyn FlatDiffFn>>
+    fn initialize_cg_diff_fn(&self, init_coords: &Coords, meta: Meta) -> FailResult<Box<DynCgDiffFn<'static>>>
     where Meta: Clone + 'static
     {
-        let mut diff_fn = self.initialize_diff_fn(init_coords, meta.clone())?;
-        let mut coords = init_coords.clone();
-        Ok(Box::new(move |pos: &[f64]| Ok({
-            coords.set_carts(pos.nest().to_vec());
+        struct Adapter<Meta2> {
+            diff_fn: Box<dyn DiffFn<Meta2>>,
+            coords: Coords,
+            meta: Meta2,
+        }
 
-            let (value, grad) = diff_fn.compute(&coords, meta.clone())?;
-            (value, grad.unvee().flat().to_vec())
-        })))
+        impl<Meta2: Clone> rsp2_minimize::cg::DiffFn for Adapter<Meta2> {
+            type Error = failure::Error;
+
+            fn compute(&mut self, pos: &[f64]) -> FailResult<(f64, Vec<f64>)> {
+                let Adapter { ref mut diff_fn, ref mut coords, ref meta } = *self;
+
+                coords.set_carts(pos.nest().to_vec());
+
+                let (value, grad) = diff_fn.compute(&coords, meta.clone())?;
+                Ok((value, grad.unvee().flat().to_vec()))
+            }
+
+            fn check(&mut self, pos: &[f64]) -> FailResult<()> {
+                let Adapter { ref mut diff_fn, ref mut coords, ref meta } = *self;
+
+                coords.set_carts(pos.nest().to_vec());
+
+                diff_fn.check(&coords, meta.clone())
+            }
+        }
+
+        let diff_fn = self.initialize_diff_fn(init_coords, meta.clone())?;
+        let coords = init_coords.clone();
+        Ok(Box::new(Adapter { diff_fn, coords, meta }) as Box<_>)
     }
 
     /// Create a DispFn, a non-threadsafe object that can compute many displacements very quickly.
@@ -269,8 +287,8 @@ where Meta: Clone + 'static,
     fn initialize_diff_fn(&self, coords: &Coords, meta: Meta) -> FailResult<Box<dyn DiffFn<Meta>>>
     { (**self).initialize_diff_fn(coords, meta) }
 
-    fn initialize_flat_diff_fn(&self, coords: &Coords, meta: Meta) -> FailResult<Box<dyn FlatDiffFn>>
-    { (**self).initialize_flat_diff_fn(coords, meta) }
+    fn initialize_cg_diff_fn(&self, coords: &Coords, meta: Meta) -> FailResult<Box<DynCgDiffFn<'static>>>
+    { (**self).initialize_cg_diff_fn(coords, meta) }
 
     fn initialize_bond_diff_fn(&self, init_coords: &Coords, meta: Meta) -> FailResult<Option<Box<dyn BondDiffFn<Meta>>>>
     { (**self).initialize_bond_diff_fn(init_coords, meta) }
@@ -318,6 +336,18 @@ pub trait DiffFn<Meta> {
         for v in &mut force { *v = -*v; }
         Ok(force)
     }
+
+    /// Check if a structure is within tolerable limits for the potential.
+    ///
+    /// For example, the rust reimplementation of REBO does not support bond lengths
+    /// in the reactive regime.  However, the implementation does not check for violations
+    /// of this condition on every single structure computed, because CG may often
+    /// speculatively visit unphysical structures during linesearch.
+    ///
+    /// During conjugate gradient, rsp2 will only call this method on those structures
+    /// which represent the end of each linesearch.
+    fn check(&mut self, _: &Coords, _: Meta) -> FailResult<()>
+    { Ok(()) }
 }
 
 // necessary for combinators like sum
@@ -333,6 +363,9 @@ impl<'d, Meta> DiffFn<Meta> for Box<dyn DiffFn<Meta> + 'd> {
 
     fn compute_force(&mut self, coords: &Coords, meta: Meta) -> FailResult<Vec<V3>>
     { (**self).compute_force(coords, meta) }
+
+    fn check(&mut self, coords: &Coords, meta: Meta) -> FailResult<()>
+    { (**self).check(coords, meta) }
 }
 
 //-------------------------------------
@@ -349,12 +382,18 @@ pub struct BondGrad {
 
 pub trait BondDiffFn<Meta> {
     fn compute(&mut self, coords: &Coords, meta: Meta) -> FailResult<(f64, Vec<BondGrad>)>;
+
+    fn check(&mut self, _: &Coords, _: Meta) -> FailResult<()>
+    { Ok(()) }
 }
 
 // necessary for combinators like sum
 impl<'d, Meta> BondDiffFn<Meta> for Box<dyn BondDiffFn<Meta> + 'd> {
     fn compute(&mut self, coords: &Coords, meta: Meta) -> FailResult<(f64, Vec<BondGrad>)>
     { (**self).compute(coords, meta) }
+
+    fn check(&mut self, coords: &Coords, meta: Meta) -> FailResult<()>
+    { (**self).check(coords, meta) }
 }
 
 //-------------------------------------
@@ -536,19 +575,19 @@ impl dyn PotentialBuilder {
 }
 
 //-------------------------------------
-// interop with other crates in rsp2
+// interop with rsp2_minimize::test
 
-pub struct Rsp2MinimizeDiffFnShim {
+pub struct DiffFnWorkShim {
     pub ndim: usize,
-    pub diff_fn: Box<dyn FlatDiffFn>
+    pub diff_fn: Box<DynCgDiffFn<'static>>,
 }
 
-impl<'a> rsp2_minimize::test::n_dee::OnceDifferentiable for Rsp2MinimizeDiffFnShim {
+impl<'a> rsp2_minimize::test::n_dee::OnceDifferentiable for DiffFnWorkShim {
     fn ndim(&self) -> usize
     { self.ndim }
 
     fn diff(&mut self, pos: &[f64]) -> (f64, Vec<f64>)
-    { (*self.diff_fn)(pos).unwrap() }
+    { self.diff_fn.compute(pos).unwrap() }
 }
 
 //-------------------------------------

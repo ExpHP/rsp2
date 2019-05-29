@@ -92,6 +92,12 @@ where
         }
         Ok((value, grad))
     }
+
+    fn check(&mut self, coords: &Coords, meta: M) -> FailResult<()> {
+        self.0.check(coords, meta.clone())?;
+        self.1.check(coords, meta.clone())?;
+        Ok(())
+    }
 }
 
 impl<M, A, B> BondDiffFn<M> for Sum<A, B>
@@ -107,6 +113,12 @@ where
         let mut grad = a_grad;
         grad.extend(b_grad);
         Ok((value, grad))
+    }
+
+    fn check(&mut self, coords: &Coords, meta: M) -> FailResult<()> {
+        self.0.check(coords, meta.clone())?;
+        self.1.check(coords, meta.clone())?;
+        Ok(())
     }
 }
 
@@ -228,4 +240,7 @@ where Meta: Clone,
         }
         (potential, out_grad)
     })}
+
+    fn check(&mut self, coords: &Coords, meta: Meta) -> FailResult<()>
+    { self.0.check(coords, meta) }
 }

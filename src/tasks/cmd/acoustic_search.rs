@@ -146,7 +146,10 @@ pub(crate) fn perform_acoustic_search(
     }
 
     // look at the negative eigenvectors for rotations and true imaginary modes
-    let mut diff_at_pos = pot.parallel(true).initialize_flat_diff_fn(coords, meta.sift())?;
+    let mut diff_at_pos = {
+        let mut flat_diff_fn = pot.parallel(true).initialize_cg_diff_fn(coords, meta.sift())?;
+        move |pos: &[f64]| flat_diff_fn.compute(pos)
+    };
 
     let pos_0 = coords.to_carts();
     let grad_0 = diff_at_pos(pos_0.flat())?.1;
