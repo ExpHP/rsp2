@@ -430,7 +430,7 @@ pub fn sparse_analysis(bin_name: &str, version: VersionInfo) -> ! {
         let matches = app.get_matches();
         let () = de.resolve_args(&matches)?;
 
-        let structure = StoredStructure::load(matches.expect_value_of("dir"))?;
+        let structure = StoredStructure::load(matches.expect_value_of("structure"))?;
 
         if let Some(path) = matches.value_of("log") {
             logfile.start(PathFile::create(path)?)?; // (NOTE: create does not truncate)
@@ -472,7 +472,7 @@ pub fn dynmat_analysis(bin_name: &str, version: VersionInfo) -> ! {
         let matches = app.get_matches();
         let ConfigArgs(config) = de.resolve_args(&matches)?;
 
-        let structure = StoredStructure::load(matches.expect_value_of("dir"))?;
+        let structure = StoredStructure::load(matches.expect_value_of("structure"))?;
 
         if let Some(path) = matches.value_of("log") {
             logfile.start(PathFile::create(path)?)?; // (NOTE: create does not truncate)
