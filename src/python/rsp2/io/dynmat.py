@@ -29,18 +29,18 @@ from . import dwim
 # the other format remains available because NPZ files are impossible to work
 # with in any language besides Python.
 
-def from_path(path):
+def from_path(path, file=None):
     return dwim.from_path_impl(
-        path,
+        path, file=file,
         from_dict=from_dict,
         from_ext={
             '.npz': dwim.sparse_from_npz,
         },
     )
 
-def to_path(path, obj):
+def to_path(path, obj, file=None):
     dwim.to_path_impl(
-        path, obj,
+        path, obj, file=file,
         to_dict=to_dict,
         to_ext={
             '.npz': dwim.sparse_to_npz,

@@ -1,22 +1,23 @@
-from . import _main_from_cli, _main_from_rust
+import typing as tp
+
+from . import _main_from_cli, _main_from_rust, DwimHooks, Pathlike, T
+from rsp2.io import dynmat
 
 def main_from_cli():
-    from rsp2.io import dynmat
-
-    _main_from_cli(
-        from_path=dynmat.from_path,
-        to_path=dynmat.to_path,
-        equal=dynmat.equal,
-    )
+    _main_from_cli(DynmatHooks())
 
 def main_from_rust():
-    from rsp2.io import dynmat
+    _main_from_rust(DynmatHooks())
 
-    _main_from_rust(
-        from_path=dynmat.from_path,
-        to_path=dynmat.to_path,
-        equal=dynmat.equal,
-    )
+class DynmatHooks(DwimHooks):
+    def from_path(self, path: Pathlike, *, file: tp.Optional[tp.BinaryIO] = None):
+        return dynmat.from_path(path, file=file)
+
+    def to_path(self, path: Pathlike, value: T, *, file: tp.Optional[tp.BinaryIO] = None):
+        return dynmat.to_path(path, value, file=file)
+
+    def equal(self, a: T, b: T) -> bool:
+        return dynmat.equal(a, b)
 
 if __name__ == '__main__':
     main_from_rust()
