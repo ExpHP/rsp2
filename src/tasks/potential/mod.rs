@@ -346,6 +346,9 @@ pub trait DiffFn<Meta> {
     ///
     /// During conjugate gradient, rsp2 will only call this method on those structures
     /// which represent the end of each linesearch.
+    ///
+    /// It may not catch *everything.* (e.g. the REBO check will detect bonds that break,
+    /// but will fail to notice new bonds that form)
     fn check(&mut self, _: &Coords, _: Meta) -> FailResult<()>
     { Ok(()) }
 }

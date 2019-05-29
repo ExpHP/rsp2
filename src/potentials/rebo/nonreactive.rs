@@ -578,6 +578,9 @@ mod interactions {
     impl Interactions {
         /// Check that all bond lengths are outside of the reactive regime.
         ///
+        /// NOTE: This can only really catch bonds that break.  It won't notice if any atoms have
+        /// moved into bonding range after the construction of `Interactions`.
+        ///
         /// Prints warnings or returns `Err` on really bad cases, as configured in [`Params`].
         pub fn check_distances(&self, params: &Params, coords: &Coords, use_rayon: bool) -> FailResult<()> {
             let bond_deltas = compute_bond_deltas(coords, &self, use_rayon);
