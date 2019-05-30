@@ -168,9 +168,9 @@ pub mod ext_traits {
 
     extension_trait! {
         pub <T, E> OptionResultExt<T, E> for Option<Result<T, E>> {
-            fn fold_ok(self) -> Result<Option<T>, E> {
-                self.map_or(Ok(None), |r| r.map(Some))
-            }
+            /// Alias of `Option::transpose` that's less likely to cause confusion.
+            fn fold_ok(self) -> Result<Option<T>, E>
+            { self.transpose() }
         }
     }
 

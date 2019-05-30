@@ -101,7 +101,7 @@ where
     use std::process::Stdio;
 
     let tmp = fsx::TempDir::new("rsp2")?;
-    
+
     let script = ReifiedScript::new(script, tmp.path().join("script.py"))?;
 
     let mut cmd = process::Command::new("python3");
