@@ -97,6 +97,19 @@ fn call_script_and_communicate<In, Out>(
 where
     In: serde::Serialize,
     Out: for<'de> serde::Deserialize<'de>,
+{ call_script_and_communicate_with_args(script, stdin_data, |_: &mut _| ()) }
+
+fn call_script_and_communicate_with_args<In, Out>(
+    script: Script,
+    stdin_data: In,
+    // Add all of the arguments to be received by the script.
+    //
+    // (this cannot be used to add options for the python interpreter)
+    add_args: impl FnOnce(&mut process::Command),
+) -> FailResult<Out>
+where
+    In: serde::Serialize,
+    Out: for<'de> serde::Deserialize<'de>,
 {Ok({
     use std::process::Stdio;
 
@@ -106,6 +119,7 @@ where
 
     let mut cmd = process::Command::new("python3");
     script.add_args(&mut cmd);
+    add_args(&mut cmd);
 
     cmd.stdin(Stdio::piped());
     cmd.stdout(Stdio::piped());

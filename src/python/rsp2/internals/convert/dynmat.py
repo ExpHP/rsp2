@@ -1,13 +1,10 @@
 import typing as tp
 
-from . import _main_from_cli, _main_from_rust, DwimHooks, Pathlike, T
+from . import _main_from_cli, DwimHooks, Pathlike, T
 from rsp2.io import dynmat
 
 def main_from_cli():
     _main_from_cli(DynmatHooks())
-
-def main_from_rust():
-    _main_from_rust(DynmatHooks())
 
 class DynmatHooks(DwimHooks):
     def from_path(self, path: Pathlike, *, file: tp.Optional[tp.BinaryIO] = None):
@@ -20,4 +17,4 @@ class DynmatHooks(DwimHooks):
         return dynmat.equal(a, b)
 
 if __name__ == '__main__':
-    main_from_rust()
+    raise ImportError("This module is not an entry point!")

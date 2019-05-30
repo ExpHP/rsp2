@@ -772,37 +772,19 @@ mod complex_33 {
 
 mod io_impls {
     use super::*;
-    use crate::traits::{Save, Load, AsPath, save::Json};
-    use rsp2_fs_util::TempDir;
+    use crate::traits::{Save, Load, AsPath};
 
     impl Load for crate::math::dynmat::DynamicalMatrix {
         /// Read a dynamical matrix in any format supported by the rsp2.io python module.
         fn load(path: impl AsPath) -> FailResult<Self> {
-            let tmp = TempDir::new_labeled("rsp2", "dynmat conversion dir")?;
-            let uncompressed_path = tmp.path().join("uncompressed-dynmat.json");
-
-            crate::cmd::python::convert::dynmat(
-                path, &uncompressed_path,
-                crate::cmd::python::convert::Mode::Delete,
-            )?;
-
-            let Json(cereal) = Load::load(&uncompressed_path)?;
-            DynamicalMatrix::from_cereal(cereal)
+            crate::cmd::python::convert::read_dynmat(path)
         }
     }
 
     impl Save for crate::math::dynmat::DynamicalMatrix {
         /// Read a dynamical matrix in any format supported by the rsp2.io python module.
         fn save(&self, path: impl AsPath) -> FailResult<()> {
-            let tmp = TempDir::new_labeled("rsp2", "dynmat conversion dir")?;
-            let uncompressed_path = tmp.path().join("uncompressed-dynmat.json");
-
-            Json(self.cereal()).save(&uncompressed_path)?;
-
-            crate::cmd::python::convert::dynmat(
-                uncompressed_path, path,
-                crate::cmd::python::convert::Mode::Delete,
-            )
+            crate::cmd::python::convert::write_dynmat(path, self)
         }
     }
 }

@@ -13,38 +13,33 @@
 //!  We're just going to call a python script.)
 
 use crate::FailResult;
-use std::path::Path;
 use crate::traits::AsPath;
+use crate::math::dynmat::DynamicalMatrix;
 
-use super::{call_script_and_communicate, Script};
+use super::{call_script_and_communicate_with_args, Script};
 
-const PY_CALL_DYNMAT: Script = Script::Module("rsp2.internals.convert.dynmat");
+const PY_CALL_READ_DYNMAT: Script = Script::Module("rsp2.internals.convert.read_dynmat");
+const PY_CALL_WRITE_DYNMAT: Script = Script::Module("rsp2.internals.convert.write_dynmat");
 
-#[derive(Serialize)]
-struct Input<'a> {
-    keep: bool,
-    input: &'a Path,
-    output: &'a Path,
-}
-
-#[allow(unused)]
-pub enum Mode {
-    Keep,
-    Delete,
-}
-
-pub fn dynmat(
+pub fn read_dynmat(
     input_path: impl AsPath,
+) -> FailResult<DynamicalMatrix> {
+    let cereal = call_script_and_communicate_with_args(
+        PY_CALL_READ_DYNMAT,
+        &(),
+        |cmd| { cmd.arg(input_path.as_path()); },
+    )?;
+
+    DynamicalMatrix::from_cereal(cereal)
+}
+
+pub fn write_dynmat(
     output_path: impl AsPath,
-    mode: Mode,
+    dynmat: &DynamicalMatrix,
 ) -> FailResult<()> {
-    let input = Input {
-        input: input_path.as_path(),
-        output: output_path.as_path(),
-        keep: match mode {
-            Mode::Keep => true,
-            Mode::Delete => false,
-        },
-    };
-    call_script_and_communicate(PY_CALL_DYNMAT, &input)
+    call_script_and_communicate_with_args(
+        PY_CALL_WRITE_DYNMAT,
+        &dynmat.cereal(),
+        |cmd| { cmd.arg(output_path.as_path()); },
+    )
 }
