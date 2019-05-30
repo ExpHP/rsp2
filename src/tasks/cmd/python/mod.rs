@@ -57,7 +57,7 @@ fn call_script_and_check_success<E: failure::Fail>(
 {Ok({
     use std::process::Stdio;
 
-    let tmp = fsx::TempDir::new("rsp2")?;
+    let tmp = fsx::TempDir::new_labeled("rsp2", "python script")?;
     let script = ReifiedScript::new(script, tmp.path().join("script.py"))?;
 
     let mut cmd = process::Command::new("python3");
@@ -100,7 +100,7 @@ where
 {Ok({
     use std::process::Stdio;
 
-    let tmp = fsx::TempDir::new("rsp2")?;
+    let tmp = fsx::TempDir::new_labeled("rsp2", "python script")?;
 
     let script = ReifiedScript::new(script, tmp.path().join("script.py"))?;
 

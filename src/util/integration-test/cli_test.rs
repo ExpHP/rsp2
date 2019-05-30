@@ -128,7 +128,7 @@ impl CliTest {
     pub fn run(self) -> Result<()> {
         let CliTest { cmd, checkers, expect_success, checker_index: _ } = self;
 
-        let _tmp = TempDir::new("rsp2")?;
+        let _tmp = TempDir::new_labeled("rsp2", "cli test cwd")?;
         let tmp = PathDir::new(_tmp.path())?;
 
         let cwd = PathDir::current_dir()?;

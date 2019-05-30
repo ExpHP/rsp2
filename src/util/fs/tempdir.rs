@@ -17,10 +17,16 @@ use std::ffi::{OsStr, OsString};
 
 /// Wrapper around `tempdir::TempDir` that does not destroy the directory on unwind.
 #[derive(Debug)]
-pub struct TempDir(Option<ActualTempDir>);
+pub struct TempDir {
+    imp: Option<ActualTempDir>,
+    label: Option<&'static str>,
+}
 
 impl From<ActualTempDir> for TempDir {
-    fn from(tmp: ActualTempDir) -> Self { TempDir(Some(tmp)) }
+    fn from(tmp: ActualTempDir) -> Self { TempDir {
+        imp: Some(tmp),
+        label: None,
+    }}
 }
 
 /// Forward everything to the tempdir crate.
@@ -29,13 +35,21 @@ impl TempDir {
         ActualTempDir::new(prefix).map(Self::from)
     }
 
+    /// Add a label that will be displayed when the `TempDir` is recovered.
+    pub fn new_labeled(prefix: &str, label: &'static str) -> IoResult<TempDir> {
+        Self::new(prefix).map(|mut me| {
+            me.label = Some(label);
+            me
+        })
+    }
+
     pub fn new_in(tmpdir: impl AsRef<Path>, prefix: &str) -> IoResult<TempDir> {
         ActualTempDir::new_in(tmpdir, prefix).map(Self::from)
     }
 
-    pub fn path(&self) -> &Path { self.0.as_ref().unwrap().path() }
-    pub fn into_path(mut self) -> PathBuf { self.0.take().unwrap().into_path() }
-    pub fn close(mut self) -> IoResult<()> { self.0.take().unwrap().close() }
+    pub fn path(&self) -> &Path { self.imp.as_ref().unwrap().path() }
+    pub fn into_path(mut self) -> PathBuf { self.imp.take().unwrap().into_path() }
+    pub fn close(mut self) -> IoResult<()> { self.imp.take().unwrap().close() }
 
     /// Recover the tempdir, as if we were unwinding.
     pub fn recover(mut self) { self._recover(); }
@@ -56,7 +70,7 @@ impl TempDir {
 }
 
 impl AsRef<Path> for TempDir {
-    fn as_ref(&self) -> &Path { self.0.as_ref().unwrap().as_ref() }
+    fn as_ref(&self) -> &Path { self.imp.as_ref().unwrap().as_ref() }
 }
 
 /// Leaks the inner TempDir if we are unwinding.
@@ -70,7 +84,7 @@ impl Drop for TempDir {
 
 impl TempDir {
     fn _recover(&mut self) {
-        let temp = match self.0.take() {
+        let temp = match self.imp.take() {
             Some(temp) => temp.into_path(),
             None => {
                 error!("A TempDir was double-dropped during panic");
@@ -84,7 +98,14 @@ impl TempDir {
 
         let dest = match non_empty_env("RSP2_SAVETEMP") {
             None => {
-                info!("successfully leaked tempdir at {}", temp.display());
+                info!(
+                    "successfully leaked tempdir at {}{}",
+                    temp.display(),
+                    match self.label {
+                        None => format!(""),
+                        Some(label) => format!(" ({})", label),
+                    },
+                );
                 return;
             },
             Some(env_dest) => match std::env::current_dir() {

@@ -262,7 +262,7 @@ impl DftbPlus {
             append_log.as_ref().map_or_else(|| PathBuf::from("/dev/null"), ToOwned::to_owned)
         };
 
-        let tempdir = fsx::TempDir::new("rsp2")?;
+        let tempdir = fsx::TempDir::new_labeled("rsp2", "dftb+")?;
 
         let primary_input_path = tempdir.path().join("dftb_in.hsd");
 
