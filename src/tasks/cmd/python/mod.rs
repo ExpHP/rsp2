@@ -15,9 +15,8 @@ mod spglib;
 pub mod convert;
 
 //---------------------------------------------------------
-use crate::{FailResult, FailOk};
+use crate::{FailResult};
 use std::process;
-use std::io::prelude::*;
 use std::path::{Path, PathBuf};
 
 use rsp2_fs_util as fsx;
@@ -25,6 +24,13 @@ use rsp2_fs_util as fsx;
 const PY_NOOP: Script = Script::String(indoc!(r#"
     #!/usr/bin/env python3
 "#));
+
+// special log target for recording data written to stdout that was intended to be deserialized
+mod raw_stdout_log {
+    pub const TARGET: &str = "rsp2_tasks::special::py_stdout";
+    pub fn enabled() -> bool { log_enabled!(target: TARGET, log::Level::Trace) }
+    pub fn suggestion() -> String { format!("RUST_LOG={}=trace", TARGET) }
+}
 
 #[derive(Debug, Fail)]
 #[fail(display = "an error occurred running the most trivial python script")]
@@ -95,7 +101,7 @@ where
     use std::process::Stdio;
 
     let tmp = fsx::TempDir::new("rsp2")?;
-    tmp.try_with_recovery(|tmp| FailOk({
+//    tmp.try_with_recovery(|tmp| FailOk({
         let script = ReifiedScript::new(script, tmp.path().join("script.py"))?;
 
         let mut cmd = process::Command::new("python3");
@@ -113,34 +119,45 @@ where
         let mut child = cmd.spawn()?;
         let child_stdin = child.stdin.take().unwrap();
         let child_stderr = child.stderr.take().unwrap();
-        let mut child_stdout = child.stdout.take().unwrap();
+        let child_stdout = child.stdout.take().unwrap();
 
         let stderr_worker = crate::stderr::spawn_log_worker(child_stderr);
 
         serde_json::to_writer(child_stdin, &stdin_data)?;
 
-        let stdout = {
-            let mut buf = String::new();
-            child_stdout.read_to_string(&mut buf)?;
-            buf
+        // for debugging deserialization errors
+        let child_stdout = {
+            let log_file = match raw_stdout_log::enabled() {
+                true => fsx::create(tmp.path().join("_py_stdout"))?,
+                false => fsx::create("/dev/null")?,
+            };
+            tee::TeeReader::new(child_stdout, log_file)
         };
-        // for debugging
-        std::fs::write(tmp.path().join("_py_stdout"), &stdout)?;
 
-        // Handle errors in python before attempting to parse the output
-        // (as it is likely empty on error)
+        // Deserialization must be done before checking the exit code...
+        let de_result = serde_json::from_reader(child_stdout);
+
+        // ...but prioritize a nonzero exit status over an error in deserialization.
         if !child.wait()?.success() {
             let extra = match crate::stderr::is_log_enabled() {
                 true => "check the log for a python backtrace",
-                false => "that's all we now",
+                false => "that's all we know",
             };
             bail!("an error occurred in a python script; {}", extra);
-        }
-
+        };
         let _ = stderr_worker.join();
 
-        serde_json::from_str(&stdout[..])?
-    }))?.1 // tmp.try_with_recovery(...)
+        // Only if the script reported success do we care about deserialization errors.
+        de_result.unwrap_or_else(move |de_error| {
+            let extra = match raw_stdout_log::enabled() {
+                false => format!("To record the ill-formed output, try setting {}", raw_stdout_log::suggestion()),
+                true => format!("The ill-formed output was logged to a temp dir."),
+            };
+            info!("{}", tmp.path().display());
+            let _ = crate::util::recover_temp_dir_if_non_empty(tmp);
+            panic!("(BUG!) Error during deserialization: {}\n{}", de_error, extra);
+        })
+//    }))?.1 // tmp.try_with_recovery(...)
 })}
 
 /// The runtime component of Script.  Constructing it may produce a file on the filesystem,

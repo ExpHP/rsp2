@@ -203,3 +203,13 @@ pub mod ext_traits {
         }
     }
 }
+
+//--------------------------------------------------------
+
+pub fn recover_temp_dir_if_non_empty(tmp: rsp2_fs_util::TempDir) -> std::io::Result<()> {
+    match std::fs::read_dir(tmp.path())?.count() {
+        0 => tmp.close()?,
+        _ => tmp.recover(),
+    };
+    Ok(())
+}

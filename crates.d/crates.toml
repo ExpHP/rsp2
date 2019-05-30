@@ -113,6 +113,7 @@ xz2 = "0.1.6"
 objekt = "0.1.1"
 rayon-cond = "0.1.0"
 dftbplus-sys = { git = "https://github.com/ExpHP/dftbplus-sys", tag = "v0.0.1" }
+tee = "0.1.0"
 
 #--------------------------------------------
 # Always optimize some crates when they appear as dependencies.
