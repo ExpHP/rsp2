@@ -101,63 +101,62 @@ where
     use std::process::Stdio;
 
     let tmp = fsx::TempDir::new("rsp2")?;
-//    tmp.try_with_recovery(|tmp| FailOk({
-        let script = ReifiedScript::new(script, tmp.path().join("script.py"))?;
+    
+    let script = ReifiedScript::new(script, tmp.path().join("script.py"))?;
 
-        let mut cmd = process::Command::new("python3");
-        script.add_args(&mut cmd);
+    let mut cmd = process::Command::new("python3");
+    script.add_args(&mut cmd);
 
-        cmd.stdin(Stdio::piped());
-        cmd.stdout(Stdio::piped());
-        cmd.stderr(Stdio::piped());
+    cmd.stdin(Stdio::piped());
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
 
-        // FIXME HACK:
-        // It'd be a PITA to propagate down threading configuration, but for now, I know
-        // that rsp2 never runs more than one python script at at time.
-        cmd.env("OMP_NUM_THREADS", crate::env::max_omp_num_threads()?.to_string());
+    // FIXME HACK:
+    // It'd be a PITA to propagate down threading configuration, but for now, I know
+    // that rsp2 never runs more than one python script at at time.
+    cmd.env("OMP_NUM_THREADS", crate::env::max_omp_num_threads()?.to_string());
 
-        let mut child = cmd.spawn()?;
-        let child_stdin = child.stdin.take().unwrap();
-        let child_stderr = child.stderr.take().unwrap();
-        let child_stdout = child.stdout.take().unwrap();
+    let mut child = cmd.spawn()?;
+    let child_stdin = child.stdin.take().unwrap();
+    let child_stderr = child.stderr.take().unwrap();
+    let child_stdout = child.stdout.take().unwrap();
 
-        let stderr_worker = crate::stderr::spawn_log_worker(child_stderr);
+    let stderr_worker = crate::stderr::spawn_log_worker(child_stderr);
 
-        serde_json::to_writer(child_stdin, &stdin_data)?;
+    serde_json::to_writer(child_stdin, &stdin_data)?;
 
-        // for debugging deserialization errors
-        let child_stdout = {
-            let log_file = match raw_stdout_log::enabled() {
-                true => fsx::create(tmp.path().join("_py_stdout"))?,
-                false => fsx::create("/dev/null")?,
-            };
-            tee::TeeReader::new(child_stdout, log_file)
+    // for debugging deserialization errors
+    let child_stdout = {
+        let log_file = match raw_stdout_log::enabled() {
+            true => fsx::create(tmp.path().join("_py_stdout"))?,
+            false => fsx::create("/dev/null")?,
         };
+        tee::TeeReader::new(child_stdout, log_file)
+    };
 
-        // Deserialization must be done before checking the exit code...
-        let de_result = serde_json::from_reader(child_stdout);
+    // Deserialization must be done before checking the exit code...
+    let de_result = serde_json::from_reader(child_stdout);
 
-        // ...but prioritize a nonzero exit status over an error in deserialization.
-        if !child.wait()?.success() {
-            let extra = match crate::stderr::is_log_enabled() {
-                true => "check the log for a python backtrace",
-                false => "that's all we know",
-            };
-            bail!("an error occurred in a python script; {}", extra);
+    // ...but prioritize a nonzero exit status over an error in deserialization.
+    if !child.wait()?.success() {
+        let extra = match crate::stderr::is_log_enabled() {
+            true => "check the log for a python backtrace",
+            false => "that's all we know",
         };
-        let _ = stderr_worker.join();
+        bail!("an error occurred in a python script; {}", extra);
+    };
+    let _ = stderr_worker.join();
 
-        // Only if the script reported success do we care about deserialization errors.
-        de_result.unwrap_or_else(move |de_error| {
-            let extra = match raw_stdout_log::enabled() {
-                false => format!("To record the ill-formed output, try setting {}", raw_stdout_log::suggestion()),
-                true => format!("The ill-formed output was logged to a temp dir."),
-            };
-            info!("{}", tmp.path().display());
-            let _ = crate::util::recover_temp_dir_if_non_empty(tmp);
-            panic!("(BUG!) Error during deserialization: {}\n{}", de_error, extra);
-        })
-//    }))?.1 // tmp.try_with_recovery(...)
+    // Only if the script reported success do we care about deserialization errors.
+    de_result.unwrap_or_else(move |de_error| {
+        let extra = match raw_stdout_log::enabled() {
+            false => format!("To record the ill-formed output, try setting {}", raw_stdout_log::suggestion()),
+            true => format!("The ill-formed output was logged to a temp dir."),
+        };
+        info!("{}", tmp.path().display());
+        let _ = crate::util::recover_temp_dir_if_non_empty(tmp);
+        panic!("(BUG!) Error during deserialization: {}\n{}", de_error, extra);
+    })
 })}
 
 /// The runtime component of Script.  Constructing it may produce a file on the filesystem,
