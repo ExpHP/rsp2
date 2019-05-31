@@ -32,14 +32,10 @@ pub struct Ket3 {
     pub(crate) imag: Vec<V3>,
 }
 
-/// Cartesian displacement directions of eigenvectors.
+/// Cartesian displacement direction of an eigenvector.
 ///
 /// Not necessarily normalized, and in structures with more than one distinct mass,
 /// they may not even be orthogonal.
-#[derive(Debug, Clone)]
-pub struct EvDirections(pub(crate) Vec<EvDirection>);
-
-/// Cartesian displacement direction of an eigenvector.
 #[derive(Debug, Clone)]
 pub struct EvDirection(Ket3);
 
@@ -101,11 +97,6 @@ impl<'iter> Partition<'iter> for EvDirection {
     { Box::new(self.0.into_unlabeled_partitions(part).map(EvDirection)) }
 }
 
-impl<'iter> Partition<'iter> for EvDirections {
-    fn into_unlabeled_partitions<L>(self, part: &'iter Part<L>) -> Unlabeled<'iter, Self>
-    { Box::new(partition_each_item(part, self.0).map(EvDirections)) }
-}
-
 impl Ket3 {
     #[allow(unused)]
     pub fn sqnorm(&self) -> f64
@@ -132,20 +123,6 @@ impl Ket3 {
         let imag = imag.iter().map(|&v| v / norm).collect();
         Ket3 { real, imag }
     }
-}
-
-impl EvDirections {
-    pub fn from_eigenvectors(evecs: &Basis3, meta: HList1<meta::SiteMasses>) -> Self {
-        EvDirections({
-            evecs.0.iter()
-                .map(|evec| EvDirection::from_eigenvector(evec, meta.sift()))
-                .collect()
-        })
-    }
-
-    /// Normalize each direction.
-    pub fn normalized(&self) -> Self
-    { EvDirections(self.0.iter().map(EvDirection::normalized).collect()) }
 }
 
 impl std::ops::Deref for EvDirection {

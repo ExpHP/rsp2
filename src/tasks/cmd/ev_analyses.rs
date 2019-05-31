@@ -12,7 +12,7 @@
 use crate::FailResult;
 use crate::ui::color::{ColorByRange, PaintAs, NullPainter};
 use crate::ui::cfg_merging::{no_summary, merge_summaries, make_nested_mapping};
-use crate::math::basis::{Basis3, EvDirections};
+use crate::math::basis::{Basis3, EvDirection};
 use crate::math::bands::{GammaUnfolder};
 #[allow(unused)] // compiler bug
 use itertools::Itertools;
@@ -252,9 +252,9 @@ pub mod ev_acousticness {
         site_masses: &SiteMasses,
     ) -> FailResult<EvAcousticness> {
         Ok(EvAcousticness({
-            EvDirections::from_eigenvectors(&ev_eigenvectors.0, hlist![site_masses.clone()])
-                .0.iter()
-                .map(|ket| ket.acousticness() / ket.sqnorm())
+            (ev_eigenvectors.0).0.iter()
+                .map(|evec| EvDirection::from_eigenvector(evec, hlist![site_masses.clone()]))
+                .map(|direction| direction.acousticness() / direction.sqnorm())
                 .collect()
         }))
     }
@@ -267,9 +267,10 @@ wrap_maybe_compute! {
         ev_eigenvectors: &EvEigenvectors,
     ) -> FailResult<_> {
         Ok(EvPolarization({
-            EvDirections::from_eigenvectors(&ev_eigenvectors.0, hlist![site_masses.clone()])
-                .normalized()
-                .0.iter().map(|direction| direction.polarization())
+            (ev_eigenvectors.0).0.iter()
+                .map(|evec| EvDirection::from_eigenvector(evec, hlist![site_masses.clone()]))
+                .map(|direction| direction.normalized())
+                .map(|direction| direction.polarization())
                 .collect()
         }))
     }
@@ -284,8 +285,9 @@ wrap_maybe_compute! {
     ) -> FailResult<_> {
         let part = Part::from_ord_keys(site_layers.iter());
         Ok(EvLayerAcousticness({
-            EvDirections::from_eigenvectors(&ev_eigenvectors.0, hlist![site_masses.clone()])
-                .0.iter().map(|direction| {
+            (ev_eigenvectors.0).0.iter()
+                .map(|evec| EvDirection::from_eigenvector(evec, hlist![site_masses.clone()]))
+                .map(|direction| {
                     direction
                         .normalized()
                         .into_unlabeled_partitions(&part)

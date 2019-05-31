@@ -15,7 +15,7 @@ use crate::potential::{PotentialBuilder};
 use crate::meta::{self, prelude::*};
 use rsp2_tasks_config as cfg;
 
-use crate::math::basis::{Basis3, EvDirections};
+use crate::math::basis::{Basis3, EvDirection};
 
 use rsp2_slice_math::{v, V, vdot, vnormalize, BadNorm};
 
@@ -97,9 +97,10 @@ pub(crate) fn perform_acoustic_search(
     settings: &cfg::AcousticSearch,
 ) -> FailResult<Rc<[ModeKind]>>
 {Ok({
-    let ev_directions = {
-        EvDirections::from_eigenvectors(eigenvectors, meta.sift())
-            .normalized()
+    let ev_directions = || {
+        eigenvectors.0.iter()
+            .map(|evec| EvDirection::from_eigenvector(evec, meta.sift()))
+            .map(|direction| direction.normalized())
     };
 
     let &cfg::AcousticSearch {
@@ -124,7 +125,7 @@ pub(crate) fn perform_acoustic_search(
         };
 
         let mut t_end = zero_index;
-        for (i, direction) in ev_directions.0.iter().take(stop_index).enumerate() {
+        for (i, direction) in ev_directions().take(stop_index).enumerate() {
             if direction.acousticness() >= 0.95 {
                 t_end = i + 1;
                 kinds[i] = Some(ModeKind::Translational);
@@ -156,7 +157,7 @@ pub(crate) fn perform_acoustic_search(
 
     let mut rotational_count = 0;
     let mut uncertain_indices = vec![];
-    for (i, direction) in ev_directions.0.iter().take(zero_index).enumerate() {
+    for (i, direction) in ev_directions().take(zero_index).enumerate() {
         if kinds[i].is_some() {
             continue;
         }
