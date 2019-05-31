@@ -230,7 +230,7 @@ impl DynamicalMatrix {
         use crate::math::basis::Ket3;
         use rsp2_array_types::V3;
 
-        trace!("Computing most negative eigensolutions.");
+        trace!("Computing all eigensolutions.");
         let mut flat = self.to_dense_flat_real().expect("(BUG!) expected real matrix!");
         let mut eigenvalues = vec![std::f64::NAN; 3 * self.num_atoms()];
         let mut eigenvectors_flat = vec![std::f64::NAN; flat.len()];

@@ -112,6 +112,7 @@ mod loggers {
                         // (`Display::fmt` might also double-panic, but that's the Drop impl's fault
                         //  for trying to format something that can panic!)
                         let _ = writeln!(file, "{}", record.args());
+                        let _ = file.flush();
                     },
                     // not yet started
                     (None, Some(delayed_messages)) => {
