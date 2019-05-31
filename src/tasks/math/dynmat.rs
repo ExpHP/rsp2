@@ -708,6 +708,32 @@ impl DynamicalMatrix {
 
         Ok(DynamicalMatrix(csr))
     }
+
+    /// If the matrix is real, produce a flat `Vec` representation.
+    pub fn to_dense_flat_real(&self) -> Option<Vec<f64>> {
+        let DynamicalMatrix(RawCsr { dim, val, col, row_ptr }) = self;
+
+        let mut out = vec![0.0; 3 * dim.0 * 3 * dim.1];
+        let row_los = &row_ptr.raw[..row_ptr.len() - 1];
+        let row_his = &row_ptr.raw[1..];
+        for (block_row, (&lo, &hi)) in zip_eq!(row_los, row_his).enumerate() {
+            for (block, &PrimI(block_col)) in zip_eq!(&val[lo..hi], &col[lo..hi]) {
+                let Complex33(real, imag) = block;
+                if imag != &M33::zero() {
+                    return None;
+                }
+                for r in 0..3 {
+                    for c in 0..3 {
+                        let out_r = 3 * block_row + r;
+                        let out_c = 3 * block_col + c;
+                        out[out_r * 3 * dim.0 + out_c] = real[r][c];
+                    }
+                }
+            }
+        }
+
+        Some(out)
+    }
 }
 
 #[derive(Deserialize, Serialize)]

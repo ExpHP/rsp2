@@ -261,6 +261,72 @@ pub fn lapacke_least_squares_svd(mut matrix: CMatrix, mut rhs: CMatrix) -> Resul
     Ok(rhs.slice_axis(Axis(0), (..n as usize).into()).to_owned())
 }
 
+pub mod dynmat {
+    // NOTE: We can't afford to use CMatrix here memory-wise; too many copies get made
+    //       and the dynmat can be MASSIVE.  (14 GB for a cell with 12*3601 atoms)
+
+    /// Diagonalize a symmetric, real matrix.
+    ///
+    /// Ideally this signature would be `(Vec<f64>) -> (Vec<f64>, Vec<f64>)`.
+    /// The current signature was chosen for wider applicability with zero copying;
+    /// there's no way to obtain a `Vec<[f64; 3]>` from a `Vec<f64>` without copying,
+    /// whereas this can be safely done for `&mut [_]`.
+    ///
+    /// `matrix` is a dense, symmetric matrix stored contiguously in row-major
+    /// order. Only the lower triangle will be used. **The algorithm will use
+    /// `matrix` as a workspace, destroying it.**
+    ///
+    /// Output is written to `eigenvalues` and `eigenvectors`.
+    /// Where `eigenvectors` is row-major, each row of `eigenvectors` will contain
+    /// one right-eigenvector. (this is the transpose of what is usually called the
+    /// eigenvector matrix, and is the format preferred everywhere in RSP2)
+    ///
+    /// (Alternatively, you could consider `matrix` and `eigenvectors` to be
+    ///  column-major, in which case only the upper triangle of `matrix` is used,
+    ///  and `eigenvectors` is the eigenvector matrix rather than its transpose)
+    pub fn diagonalize_real(
+        matrix: &mut [f64],
+        eigenvalues: &mut [f64],
+        eigenvectors: &mut [f64],
+    ) {
+        let square = |x| x*x;
+        assert_eq!(square(eigenvalues.len()), matrix.len());
+        assert_eq!(square(eigenvalues.len()), eigenvectors.len());
+
+        // Why column major? A couple of reasons:
+        // * It allows lapacke to use less memory.
+        // * It writes the eigenvectors in vector-major order, which is what we want.
+        // * It has no effect on the input matrix, which is symmetric.
+        let layout = lapacke::Layout::ColumnMajor;
+        let jobz = b'V'; // Get eigenvectors
+        let range = b'A'; // All eigenvalues
+        let uplo = b'U'; // Upper triangle (for us, lower triangle) of A is stored
+        let n = eigenvalues.len() as _;
+        let a = matrix;
+        let lda = n;
+        let (vl, vu) = (0.0, 0.0); // value range (unused)
+        let (il, iu) = (0, 0); // index range (unused)
+        let abstol = 0.0; // automatically determine from tridiagonal form
+        let mut m = 0;
+        let mut w = eigenvalues;
+        let mut z = eigenvectors;
+        let ldz = n;
+        let mut isuppz = vec![0; 2 * usize::max(n as usize, 1)];
+
+        match unsafe {
+            // The '*evr' method was chosen because it's what scipy prefers.
+            lapacke::dsyevr(
+                layout, jobz, range, uplo, n, a, lda, vl, vu, il, iu, abstol,
+                &mut m, &mut w, &mut z, ldz, &mut isuppz,
+            )
+        } {
+            0 => { /* okey dokey */ },
+            info if info < 0 => panic!("bad arg number {} to dsyevr", -info),
+            info => panic!("internal error in dsyevr (INFO = {})", info),
+        }
+    }
+}
+
 #[test]
 fn test_pseudoinverse() {
     use rand::Rng;

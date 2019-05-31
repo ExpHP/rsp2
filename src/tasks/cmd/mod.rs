@@ -463,7 +463,7 @@ fn do_diagonalize_dynmat(
         match settings.phonons.eigensolver {
             cfg::PhononEigensolver::Phonopy(cfg::AlwaysFail(never, _)) => match never {},
             cfg::PhononEigensolver::Rsp2 { dense: true, .. } => {
-                dynmat.compute_eigensolutions_dense()?
+                dynmat.compute_eigensolutions_dense_gamma()
             },
             cfg::PhononEigensolver::Rsp2 { dense: false, how_many, shift_invert_attempts } => {
                 dynmat.compute_negative_eigensolutions(

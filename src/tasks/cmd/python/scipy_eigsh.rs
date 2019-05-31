@@ -199,8 +199,6 @@ impl DynamicalMatrix {
         }.invoke()
     }
 
-    /// Intended to be used during relaxation.
-    ///
     /// Produce all eigensolutions.
     pub fn compute_eigensolutions_dense(&self) -> FailResult<(Vec<f64>, Basis3)> {
         trace!("Computing most negative eigensolutions.");
@@ -221,5 +219,37 @@ impl DynamicalMatrix {
                 ..Default::default()
             },
         }.invoke()
+    }
+
+    /// Produce all eigensolutions of a dynamical matrix at gamma.
+    ///
+    /// This function has vastly less memory overhead than the ones that invoke python scripts.
+    //
+    // FIXME: That also kind of suggests it's out of place!
+    pub fn compute_eigensolutions_dense_gamma(&self) -> (Vec<f64>, Basis3) {
+        use crate::math::basis::Ket3;
+        use rsp2_array_types::V3;
+
+        trace!("Computing most negative eigensolutions.");
+        let mut flat = self.to_dense_flat_real().expect("(BUG!) expected real matrix!");
+        let mut eigenvalues = vec![std::f64::NAN; 3 * self.num_atoms()];
+        let mut eigenvectors_flat = vec![std::f64::NAN; flat.len()];
+
+        rsp2_linalg::dynmat::diagonalize_real(&mut flat, &mut eigenvalues, &mut eigenvectors_flat);
+
+        // save that precious memory!
+        drop(flat);
+
+        let mut kets = vec![];
+        for eigenvector_data in eigenvectors_flat.chunks(3 * self.num_atoms()) {
+            let real = eigenvector_data.nest().to_vec();
+            let imag = vec![V3::zero(); self.num_atoms()];
+            kets.push(Ket3 { real, imag })
+        }
+        let eigenvectors = Basis3(kets);
+
+        let frequencies = eigenvalues.into_iter().map(crate::filetypes::eigensols::eigenvalue_to_frequency).collect();
+
+        (frequencies, eigenvectors)
     }
 }
