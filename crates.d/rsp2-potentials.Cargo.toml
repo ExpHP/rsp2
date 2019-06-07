@@ -12,7 +12,6 @@ path = "lib.rs"
 !!rsp2-structure
 !!rsp2-assert-close
 !!rsp2-array-types
-!!rsp2-array-utils
 !!rsp2-util-macros
 !!rsp2-newtype-indices
 !!rsp2-minimize

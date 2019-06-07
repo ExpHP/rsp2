@@ -12,7 +12,6 @@
 #[macro_use] extern crate rsp2_util_macros;
 #[macro_use] extern crate rsp2_assert_close;
 #[macro_use] extern crate rsp2_newtype_indices;
-#[macro_use] extern crate rsp2_array_utils;
 
 #[macro_use] extern crate enum_map;
 #[macro_use] extern crate failure;

@@ -32,7 +32,7 @@ use num_traits::{Zero, One};
 /// is used.  There is also a static method form of this for
 /// easily supplying a type hint. (e.g. `M33::from_fn`)
 #[inline(always)]
-pub fn from_fn<M: FromFn<F>, B, F>(f: F) -> M
+pub(crate) fn from_fn<M: FromFn<F>, B, F>(f: F) -> M
 where F: FnMut(usize, usize) -> B,
 { FromFn::from_fn(f) }
 
@@ -46,20 +46,6 @@ where F: FnMut(usize, usize) -> B,
 #[inline(always)]
 pub fn from_array<A: IntoMatrix>(arr: A) -> A::Matrix
 { arr.into_matrix() }
-
-/// Construct an identity matrix (using type inference).
-///
-/// This is also available as a static method on the matrix types.
-#[inline(always)]
-pub fn eye<M: One + IsMatrix>() -> M
-{ One::one() }
-
-/// Construct a zero matrix (using type inference).
-///
-/// This is also available as a static method on the matrix types.
-#[inline(always)]
-pub fn zero<M: Zero + IsMatrix>() -> M
-{ Zero::zero() }
 
 /// Matrix inverse.
 #[inline(always)]
@@ -75,9 +61,6 @@ gen_each!{
     ) => {
         impl<X> $Mnn<X> {
             /// Construct the identity matrix.
-            ///
-            /// This is also available as the free function `mat::eye`;
-            /// this static method just provides an easy way to supply a type hint.
             #[inline(always)]
             pub fn eye() -> Self
             where Self: One,
@@ -143,26 +126,20 @@ gen_each!{
 
 // General rectangular.
 gen_each!{
-    @{Mn_n}
+    @{Mnn_Mn_Vn_n}
     @{Vn_n}
     for_each!(
-        {$Mr:ident $r:tt}
+        {$_Mrr:ident $Mr:ident $Vr:ident $r:tt}
         {$Vc:ident $c:tt}
     ) => {
         impl<X> $Mr<$Vc<X>> {
             /// Construct the zero matrix.
-            ///
-            /// This is also available as the free function `mat::zero`;
-            /// this static method just provides an easy way to supply a type hint.
             #[inline(always)]
             pub fn zero() -> Self
             where Self: Zero,
             { Zero::zero() }
 
-            /// Construct a fixed-size vector from a function on indices.
-            ///
-            /// This is also available as the free function `mat::from_fn`;
-            /// this static method just provides an easy way to supply a type hint.
+            /// Construct a fixed-size matrix from a function on indices.
             #[inline(always)]
             pub fn from_fn<B, F>(f: F) -> Self
             where Self: FromFn<F>, F: FnMut(usize, usize) -> B,
@@ -172,19 +149,19 @@ gen_each!{
             #[inline(always)]
             pub fn map<B, F>(self, mut f: F) -> $Mr<$Vc<B>>
             where F: FnMut(X) -> B,
-            { $Mr(::rsp2_array_utils::map_arr(self.0, |row| row.map(&mut f))) }
+            { $Mr($Vr(self.0).map(|v| v.map(&mut f)).0) }
 
             /// Apply a fallible function to each scalar element, with short-circuiting.
             #[inline(always)]
             pub fn try_map<E, B, F>(self, mut f: F) -> Result<$Mr<$Vc<B>>, E>
             where F: FnMut(X) -> Result<B, E>,
-            { rsp2_array_utils::try_map_arr(self.0, |row| row.try_map(&mut f)).map($Mr) }
+            { Ok($Mr($Vr(self.0).try_map(|v| v.try_map(&mut f))?.0)) }
 
             /// Apply a fallible function to each scalar element, with short-circuiting.
             #[inline(always)]
             pub fn opt_map<B, F>(self, mut f: F) -> Option<$Mr<$Vc<B>>>
             where F: FnMut(X) -> Option<B>,
-            { rsp2_array_utils::opt_map_arr(self.0, |row| row.opt_map(&mut f)).map($Mr) }
+            { Some($Mr($Vr(self.0).opt_map(|v| v.opt_map(&mut f))?.0)) }
         }
     }
 }

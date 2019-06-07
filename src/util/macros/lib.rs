@@ -91,3 +91,13 @@ macro_rules! debug_once { ($($arg:tt)*) => { _log_once_impl!{debug!($($arg)*)} }
 macro_rules! named_block {
     ($lt:lifetime: $block:block) => { $lt: loop { break $block } };
 }
+
+/// Generates the type [[...[T; nN]; ...; n1]; n0].
+#[macro_export]
+macro_rules! nd {
+    ($T:ty; $n0:expr $(;$n:expr)*)
+    => { [nd!($T $(;$n)*); $n0] };
+
+    ($T:ty)
+    => { $T };
+}

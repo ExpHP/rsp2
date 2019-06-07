@@ -14,7 +14,6 @@ use crate::{FailResult};
 use rsp2_structure::{CoordsKind, Lattice, Coords};
 
 use rsp2_soa_ops::{Part, Perm, Permute};
-use rsp2_array_utils::map_arr;
 use rsp2_array_types::{M33, V3, dot};
 
 /// A partially assembled structure for which
@@ -180,7 +179,7 @@ impl Assemble {
         // selected vector must be orthogonal to the others.
         // It is normalized so that it can be easily scaled later.
         let lattice = {
-            let units = map_arr(lattice.vectors().clone(), |v| v.unit());
+            let units = V3(lattice.vectors().clone()).map(|v| v.unit()).0;
             for &k in &other_axes {
                 let d = dot(&units[normal_axis], &units[k]);
                 ensure!(

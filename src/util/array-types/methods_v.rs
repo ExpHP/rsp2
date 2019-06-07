@@ -19,21 +19,11 @@ use num_traits::Zero;
 // ---------------------------------------------------------------------------
 // ------------------------------ PUBLIC API ---------------------------------
 
-/// Construct a fixed-size vector from a function on indices.
-///
-/// The length of the vector will be inferred solely from how
-/// it is used. There is also a static method form of this for
-/// easily supplying a type hint. (e.g. `V3::from_fn`)
-#[inline(always)]
-pub fn from_fn<V: FromFn<F>, B, F>(f: F) -> V
+// This version is generic over the output type.
+#[inline]
+pub(crate) fn from_fn<V: TryFromFn<Elem=B>, B, F>(mut f: F) -> V
 where F: FnMut(usize) -> B,
-{ FromFn::from_fn(f) }
-
-/// Get a zero vector. (using type inference)
-#[inline(always)]
-pub fn zero<V: Zero>() -> V
-where V: Zero + IsV,
-{ Zero::zero() }
+{ V::try_from_fn(|n| Ok::<_, ()>(f(n))).ok().unwrap() }
 
 gen_each!{
     @{Vn_n}
@@ -55,14 +45,14 @@ gen_each!{
             /// This is also available as the free function `vee::from_fn`;
             /// this static method just provides an easy way to supply a type hint.
             #[inline(always)]
-            pub fn from_fn<B, F>(f: F) -> Self
-            where Self: FromFn<F>, F: FnMut(usize) -> B,
-            { FromFn::from_fn(f) }
+            pub fn from_fn<F>(f: F) -> Self
+            where F: FnMut(usize) -> X,
+            { from_fn(f) }
 
             /// Construct a fixed-size vector from a function on indices.
             #[inline(always)]
-            pub fn try_from_fn<B, E, F>(f: F) -> Result<Self, E>
-            where Self: TryFromFn<F, E>, F: FnMut(usize) -> Result<B, E>,
+            pub fn try_from_fn<E, F>(f: F) -> Result<Self, E>
+            where F: FnMut(usize) -> Result<X, E>,
             { TryFromFn::try_from_fn(f) }
 
             /// Get the inner product of two vectors.
@@ -153,25 +143,29 @@ gen_each!{
             { self - self.par(r) }
 
             /// Apply a function to each element.
-            #[inline(always)]
-            pub fn map<B, F>(self, f: F) -> $Vn<B>
+            #[inline]
+            pub fn map<B, F>(self, mut f: F) -> $Vn<B>
             where F: FnMut(X) -> B,
-            { $Vn(::rsp2_array_utils::map_arr(self.0, f)) }
+            { self.try_map(|x| Ok::<_, ()>(f(x))).ok().unwrap() }
 
             /// Apply a fallible function to each element, with short-circuiting.
             #[inline(always)]
             pub fn try_map<E, B, F>(self, f: F) -> Result<$Vn<B>, E>
             where F: FnMut(X) -> Result<B, E>,
-            { rsp2_array_utils::try_map_arr(self.0, f).map($Vn) }
+            { TryMap::try_map(self, f) }
 
             /// Apply a fallible function to each element, with short-circuiting.
-            #[inline(always)]
-            pub fn opt_map<B, F>(self, f: F) -> Option<$Vn<B>>
+            #[inline]
+            pub fn opt_map<B, F>(self, mut f: F) -> Option<$Vn<B>>
             where F: FnMut(X) -> Option<B>,
-            { rsp2_array_utils::opt_map_arr(self.0, f).map($Vn) }
+            {
+                // hand the problem off to our "sufficiently smart compiler"
+                self.try_map(|x| f(x).ok_or(Err::<B, ()>(()))).ok()
+            }
         }
     }
 }
+
 
 impl<X: Ring> V3<X>
 where X: PrimitiveRing
@@ -238,55 +232,80 @@ gen_each!{
 
 // ---------------------------------------------------------------------------
 
-/// Implementation detail of the free function `vee::from_fn`.
-///
-/// > **_Fuggedaboudit._**
-///
-/// Without this, the free function `from_fn` could not be generic over different
-/// sizes of V.
-pub trait FromFn<F>: Sized {
-    fn from_fn(f: F) -> Self;
+/// Implementation detail of `V3::try_from_fn`.
+pub(crate) trait TryFromFn: Sized {
+    type Elem;
+
+    fn try_from_fn<E>(f: impl FnMut(usize) -> Result<Self::Elem, E>) -> Result<Self, E>;
 }
 
-gen_each!{
-    @{Vn}
-    for_each!(
-        {$Vn:ident}
-    ) => {
-        impl<X, F> FromFn<F> for $Vn<X>
-          where F: FnMut(usize) -> X,
-        {
-            #[inline]
-            fn from_fn(f: F) -> Self
-            { $Vn(::rsp2_array_utils::arr_from_fn(f)) }
-        }
+impl<A> TryFromFn for V2<A> {
+    type Elem = A;
+
+    #[inline]
+    fn try_from_fn<E>(mut f: impl FnMut(usize) -> Result<Self::Elem, E>) -> Result<Self, E> {
+        Ok(V2([f(0)?, f(1)?]))
+    }
+}
+
+impl<A> TryFromFn for V3<A> {
+    type Elem = A;
+
+    #[inline]
+    fn try_from_fn<E>(mut f: impl FnMut(usize) -> Result<Self::Elem, E>) -> Result<Self, E> {
+        Ok(V3([f(0)?, f(1)?, f(2)?]))
+    }
+}
+
+impl<A> TryFromFn for V4<A> {
+    type Elem = A;
+
+    #[inline]
+    fn try_from_fn<E>(mut f: impl FnMut(usize) -> Result<Self::Elem, E>) -> Result<Self, E> {
+        Ok(V4([f(0)?, f(1)?, f(2)?, f(3)?]))
     }
 }
 
 // ---------------------------------------------------------------------------
 
-/// Implementation detail of the free function `vee::try_rom_fn`.
-///
-/// > **_Fuggedaboudit._**
-///
-/// Without this, the free function `try_from_fn` could not be generic over different
-/// sizes of V.
-pub trait TryFromFn<F, E>: Sized {
-    fn try_from_fn(f: F) -> Result<Self, E>;
+/// Implementation detail of the inherent method `V3::try_map`.
+pub(crate) trait TryMap<B>: Sized {
+    type Elem;
+    type Output;
+
+    fn try_map<E>(self, f: impl FnMut(Self::Elem) -> Result<B, E>) -> Result<Self::Output, E>;
 }
 
-gen_each!{
-    @{Vn}
-    for_each!(
-        {$Vn:ident}
-    ) => {
-        impl<X, F, E> TryFromFn<F, E> for $Vn<X>
-          where F: FnMut(usize) -> Result<X, E>,
-        {
-            #[inline]
-            fn try_from_fn(f: F) -> Result<$Vn<X>, E>
-            { ::rsp2_array_utils::try_arr_from_fn(f).map($Vn) }
-        }
+impl<A, B> TryMap<B> for V2<A> {
+    type Elem = A;
+    type Output = V2<B>;
+
+    #[inline]
+    fn try_map<E>(self, mut f: impl FnMut(Self::Elem) -> Result<B, E>) -> Result<Self::Output, E> {
+        let V2([a, b]) = self;
+        Ok(V2([f(a)?, f(b)?]))
+    }
+}
+
+impl<A, B> TryMap<B> for V3<A> {
+    type Elem = A;
+    type Output = V3<B>;
+
+    #[inline]
+    fn try_map<E>(self, mut f: impl FnMut(Self::Elem) -> Result<B, E>) -> Result<Self::Output, E> {
+        let V3([a, b, c]) = self;
+        Ok(V3([f(a)?, f(b)?, f(c)?]))
+    }
+}
+
+impl<A, B> TryMap<B> for V4<A> {
+    type Elem = A;
+    type Output = V4<B>;
+
+    #[inline]
+    fn try_map<E>(self, mut f: impl FnMut(Self::Elem) -> Result<B, E>) -> Result<Self::Output, E> {
+        let V4([a, b, c, d]) = self;
+        Ok(V4([f(a)?, f(b)?, f(c)?, f(d)?]))
     }
 }
 

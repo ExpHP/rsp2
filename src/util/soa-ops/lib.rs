@@ -9,8 +9,6 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-#[macro_use] extern crate failure;
-
 #[cfg(test)]
 macro_rules! assert_matches {
     ($pat:pat, $expr:expr,)

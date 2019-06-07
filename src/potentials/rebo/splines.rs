@@ -1088,7 +1088,7 @@ pub mod tricubic {
 
     #[test]
     fn test_integer_values() -> FailResult<()> {
-        use rsp2_array_utils::arr_from_fn;
+        fn arr_from_fn<T>(f: impl Fn(usize) -> T) -> [T; 3] { V3::from_fn(f).0 }
 
         let input = Input::random();
         let spline = input.solve()?;
@@ -1271,7 +1271,7 @@ pub mod bicubic {
 
     #[test]
     fn test_integer_values() -> FailResult<()> {
-        use rsp2_array_utils::arr_from_fn;
+        fn arr_from_fn<T>(f: impl Fn(usize) -> T) -> [T; 3] { V3::from_fn(f).0 }
 
         let input = Input::random();
         let spline = input.solve()?;

@@ -42,9 +42,14 @@ impl fmt::Debug for PermVec {
     }
 }
 
-#[derive(Debug, Fail)]
-#[fail(display = "Tried to construct an invalid permutation.")]
-pub struct InvalidPermutationError(::failure::Backtrace);
+#[derive(Debug)]
+pub struct InvalidPermutationError { _private: () }
+
+impl fmt::Display for InvalidPermutationError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt("Tried to construct an invalid permutation.", f)
+    }
+}
 
 impl Perm {
     pub fn eye(n: usize) -> Perm
@@ -220,7 +225,7 @@ impl PermVec {
     fn from_vec(vec: Vec<usize>) -> Result<PermVec, InvalidPermutationError>
     {
         if !Self::validate_data(&vec) {
-            return Err(InvalidPermutationError(::failure::Backtrace::new()));
+            return Err(InvalidPermutationError { _private: () });
         }
         Ok(PermVec(vec))
     }
@@ -537,11 +542,11 @@ mod tests {
     #[test]
     fn invalid() {
         assert_matches!(
-            Err(InvalidPermutationError(_)),
+            Err(InvalidPermutationError{..}),
             Perm::from_vec(vec![0,1,3,3]));
 
         assert_matches!(
-            Err(InvalidPermutationError(_)),
+            Err(InvalidPermutationError{..}),
             Perm::from_vec(vec![1,2,3]));
     }
 

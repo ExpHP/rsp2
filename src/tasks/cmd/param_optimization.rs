@@ -323,11 +323,9 @@ pub struct RelaxationOptimizationHelper {
 
 impl RelaxationOptimizationHelper {
     pub fn new(params: &cfg::Parameters, original_lattice: &Lattice) -> Self {
-        use rsp2_array_utils::arr_from_fn;
-
         let mut map = std::collections::BTreeMap::new();
         let mut param_primary_axis = ArrayVec::<[usize; 3]>::new();
-        let axis_param: [_; 3] = arr_from_fn(|axis| match params[axis] {
+        let axis_param: [_; 3] = V3::from_fn(|axis| match params[axis] {
             cfg::Parameter::Param(c) => {
                 let param_index = *map.entry(c).or_insert_with(|| {
                     let out = param_primary_axis.len();
@@ -338,7 +336,7 @@ impl RelaxationOptimizationHelper {
             },
             cfg::Parameter::One |
             cfg::Parameter::NotPeriodic => None,
-        });
+        }).0;
 
         let original_params = Self::_read_lattice_params(&param_primary_axis, original_lattice);
         let mut axis_vectors = *original_lattice.vectors();

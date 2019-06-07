@@ -3,7 +3,17 @@
 #
 # To update it, run './crates gen' in the workspace root
 
+# !!! CAUTION !!!
+# Nightly cargo features are enabled in the user config of 'crates'.
+# Please do not check this change into VCS!!!
+#
+# To correct it, do the following to temporarily override the
+# cargo-nightly settings before committing:
+#
+#      ./crates gen --vcs
+#
 
+cargo-features = ['profile-overrides']
 
 [package]
 name = "rsp2"
@@ -141,4 +151,17 @@ beta = ["rsp2-array-types/beta", "rsp2-array-utils/beta", "rsp2-assert-close/bet
 [workspace]
 exclude = ["./scripts"]
 
+[profile.dev.overrides."rsp2-array-types"]
+opt-level = 3
 
+[profile.dev.overrides."rsp2-array-utils"]
+opt-level = 3
+
+[profile.dev.overrides."rsp2-kets"]
+opt-level = 3
+
+[profile.dev.overrides."rsp2-potentials"]
+opt-level = 3
+
+[profile.dev.overrides."rsp2-structure"]
+opt-level = 3

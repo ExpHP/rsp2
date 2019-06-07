@@ -18,7 +18,7 @@ use crate::FailResult;
 use crate::math::basis::Basis3;
 use crate::meta::{Element, Mass};
 use enum_map::EnumMap;
-use rsp2_array_types::{dot, mat, V3, M33};
+use rsp2_array_types::{dot, V3, M33};
 use rsp2_structure::bonds::{CartBond, CartBonds};
 
 pub struct PolConstant {
@@ -226,7 +226,7 @@ fn raman_tensor(
         let dconst_one = pc.c2; // `a'_par -   a'_perp`
         let dconst_two = pc.c3; // `a'_par + 2 a'_perp`
 
-        tensor += &mat::from_fn(|r, c| {
+        tensor += &M33::from_fn(|r, c| {
             dot(&rhat, &eig) * (
                 (dconst_two / 3.0) * kdelta[r][c]
                     + dconst_one * (rhat[r] * rhat[c] - kdelta[r][c] / 3.0)

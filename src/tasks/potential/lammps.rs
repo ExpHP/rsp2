@@ -130,10 +130,8 @@ impl<P: Clone> Builder<P>
     }
 
     pub(crate) fn parallel(&self, parallel: bool) -> Self {
-        use rsp2_array_utils::map_arr;
-
         let processors = match parallel {
-            true => map_arr(self.processor_axis_mask, |flag| if flag { None } else { Some(1) }),
+            true => V3(self.processor_axis_mask).map(|flag| if flag { None } else { Some(1) }).0,
             false => [Some(1); 3],
         };
 

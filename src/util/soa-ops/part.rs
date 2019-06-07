@@ -11,6 +11,7 @@
 
 use crate::{Perm, Permute};
 use std::iter::FusedIterator;
+use std::fmt;
 #[cfg(feature = "frunk")]
 use frunk::{HNil, HCons};
 
@@ -61,9 +62,14 @@ pub struct Part<L> {
 // impl<L: Hash + Eq> Label<HashMap<L, Vec<usize>> for L;
 // impl<L> Label<Vec<(L, Vec<usize>)>> for L;
 
-#[derive(Debug, Fail)]
-#[fail(display = "Tried to construct an invalid partition.")]
-pub struct InvalidPartitionError(::failure::Backtrace);
+#[derive(Debug)]
+pub struct InvalidPartitionError { _private: () }
+
+impl fmt::Display for InvalidPartitionError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt("Tried to construct an invalid partition.", f)
+    }
+}
 
 impl<L> Part<L> {
     /// Create a partition that decomposes a vector entirely.
@@ -73,7 +79,7 @@ impl<L> Part<L> {
     {Ok({
         let index_limit = part.iter().map(|(_, v)| v.len()).sum();
         if !Self::validate_part(&part, index_limit) {
-            return Err(InvalidPartitionError(::failure::Backtrace::new()))
+            return Err(InvalidPartitionError { _private: () })
         }
         Self { part, index_limit }
     })}
@@ -405,19 +411,19 @@ mod tests {
     fn error() {
         // skipped an index
         assert_matches!{
-            Err(InvalidPartitionError(..)),
+            Err(InvalidPartitionError{..}),
             Part::new(vec![ ((), vec![0, 1, 2, 4]) ]),
         }
 
         // duplicate, same vec
         assert_matches!{
-            Err(InvalidPartitionError(..)),
+            Err(InvalidPartitionError{..}),
             Part::new(vec![ ((), vec![2, 1, 2, 4]) ]),
         }
 
         // duplicate, different vec
         assert_matches!{
-            Err(InvalidPartitionError(..)),
+            Err(InvalidPartitionError{..}),
             Part::new(vec![
                 (true, vec![0, 2, 4]),
                 (false, vec![1, 2, 5]),

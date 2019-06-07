@@ -11,7 +11,6 @@
 
 use rsp2_structure::{CoordsKind, Lattice, Coords};
 use rsp2_kets::{Ket, KetRef, Rect};
-use rsp2_array_utils::{arr_from_fn};
 use rsp2_array_types::{V3, M33, dot, inv};
 use crate::threading::Threading;
 
@@ -229,7 +228,7 @@ impl GammaUnfolder {
                     quotient_sample_spec.signed_indices()
                         .into_iter()
                         .map(|v| {
-                            arr_from_fn(|k| (v[k] + sc_periods[k] as i32) as u32 % sc_periods[k])
+                            V3::from_fn(|k| (v[k] + sc_periods[k] as i32) as u32 % sc_periods[k]).0
                         }).collect();
                 assert!(quotient_indices.len() > 0, "no points to sample against");
 
@@ -280,11 +279,11 @@ impl GammaUnfolder {
         assert_eq!(eigenvector.len(), 3 * self.q_kets_by_pc_sc[0][0].len());
 
         // separate kets for each polarization axis (they don't cancel each other)
-        let axis_evs: [Ket; 3] = arr_from_fn(|axis| {
+        let axis_evs: [Ket; 3] = V3::from_fn(|axis| {
             eigenvector.iter().tuples()
                 .map(|(x, y, z)| [x, y, z][axis])
                 .collect()
-        });
+        }).0;
 
         let num_sc_recip_vecs = self.sc_indices.len();
 
