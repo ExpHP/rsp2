@@ -9,7 +9,6 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use rsp2_array_utils::{map_arr};
 use std::ops::{Mul, Div};
 use std::sync::Arc;
 #[cfg(feature = "serde")]
@@ -105,10 +104,10 @@ impl Lattice {
     { &self.matrix().0 }
 
     pub fn norms(&self) -> [f64; 3]
-    { map_arr(*self.vectors(), |v| v.norm()) }
+    { V3(*self.vectors()).map(|v| v.norm()).0 }
 
     pub fn sqnorms(&self) -> [f64; 3]
-    { map_arr(*self.vectors(), |v| v.sqnorm()) }
+    { V3(*self.vectors()).map(|v| v.sqnorm()).0 }
 
     /// Get the (positive) volume of the lattice cell.
     pub fn volume(&self) -> f64
@@ -131,8 +130,6 @@ impl Lattice {
     /// # Panics
     ///
     /// Panics on a Miller index of `[0, 0, 0]`.
-    ///
-    /// [`miller`]: TODO-LINK-FN
     pub fn plane_normal(&self, miller: V3<i32>) -> V3
     { self.miller_to_recip_cart(miller).unit() }
 
@@ -145,8 +142,6 @@ impl Lattice {
     /// # Panics
     ///
     /// Panics on a Miller index of `[0, 0, 0]`.
-    ///
-    /// [`miller`]: TODO-LINK-FN
     pub fn plane_spacing(&self, miller: V3<i32>) -> f64
     { self.miller_to_recip_cart(miller).norm().recip() }
 

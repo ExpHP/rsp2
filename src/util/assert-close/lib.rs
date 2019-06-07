@@ -9,7 +9,6 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use failure; // FIXME: artefact of cargo fix ???
 use std::fmt;
 
 pub const DEFAULT_NONZERO_TOL: f64 = 1e-9;
@@ -149,11 +148,7 @@ pub struct CheckCloseError<T = f64> {
     pub tol: Tolerances<T>,
 }
 
-// avoid `T: Fail` bound
-impl<T: fmt::Debug + Send + Sync + 'static> failure::Fail for CheckCloseError<T> {
-    fn backtrace(&self) -> Option <&::failure::Backtrace> { None }
-    fn cause(&self) -> Option <&dyn (::failure::Fail)> { None }
-}
+impl<T: fmt::Debug> std::error::Error for CheckCloseError<T> { }
 
 impl<T: fmt::Debug> fmt::Display for CheckCloseError<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

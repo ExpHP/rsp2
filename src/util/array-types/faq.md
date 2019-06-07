@@ -61,9 +61,7 @@ This is a big one.
 
 If an inherent method `foo()` calls an inherent method `bar()`, then `foo` is required to include all of the necessary `where` bounds for `bar`.  In contrast, if an inherent method `foo()` calls a trait method `bar()`, then `Self: Bar` usually suffices.
 
-Extending this argument to arbitrary downstream code; generic functions in downstream code need to have appropriate `where` bounds, and in this respect, individual traits per method are more stable. Normally this might be cited as an argument for wrapping *every single function* into its own trait... however, generally speaking, this point does not matter much to rsp2 since *all of the downstream code is also part of rsp2.*
-
-What it all basically boils down to is creating a balance:
+Extending this argument to arbitrary downstream code; generic functions in downstream code need to have appropriate `where` bounds, and in this respect, individual traits per method are more stable.  What it all basically boils down to is creating a balance:
 
 - *If every single method has its own trait,* then any function generic over vectors basically needs to duplicate its entire implementation within its `where` bounds to make sure that each method it calls is available. This is, of course, *really friggin dumb.*
 

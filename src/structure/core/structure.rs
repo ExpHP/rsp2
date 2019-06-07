@@ -558,6 +558,7 @@ mod compiletest {
     }
 
     #[test]
+    #[cfg(feature = "serde-support")]
     fn serde() {
         let de: Coords = serde_json::from_str(r#"{
             "lattice": [[2.4192432809928756, 0.0, 0.0],

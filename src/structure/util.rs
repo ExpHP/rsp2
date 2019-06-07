@@ -16,7 +16,7 @@ use ordered_float::NotNan;
 
 use crate::IntPrecisionError;
 
-use rsp2_array_types::{V3, M33, M3};
+use rsp2_array_types::{V3, M33};
 
 pub(crate) fn translate_mut_n3_3(coords: &mut [V3], t: &V3)
 {
@@ -69,7 +69,7 @@ impl Tol {
     { v.try_map(|x| self.unfloat(x)) }
 
     pub(crate) fn unfloat_m33(&self, m: &M33) -> Result<M33<i32>, IntPrecisionError>
-    { rsp2_array_utils::try_map_arr(m.0, |v| self.unfloat_v3(&v)).map(M3) }
+    { m.try_map(|x| self.unfloat(x)) }
 }
 
 #[inline(always)] // hopefully encourage LLVM to do crazy bit math for constant moduli

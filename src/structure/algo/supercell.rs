@@ -12,7 +12,6 @@
 use crate::{Lattice, CoordsKind, Coords};
 
 use rsp2_soa_ops::{Perm};
-use rsp2_array_utils::{arr_from_fn, try_arr_from_fn};
 use rsp2_array_types::{V3};
 
 
@@ -242,7 +241,7 @@ impl SupercellToken {
                 image_carts.extend(carts.drain(new_len..));
                 crate::util::translate_mut_n3_n3(&mut image_carts, &neg_offsets);
 
-                out_carts.push(V3(try_arr_from_fn(|k| {
+                out_carts.push(V3::try_from_fn(|k| {
                     let this_axis = || image_carts.iter().map(|v| v[k]);
 
                     let inf = std::f64::INFINITY;
@@ -256,7 +255,7 @@ impl SupercellToken {
 
                     let sum = this_axis().sum::<f64>();
                     Ok(sum / num_cells as f64)
-                })?));
+                })?);
             }
             // Atoms were done in reverse order
             out_carts.into_iter().rev().collect()
@@ -418,10 +417,10 @@ impl SupercellToken {
     pub fn lattice_point_translation_deperm(&self, lattice_point: V3<i32>) -> Perm {
         // Depermutations that permute the cells along each axis independently.
         // (expressed in the quotient spaces of images along those axes)
-        let axis_deperms: [_; 3] = arr_from_fn(|k| {
+        let axis_deperms: [_; 3] = V3::from_fn(|k| {
             Perm::eye(self.periods[k] as usize)
                 .shift_signed(lattice_point[k] as isize)
-        });
+        }).0;
 
         // Construct the overall deperm as an outer product of deperms.
         // this could be written as a fold, but I wanted to emphasize the order;

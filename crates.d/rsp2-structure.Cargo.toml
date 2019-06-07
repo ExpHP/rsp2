@@ -10,8 +10,7 @@ description = "Periodic chemical structure type."
 path = "lib.rs"
 
 [dependencies]
-!!rsp2-array-utils
-!!rsp2-array-types { features = ["serde-support"] }
+!!rsp2-array-types
 !!rsp2-assert-close
 !!rsp2-soa-ops
 

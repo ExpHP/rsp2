@@ -15,7 +15,6 @@ edition = "2018"
 path = "lib.rs"
 
 [dependencies]
-failure = "0.1.2"
 
 [features]
 nightly = ["beta"]
