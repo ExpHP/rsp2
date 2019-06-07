@@ -983,7 +983,6 @@ dependencies = [
  "pretty_assertions 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "rand 0.3.22 (registry+https://github.com/rust-lang/crates.io-index)",
  "rsp2-array-types 0.1.0",
- "rsp2-array-utils 0.1.0",
  "rsp2-assert-close 0.1.0",
  "rsp2-clap 0.1.0",
  "rsp2-dftbplus 0.1.0",
@@ -1017,15 +1016,10 @@ version = "0.1.0"
 dependencies = [
  "num-traits 0.2.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "rand 0.3.22 (registry+https://github.com/rust-lang/crates.io-index)",
- "rsp2-array-utils 0.1.0",
  "rsp2-assert-close 0.1.0",
  "serde 1.0.91 (registry+https://github.com/rust-lang/crates.io-index)",
  "slice-of-array 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
-
-[[package]]
-name = "rsp2-array-utils"
-version = "0.1.0"
 
 [[package]]
 name = "rsp2-assert-close"
@@ -1133,7 +1127,6 @@ dependencies = [
  "objekt 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "ordered-float 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "rand 0.3.22 (registry+https://github.com/rust-lang/crates.io-index)",
- "rsp2-array-utils 0.1.0",
  "rsp2-assert-close 0.1.0",
  "rsp2-slice-math 0.1.0",
  "rsp2-util-macros 0.1.0",
@@ -1224,7 +1217,6 @@ dependencies = [
  "log 0.4.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "num-complex 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "rsp2-array-types 0.1.0",
- "rsp2-array-utils 0.1.0",
  "rsp2-soa-ops 0.1.0",
  "rsp2-structure 0.1.0",
  "rsp2-util-macros 0.1.0",
@@ -1264,7 +1256,6 @@ dependencies = [
  "rayon 1.0.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "rayon-cond 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "rsp2-array-types 0.1.0",
- "rsp2-array-utils 0.1.0",
  "rsp2-assert-close 0.1.0",
  "rsp2-clap 0.1.0",
  "rsp2-dftbplus 0.1.0",

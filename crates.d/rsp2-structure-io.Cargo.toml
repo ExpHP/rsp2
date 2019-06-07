@@ -20,7 +20,6 @@ path = "lib.rs"
 
 !!rsp2-structure
 !!rsp2-array-types
-!!rsp2-array-utils
 !!rsp2-soa-ops
 !!rsp2-util-macros
 

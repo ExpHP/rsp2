@@ -10,8 +10,6 @@ description = "Provides mathematical vector and matrix types used throughout rsp
 path = "lib.rs"
 
 [dependencies]
-!!rsp2-array-utils
-
 !!slice-of-array
 !!num-traits
 !!serde { optional = true, features = ["derive"] }

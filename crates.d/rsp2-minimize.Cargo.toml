@@ -17,7 +17,6 @@ description = "Function minimization algorithms, even in multiple dimensions."
 !!either
 !!objekt
 
-!!rsp2-array-utils
 !!rsp2-assert-close
 !!rsp2-slice-math
 !!rsp2-util-macros

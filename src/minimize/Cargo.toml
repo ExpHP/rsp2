@@ -22,7 +22,6 @@ serde_json = "1"
 either = "1"
 objekt = "0.1.1"
 
-rsp2-array-utils = { path = "../util/array" }
 rsp2-assert-close = { path = "../util/assert-close" }
 rsp2-slice-math = { path = "../util/slice-math" }
 rsp2-util-macros = { path = "../util/macros" }
@@ -33,5 +32,5 @@ failure = "0.1.2"
 env_logger = "0.6.1"
 
 [features]
-nightly = ["beta", "rsp2-array-utils/nightly", "rsp2-assert-close/nightly", "rsp2-slice-math/nightly", "rsp2-util-macros/nightly"]
-beta = ["rsp2-array-utils/beta", "rsp2-assert-close/beta", "rsp2-slice-math/beta", "rsp2-util-macros/beta"]
+nightly = ["beta", "rsp2-assert-close/nightly", "rsp2-slice-math/nightly", "rsp2-util-macros/nightly"]
+beta = ["rsp2-assert-close/beta", "rsp2-slice-math/beta", "rsp2-util-macros/beta"]

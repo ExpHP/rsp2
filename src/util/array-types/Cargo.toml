@@ -15,8 +15,6 @@ edition = "2018"
 path = "lib.rs"
 
 [dependencies]
-rsp2-array-utils = { path = "../array" }
-
 slice-of-array = "0.2.1"
 num-traits = "0.2.3"
 serde = { version = "1.0.91", features = ["derive", "rc"], optional = true }
@@ -29,8 +27,8 @@ rsp2-assert-close = { path = "../assert-close" }
 [features]
 default = []
 
-nightly = ["beta", "rsp2-array-utils/nightly", "rsp2-assert-close/nightly"]
-beta = ["rsp2-array-utils/beta", "rsp2-assert-close/beta"]
+nightly = ["beta", "rsp2-assert-close/nightly"]
+beta = ["rsp2-assert-close/beta"]
 
 # FIXME
 # Features for optional deps, because the implicit features defined by deps do not scale well.

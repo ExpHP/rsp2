@@ -19,7 +19,6 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 !!rsp2-lammps-wrap
 !!rsp2-tasks
 !!rsp2-minimize
-!!rsp2-array-utils
 !!rsp2-assert-close
 !!rsp2-structure
 !!rsp2-structure-io

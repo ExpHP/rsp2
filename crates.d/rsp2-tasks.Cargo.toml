@@ -21,7 +21,6 @@ path = "lib.rs"
 !!rsp2-structure { features = ["serde-support"] }
 !!rsp2-structure-io
 !!rsp2-potentials
-!!rsp2-array-utils
 !!rsp2-array-types { features = ["serde-support"] }
 !!rsp2-soa-ops { features = ["frunk-support"] }
 !!rsp2-slice-math

@@ -52,7 +52,6 @@ use rsp2_structure::consts::CARBON;
 use rsp2_slice_math::{vnorm};
 
 use slice_of_array::prelude::*;
-use rsp2_array_utils::arr_from_fn;
 use rsp2_array_types::{V3, Unvee};
 use rsp2_structure::{Coords, Lattice};
 use rsp2_structure::{
@@ -838,9 +837,9 @@ extension_trait!{
                 SupercellSpec::Dim(d) => d,
                 SupercellSpec::Target(targets) => {
                     let unit_lengths = prim.norms();
-                    arr_from_fn(|k| {
+                    V3::from_fn(|k| {
                         (targets[k] / unit_lengths[k]).ceil().max(1.0) as u32
-                    })
+                    }).0
                 },
             }
         }
