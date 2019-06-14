@@ -11,12 +11,13 @@
 
 use rsp2_kets::{Ket, Basis, AsKetRef};
 use rsp2_soa_ops::{Perm, Permute};
-use rsp2_soa_ops::{Part, Partition, Unlabeled, helper::partition_each_item};
+use rsp2_soa_ops::{Part, Partition, Unlabeled};
 
 use crate::hlist_aliases::*;
 use crate::meta::{self, Mass, prelude::*};
 use rsp2_array_types::V3;
 use slice_of_array::prelude::*;
+use std::sync::Arc;
 
 // alternative types to those in rsp2_kets which are defined in terms of 3-vectors
 // and for which we can implement Permute and Partition, etc.
@@ -25,7 +26,7 @@ use slice_of_array::prelude::*;
 pub struct Basis3(pub(crate) Vec<Ket3>);
 
 #[derive(Debug, Clone)]
-pub struct GammaBasis3(pub(crate) Vec<GammaKet3>);
+pub struct GammaBasis3(pub(crate) Arc<Vec<GammaKet3>>);
 
 // a ket type belonging exclusively to this crate so that we can say it consists
 // of 3-vectors and implement Permute for it, etc
@@ -65,7 +66,7 @@ impl Basis3 {
                 return None;
             }
         }
-        Some(GammaBasis3(self.0.into_iter().map(|ket| GammaKet3(ket.real)).collect()))
+        Some(GammaBasis3(Arc::new(self.0.into_iter().map(|ket| GammaKet3(ket.real)).collect())))
     }
 }
 
@@ -139,16 +140,6 @@ impl<'iter> Partition<'iter> for GammaKet3 {
     {Box::new({
         self.0.into_unlabeled_partitions(part).into_iter().map(GammaKet3)
     })}
-}
-
-impl<'iter> Partition<'iter> for Basis3 {
-    fn into_unlabeled_partitions<L>(self, part: &'iter Part<L>) -> Unlabeled<'iter, Self>
-    { Box::new(partition_each_item(part, self.0).map(Basis3)) }
-}
-
-impl<'iter> Partition<'iter> for GammaBasis3 {
-    fn into_unlabeled_partitions<L>(self, part: &'iter Part<L>) -> Unlabeled<'iter, Self>
-    { Box::new(partition_each_item(part, self.0).map(GammaBasis3)) }
 }
 
 impl<'iter> Partition<'iter> for EvDirection {

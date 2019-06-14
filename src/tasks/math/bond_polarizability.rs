@@ -280,7 +280,7 @@ impl<'a> Input<'a> {
 
         let pol_constants = default_CH_pol_constants();
 
-        zip_eq!(ev_frequencies, &ev_eigenvectors.0)
+        zip_eq!(ev_frequencies, &*ev_eigenvectors.0)
             .map(|(&frequency, eigs)| {
                 let prefactor = raman_prefactor(frequency, temperature);
                 let tensor = raman_tensor(

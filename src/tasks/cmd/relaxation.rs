@@ -176,7 +176,7 @@ impl TrialDir {
 
         let bad_directions: Vec<_> = {
             let classifications = ev_analysis.ev_classifications.as_ref().expect("(bug) always computed!");
-            izip!(1.., freqs, &evecs.0, &classifications.0)
+            izip!(1.., freqs, &*evecs.0, &classifications.0)
                 .filter(|&(_, _, _, kind)| kind == &super::acoustic_search::ModeKind::Imaginary)
                 .map(|(i, &freq, evec, _)| {
                     let name = format!("band {} ({})", i, freq);
@@ -187,7 +187,7 @@ impl TrialDir {
 
         if let Some(animate_settings) = settings.animate.as_ref() {
             let all_guys = {
-                zip_eq!(freqs, &evecs.0)
+                zip_eq!(freqs, &*evecs.0)
                     .map(|(&freq, evec)| (freq, EvDirection::from_eigenvector(&evec.to_complex(), meta.sift())))
             };
             let bad_guys = {

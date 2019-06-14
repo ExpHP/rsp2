@@ -45,6 +45,7 @@
 
 use crate::FailResult;
 use crate::math::basis::{Basis3, GammaBasis3};
+use std::sync::Arc;
 
 #[allow(unused)] // rustc bug
 use slice_of_array::prelude::*;
@@ -250,7 +251,7 @@ impl DynamicalMatrix {
         for eigenvector_data in eigenvectors_flat.chunks(3 * self.num_atoms()) {
             kets.push(GammaKet3(eigenvector_data.nest().to_vec()));
         }
-        let eigenvectors = GammaBasis3(kets);
+        let eigenvectors = GammaBasis3(Arc::new(kets));
 
         let frequencies = eigenvalues.into_iter().map(crate::filetypes::eigensols::eigenvalue_to_frequency).collect();
 
