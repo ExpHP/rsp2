@@ -1088,7 +1088,7 @@ pub mod tricubic {
 
     #[test]
     fn test_integer_values() -> FailResult<()> {
-        fn arr_from_fn<T>(f: impl Fn(usize) -> T) -> [T; 3] { V3::from_fn(f).0 }
+        use arr_from_fn::*;
 
         let input = Input::random();
         let spline = input.solve()?;
@@ -1100,7 +1100,7 @@ pub mod tricubic {
         ];
         for (get_expected, project_output) in projections {
             let actual: EndpointGrid<f64> = {
-                arr_from_fn(|i| arr_from_fn(|j| arr_from_fn(|k| {
+                arr_4_from_fn(|i| arr_4_from_fn(|j| arr_10_from_fn(|k| {
                     let point = V3([i, j, k]).map(|x| x as f64);
                     project_output(spline.evaluate(point))
                 })))
@@ -1271,7 +1271,7 @@ pub mod bicubic {
 
     #[test]
     fn test_integer_values() -> FailResult<()> {
-        fn arr_from_fn<T>(f: impl Fn(usize) -> T) -> [T; 3] { V3::from_fn(f).0 }
+        use arr_from_fn::*;
 
         let input = Input::random();
         let spline = input.solve()?;
@@ -1282,7 +1282,7 @@ pub mod bicubic {
         ];
         for (get_expected, project_output) in projections {
             let actual: EndpointGrid<f64> = {
-                arr_from_fn(|i| arr_from_fn(|j| {
+                arr_5_from_fn(|i| arr_5_from_fn(|j| {
                     let point = V2([i, j]).map(|x| x as f64);
                     project_output(spline.evaluate(point))
                 }))
@@ -1301,5 +1301,18 @@ pub mod bicubic {
         assert_eq!(spline.evaluate(V2([MAX_I as f64 + 3.0, 1.0])), spline.evaluate(V2([MAX_I as f64, 1.0])));
         assert_eq!(spline.evaluate(V2([1.0, MAX_J as f64 + 3.0])), spline.evaluate(V2([1.0, MAX_J as f64])));
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod arr_from_fn {
+    use rsp2_array_types::{V4};
+
+    pub fn arr_4_from_fn<T>(f: impl FnMut(usize) -> T) -> [T; 4] { V4::from_fn(f).0 }
+    pub fn arr_5_from_fn<T>(mut f: impl FnMut(usize) -> T) -> [T; 5] {
+        [f(0), f(1), f(2), f(3), f(4)]
+    }
+    pub fn arr_10_from_fn<T>(mut f: impl FnMut(usize) -> T) -> [T; 10] {
+        [f(0), f(1), f(2), f(3), f(4), f(5), f(6), f(7), f(8), f(9)]
     }
 }
