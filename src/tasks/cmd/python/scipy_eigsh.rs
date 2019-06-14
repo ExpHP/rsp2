@@ -44,7 +44,7 @@
 //! So there you have it.
 
 use crate::FailResult;
-use crate::math::basis::{Basis3};
+use crate::math::basis::{Basis3, GammaBasis3};
 
 #[allow(unused)] // rustc bug
 use slice_of_array::prelude::*;
@@ -79,9 +79,15 @@ mod scripts {
     }
 
     impl Eigsh {
+        #[allow(unused)]
         pub(super) fn invoke(self) -> FailResult<(Vec<Frequency>, Basis3)> {
             call_script_and_communicate(PY_CALL, self)
                 .and_then(read_py_output)
+        }
+
+        pub(super) fn invoke_gamma(self) -> FailResult<(Vec<Frequency>, GammaBasis3)> {
+            call_script_and_communicate(PY_CALL, self)
+                .and_then(read_py_output_gamma)
         }
     }
 
@@ -95,15 +101,27 @@ mod scripts {
     }
 
     impl Negative {
+        #[allow(unused)]
         pub(super) fn invoke(self) -> FailResult<(Vec<Frequency>, Basis3)> {
             call_script_and_communicate(PY_NEGATIVE, self)
                 .and_then(read_py_output)
+        }
+
+        pub(super) fn invoke_gamma(self) -> FailResult<(Vec<Frequency>, GammaBasis3)> {
+            call_script_and_communicate(PY_NEGATIVE, self)
+                .and_then(read_py_output_gamma)
         }
     }
 
     fn read_py_output(raw: eigensols::Raw) -> FailResult<(Vec<Frequency>, Basis3)> {
         let esols = raw.into_eigensols()?;
         Ok((esols.frequencies, esols.eigenvectors))
+    }
+
+    fn read_py_output_gamma(raw: eigensols::Raw) -> FailResult<(Vec<Frequency>, GammaBasis3)> {
+        let (freqs, evecs) = read_py_output(raw)?;
+        let evecs = evecs.into_gamma_basis3().ok_or_else(|| failure::err_msg("Eigensols not real!"))?;
+        Ok((freqs, evecs))
     }
 }
 
@@ -185,32 +203,21 @@ impl DynamicalMatrix {
     ///
     /// If none of the modes produced are negative, then it is safe (-ish) to assume that the matrix
     /// has no such eigenmodes.  (At least, that is the intent!)
-    pub fn compute_negative_eigensolutions(
+    pub fn compute_negative_eigensolutions_gamma(
         &self,
         max_solutions: usize,
         shift_invert_attempts: u32,
-    ) -> FailResult<(Vec<f64>, Basis3)> {
+    ) -> FailResult<(Vec<f64>, GammaBasis3)> {
         trace!("Computing most negative eigensolutions.");
         scripts::Negative {
             max_solutions,
             shift_invert_attempts,
             dense: false,
             matrix: self.cereal(),
-        }.invoke()
+        }.invoke_gamma()
     }
 
-    /// Produce all eigensolutions.
-    pub fn compute_eigensolutions_dense(&self) -> FailResult<(Vec<f64>, Basis3)> {
-        trace!("Computing most negative eigensolutions.");
-        scripts::Negative {
-            max_solutions: 3 * self.num_atoms(),
-            shift_invert_attempts: 0, // unused
-            dense: true,
-            matrix: self.cereal(),
-        }.invoke()
-    }
-
-    pub fn compute_most_extreme_eigensolutions(&self, how_many: usize) -> FailResult<(Vec<f64>, Basis3)> {
+    pub fn compute_most_extreme_eigensolutions_gamma(&self, how_many: usize) -> FailResult<(Vec<f64>, GammaBasis3)> {
         scripts::Eigsh {
             matrix: self.cereal(),
             allow_fewer_solutions: false,
@@ -218,7 +225,7 @@ impl DynamicalMatrix {
                 how_many: Some(how_many),
                 ..Default::default()
             },
-        }.invoke()
+        }.invoke_gamma()
     }
 
     /// Produce all eigensolutions of a dynamical matrix at gamma.
@@ -226,9 +233,8 @@ impl DynamicalMatrix {
     /// This function has vastly less memory overhead than the ones that invoke python scripts.
     //
     // FIXME: That also kind of suggests it's out of place!
-    pub fn compute_eigensolutions_dense_gamma(&self) -> (Vec<f64>, Basis3) {
-        use crate::math::basis::Ket3;
-        use rsp2_array_types::V3;
+    pub fn compute_eigensolutions_dense_gamma(&self) -> (Vec<f64>, GammaBasis3) {
+        use crate::math::basis::GammaKet3;
 
         trace!("Computing all eigensolutions.");
         let mut flat = self.to_dense_flat_real().expect("(BUG!) expected real matrix!");
@@ -242,11 +248,9 @@ impl DynamicalMatrix {
 
         let mut kets = vec![];
         for eigenvector_data in eigenvectors_flat.chunks(3 * self.num_atoms()) {
-            let real = eigenvector_data.nest().to_vec();
-            let imag = vec![V3::zero(); self.num_atoms()];
-            kets.push(Ket3 { real, imag })
+            kets.push(GammaKet3(eigenvector_data.nest().to_vec()));
         }
-        let eigenvectors = Basis3(kets);
+        let eigenvectors = GammaBasis3(kets);
 
         let frequencies = eigenvalues.into_iter().map(crate::filetypes::eigensols::eigenvalue_to_frequency).collect();
 

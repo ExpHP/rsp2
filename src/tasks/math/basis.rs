@@ -24,6 +24,9 @@ use slice_of_array::prelude::*;
 #[derive(Debug, Clone)]
 pub struct Basis3(pub(crate) Vec<Ket3>);
 
+#[derive(Debug, Clone)]
+pub struct GammaBasis3(pub(crate) Vec<GammaKet3>);
+
 // a ket type belonging exclusively to this crate so that we can say it consists
 // of 3-vectors and implement Permute for it, etc
 #[derive(Debug, Clone)]
@@ -31,6 +34,9 @@ pub struct Ket3 {
     pub(crate) real: Vec<V3>,
     pub(crate) imag: Vec<V3>,
 }
+
+#[derive(Debug, Clone)]
+pub struct GammaKet3(pub Vec<V3>);
 
 /// Cartesian displacement direction of an eigenvector.
 ///
@@ -40,21 +46,31 @@ pub struct Ket3 {
 pub struct EvDirection(Ket3);
 
 impl Basis3 {
+    #[allow(unused)]
     pub fn from_basis(basis: Basis) -> Self
     { Basis3(basis.iter().map(|k| Ket3::from_ket(k)).collect()) }
 
     #[allow(unused)]
-    pub fn to_basis(&self) -> Basis
-    {
+    pub fn to_basis(&self) -> Basis {
         let mut basis = Basis::new(vec![], 3 * self.0[0].real.len());
         for ket in &self.0 {
             basis.insert((ket.real.flat(), ket.imag.flat()));
         }
         basis
     }
+
+    pub fn into_gamma_basis3(self) -> Option<GammaBasis3> {
+        for ket in self.0.iter() {
+            if ket.imag.iter().any(|v| v != &V3::zero()) {
+                return None;
+            }
+        }
+        Some(GammaBasis3(self.0.into_iter().map(|ket| GammaKet3(ket.real)).collect()))
+    }
 }
 
 impl Ket3 {
+    #[allow(unused)]
     pub fn from_ket(ket: impl AsKetRef) -> Self
     { Ket3 {
         real: ket.as_ket_ref().real().nest().to_vec(),
@@ -65,12 +81,43 @@ impl Ket3 {
     { Ket::new(self.real.flat().to_vec(), self.imag.flat().to_vec()) }
 }
 
+impl GammaKet3 {
+    #[allow(unused)]
+    /// Returns `None` if not real.
+    pub fn from_complex(ket: Ket3) -> Option<Self> {
+        if ket.imag.iter().any(|v| v != &V3::zero()) {
+            return None;
+        }
+        Some(GammaKet3(ket.real))
+    }
+
+    pub fn to_complex(&self) -> Ket3 {
+        Ket3 {
+            real: self.0.clone(),
+            imag: vec![V3::zero(); self.0.len()],
+        }
+    }
+
+    #[allow(unused)]
+    /// Returns `None` if not real.
+    pub fn from_ket(ket: impl AsKetRef) -> Option<Self>
+    { Self::from_complex(Ket3::from_ket(ket)) }
+
+    pub fn to_ket(&self) -> Ket
+    { self.to_complex().to_ket() }
+}
+
 impl Permute for Ket3 {
     fn permuted_by(self, perm: &Perm) -> Self
     { Ket3 {
         real: self.real.permuted_by(perm),
         imag: self.imag.permuted_by(perm),
     }}
+}
+
+impl Permute for GammaKet3 {
+    fn permuted_by(self, perm: &Perm) -> Self
+    { GammaKet3(self.0.permuted_by(perm)) }
 }
 
 impl Permute for EvDirection {
@@ -87,9 +134,21 @@ impl<'iter> Partition<'iter> for Ket3 {
     })}
 }
 
+impl<'iter> Partition<'iter> for GammaKet3 {
+    fn into_unlabeled_partitions<L>(self, part: &'iter Part<L>) -> Unlabeled<'iter, Self>
+    {Box::new({
+        self.0.into_unlabeled_partitions(part).into_iter().map(GammaKet3)
+    })}
+}
+
 impl<'iter> Partition<'iter> for Basis3 {
     fn into_unlabeled_partitions<L>(self, part: &'iter Part<L>) -> Unlabeled<'iter, Self>
     { Box::new(partition_each_item(part, self.0).map(Basis3)) }
+}
+
+impl<'iter> Partition<'iter> for GammaBasis3 {
+    fn into_unlabeled_partitions<L>(self, part: &'iter Part<L>) -> Unlabeled<'iter, Self>
+    { Box::new(partition_each_item(part, self.0).map(GammaBasis3)) }
 }
 
 impl<'iter> Partition<'iter> for EvDirection {

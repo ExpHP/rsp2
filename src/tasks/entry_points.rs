@@ -439,6 +439,9 @@ pub fn sparse_analysis(bin_name: &str, version: VersionInfo) -> ! {
         let (freqs, evecs) = {
             let path = PathFile::new(matches.expect_value_of("eigensols"))?;
             let Eigensols { frequencies, eigenvectors } = Load::load(path)?;
+            let eigenvectors = eigenvectors.into_gamma_basis3().ok_or_else(|| {
+                failure::err_msg("expected real eigensols!")
+            })?;
             (frequencies, eigenvectors)
         };
 

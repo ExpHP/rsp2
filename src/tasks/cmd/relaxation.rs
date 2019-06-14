@@ -16,7 +16,7 @@ use crate::{FailResult, FailOk};
 use crate::potential::{PotentialBuilder, DiffFn, BondDiffFn, DynCgDiffFn, CommonMeta};
 use crate::meta::{self, prelude::*};
 use crate::hlist_aliases::*;
-use crate::math::basis::{Basis3, EvDirection};
+use crate::math::basis::{GammaBasis3, EvDirection};
 use crate::traits::Save;
 
 use super::trial::TrialDir;
@@ -149,7 +149,7 @@ impl TrialDir {
         iteration: Iteration,
         coords: Coords,
         freqs: &Vec<f64>,
-        evecs: &Basis3,
+        evecs: &GammaBasis3,
     ) -> FailResult<(GammaSystemAnalysis, Coords, DidEvChasing)>
     {Ok({
         let classifications = super::acoustic_search::perform_acoustic_search(
@@ -180,7 +180,7 @@ impl TrialDir {
                 .filter(|&(_, _, _, kind)| kind == &super::acoustic_search::ModeKind::Imaginary)
                 .map(|(i, &freq, evec, _)| {
                     let name = format!("band {} ({})", i, freq);
-                    let direction = EvDirection::from_eigenvector(evec, meta.sift());
+                    let direction = EvDirection::from_eigenvector(&evec.to_complex(), meta.sift());
                     (name, freq, direction)
                 }).collect()
         };
@@ -188,7 +188,7 @@ impl TrialDir {
         if let Some(animate_settings) = settings.animate.as_ref() {
             let all_guys = {
                 zip_eq!(freqs, &evecs.0)
-                    .map(|(&freq, evec)| (freq, EvDirection::from_eigenvector(evec, meta.sift())))
+                    .map(|(&freq, evec)| (freq, EvDirection::from_eigenvector(&evec.to_complex(), meta.sift())))
             };
             let bad_guys = {
                 bad_directions.iter()

@@ -41,7 +41,7 @@ use rsp2_lammps_wrap::LammpsOnDemand;
 use crate::meta::{self, prelude::*};
 use crate::util::ext_traits::{OptionResultExt, PathNiceExt};
 use crate::math::{
-    basis::{Basis3, EvDirection},
+    basis::{GammaBasis3, EvDirection},
     bands::{ScMatrix},
     dynmat::{ForceConstants, DynamicalMatrix},
 };
@@ -449,7 +449,7 @@ fn do_diagonalize_dynmat(
     dynmat: DynamicalMatrix,
     // don't let MPI processes compete with python's threads
     _: EcoModeProof<'_>,
-) -> FailResult<(Vec<f64>, Basis3)>
+) -> FailResult<(Vec<f64>, GammaBasis3)>
 {Ok({
     {
         let max_size = (|(a, b)| a * b)(dynmat.0.dim);
@@ -465,7 +465,7 @@ fn do_diagonalize_dynmat(
                 dynmat.compute_eigensolutions_dense_gamma()
             },
             cfg::PhononEigensolver::Rsp2 { dense: false, how_many, shift_invert_attempts } => {
-                dynmat.compute_negative_eigensolutions(
+                dynmat.compute_negative_eigensolutions_gamma(
                     how_many,
                     shift_invert_attempts,
                 )?
@@ -614,7 +614,7 @@ fn do_gamma_system_analysis(
         Option<meta::FracBonds>,
     >,
     freqs: &[f64],
-    evecs: &Basis3,
+    evecs: &GammaBasis3,
     mode_classifications: Option<Rc<[ModeKind]>>,
     // can set to false to forcibly disable this expensive operation even
     // if all necessary data is available
@@ -759,7 +759,7 @@ impl TrialDir {
             rsp2-shear-plot has not yet been fixed to accept non-phonopy-based \
             input files.\
         ")}();
-        let (freqs, evecs): (Vec<f64>, Basis3) = {|| unreachable!()}();
+        let (freqs, evecs): (Vec<f64>, GammaBasis3) = {|| unreachable!()}();
 
         let plot_ev_indices = {
             use rsp2_tasks_config::EnergyPlotEvIndices::*;
@@ -780,7 +780,7 @@ impl TrialDir {
         };
 
         let get_real_ev = |i: usize| {
-            let ev = evecs.0[i].as_real_checked();
+            let ev = &evecs.0[i].0;
             settings.normalization.normalize(ev)
         };
 
@@ -930,7 +930,7 @@ impl TrialDir {
 pub(crate) fn run_sparse_analysis(
     structure: StoredStructure,
     freqs: &[f64],
-    evecs: &Basis3,
+    evecs: &GammaBasis3,
 ) -> FailResult<GammaSystemAnalysis>
 {Ok({
     trace!("Computing eigensystem info");
@@ -1153,6 +1153,10 @@ impl TrialDir {
             frequencies: freqs,
             eigenvectors: evecs,
         } = Load::load(self.join(self.eigensols_path(prev_iteration)))?;
+
+        let evecs = evecs.into_gamma_basis3().ok_or_else(|| {
+            failure::err_msg("expected real eigensols!")
+        })?;
 
         let (_, mut coords, did_ev_chasing) = self.do_ev_loop_stuff_after_diagonalization(
             settings, &pot, meta.sift(), prev_iteration,

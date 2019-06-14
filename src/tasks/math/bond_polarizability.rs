@@ -15,7 +15,7 @@
 //! Adapted from the sp2 code.
 
 use crate::FailResult;
-use crate::math::basis::Basis3;
+use crate::math::basis::GammaBasis3;
 use crate::meta::{Element, Mass};
 use enum_map::EnumMap;
 use rsp2_array_types::{dot, V3, M33};
@@ -265,7 +265,7 @@ pub enum LightPolarization {
 pub struct Input<'a> {
     pub temperature: f64,
     pub ev_frequencies: &'a [f64],
-    pub ev_eigenvectors: &'a Basis3,
+    pub ev_eigenvectors: &'a GammaBasis3,
     pub site_elements: &'a [Element],
     pub site_masses: &'a [Mass],
     pub bonds: &'a CartBonds,
@@ -284,7 +284,7 @@ impl<'a> Input<'a> {
             .map(|(&frequency, eigs)| {
                 let prefactor = raman_prefactor(frequency, temperature);
                 let tensor = raman_tensor(
-                    eigs.as_real_checked(),
+                    &eigs.0,
                     site_masses,
                     bonds,
                     site_elements,

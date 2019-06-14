@@ -12,7 +12,7 @@
 use crate::FailResult;
 use crate::ui::color::{ColorByRange, PaintAs, NullPainter};
 use crate::ui::cfg_merging::{no_summary, merge_summaries, make_nested_mapping};
-use crate::math::basis::{Basis3, EvDirection};
+use crate::math::basis::{GammaBasis3, EvDirection};
 use crate::math::bands::{GammaUnfolder};
 #[allow(unused)] // compiler bug
 use itertools::Itertools;
@@ -43,7 +43,7 @@ pub use crate::meta::SiteMasses;
 pub use crate::meta::LayerScMatrices;
 #[derive(Debug, Clone)] pub struct EvClassifications(pub Vec<acoustic_search::ModeKind>);
 #[derive(Debug, Clone)] pub struct EvFrequencies(pub Vec<f64>);
-#[derive(Debug, Clone)] pub struct EvEigenvectors(pub Basis3);
+#[derive(Debug, Clone)] pub struct EvEigenvectors(pub GammaBasis3);
 #[derive(Debug, Clone)] pub struct Bonds(pub rsp2_structure::bonds::CartBonds);
 
 // Band unfolding is seriously expensive, and not at all useful for the sparse diagonalizer
@@ -253,8 +253,9 @@ pub mod ev_acousticness {
     ) -> FailResult<EvAcousticness> {
         Ok(EvAcousticness({
             (ev_eigenvectors.0).0.iter()
-                .map(|evec| EvDirection::from_eigenvector(evec, hlist![site_masses.clone()]))
-                .map(|direction| direction.acousticness() / direction.sqnorm())
+                .map(|evec| EvDirection::from_eigenvector(&evec.to_complex(), hlist![site_masses.clone()]))
+                .map(|direction| direction.normalized())
+                .map(|direction| direction.acousticness())
                 .collect()
         }))
     }
@@ -268,7 +269,7 @@ wrap_maybe_compute! {
     ) -> FailResult<_> {
         Ok(EvPolarization({
             (ev_eigenvectors.0).0.iter()
-                .map(|evec| EvDirection::from_eigenvector(evec, hlist![site_masses.clone()]))
+                .map(|evec| EvDirection::from_eigenvector(&evec.to_complex(), hlist![site_masses.clone()]))
                 .map(|direction| direction.normalized())
                 .map(|direction| direction.polarization())
                 .collect()
@@ -286,10 +287,10 @@ wrap_maybe_compute! {
         let part = Part::from_ord_keys(site_layers.iter());
         Ok(EvLayerAcousticness({
             (ev_eigenvectors.0).0.iter()
-                .map(|evec| EvDirection::from_eigenvector(evec, hlist![site_masses.clone()]))
+                .map(|evec| EvDirection::from_eigenvector(&evec.to_complex(), hlist![site_masses.clone()]))
+                .map(|direction| direction.normalized())
                 .map(|direction| {
                     direction
-                        .normalized()
                         .into_unlabeled_partitions(&part)
                         .map(|layer_dir| layer_dir.acousticness())
                         .sum()

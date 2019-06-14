@@ -15,7 +15,7 @@ use crate::potential::{PotentialBuilder};
 use crate::meta::{self, prelude::*};
 use rsp2_tasks_config as cfg;
 
-use crate::math::basis::{Basis3, EvDirection};
+use crate::math::basis::{GammaBasis3, EvDirection};
 
 use rsp2_slice_math::{v, V, vdot, vnormalize, BadNorm};
 
@@ -87,7 +87,7 @@ impl fmt::Display for Colorful {
 pub(crate) fn perform_acoustic_search(
     pot: &dyn PotentialBuilder,
     frequencies: &[f64],
-    eigenvectors: &Basis3,
+    eigenvectors: &GammaBasis3,
     coords: &Coords,
     meta: HList3<
         meta::SiteElements,
@@ -99,7 +99,7 @@ pub(crate) fn perform_acoustic_search(
 {Ok({
     let ev_directions = || {
         eigenvectors.0.iter()
-            .map(|evec| EvDirection::from_eigenvector(evec, meta.sift()))
+            .map(|evec| EvDirection::from_eigenvector(&evec.to_complex(), meta.sift()))
             .map(|direction| direction.normalized())
     };
 
