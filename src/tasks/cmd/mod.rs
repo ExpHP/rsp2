@@ -114,7 +114,7 @@ impl TrialDir {
         stop_after_dynmat: bool,
     ) -> FailResult<()>
     {Ok({
-        let pot = PotentialBuilder::from_root_config(&self, on_demand, &settings)?;
+        let pot = PotentialBuilder::from_root_config(Some(&self), on_demand, &settings)?;
 
         let (optimizable_coords, meta) = {
             read_optimizable_structure(
@@ -893,7 +893,7 @@ impl TrialDir {
         stored: StoredStructure,
     ) -> FailResult<()>
     {Ok({
-        let pot = PotentialBuilder::from_root_config(&self, on_demand, &settings)?;
+        let pot = PotentialBuilder::from_root_config(Some(&self), on_demand, &settings)?;
 
         let dynmat = self.do_compute_dynmat(
             settings, &*pot, &stored.coords, stored.meta().sift(),
@@ -1087,6 +1087,30 @@ pub(crate) fn run_converge_vdw(
 
 //=================================================================
 
+pub(crate) fn run_single_force_computation(
+    on_demand: Option<LammpsOnDemand>,
+    settings: &Settings,
+    poscar: rsp2_structure_io::Poscar,
+) -> FailResult<Vec<V3>>
+{Ok({
+    let rsp2_structure_io::Poscar { comment: _, coords, elements } = poscar;
+    let elements: meta::SiteElements = elements.into();
+    let masses = masses_by_config(settings.masses.as_ref(), elements.clone())?;
+
+    let meta = hlist![elements, masses];
+    let meta = meta.prepend({
+        settings.bond_radius.map(|bond_radius| FailOk({
+            Rc::new(FracBonds::from_brute_force(&coords, bond_radius)?)
+        })).fold_ok()?
+    });
+
+    let pot = PotentialBuilder::from_root_config(None, on_demand, &settings)?;
+
+    pot.one_off().compute_force(&coords, meta.sift())?
+})}
+
+//=================================================================
+
 impl TrialDir {
     /// Used to figure out which iteration we're on when starting from the
     /// post-diagonalization part of the EV loop for sparse.
@@ -1122,7 +1146,7 @@ impl TrialDir {
         use crate::cmd::EvLoopStructureKind::*;
         use crate::filetypes::Eigensols;
 
-        let pot = PotentialBuilder::from_root_config(&self, on_demand, &settings)?;
+        let pot = PotentialBuilder::from_root_config(Some(&self), on_demand, &settings)?;
 
         let (coords, meta) = self.read_stored_structure_data(&self.structure_path(PreEvChase(prev_iteration)))?;
         let Eigensols {
@@ -1385,7 +1409,7 @@ pub(crate) fn perform_layer_search(
 /// Implements the behavior of the `"masses"` config section.
 ///
 /// When the section is omitted, default masses are used.
-fn masses_by_config(
+pub(crate) fn masses_by_config(
     cfg_masses: Option<&cfg::Masses>,
     elements: meta::SiteElements,
 ) -> FailResult<meta::SiteMasses>

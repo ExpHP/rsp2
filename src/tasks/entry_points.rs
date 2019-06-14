@@ -16,7 +16,7 @@ use crate::FailResult;
 use crate::VersionInfo;
 use crate::cmd::trial::{TrialDir, NewTrialDirArgs};
 use crate::cmd::{StructureFileType, DidEvChasing};
-use crate::traits::Load;
+use crate::traits::{Save, Load};
 use crate::ui::logging::{init_global_logger, SetGlobalLogfile};
 use crate::ui::cfg_merging::ConfigSources;
 use crate::ui::cli_deserialize::CliDeserialize;
@@ -608,6 +608,34 @@ pub fn make_supercell(bin_name: &str, _version: VersionInfo) -> ! {
         let output = matches.expect_value_of("output");
 
         crate::cmd::run_make_supercell(input, &dim_string, output)
+    });
+}
+
+// %% CRATES: binary: rsp2-compute-for-phonopy %%
+pub fn compute_for_phonopy(bin_name: &str, version: VersionInfo) -> ! {
+    wrap_main(version, |logfile, mpi_on_demand| {
+        let (app, de) = CliDeserialize::augment_clap_app({
+            clap::App::new(bin_name)
+                .about("Computes a single force set for phonopy.")
+                .args(&[
+                    arg!( input=STRUCTURE "Input structure POSCAR created by Phonopy"),
+                    arg!(*output [-o][--output]=PATH "Path for output vasprun.xml file."),
+                ])
+        });
+        let matches = app.get_matches();
+        let ConfigArgs(config) = de.resolve_args(&matches)?;
+
+        logfile.disable(); // no trial dir
+
+        let ValidatedSettings(settings) = config.deserialize()?;
+
+        let poscar = Load::load(matches.expect_value_of("input"))?;
+
+        let force = crate::cmd::run_single_force_computation(mpi_on_demand, &settings, poscar)?;
+
+        crate::filetypes::FakeVasprun { force }.save(matches.expect_value_of("output"))?;
+
+        Ok(())
     });
 }
 

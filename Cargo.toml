@@ -43,6 +43,10 @@ name = "rsp2-bond-test"
 path = "src/binary-shims/rsp2-bond-test.rs"
 
 [[bin]]
+name = "rsp2-compute-for-phonopy"
+path = "src/binary-shims/rsp2-compute-for-phonopy.rs"
+
+[[bin]]
 name = "rsp2-converge-vdw"
 path = "src/binary-shims/rsp2-converge-vdw.rs"
 

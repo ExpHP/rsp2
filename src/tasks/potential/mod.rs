@@ -482,12 +482,12 @@ impl<'a, M: Clone + 'static> DiffFn<M> for OneOff<'a, M> {
 /// High-level logic
 impl dyn PotentialBuilder {
     pub(crate) fn from_root_config(
-        trial_dir: &TrialDir,
+        trial_dir: Option<&TrialDir>,
         on_demand: Option<LammpsOnDemand>,
         cfg: &cfg::Settings,
     ) -> FailResult<Box<dyn PotentialBuilder>> {
         Self::from_config_parts(
-            Some(trial_dir),
+            trial_dir,
             on_demand,
             &cfg.threading,
             &cfg.lammps,

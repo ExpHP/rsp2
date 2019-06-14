@@ -9,6 +9,8 @@ from scipy import interpolate as scint
 from scipy import sparse
 from pymatgen import Structure
 
+THZ_TO_WAVENUMBER = 33.3564095198152
+
 try:
     import rsp2
 except ImportError:
@@ -464,12 +466,15 @@ class TaskBandPath(Task):
         point_names = parse_path_string(args.plot_kpath)
         if len(point_names) > 1:
             die('This script currently does not support plots along discontinuous paths.')
+        point_names, = point_names
+
+        point_names = [r'$\mathrm{\Gamma}$' if x == 'G' else x for x in point_names]
 
         return {
             'plot_kpoint_pfracs': bandpath_output[0],
             'plot_x_coordinates': bandpath_output[1],
             'plot_xticks': bandpath_output[2],
-            'plot_xticklabels': point_names[0],
+            'plot_xticklabels': point_names,
         }
 
 # Arguments related to high symmetry path resampling
@@ -492,16 +497,6 @@ class TaskBands(Task):
         parser.add_argument(
             '--write-bands', metavar='FILE', help=
             'Write data resampled onto layer high sym path. (.npz)',
-        )
-
-        parser.add_argument(
-            '--plot-exponent', type=float, metavar='VALUE', default=1.0, help=
-            'Scale probabilities by this exponent before plotting.'
-        )
-
-        parser.add_argument(
-            '--plot-max-alpha', type=float, metavar='VALUE', default=1.0, help=
-            'Scale probabilities by this exponent before plotting.'
         )
 
         parser.add_argument(
@@ -558,6 +553,44 @@ class TaskBandPlot(Task):
         parser.add_argument('--show', action='store_true', help='show plot')
         parser.add_argument('--write-plot', metavar='FILE', help='save plot to file')
 
+        parser.add_argument(
+            '--plot-exponent', type=float, metavar='VALUE', default=1.0, help=
+            'Scale probabilities by this exponent before plotting.'
+        )
+
+        parser.add_argument(
+            '--plot-max-alpha', type=float, metavar='VALUE', default=1.0, help=
+            'Scale probabilities by this exponent before plotting.'
+        )
+
+        parser.add_argument(
+            '--plot-truncate', type=float, metavar='VALUE', default=0.0, help=
+            'Don\'t plot points whose final alpha is less than this. '
+            'This can be a good idea for SVG and PDF outputs.'
+        )
+
+        parser.add_argument(
+            '--plot-baseline-file', type=str, metavar='FILE', help=
+            'Data file for a "normal" plot.  Phonopy band.yaml is accepted.'
+        )
+
+        parser.add_argument(
+            '--plot-color', type=str, default='zpol', metavar='FILE', help=
+            'How the plot points are colored. Choices: [zpol, uniform:COLOR] '
+            '(e.g. --plot-color uniform:blue)'
+        )
+
+        parser.add_argument(
+            '--plot-sidebar', action='store_true', help=
+            'Show a sidebar with the frequencies all on the same point.'
+        )
+
+        parser.add_argument(
+            '--plot-hide-unfolded', action='store_true', help=
+            "Don't actually show the unfolded probs. (intended for use with --plot-baseline-file, "
+            "so that you can show only the baseline)"
+        )
+
     def has_action(self, args):
         return args.show or bool(args.write_plot)
 
@@ -571,6 +604,11 @@ class TaskBandPlot(Task):
             plot_xticklabels=self.band_path.require(args)['plot_xticklabels'],
             alpha_exponent=args.plot_exponent,
             alpha_max=args.plot_max_alpha,
+            alpha_truncate=args.plot_truncate,
+            plot_baseline_path=args.plot_baseline_file,
+            plot_color=args.plot_color,
+            plot_sidebar=args.plot_sidebar,
+            plot_hide_unfolded=args.plot_hide_unfolded,
             verbose=args.verbose,
         )
 
@@ -648,11 +686,21 @@ def probs_to_band_plot(
         plot_x_coordinates,
         plot_xticks,
         plot_xticklabels,
-        alpha_exponent=1.0,
-        alpha_max=1.0,
+        plot_color,
+        alpha_truncate,
+        alpha_exponent,
+        alpha_max,
+        plot_baseline_path,
+        plot_hide_unfolded,
+        plot_sidebar,
         verbose=False,
 ):
     import matplotlib.pyplot as plt
+
+    if plot_baseline_path is not None:
+        base_X, base_Y = read_baseline_plot(plot_baseline_path)
+    else:
+        base_X, base_Y = [], []
 
     check_arrays(
         ev_frequencies = (ev_frequencies, ['ev'], np.floating),
@@ -676,9 +724,6 @@ def probs_to_band_plot(
         S.append(path_probs[mask])
         Z_proj.append([z_projection] * mask.sum())
 
-    if verbose:
-        print(f'Plotting {len(X)} points!')
-
     X = np.hstack(X)
     Y = np.hstack(Y)
     S = np.hstack(S)
@@ -687,26 +732,73 @@ def probs_to_band_plot(
     S **= alpha_exponent
     S *= alpha_max
 
+    mask = S > alpha_truncate
+    X = X[mask]
+    Y = Y[mask]
+    S = S[mask]
+    Z_proj = Z_proj[mask]
+
+    if verbose:
+        print(f'Plotting {len(X)} points!')
+
     C = np.hstack([np.zeros((len(S), 3)), S[:, None]])
 
-    # colorize Z projection
-    from matplotlib.colors import LinearSegmentedColormap
-    cmap = LinearSegmentedColormap.from_list('', [[0, 0, 1], [0, 0.5, 0]])
-    C[:, :3] = cmap(Z_proj)[:, :3]
+    if plot_color == 'zpol':
+        # colorize Z projection
+        from matplotlib.colors import LinearSegmentedColormap
+        cmap = LinearSegmentedColormap.from_list('', [[0, 0, 1], [0, 0.5, 0]])
+        C[:, :3] = cmap(Z_proj)[:, :3]
+    elif plot_color.startswith('uniform:'):
+        from matplotlib.colors import to_rgb
+        # use given color
+        C[:, :3] = to_rgb(plot_color[len('uniform:'):].strip())
+    else:
+        die(f'invalid --plot-color: {repr(plot_color)}'),
 
-    fig, ax = plt.subplots(figsize=(7, 8))
-    fig.set_tight_layout(True)
+    fig = plt.figure(figsize=(7, 8), constrained_layout=True)
+    #fig.set_tight_layout(True)
 
-    ax.scatter(X, Y, 20, C)
+    if plot_sidebar:
+        gs = fig.add_gridspec(ncols=8, nrows=1)
+        ax = fig.add_subplot(gs[0,:-1])
+        ax_sidebar = fig.add_subplot(gs[0,-1], sharey=ax)
+    else:
+        ax = fig.add_subplot(111)
+
+    if not plot_hide_unfolded:
+        ax.scatter(X, Y, 20, C)
+    if plot_baseline_path is not None:
+        base_X /= np.max(base_X)
+        base_X *= np.max(X)
+        ax.scatter(base_X, base_Y, 5, 'k')
 
     for x in plot_xticks:
-        ax.axvline(x)
+        ax.axvline(x, color='k')
 
     ax.set_xlim(X.min(), X.max())
     ax.set_xticks(plot_xticks)
-    ax.set_xticklabels(plot_xticklabels)
+    ax.set_xticklabels(plot_xticklabels, fontsize=20)
+    ax.set_ylabel('Frequency (cm$^{-1}$)', fontsize=20)
+    for tick in ax.yaxis.get_major_ticks():
+        tick.label.set_fontsize(16)
+
+    if plot_sidebar:
+        ax_sidebar.set_xlim(-1, 1)
+        ax_sidebar.hlines(Y, -1, 1, color=C)
+        ax_sidebar.set_xticks([0])
+        ax_sidebar.set_xticklabels([r'$\mathrm{\Gamma}$'], fontsize=20)
+        plt.setp(ax_sidebar.get_yticklabels(), visible=False)
 
     return fig, ax
+
+def read_baseline_plot(path):
+    X, Y = [], []
+    d = dwim.from_path(path)
+    d = d['phonon']
+    for qpoint in d:
+        X.extend([qpoint['distance']] * len(qpoint['band']))
+        Y.extend(band['frequency'] * THZ_TO_WAVENUMBER for band in qpoint['band'])
+    return X, Y
 
 def reduce_carts(carts, lattice):
     fracs = carts @ np.linalg.inv(lattice)

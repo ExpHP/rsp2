@@ -14,3 +14,6 @@ pub mod eigensols;
 
 pub use self::stored_structure::StoredStructure;
 pub mod stored_structure;
+
+pub use self::vasprun_forces::FakeVasprun;
+mod vasprun_forces;
