@@ -576,13 +576,18 @@ class TaskBandPlot(Task):
 
         parser.add_argument(
             '--plot-color', type=str, default='zpol', metavar='FILE', help=
-            'How the plot points are colored. Choices: [zpol, uniform:COLOR] '
+            'How the plot points are colored. Choices: [zpol, sign, uniform:COLOR] '
             '(e.g. --plot-color uniform:blue)'
         )
 
         parser.add_argument(
             '--plot-sidebar', action='store_true', help=
             'Show a sidebar with the frequencies all on the same point.'
+        )
+
+        parser.add_argument(
+            '--plot-ylim', help=
+            'Set plot ylim.'
         )
 
         parser.add_argument(
@@ -607,6 +612,7 @@ class TaskBandPlot(Task):
             alpha_truncate=args.plot_truncate,
             plot_baseline_path=args.plot_baseline_file,
             plot_color=args.plot_color,
+            plot_ylim=args.plot_ylim,
             plot_sidebar=args.plot_sidebar,
             plot_hide_unfolded=args.plot_hide_unfolded,
             verbose=args.verbose,
@@ -687,6 +693,7 @@ def probs_to_band_plot(
         plot_xticks,
         plot_xticklabels,
         plot_color,
+        plot_ylim,
         alpha_truncate,
         alpha_exponent,
         alpha_max,
@@ -748,6 +755,11 @@ def probs_to_band_plot(
         from matplotlib.colors import LinearSegmentedColormap
         cmap = LinearSegmentedColormap.from_list('', [[0, 0, 1], [0, 0.5, 0]])
         C[:, :3] = cmap(Z_proj)[:, :3]
+    elif plot_color == 'sign':
+        from matplotlib.colors import to_rgb
+        C[:,:3] = to_rgb('y')
+        C[:,:3] = np.where((Y < -1e-3)[:, None], to_rgb('g'), C[:,:3])
+        C[:,:3] = np.where((Y > +1e-3)[:, None], to_rgb('r'), C[:,:3])
     elif plot_color.startswith('uniform:'):
         from matplotlib.colors import to_rgb
         # use given color
@@ -781,6 +793,10 @@ def probs_to_band_plot(
     ax.set_ylabel('Frequency (cm$^{-1}$)', fontsize=20)
     for tick in ax.yaxis.get_major_ticks():
         tick.label.set_fontsize(16)
+
+    if plot_ylim is not None:
+        ymin, ymax = (float(x.strip()) for x in plot_ylim.split(':'))
+        ax.set_ylim(ymin, ymax)
 
     if plot_sidebar:
         ax_sidebar.set_xlim(-1, 1)
