@@ -17,6 +17,12 @@ def main():
         '--temperature', type=float,
         help="specify temperature, for double checking that the missing prefactor matches expectation.",
     )
+    parser.add_argument(
+        '--mistake-no', type=int, default=1,
+        help="which mistake defines our expectation?"
+             " 1: first mistake (completely missing), "
+             " 2: second mistake (missing sqrt)",
+    )
     args = parser.parse_args()
 
     for path in args.INPUT:
@@ -37,7 +43,7 @@ def main():
         missing_prefactors[frequencies <= 0] = 0
 
         if args.temperature is not None:
-            expected_prefactors = get_expected_prefactors(frequencies, temperature=args.temperature)
+            expected_prefactors = get_expected_prefactors(frequencies, temperature=args.temperature, mistake=args.mistake_no)
             if np.allclose(expected_prefactors, missing_prefactors, atol=0):
                 warn(f"{path} has missing prefactors that match expectation")
             else:
@@ -56,7 +62,7 @@ def main():
             json.dump(d, f)
             print(file=f)
 
-def get_expected_prefactors(frequencies, temperature):
+def get_expected_prefactors(frequencies, temperature, mistake):
     hk = 0.22898852319
 
     if temperature == 0:
@@ -64,7 +70,14 @@ def get_expected_prefactors(frequencies, temperature):
     else:
         expm1 = np.expm1(hk * frequencies / temperature)
         bose_occupation = (1.0 + 1.0 / expm1)
-    return np.where(frequencies <= 0.0, 0.0, bose_occupation / frequencies)
+    prefactors = bose_occupation / frequencies
+
+    if mistake == 1:
+        return np.where(frequencies <= 0.0, 0.0, prefactors)
+    elif mistake == 2:
+        return np.where(frequencies <= 0.0, 0.0, prefactors ** -1)
+    else:
+        raise ValueError('mistake')
 
 # ------------------------------------------------------
 
