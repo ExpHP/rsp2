@@ -1114,7 +1114,7 @@ pub(crate) fn run_single_force_computation(
 impl TrialDir {
     /// Used to figure out which iteration we're on when starting from the
     /// post-diagonalization part of the EV loop for sparse.
-    pub(crate) fn find_iteration_for_ev_chase(&self) -> FailResult<Iteration> {
+    pub(crate) fn find_iteration_for_ev_chase(&self, will_diagonalize: bool) -> FailResult<Iteration> {
         use crate::cmd::EvLoopStructureKind::*;
 
         for iteration in (1..).map(Iteration) {
@@ -1125,9 +1125,10 @@ impl TrialDir {
                 bail!("{}: does not exist", pre_chase.nice());
             }
             if !post_chase.exists() {
-                if !eigensols.exists() {
+                if !(eigensols.exists() || will_diagonalize) {
                     bail!("\
-                        {}: does not exist.  Did you perform diagonalization? \
+                        {}: does not exist, and --diagonalize not supplied. \
+                        Did you perform diagonalization? \
                         (try the python module rsp2.cli.negative_modes)\
                     ", eigensols.nice())
                 }
@@ -1142,6 +1143,7 @@ impl TrialDir {
         on_demand: Option<LammpsOnDemand>,
         settings: &Settings,
         prev_iteration: Iteration,
+        will_diagonalize: bool,
     ) -> FailResult<DidEvChasing> {
         use crate::cmd::EvLoopStructureKind::*;
         use crate::filetypes::Eigensols;
@@ -1149,14 +1151,26 @@ impl TrialDir {
         let pot = PotentialBuilder::from_root_config(Some(&self), on_demand, &settings)?;
 
         let (coords, meta) = self.read_stored_structure_data(&self.structure_path(PreEvChase(prev_iteration)))?;
-        let Eigensols {
-            frequencies: freqs,
-            eigenvectors: evecs,
-        } = Load::load(self.join(self.eigensols_path(prev_iteration)))?;
 
-        let evecs = evecs.into_gamma_basis3().ok_or_else(|| {
-            failure::err_msg("expected real eigensols!")
-        })?;
+        let (freqs, evecs) = {
+            if will_diagonalize {
+                trace!("Diagonalizing due to --diagonalize.");
+                pot.eco_mode(|proof| {
+                    let dynmat = DynamicalMatrix::load(self.join(self.gamma_dynmat_path(prev_iteration)))?;
+                    do_diagonalize_dynmat(settings, dynmat, proof)
+                })?
+            } else {
+                let Eigensols {
+                    frequencies, eigenvectors,
+                } = Load::load(self.join(self.eigensols_path(prev_iteration)))?;
+
+                let eigenvectors = eigenvectors.into_gamma_basis3().ok_or_else(|| {
+                    failure::err_msg("expected real eigensols!")
+                })?;
+
+                (frequencies, eigenvectors)
+            }
+        };
 
         let (_, mut coords, did_ev_chasing) = self.do_ev_loop_stuff_after_diagonalization(
             settings, &pot, meta.sift(), prev_iteration,

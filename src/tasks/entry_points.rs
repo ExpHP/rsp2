@@ -332,6 +332,11 @@ pub fn after_diagonalization(bin_name: &str, version: VersionInfo) -> ! {
             clap::App::new(bin_name)
                 .about("The next step after rsp2-acgsd-and-dynmat and the negative_modes py script")
                 .args(&[
+                    arg!( diagonalize [--diagonalize] "\
+                        perform diagonalization, rather than expecting ev-loop-modes-NN.json.gz to \
+                        exist. This is provided for cases involving the dense diagonalizer on \
+                        large systems where the python script may require too much memory.\
+                    "),
                     arg!( dir=DIR "existing trial directory"),
                 ])
         });
@@ -342,7 +347,8 @@ pub fn after_diagonalization(bin_name: &str, version: VersionInfo) -> ! {
         let mut trial = TrialDir::from_existing(&dir)?;
 
         // Make sure the run is valid before making a logfile
-        let iteration = trial.find_iteration_for_ev_chase()?;
+        let will_diagonalize = matches.is_present("diagonalize");
+        let iteration = trial.find_iteration_for_ev_chase(will_diagonalize)?;
 
         logfile.start(PathFile::new(trial.new_logfile_path()?)?)?;
 
@@ -355,7 +361,7 @@ pub fn after_diagonalization(bin_name: &str, version: VersionInfo) -> ! {
         };
 
         let DidEvChasing(chased) = trial.run_after_diagonalization(
-            mpi_on_demand, &settings, iteration,
+            mpi_on_demand, &settings, iteration, will_diagonalize,
         )?;
         match chased {
             true => bail!("Ev chasing was performed; loop not done"),
