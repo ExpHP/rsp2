@@ -702,19 +702,25 @@ fn _potential_kolmogorov_crespi_full__rebo() -> bool { true }
 pub struct PotentialKolmogorovCrespiZNew {
     // NOTE: defaults are not here because they are defined in rsp2_tasks,
     //       which depends on this crate
-    /// Cutoff radius (Angstrom?)
+    /// Cutoff radius. (Angstrom)
+    ///
+    /// More specifically, it is the maximum radius where the cutoff prefactor has a value of 1.
     #[serde(rename = "cutoff")]
     pub cutoff_begin: OrDefault<f64>,
 
-    /// Thickness of the "smooth cutoff" shell.
+    /// Thickness of the "smooth cutoff" shell. (Angstrom)
     ///
     /// NOTE: If a value of 0.0 is used, the value is offset to maintain C0 continuity.
     /// (This makes it effectively identical to LAMMPS)
     #[serde(rename = "cutoff-length")]
     pub cutoff_transition_dist: OrDefault<f64>,
 
-    /// Skin depth for neighbor searches.  Adjusting this may wildly improve (or hurt!)
-    /// performance depending on the application.
+    /// Skin depth for neighbor searches. (Angstrom)
+    ///
+    /// Adjusting this may wildly improve (or hurt!) performance depending on the application.
+    ///
+    /// This should be larger than the phonon displacement distance, or else phonon forces
+    /// may be incorrect.
     #[serde(default = "_potential_kolmogorov_crespi_z_new__skin_depth")]
     pub skin_depth: f64,
 
