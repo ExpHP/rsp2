@@ -1002,6 +1002,7 @@ dependencies = [
  "rsp2-tasks 0.1.0",
  "rsp2-tasks-config 0.1.0",
  "rsp2-util-macros 0.1.0",
+ "rsp2c_unfold 0.1.0",
  "serde 1.0.91 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_derive 1.0.91 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_json 1.0.33 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1014,6 +1015,7 @@ dependencies = [
 name = "rsp2-array-types"
 version = "0.1.0"
 dependencies = [
+ "num-complex 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "num-traits 0.2.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "rand 0.3.22 (registry+https://github.com/rust-lang/crates.io-index)",
  "rsp2-assert-close 0.1.0",
@@ -1301,6 +1303,19 @@ dependencies = [
 [[package]]
 name = "rsp2-util-macros"
 version = "0.1.0"
+
+[[package]]
+name = "rsp2c_unfold"
+version = "0.1.0"
+dependencies = [
+ "num-complex 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rayon 1.0.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rsp2-array-types 0.1.0",
+ "rsp2-assert-close 0.1.0",
+ "rsp2-soa-ops 0.1.0",
+ "rsp2-util-macros 0.1.0",
+ "slice-of-array 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
+]
 
 [[package]]
 name = "rustc-demangle"

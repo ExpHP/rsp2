@@ -955,16 +955,29 @@ def unfold_all(
 
     # debug_quotient_points((gpoint_sfracs @ np.linalg.inv(super_lattice).T)[:, :2], np.linalg.inv(prim_lattice).T[:2,:2])
 
-    return np.array(list(map_with_progress(
-        eigenvectors, progress,
-        lambda eigenvector: unfold_one(
-            translation_sfracs=translation_sfracs,
-            translation_deperms=translation_deperms,
-            gpoint_sfracs=gpoint_sfracs,
-            kpoint_sfrac=kpoint_sfrac,
-            eigenvector=eigenvector.reshape((-1, 3)),
+    if kpoint_sfrac == [0, 0, 0]:
+        import unfold_lib
+        if unfold_lib.unfold_all_gamma is None:
+            unfold_lib.build()
+
+        return unfold_lib.unfold_all_gamma(
+            superstructure,
+            translation_carts,
+            gpoint_sfracs,
+            eigenvectors,
+            translation_deperms,
         )
-    )))
+    else:
+        return np.array(list(map_with_progress(
+            eigenvectors, progress,
+            lambda eigenvector: unfold_one(
+                translation_sfracs=translation_sfracs,
+                translation_deperms=translation_deperms,
+                gpoint_sfracs=gpoint_sfracs,
+                kpoint_sfrac=kpoint_sfrac,
+                eigenvector=eigenvector.reshape((-1, 3)),
+            )
+        )))
 
 def unfold_one(
         translation_sfracs,

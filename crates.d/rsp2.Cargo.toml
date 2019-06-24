@@ -35,6 +35,7 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 !!rsp2-python
 !!rsp2-potentials
 !!rsp2-dftbplus { optional = true, default-features = false }
+!!rsp2c_unfold
 #!!INSERTION POINT FOR NEW CRATES!!#
 # (do not edit the above line!)
 
@@ -84,6 +85,7 @@ dftbplus-support = ["rsp2-tasks/dftbplus-support"]
 
 !!NIGHTLY-FEATURE-LINE
 
-!!MAYBE-ITS-A-WORKSPACE
+[workspace]
+exclude = "scripts/rsp2-pot-debug"
 
 !!MAYBE-OPTIMIZE-SOME-DEPS

@@ -14,6 +14,7 @@ path = "lib.rs"
 !!num-traits
 !!serde { optional = true, features = ["derive"] }
 !!rand
+!!num-complex
 
 # This should be a dev-dependency, but see this bug:
 # https://github.com/rust-lang/cargo/issues/6915

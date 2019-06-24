@@ -19,6 +19,7 @@ slice-of-array = "0.2.1"
 num-traits = "0.2.3"
 serde = { version = "1.0.91", features = ["derive", "rc"], optional = true }
 rand = "0.3"
+num-complex = "0.2.1"
 
 # This should be a dev-dependency, but see this bug:
 # https://github.com/rust-lang/cargo/issues/6915
