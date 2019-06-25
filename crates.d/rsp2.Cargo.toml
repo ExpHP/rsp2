@@ -86,6 +86,8 @@ dftbplus-support = ["rsp2-tasks/dftbplus-support"]
 !!NIGHTLY-FEATURE-LINE
 
 [workspace]
-exclude = "scripts/rsp2-pot-debug"
+exclude = [
+    "scripts/rsp2-pot-debug",
+]
 
 !!MAYBE-OPTIMIZE-SOME-DEPS
