@@ -26,6 +26,7 @@ CARGO_TOMLS_DIR = Path('crates.d')
 MASTER_CFG_PATH = Path('crates.d/crates.toml')
 MASTER_USER_CFG_PATH = Path('crates.d/config.toml')
 MASTER_USER_CFG_EXAMPLE_PATH = Path('crates.d/config.example.toml')
+GIT_HOOKS_DIR = Path('crates.d/git-hooks')
 # something long enough for people to grep and find this script
 INSERTION_POINT_TEXT = "#!!INSERTION POINT FOR NEW CRATES!!#"
 
@@ -589,7 +590,6 @@ class Mv:
     def run(args, fail):
         do_mv_or_rm(curdir=args.CURDIR, destdir=args.DESTDIR, fail=fail)
 
-
 @register
 class Rm:
     cmd = 'rm'
@@ -643,6 +643,44 @@ def do_mv_or_rm(curdir, destdir, fail):
     Gen.run_like_function(fail)
 
 #------------
+
+@register
+class InstallHooks:
+    cmd = 'install-git-hooks'
+    parser_kw = {}
+
+    @staticmethod
+    def configure(sub):
+        pass
+
+    @staticmethod
+    def run(args, fail):
+        with pushd(search_for_root(fail)):
+            nothing_to_do = True
+            error = False
+            for name in os.listdir(GIT_HOOKS_DIR):
+                dest = os.path.join('.git/hooks', name)
+                src = os.path.join(GIT_HOOKS_DIR, name)
+                dest_rel_src = os.path.relpath(src, start=os.path.dirname(dest))
+                if os.path.lexists(dest):
+                    if any(x() for x in [
+                        (lambda: not os.path.exists(dest)),
+                        (lambda: not os.path.exists(src)),
+                        (lambda: not os.path.samefile(os.path.realpath(dest), os.path.realpath(src))),
+                    ]):
+                        warnings.warn(f'Not overwriting {dest}')
+                        nothing_to_do = False
+                        error = True
+                    continue
+                else:
+                    nothing_to_do = False
+                    print(f'Installing {name} hook', file=sys.stderr)
+                    os.symlink(dest_rel_src, dest)
+
+            if nothing_to_do:
+                print(f'Already up to date!', file=sys.stderr)
+            if error:
+                sys.exit(1)
 
 @register
 class Test:
@@ -797,7 +835,7 @@ class Edit:
 
         editor = os.environ.get('EDITOR') or 'vim'
         if subprocess.run([editor, toml_path]).returncode != 0:
-            print(f"Failed to edit '{toml_path}'!")
+            print(f"Failed to edit '{toml_path}'!", file=sys.stderr)
             sys.exit(1)
 
         # regenerate

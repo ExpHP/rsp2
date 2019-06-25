@@ -9,6 +9,8 @@ from scipy import interpolate as scint
 from scipy import sparse
 from pymatgen import Structure
 
+import unfold_lib
+
 THZ_TO_WAVENUMBER = 33.3564095198152
 
 try:
@@ -80,6 +82,8 @@ def main():
 
     if args.debug:
         SHOW_ACTION_STACK = True
+
+    unfold_lib.build()
 
     for task in all_tasks:
         if task.has_action(args):
