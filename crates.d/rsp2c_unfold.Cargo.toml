@@ -1,0 +1,25 @@
+[package]
+!!CRATE-NAME-LINE
+version = "0.1.0"
+authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
+description = "Optimized routines for the unfold python script, with a C interface."
+!!LICENSE-PERMISSIVE
+!!DEFAULT-EDITION
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+!!slice-of-array
+!!num-complex
+!!rayon
+
+!!rsp2-assert-close
+!!rsp2-util-macros
+!!rsp2-soa-ops
+!!rsp2-array-types
+
+[features]
+default = []
+
+!!NIGHTLY-FEATURE-LINE
