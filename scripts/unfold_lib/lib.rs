@@ -8,6 +8,7 @@ use rayon::prelude::*;
 #[macro_use] extern crate rsp2_util_macros;
 #[macro_use] extern crate rsp2_assert_close;
 
+#[no_mangle]
 pub extern "C" fn rsp2c_unfold_all_gamma(
     num_quotient: i64,
     num_sites: i64,
@@ -18,7 +19,7 @@ pub extern "C" fn rsp2c_unfold_all_gamma(
     gpoint_sfracs: *const f64, // shape (quotient, 3)
     eigenvectors: *const f64, // shape (evecs, sites, 3)
     translation_deperms: *const i32, // shape (quotient, sites)
-    dest_csr: *mut Vec<f64>,
+    output: *mut f64, // shape (evecs, quotient)
     // return is nonzero on error
 ) -> i32 {
     match std::panic::catch_unwind(|| {
@@ -26,25 +27,24 @@ pub extern "C" fn rsp2c_unfold_all_gamma(
         let num_sites = num_sites as usize;
         let num_evecs = num_evecs as usize;
 
-        use std::slice::from_raw_parts;
+        use std::slice::{from_raw_parts, from_raw_parts_mut};
         unsafe {
             let ref super_lattice = M3(*from_raw_parts(super_lattice, 3 * 3).nest().as_array());
             let super_carts = from_raw_parts(super_carts, num_sites * 3).nest();
-            let translation_carts = from_raw_parts(translation_carts, num_sites * 3).nest();
+            let translation_carts = from_raw_parts(translation_carts, num_quotient * 3).nest();
             let gpoint_sfracs = from_raw_parts(gpoint_sfracs, num_quotient * 3).nest();
             let eigenvectors = from_raw_parts(eigenvectors, num_evecs * num_sites * 3).nest();
             let translation_deperms = from_raw_parts(translation_deperms, num_quotient * num_sites);
-            let csr = unfold_all_gamma(
-                num_evecs,
+            let output = from_raw_parts_mut(output, num_evecs * num_quotient);
+            unfold_all_gamma(
                 super_lattice,
                 super_carts,
                 translation_carts,
                 gpoint_sfracs,
                 eigenvectors,
                 translation_deperms,
+                output,
             );
-
-            std::mem::replace(dest_csr.as_mut().expect("unexpected null pointer"), csr);
         }
     }) {
         Ok(()) => 0,
@@ -77,15 +77,17 @@ pub extern "C" fn rsp2c_unfold_all_gamma(
 /// For each vector in ``eigenvectors``, its projected probabilities
 /// onto ``k + g`` for each g in ``supercell.gpoint_sfracs()``.
 fn unfold_all_gamma(
-    num_evecs: usize,
     super_lattice: &M33,
     super_carts: &[V3],
     translation_carts: &[V3],
     gpoint_sfracs: &[V3],
     eigenvectors: &[V3],
     translation_deperms: &[i32],
-) -> Vec<f64> {
+    output: &mut [f64],
+) {
     let num_sites = super_carts.len();
+    let num_quotient = translation_carts.len();
+
     let super_lattice_inv = M33::inv(super_lattice);
     let ref translation_sfracs: Vec<_> = translation_carts.iter().map(|v| v * super_lattice_inv).collect();
 
@@ -95,9 +97,7 @@ fn unfold_all_gamma(
             .collect()
     };
 
-    let mut out = Vec::default();
-    for i in 0..num_evecs {
-        let eigenvector = &eigenvectors[i * 3 * num_sites..(i + 1) * 3 * num_sites];
+    for (eigenvector, output) in zip_eq!(eigenvectors.chunks(num_sites), output.chunks_mut(num_quotient)) {
         let ref eigenvector = eigenvector.iter().map(|v| v.map(|r| Complex64::new(r, 0.0))).collect::<Vec<_>>();
 
         let kpoint_sfrac = V3::zero();
@@ -108,9 +108,8 @@ fn unfold_all_gamma(
             kpoint_sfrac,
             eigenvector,
         );
-        out.extend(dense_row);
+        output.copy_from_slice(&dense_row);
     }
-    out
 }
 
 fn unfold_one(
@@ -164,20 +163,4 @@ fn inner_prod_ev(a: &[V3<Complex64>], b: &[V3<Complex64>]) -> Complex64 {
 
 fn inner_prod_v3(a: &V3<Complex64>, b: &V3<Complex64>) -> Complex64 {
     V3::from_fn(|i| a[i].conj() * b[i]).0.iter().sum()
-}
-
-pub extern "C" fn rsp2c_vec_new() -> *mut Vec<f64> {
-    Box::into_raw(Box::new(vec![]))
-}
-
-pub extern "C" fn rsp2c_vec_data(vec: *const Vec<f64>) -> *const f64 {
-    unsafe { vec.as_ref() }.expect("unexpected null ptr").as_ptr()
-}
-
-pub extern "C" fn rsp2c_vec_len(vec: *const Vec<f64>) -> i64 {
-    unsafe { vec.as_ref() }.expect("unexpected null ptr").len() as i64
-}
-
-pub extern "C" fn rsp2c_vec_free(vec: *mut Vec<f64>) {
-    unsafe { drop(Box::from_raw(vec)) }
 }

@@ -37,6 +37,8 @@ def build():
         nquotient = len(translation_carts)
         nsite = len(super_carts)
         nev = len(eigenvectors)
+
+        output = np.zeros((nev, nquotient))
         arrays = [
             (super_lattice, (3, 3), c_double),
             (super_carts, (nsite, 3), c_double),
@@ -44,27 +46,19 @@ def build():
             (gpoint_sfracs, (nquotient, 3), c_double),
             (eigenvectors, (nev, nsite, 3), c_double),
             (translation_deperms, (nquotient, nsite), c_int32),
+            (output, (nev, nquotient), c_double),
         ]
 
+        pointers = []
         for (key, (array, shape, ctype)) in enumerate(arrays):
-            array = array.reshape(shape).astype(ctype, copy=False)
+            array = np.reshape(array, shape).astype(ctype, copy=False)
             array = np.ascontiguousarray(array)
-            arrays[key] = array
+            pointers.append(array.ctypes.data_as(ctypes.POINTER(ctype)))
 
-        vec = imp.rsp2c_vec_new()
-        imp.unfold_all_gamma(
+        imp.rsp2c_unfold_all_gamma(
             ctypes.c_int32(nquotient),
             ctypes.c_int32(nsite),
             ctypes.c_int32(nev),
-            *arrays,
-            vec,
+            *pointers,
         )
-
-        n = imp.rsp2c_vec_len(vec)
-        ptr = imp.rsp2c_vec_data(vec)
-        data = ctypes.cast(ptr, ctypes.POINTER(ctypes.c_double))
-        array = np.ctypeslib.as_array(data, (n,)).copy()
-
-        imp.rsp2c_vec_free(vec)
-
-        return array.reshape((nev, nquotient))
+        return output

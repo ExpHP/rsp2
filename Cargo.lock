@@ -1002,7 +1002,7 @@ dependencies = [
  "rsp2-tasks 0.1.0",
  "rsp2-tasks-config 0.1.0",
  "rsp2-util-macros 0.1.0",
- "rsp2c_unfold 0.1.0",
+ "rsp2c-unfold 0.1.0",
  "serde 1.0.91 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_derive 1.0.91 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_json 1.0.33 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1305,7 +1305,7 @@ name = "rsp2-util-macros"
 version = "0.1.0"
 
 [[package]]
-name = "rsp2c_unfold"
+name = "rsp2c-unfold"
 version = "0.1.0"
 dependencies = [
  "num-complex 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
