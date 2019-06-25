@@ -16,3 +16,5 @@ log.lammps
 .secret-test-dir
 
 crates.d/config.toml
+
+venv

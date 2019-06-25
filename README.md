@@ -6,14 +6,78 @@ Contains a small ecosystem of utility crates for working with crystal structures
 
 # External dependencies
 
-`rsp2` won't run out of the box; among the things you will need:
+`rsp2` has the following (non-exhaustive) list of dependencies:
 
-* `python3` with `spglib` and `scipy` installed.
-* `phonopy` is an optional requirement.  (`rsp2` now reimplements most of what it needs from phonopy, but retains the ability to use phonopy directly for purposes of comparison).
-* You may wish to build your own copy of LAMMPS and make it available through `pkg-config`, if you require MPI to work. See the [`lammps-sys 0.5.0` readme](https://github.com/ExpHP/lammps-sys/tree/v0.5.0).
-    * If you do not need MPI support, lammps will automatically be built, but will likely be linked against the `mpi_stubs` library. This may cause incompatibilities with the rest of rsp2, which brazenly assumes that lammps was built against whatever implementation of MPI is found by `rsmpi`. In this case, for now it is recommended that you build with `--no-default-features` to disable `rsmpi` support.
+```
+python3 >= 3.7.0 (see below about packages)
+rust >= 1.35.0
+libffi
+libllvm and libclang
+blas and lapacke
+mpi (optional; see below)
+```
 
-If you have trouble, please open an issue.
+It also has a large number of rust dependencies, but these are automatically managed by cargo.
+
+## Python
+
+There is a `requirements.txt` suitable for use with `venv`.  To install all required python dependencies:
+
+```
+# First time usage
+python3 -m venv venv
+. venv/bin/activate
+python3 -m pip install -r requirements.txt
+
+# Afterwards
+. venv/bin/activate
+```
+
+If you want to run scripts in `scripts/` (e.g. most notably for band unfolding), there are additional requirements in `scripts/requirements.txt`.
+
+## Optional features
+
+### MPI
+
+MPI support is enabled by default, but you can build without MPI by supplying the `--no-default-features` flag to cargo.
+
+**The MPI implementation must implement version 3.0 of the interface.**  (e.g. OpenMPI 3.x).  Furthermore, due to problems upstream, **openMPI 4.x is not currently supported.**  The following versions ought to work:
+
+* OpenMPI 3.0.4, 3.1.4 (**not 4.x**)
+* MPICH 3.3, 3.2.1
+
+**MPI support is only utilized by LAMMPS potentials.**  The potentials implemented in Rust use rayon to perform work-stealing parallelism on a single machine, and the potentials in DFTB+ use OpenMP.
+
+### LAMMPS
+
+LAMMPS is used to provide the following potentials:
+
+* AIREBO
+* REBO + `kolmogorov/crespi/full`
+* Versions of rsp2's built-in potentials that lack support for lattice parameter optimization, but which fully model the bondorder factors in REBO.
+
+rsp2 currently automatically builds an old version of LAMMPS.  **At the time of writing, this version is known to be incorrect for pure (non-AIREBO) REBO on some H−C bonds.**
+
+If you want to build and install your own version of LAMMPS, [see this page](https://github.com/lammps/lammps/blob/master/cmake/README.md). To be able to use it in rsp2, please enable the following flags in the `cmake` command:
+
+```
+-DCMAKE_BUILD_TYPE=Release -DLAMMPS_EXCEPTIONS=on -DBUILD_LIB=on -DBUILD_SHARED_LIBS=on -DPKG_MANYBODY=on -DPKG_USER-OMP=on -DPKG_USER-MISC=on
+```
+
+`pkg-config` must be able to locate the library, or rsp2 will not use it.  Verify:
+
+```
+$ pkg-config --libs --cflags liblammps
+-DLAMMPS_EXCEPTIONS -llammps
+```
+
+### DFTB+
+
+`dftb+` is optional, and it is not required by default.  To enable it, supply `--features=dftbplus-support` to cargo commands.
+
+All DFTB+ potentials are available.
+
+You **must** manually install DFTB+. [See this page for details](https://github.com/ExpHP/dftbplus-sys/blob/master/doc/installing-dftbplus.md).
 
 # Running
 
@@ -21,9 +85,11 @@ If you have trouble, please open an issue.
 
 Because there is currently one or *maybe two* people who need to use the code (and this count includes the author!), the CLI binaries have no stable interface.  Config files, CLI arguments, inputs and outputs undergo major revisions on a complete whim.
 
+This situation has improved *slightly* in recent times, as changes to the config file now generally at least try to preserve backwards compatibility by keeping deprecated flags around.
+
 ## MPI
 
-You can't use `mpirun` through cargo, so you need to run the built binary directly from 
+You can't use `mpirun` through cargo, so you need to run the built binary directly from the target directory.
 
 ```
 cargo build --release --bin=rsp2
