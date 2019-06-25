@@ -13,6 +13,7 @@ edition = "2018"
 
 [lib]
 path = "lib.rs"
+crate-type = ["cdylib"]
 
 [dependencies]
 slice-of-array = "0.2.1"
