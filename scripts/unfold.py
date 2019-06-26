@@ -283,6 +283,8 @@ class TaskEigensols(Task):
                 print('--eigensols not supplied. Will diagonalize dynmat.')
 
             m = self.dynmat.require(args)
+            if np.all(m.data.imag == 0.0):
+                m = m.real
             ev_eigenvalues, ev_eigenvectors = scipy.linalg.eigh(m.todense())
             ev_eigenvectors = ev_eigenvectors.T
 
@@ -383,6 +385,11 @@ class TaskQProbs(Task):
         )
 
         parser.add_argument(
+            '--probs-impl', choices=['rust', 'python'], default='python', help=
+            'Enable the experimental rust unfolder.',
+        )
+
+        parser.add_argument(
             '--probs', metavar='FILE', help=
             'Path to .npz file previously written through --write-probs.',
         )
@@ -399,10 +406,7 @@ class TaskQProbs(Task):
 
             layer = self.structure.require(args)['layer']
 
-            progress_callback = None
-            if args.verbose:
-                def progress_callback(done, count):
-                    print(f'Layer {layer}: Unfolding {done:>5} of {count} eigenvectors')
+            progress_prefix = f'Layer {layer}: ' if args.verbose else None
 
             # reading the file might take forever; compute deperms first as it has
             # a greater chance of having a bug
@@ -414,7 +418,8 @@ class TaskQProbs(Task):
                 eigenvectors=self.eigensols.require(args)['ev_projected_eigenvectors'],
                 kpoint_sfrac=self.kpoint_sfrac.require(args),
                 translation_deperms=self.translation_deperms.require(args),
-                progress=progress_callback,
+                implementation=args.probs_impl,
+                progress_prefix=progress_prefix,
             )
 
         if args.verbose:
@@ -916,12 +921,13 @@ def unfold_all(
         eigenvectors,
         kpoint_sfrac,
         translation_deperms,
-        progress = None,
+        implementation,
+        progress_prefix = None,
 ):
     """
     :param superstructure: ``pymatgen.Structure`` object with `sites` sites.
     :param supercell: ``Supercell`` object.
-    :param eigenvectors: Shape ``(num_evecs, 3 * sites)``, complex.
+    :param eigenvectors: Shape ``(num_evecs, 3 * sites)``, complex or real.
 
     Each row is an eigenvector.  Their norms may be less than 1, if the
     structure has been projected onto a single layer, but should not exceed 1.
@@ -959,19 +965,26 @@ def unfold_all(
 
     # debug_quotient_points((gpoint_sfracs @ np.linalg.inv(super_lattice).T)[:, :2], np.linalg.inv(prim_lattice).T[:2,:2])
 
-    if kpoint_sfrac == [0, 0, 0]:
+    if implementation == 'rust':
         import unfold_lib
-        if unfold_lib.unfold_all_gamma is None:
+        if unfold_lib.unfold_all is None:
             unfold_lib.build()
 
-        return unfold_lib.unfold_all_gamma(
-            superstructure,
-            translation_carts,
-            gpoint_sfracs,
-            eigenvectors,
-            translation_deperms,
+        return unfold_lib.unfold_all(
+            superstructure=superstructure,
+            translation_carts=translation_carts,
+            gpoint_sfracs=gpoint_sfracs,
+            kpoint_sfrac=kpoint_sfrac,
+            eigenvectors=eigenvectors,
+            translation_deperms=translation_deperms,
+            progress_prefix=progress_prefix,
         )
-    else:
+    elif implementation == 'python':
+        progress = None
+        if progress_prefix is not None:
+            def progress(done, count):
+                print(f'{progress_prefix}Unfolding {done:>5} of {count} eigenvectors')
+
         return np.array(list(map_with_progress(
             eigenvectors, progress,
             lambda eigenvector: unfold_one(
@@ -982,6 +995,7 @@ def unfold_all(
                 eigenvector=eigenvector.reshape((-1, 3)),
             )
         )))
+    else: assert False, 'complete switch'
 
 def unfold_one(
         translation_sfracs,
@@ -1175,6 +1189,9 @@ def truncate(array, tol):
 
 def debug_bin_magnitudes(array):
     from collections import Counter
+
+    print(array)
+    print(array.dtype)
 
     zero_count = product(array.shape) - np.sum(array != 0)
     if sparse.issparse(array):

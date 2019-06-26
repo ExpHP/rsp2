@@ -1,23 +1,29 @@
-use slice_of_array::prelude::*;
 use rsp2_array_types::{V3, M33, M3};
 use rsp2_soa_ops::{Perm, Permute};
+
 use std::f64::consts::PI;
-use num_complex::Complex64;
+use std::os::raw::c_char;
+use std::ffi::CStr;
+
+use slice_of_array::prelude::*;
 use rayon::prelude::*;
+use num_complex::Complex64;
 
 #[macro_use] extern crate rsp2_util_macros;
 #[macro_use] extern crate rsp2_assert_close;
 
 #[no_mangle]
-pub extern "C" fn rsp2c_unfold_all_gamma(
+pub extern "C" fn rsp2c_unfold_all(
     num_quotient: i64,
     num_sites: i64,
     num_evecs: i64,
+    progress_prefix: *const c_char, // NUL-terminated UTF-8, possibly NULL
     super_lattice: *const f64, // shape (3, 3)
     super_carts: *const f64, // shape (sites, 3)
     translation_carts: *const f64, // shape (quotient, 3)
     gpoint_sfracs: *const f64, // shape (quotient, 3)
-    eigenvectors: *const f64, // shape (evecs, sites, 3)
+    kpoint_sfrac: *const f64, // shape (3,)
+    eigenvectors: *const Complex64, // shape (evecs, sites, 3)
     translation_deperms: *const i32, // shape (quotient, sites)
     output: *mut f64, // shape (evecs, quotient)
     // return is nonzero on error
@@ -33,14 +39,24 @@ pub extern "C" fn rsp2c_unfold_all_gamma(
             let super_carts = from_raw_parts(super_carts, num_sites * 3).nest();
             let translation_carts = from_raw_parts(translation_carts, num_quotient * 3).nest();
             let gpoint_sfracs = from_raw_parts(gpoint_sfracs, num_quotient * 3).nest();
+            let kpoint_sfrac = from_raw_parts(kpoint_sfrac, 3).as_array();
             let eigenvectors = from_raw_parts(eigenvectors, num_evecs * num_sites * 3).nest();
             let translation_deperms = from_raw_parts(translation_deperms, num_quotient * num_sites);
             let output = from_raw_parts_mut(output, num_evecs * num_quotient);
-            unfold_all_gamma(
+
+            let progress_prefix = if progress_prefix.is_null() {
+                None
+            } else {
+                Some(CStr::from_ptr(progress_prefix).to_str().unwrap())
+            };
+
+            unfold_all(
+                progress_prefix,
                 super_lattice,
                 super_carts,
                 translation_carts,
                 gpoint_sfracs,
+                kpoint_sfrac,
                 eigenvectors,
                 translation_deperms,
                 output,
@@ -52,36 +68,14 @@ pub extern "C" fn rsp2c_unfold_all_gamma(
     }
 }
 
-/// :param superstructure: ``pymatgen.Structure`` object with `sites` sites.
-/// :param supercell: ``Supercell`` object.
-/// :param eigenvectors: Shape ``(num_evecs, 3 * sites)``, complex.
-///
-/// Each row is an eigenvector.  Their norms may be less than 1, if the
-/// structure has been projected onto a single layer, but should not exceed 1.
-/// (They will NOT be automatically normalized by this function, as projection
-/// onto a layer may create eigenvectors of zero norm)
-///
-/// :param translation_deperms:  Shape ``(quotient, sites)``.
-/// Permutations such that ``(carts + translation_carts[i])[deperms[i]]`` is
-/// equivalent to ``carts`` under superlattice translational symmetry, where
-/// ``carts`` is the supercell carts.
-///
-/// :param kpoint_sfrac: Shape ``(3,)``, real.
-/// The K point in the SC reciprocal cell at which the eigenvector was computed,
-/// in fractional coords.
-///
-/// :param progress: Progress callback.
-/// Called as ``progress(num_done, num_total)``.
-///
-/// :return: Shape ``(num_evecs, quotient)``
-/// For each vector in ``eigenvectors``, its projected probabilities
-/// onto ``k + g`` for each g in ``supercell.gpoint_sfracs()``.
-fn unfold_all_gamma(
+fn unfold_all(
+    progress_prefix: Option<&str>,
     super_lattice: &M33,
     super_carts: &[V3],
     translation_carts: &[V3],
     gpoint_sfracs: &[V3],
-    eigenvectors: &[V3],
+    kpoint_sfrac: &V3,
+    eigenvectors: &[V3<Complex64>],
     translation_deperms: &[i32],
     output: &mut [f64],
 ) {
@@ -97,10 +91,17 @@ fn unfold_all_gamma(
             .collect()
     };
 
-    for (eigenvector, output) in zip_eq!(eigenvectors.chunks(num_sites), output.chunks_mut(num_quotient)) {
-        let ref eigenvector = eigenvector.iter().map(|v| v.map(|r| Complex64::new(r, 0.0))).collect::<Vec<_>>();
+    let progress = progress_prefix.map(|prefix| {
+        move |done, total| println!("{}Unfolded {:>5} of {} eigenvectors", prefix, done, total)
+    });
 
-        let kpoint_sfrac = V3::zero();
+    let iter = zip_eq!(eigenvectors.chunks(num_sites), output.chunks_mut(num_quotient)).enumerate();
+    let num_total = iter.len();
+    for (num_complete, (eigenvector, output)) in iter {
+        if let Some(progress) = progress.as_ref() {
+            progress(num_complete, num_total);
+        }
+
         let dense_row = unfold_one(
             translation_sfracs,
             translation_deperms,
@@ -110,19 +111,23 @@ fn unfold_all_gamma(
         );
         output.copy_from_slice(&dense_row);
     }
+
+    if let Some(progress) = progress {
+        progress(num_total, num_total);
+    }
 }
 
 fn unfold_one(
     translation_sfracs: &[V3],
     translation_deperms: &[Perm],
     gpoint_sfracs: &[V3],
-    kpoint_sfrac: V3,
+    kpoint_sfrac: &V3,
     eigenvector: &[V3<Complex64>],
 ) -> Vec<f64> {
     let num_quotient = translation_sfracs.len();
 
     let inner_prods: Vec<_> = {
-        translation_deperms.iter().map(|perm| {
+        translation_deperms.par_iter().map(|perm| {
             let permuted = eigenvector.to_vec().permuted_by(perm);
             inner_prod_ev(eigenvector, &permuted)
         }).collect()
