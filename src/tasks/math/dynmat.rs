@@ -13,6 +13,7 @@ use crate::FailResult;
 use crate::meta;
 use rsp2_array_types::{V3, M33, M3};
 use rsp2_soa_ops::{Perm, Permute};
+use rsp2_structure::{Coords};
 use rsp2_structure::supercell::SupercellToken;
 use rsp2_newtype_indices::{Idx, Indexed, index_cast};
 use std::collections::BTreeMap;
@@ -40,7 +41,6 @@ pub struct DynamicalMatrix(
 );
 
 impl ForceConstants {
-
     /// Displaced atoms must always be in this cell.
     pub const DESIGNATED_CELL: [u32; 3] = [0, 0, 0];
 
@@ -576,13 +576,14 @@ impl ForceConstants {
         self.0.to_dense()
     }
 
-    // note: other K points will require cartesian coords for the right phase factors
-    /// Compute the dynamical matrix at gamma.
+    /// Compute the dynamical matrix at a q-point.
     ///
     /// The force constants do not need to contain data for rows outside the
     /// designated cell. (but if they do, it won't hurt)
-    pub fn gamma_dynmat(
+    pub fn dynmat_at_q(
         &self,
+        super_coords: &Coords,
+        qpoint_sfrac: V3,
         sc: &SupercellToken,
         masses: meta::SiteMasses,
     ) -> DynamicalMatrix {
@@ -595,25 +596,85 @@ impl ForceConstants {
         let cells = sc.atom_cells();
         let get_prim = |SuperI(r)| PrimI(primitive_atoms[r.index()]);
 
+        let qpoint_cart = qpoint_sfrac * &super_coords.lattice().reciprocal();
+
+        // Since rsp2 pays so much attention to image vectors (see FracBond) in places,
+        // one might wonder why it is now doing brute-force searches for nearest images.
+        //
+        // Well... our current representation of force_sets doesn't contain image information.
+        // All we know is that our supercell should be large enough that each site in the
+        // designated cell only interacts with one image of any other site in the supercell.
+        let image_finder = rsp2_structure::NearestImageFinder::new(super_coords.lattice()).unwrap();
+
+        // Reducing the carts is a requirement for NearestImageFinder::shortest_images_cart_fast
+        let reduced_carts = Indexed::<SuperI, _>::from_raw({
+            let mut reduced = super_coords.clone();
+            reduced.reduce_positions();
+            reduced.to_carts()
+        });
+
+        let mut shortest_images_buf = vec![];
         let iter = zip_eq!(&self.0.row, &self.0.col, &self.0.val)
             // ignore elements outside the rows of the designated cell, which were added
             // for no other purpose than to facilitate imposing translational invariance
             .filter(|&(&SuperI(r), _, _)| cells[r] == Self::DESIGNATED_CELL)
             // each column of the dynamical matrix sums over columns for images in
             // the force constants matrix, with phase factors.
-            .map(|(&r, &c, &m)| {
-                let r = get_prim(r);
-                let c = get_prim(c);
+            .map(|(&super_r, &super_c, &mat)| {
+                let prim_r = get_prim(super_r);
+                let prim_c = get_prim(super_c);
 
                 // mass-normalizing scale factor
-                let scale = 1.0 / f64::sqrt(masses[r].0 * masses[c].0);
+                let scale = 1.0 / f64::sqrt(masses[prim_r].0 * masses[prim_c].0);
 
-                // at gamma, phase is 1
-                let (phase_real, phase_imag) = (1.0, 0.0);
-                let real = scale * phase_real * m;
-                let imag = scale * phase_imag * m;
+                // vector from atom in primitive cell to atom in supercell.
+                //
+                // NOTE: Strictly speaking, rsp2 does not currently need to consider ties for
+                // length. If necessary, we can optimize this by only getting one vector.
+                //
+                // I believe that the reason that phonopy must do this is because phonopy's
+                // forces are dense; phonopy assumes that the equilibrium structure has zero
+                // force, so the small forces that are present in the equilibrium structure
+                // will also appear between distant, noninteracting sites in the force sets.
+                // Considering ties thus helps cancel out some terms that would otherwise
+                // violate symmetry.
+                //
+                // In rsp2, noninteracting sites in the supercell truly have zero force
+                // between them. There should not be any ties for any of the `(r, c)` pairs
+                // that appear in our sparse force constants.
+                //
+                // For now, however, we *do* find all shortest images, simply because I don't want
+                // this to come back to bite me if things change in the future.
 
-                ((r, c), Complex33(real, imag))
+                // `_fast` is okay because the carts are reduced.
+                image_finder.shortest_images_cart_fast(
+                    &mut shortest_images_buf,
+                    reduced_carts[super_c] - reduced_carts[super_r],
+                    1e-4,
+                );
+                if shortest_images_buf.len() > 1 {
+                    // If this warning is generated spuriously, then it probably means a potential
+                    // was added to rsp2 that is incapable of producing sparse force sets.
+                    //
+                    // If that is indeed the case, the existing code should still handle it properly
+                    // (though it hasn't been tested under these conditions), and either the
+                    // potential should be fixed if possible or the warning should be removed.
+                    warn_once!("\
+                        Multiple shortest images found for a vector in the force constants! \
+                        This could mean that your supercell is not large enough.\
+                    ");
+                }
+
+                let arg: f64 = {
+                    shortest_images_buf.iter()
+                        .map(|cart_diff| V3::dot(&qpoint_cart, cart_diff))
+                        .sum::<f64>() * 2.0 * std::f64::consts::PI
+                };
+                let (phase_real, phase_imag) = (arg.cos(), arg.sin());
+                let real = scale * phase_real * mat;
+                let imag = scale * phase_imag * mat;
+
+                ((prim_r, prim_c), Complex33(real, imag))
             });
 
         let matrix = {
@@ -748,6 +809,8 @@ pub struct Cereal {
     pub row_ptr: Vec<usize>,
 }
 
+// FIXME: Now that we've decided to add num_complex as a dependency,
+//        this type is kinda weird to have around.
 pub use self::complex_33::Complex33;
 mod complex_33 {
     use super::*;

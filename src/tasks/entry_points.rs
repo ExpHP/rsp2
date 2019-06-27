@@ -648,6 +648,41 @@ pub fn compute_for_phonopy(bin_name: &str, version: VersionInfo) -> ! {
     });
 }
 
+// %% CRATES: binary: rsp2-dynmat-at-q %%
+pub fn dynmat_at_q(bin_name: &str, version: VersionInfo) -> ! {
+    wrap_main(version, |logfile, mpi_on_demand| {
+        let (app, de) = CliDeserialize::augment_clap_app({
+            clap::App::new(bin_name)
+                .about("Computes the dynamical matrix at a qpoint.")
+                .args(&[
+                    arg!( input=STRUCTURE "Input structure, in rsp2 structure directory format."),
+                    arg!( qpoint [--qpoint]=KPOINT "\
+                        json-serialized array of 3 numbers describing the location in \
+                        units of the reciprocal cell.\
+                    "),
+                    arg!(*output [-o][--output]=PATH "Path for output dynmat.npz file."),
+                    arg!( log [--log]=LOGFILE "append to this logfile"),
+                ])
+        });
+        let matches = app.get_matches();
+        let ConfigArgs(config) = de.resolve_args(&matches)?;
+
+        if let Some(path) = matches.value_of("log") {
+            logfile.start(PathFile::create(path)?)?; // (NOTE: create does not truncate)
+        }
+
+        let ValidatedSettings(settings) = config.deserialize()?;
+
+        let structure = StoredStructure::load(matches.expect_value_of("input"))?;
+
+        let dynmat = crate::cmd::run_dynmat_at_q(mpi_on_demand, &settings, structure)?;
+
+        dynmat.save(matches.expect_value_of("output"))?;
+
+        Ok(())
+    });
+}
+
 // %% CRATES: binary: rsp2-library-paths %%
 pub fn print_library_paths(bin_name: &str, _version: VersionInfo) -> ! {
     let app = {

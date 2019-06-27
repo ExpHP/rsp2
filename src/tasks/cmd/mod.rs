@@ -286,6 +286,7 @@ impl TrialDir {
         &self,
         settings: &Settings,
         pot: &dyn PotentialBuilder,
+        qpoint_sfrac: V3,
         prim_coords: &Coords,
         prim_meta: HList4<
             meta::SiteElements,
@@ -435,7 +436,7 @@ impl TrialDir {
         trace!("Computing sparse dynamical matrix");
         let dynmat = {
             force_constants
-                .gamma_dynmat(&sc, prim_meta.pick())
+                .dynmat_at_q(&super_coords, qpoint_sfrac, &sc, prim_meta.pick())
                 .hermitianize()
         };
         trace!("Done computing dynamical matrix");
@@ -895,8 +896,9 @@ impl TrialDir {
     {Ok({
         let pot = PotentialBuilder::from_root_config(Some(&self), on_demand, &settings)?;
 
+        let qpoint = V3::zero();
         let dynmat = self.do_compute_dynmat(
-            settings, &*pot, &stored.coords, stored.meta().sift(),
+            settings, &*pot, qpoint, &stored.coords, stored.meta().sift(),
         )?;
         // Don't write the dynamical matrix; unclear where to put it.
         let (freqs, evecs) = pot.eco_mode(|eco_proof| {
@@ -1109,6 +1111,24 @@ pub(crate) fn run_single_force_computation(
     pot.one_off().compute_force(&coords, meta.sift())?
 })}
 
+
+//=================================================================
+
+pub(crate) fn run_dynmat_at_q(
+    on_demand: Option<LammpsOnDemand>,
+    settings: &Settings,
+    structure: StoredStructure,
+) -> FailResult<DynamicalMatrix>
+{Ok({
+    let pot = PotentialBuilder::from_root_config(None, on_demand, &settings)?;
+
+    let meta = structure.meta();
+    let coords = structure.coords;
+
+    let _ = (pot, meta, coords);
+    unimplemented!()
+})}
+
 //=================================================================
 
 impl TrialDir {
@@ -1192,7 +1212,8 @@ impl TrialDir {
             )?;
         }
 
-        let dynmat = self.do_compute_dynmat(settings, &pot, &coords, meta.sift())?;
+        let qpoint = V3::zero();
+        let dynmat = self.do_compute_dynmat(settings, &pot, qpoint, &coords, meta.sift())?;
         dynmat.save(self.gamma_dynmat_path(next_iteration))?;
 
         Ok(did_ev_chasing)

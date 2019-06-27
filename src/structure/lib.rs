@@ -52,6 +52,7 @@ pub use crate::core::coords::CoordsKind;
 pub use crate::core::structure::Coords;
 pub use crate::core::structure::NonEquivalentLattice;
 pub use crate::algo::find_perm::Missing;
+pub use crate::algo::nearest_image::NearestImageFinder;
 
 pub use crate::element::Element;
 pub use crate::element::consts as consts;

@@ -9,6 +9,8 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
+pub use failure::Error as Error;
+
 use std::ops::{Mul, Div};
 use std::sync::Arc;
 #[cfg(feature = "serde")]
