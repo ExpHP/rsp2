@@ -12,6 +12,10 @@
 ** parts of it are licensed under more permissive terms.                  **
 ** ********************************************************************** */
 
+// the doctests runner wastes a lot of time presumably generating the HTML
+// for the include_dir! constant.  #[doc(hidden)] doesn't help.
+#![cfg(not(test))]
+
 #[macro_use] extern crate include_dir;
 #[macro_use] extern crate log;
 use rsp2_fs_util as fsx;
