@@ -11,7 +11,8 @@ parameters: [a, ~, ~]
 
 phonons:
   eigensolver:
-    sparse: {}
+    rsp2:
+      dense: true
 
 acoustic-search:
   expected-non-translations: 1

@@ -52,7 +52,7 @@ fn simple_test() -> Result<()> {
     let env = cli_test::Environment::init();
     CliTest::cargo_binary(&env, "rsp2")
         .arg("-c").arg(resource("defaults.yaml"))
-        .arg("-c").arg(resource("simple.yaml"))
+        .arg("-c").arg(resource("simple-lammps.yaml"))
         .arg(resource("simple.vasp").as_path())
         .arg("-o").arg("out")
         .check_file::<filetypes::RamanJson>(
