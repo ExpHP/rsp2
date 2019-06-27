@@ -661,8 +661,11 @@ impl ForceConstants {
                     // potential should be fixed if possible or the warning should be removed.
                     warn_once!("\
                         Multiple shortest images found for a vector in the force constants! \
-                        This could mean that your supercell is not large enough.\
-                    ");
+                        This could mean that your supercell is not large enough.\n\
+                        Lattice: {:?}\n\
+                        Vectors: {:?}\n\
+                          Force: {:?}\n\
+                    ", super_coords.lattice(), shortest_images_buf, mat);
                 }
 
                 let arg: f64 = {

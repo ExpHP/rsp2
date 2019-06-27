@@ -46,13 +46,14 @@ const WEAK_RAMAN_TOL: filetypes::RamanJsonTolerances = filetypes::RamanJsonToler
     intensity_nonzero_rel_tol: 1e-4,
 };
 
+// Uses the rust reimplementations of REBO/KCZ
 #[ignore] // This test is expensive; use `cargo test -- --ignored` to run it!
 #[test]
-fn simple_test() -> Result<()> {
+fn simple_test_rust() -> Result<()> {
     let env = cli_test::Environment::init();
     CliTest::cargo_binary(&env, "rsp2")
         .arg("-c").arg(resource("defaults.yaml"))
-        .arg("-c").arg(resource("simple-lammps.yaml"))
+        .arg("-c").arg(resource("simple-rust.yaml"))
         .arg(resource("simple.vasp").as_path())
         .arg("-o").arg("out")
         .check_file::<filetypes::RamanJson>(
@@ -63,14 +64,13 @@ fn simple_test() -> Result<()> {
         .run()
 }
 
-// Uses the rust reimplementations of REBO/KCZ
 #[ignore] // This test is expensive; use `cargo test -- --ignored` to run it!
 #[test]
-fn simple_test_rust() -> Result<()> {
+fn simple_test_lammps() -> Result<()> {
     let env = cli_test::Environment::init();
     CliTest::cargo_binary(&env, "rsp2")
         .arg("-c").arg(resource("defaults.yaml"))
-        .arg("-c").arg(resource("simple-rust.yaml"))
+        .arg("-c").arg(resource("simple-lammps.yaml"))
         .arg(resource("simple.vasp").as_path())
         .arg("-o").arg("out")
         .check_file::<filetypes::RamanJson>(

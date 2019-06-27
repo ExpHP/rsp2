@@ -479,6 +479,18 @@ gen_each!{
 
 // ---------------------------------------------------------------------------
 
+gen_each!{
+    @{Mn_n}
+    for_each!( {$Mn:ident $n:tt} ) => {
+        unsafe impl<V> slice_of_array::IsSliceomorphic for $Mn<V> {
+            type Element = V;
+            const LEN: usize = $n;
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+
 /// Argument to `from_diag`. Probably a vector type like `V3<X>`.
 pub type DiagT<A> = <A as FromDiag>::Diag;
 

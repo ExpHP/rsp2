@@ -21,6 +21,7 @@ use crate::CheckFile;
 
 pub use failure::Error;
 
+use slice_of_array::prelude::*;
 use path_abs::{FileRead, FileWrite};
 use rsp2_structure::{Coords, CartOp};
 use rsp2_array_types::{V3, M33, Unvee};
@@ -80,6 +81,7 @@ pub struct RamanJsonTolerances {
 pub struct RamanJson {
     pub frequency: Frequencies,
     pub average_3d: Vec<f64>,
+    pub raman_tensor: Vec<M33>,
     pub backscatter: Vec<f64>,
 }
 impl_json!{ (RamanJson)[save, load] }
@@ -164,6 +166,22 @@ impl CheckFile for RamanJson {
                 let b = MaybeZerolike(b);
                 a.check_against(&b, MaybeZerolikeTolerances {
                     negative_ok: false,
+                    zero_thresh: zero_thresh,
+                    rel_tol: tol.intensity_nonzero_rel_tol,
+                });
+            }
+        }
+
+        {
+            let actual = self.raman_tensor.flat().flat();
+            let expected = self.raman_tensor.flat().flat();
+            let max = util::partial_max(expected.iter().map(|x| x.abs())).unwrap();
+            let zero_thresh = max * f64::sqrt(tol.intensity_nonzero_thresh);
+            for (&a, &b) in zip_eq!(actual, expected) {
+                let a = MaybeZerolike(a);
+                let b = MaybeZerolike(b);
+                a.check_against(&b, MaybeZerolikeTolerances {
+                    negative_ok: true,
                     zero_thresh: zero_thresh,
                     rel_tol: tol.intensity_nonzero_rel_tol,
                 });

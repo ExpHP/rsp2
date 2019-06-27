@@ -21,6 +21,7 @@ rsp2-array-types = { path = "../array-types" }
 rsp2-assert-close = { path = "../assert-close" }
 rsp2-python = { path = "../../python" }
 
+slice-of-array = "0.2.1"
 env_logger = "0.6.1"
 log = "0.4"
 serde = { version = "1.0.91", features = ["rc"] }
