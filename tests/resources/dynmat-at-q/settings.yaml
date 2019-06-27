@@ -1,0 +1,53 @@
+---
+potential:
+  - kc-z-new: {}
+  - rebo-new.params: lammps
+ev-loop:
+  min-positive-iter: 1
+  max-iter: 3
+  fail: false
+ev-chase:
+  cg:
+    stop-condition:
+      any:
+        - value-delta:
+            rel-greater-than: 0
+            steps-ago: 10
+        - iterations: 100
+    alpha-guess-max: 0.1
+    alpha-guess-first: 0.01
+phonons:
+  supercell:
+    target: [50, 50, 0]
+  disp-finder:
+    rsp2:
+      directions: survey
+  eigensolver:
+    rsp2:
+      dense: true
+  symmetry-tolerance: 1e-10
+  displacement-distance: 0.0001
+layer-gamma-threshold: 0.2
+bond-radius: 1.8
+lammps-update-style:
+  fast:
+    sync-positions-every: 1
+lammps-processor-axis-mask: [true, true, false]
+scale-ranges:
+  repeat-count: 2
+  scalables:
+    - parameter:
+        axis-mask: [1, 1, 0]
+        range: [2.0, 3.0]
+        guess: 2.5
+    - uniform-layer-sep:
+        range: [3.0, 3.5]
+        guess: 3.25
+cg:
+  alpha-guess-max: 0.1
+  alpha-guess-first: 0.01
+  stop-condition:
+    grad-max: 0.001
+cg.stop-condition: true
+threading: rayon
+parameters: [a, a, ~]
