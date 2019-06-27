@@ -925,33 +925,17 @@ fn _compute_rebo_bonds(
         }
 
         (site_V, site_V_d_delta, site_V_d_other_deltas)
+    }).collect::<Vec<_>>();
 
-    // well this is awkward
-    }).fold(
-        || (0.0, IndexVec::new(), vec![]),
-        |
-            (mut value, mut d_deltas, mut d_other_deltas),
-            (site_V, site_V_d_delta, site_V_d_other_deltas),
-        | {
-            value += site_V;
-            d_deltas.extend(site_V_d_delta);
-            d_other_deltas.extend(site_V_d_other_deltas);
-            (value, d_deltas, d_other_deltas)
-        },
-    ).reduce(
-        || (0.0, IndexVec::new(), vec![]),
-        |
-            (mut value, mut d_deltas, d_other_deltas),
-            (value_part, d_delta_part, d_other_deltas_part),
-        | {
-            value += value_part;
-            d_deltas.extend(d_delta_part); // must be concatenated in order
-            let d_other_deltas = concat_any_order(d_other_deltas, d_other_deltas_part);
-            (value, d_deltas, d_other_deltas)
-        },
-    );
-    let (value, mut d_deltas, d_other_deltas) = out;
-
+    // put it all together in serial code
+    let mut value = 0.0;
+    let mut d_deltas = IndexVec::new();
+    let mut d_other_deltas = vec![];
+    for (site_V, site_V_d_delta, site_V_d_other_deltas) in out {
+        value += site_V;
+        d_deltas.extend(site_V_d_delta);
+        d_other_deltas.extend(site_V_d_other_deltas);
+    }
     assert_eq!(d_deltas.len(), interactions.num_bonds());
 
     // absorb the other terms we couldn't take care of into d_deltas
