@@ -281,168 +281,182 @@ impl TrialDir {
     /// Relative paths are intepreted relative to the trial directory.
     fn read_stored_structure(&self, dir: impl AsPath) -> FailResult<StoredStructure>
     { Load::load(self.join(dir.as_path())) }
+}
 
-    fn do_compute_dynmat(
-        &self,
-        settings: &Settings,
-        pot: &dyn PotentialBuilder,
-        qpoint_sfrac: V3,
-        prim_coords: &Coords,
-        prim_meta: HList4<
-            meta::SiteElements,
-            meta::SiteMasses,
-            Option<meta::SiteLayers>,
-            Option<meta::FracBonds>,
-        >,
-    ) -> FailResult<DynamicalMatrix>
-    {Ok({
-        // FIXME:
-        //   A great deal of logic in here exists for dealing with supercells.
-        //   It ought to be factored out somehow to be less in your face,
-        //    so that this function doesn't have so many responsibilities.
-        //
-        //   (it already has the fairly big responsibility of chaining together
-        //    many utilities)
+fn do_compute_dynmat(
+    trial_dir: Option<&TrialDir>,
+    settings: &Settings,
+    pot: &dyn PotentialBuilder,
+    qpoint_sfrac: V3,
+    prim_coords: &Coords,
+    prim_meta: HList4<
+        meta::SiteElements,
+        meta::SiteMasses,
+        Option<meta::SiteLayers>,
+        Option<meta::FracBonds>,
+    >,
+) -> FailResult<DynamicalMatrix>
+{
+    // Here exists a great deal of logic for dealing with supercells.
+    // Ideally it would be factored out somehow to be less in your face,
+    // so that this function doesn't have so many responsibilities.
+    //
+    // (but last time I tried to do so, I found the resulting function signature too obnoxious)
+    trace!("Constructing supercell");
+    let (super_coords, sc) = {
+        let sc_dim = settings.phonons.supercell.dim_for_unitcell(prim_coords.lattice());
+        rsp2_structure::supercell::diagonal(sc_dim).build(prim_coords)
+    };
 
-        let compute_deperms = |coords: &_, cart_ops: &_| {
-            rsp2_structure::find_perm::spacegroup_deperms(
-                coords,
-                cart_ops,
-                // larger than SYMPREC because the coords we see may may be slightly
-                // different from what spglib saw, but not so large that we risk pairing
-                // the wrong atoms
-                //
-                // the case of symmetry_tolerance = 0 is explicitly supported by the method
-                settings.phonons.symmetry_tolerance * 3.0,
-            )
-        };
+    let (super_displacements, cart_ops) = match settings.phonons.disp_finder {
+        cfg::PhononDispFinder::Phonopy(cfg::AlwaysFail(never, _)) => match never { },
+        cfg::PhononDispFinder::Rsp2 { ref directions } => {
+            use self::python::SpgDataset;
 
-        let (super_coords, prim_displacements, sc, cart_ops) = match settings.phonons.disp_finder {
-            cfg::PhononDispFinder::Phonopy(cfg::AlwaysFail(never, _)) => match never { },
-            cfg::PhononDispFinder::Rsp2 { ref directions } => {
-                use self::python::SpgDataset;
-
-                let sc_dim = settings.phonons.supercell.dim_for_unitcell(prim_coords.lattice());
-                let (super_coords, sc) = rsp2_structure::supercell::diagonal(sc_dim).build(prim_coords);
-
-                let symprec = settings.phonons.symmetry_tolerance;
-                let cart_ops = if symprec == 0.0 {
-                    trace!("Not computing symmetry (symmetry-tolerance = 0)");
-                    info!(" Spacegroup: P1 (1)");
-                    info!("Point group: 1");
-                    vec![CartOp::eye()]
-                } else {
-                    trace!("Computing symmetry");
-                    let atom_types: Vec<u32> = {
-                        let elements: meta::SiteElements = prim_meta.pick();
-                        elements.iter().map(|e| e.atomic_number()).collect()
-                    };
-
-                    let spg = SpgDataset::compute(prim_coords, &atom_types, symprec)?;
-                    info!(" Spacegroup: {} ({})", spg.international_symbol, spg.spacegroup_number);
-                    info!("Point group: {}", spg.point_group);
-
-                    spg.cart_ops()
+            let symprec = settings.phonons.symmetry_tolerance;
+            let cart_ops = if symprec == 0.0 {
+                trace!("Not computing symmetry (symmetry-tolerance = 0)");
+                info!(" Spacegroup: P1 (1)");
+                info!("Point group: 1");
+                vec![CartOp::eye()]
+            } else {
+                trace!("Computing symmetry");
+                let atom_types: Vec<u32> = {
+                    let elements: meta::SiteElements = prim_meta.pick();
+                    elements.iter().map(|e| e.atomic_number()).collect()
                 };
 
-                trace!("Computing deperms in primitive cell");
-                let prim_deperms = compute_deperms(&prim_coords, &cart_ops)?;
-                let prim_stars = crate::math::stars::compute_stars(&prim_deperms);
+                let spg = SpgDataset::compute(prim_coords, &atom_types, symprec)?;
+                info!(" Spacegroup: {} ({})", spg.international_symbol, spg.spacegroup_number);
+                info!("Point group: {}", spg.point_group);
 
-                let prim_displacements = crate::math::displacements::compute_displacements(
-                    directions,
-                    cart_ops.iter().map(|c| {
-                        c.int_rot(prim_coords.lattice()).expect("bad operator from spglib!?")
-                    }),
-                    &prim_stars,
-                    &prim_coords,
-                    settings.phonons.displacement_distance,
-                );
-                (super_coords, prim_displacements, sc, cart_ops)
-            },
-        };
+                spg.cart_ops()
+            };
 
-        // Generate supercell metadata by repeating the unit cell metadata.
-        let super_meta = {
-            // macro to generate a closure, because generic closures don't exist
-            macro_rules! f {
-                () => { |x: Rc<[_]>| -> Rc<[_]> {
-                    sc.replicate(&x[..]).into()
-                }};
-            }
+            trace!("Computing deperms in primitive cell");
+            let prim_deperms = do_compute_deperms(&settings.phonons, &prim_coords, &cart_ops)?;
+            let prim_stars = crate::math::stars::compute_stars(&prim_deperms);
 
-            // deriving these from the primitive cell bonds is not worth the trouble
-            let super_bonds = settings.bond_radius.map(|bond_radius| FailOk({
-                Rc::new(FracBonds::from_brute_force(&super_coords, bond_radius)?)
-            })).fold_ok()?;
-            prim_meta.clone().map(hlist![
-                f!(),
-                f!(),
-                |opt: Option<_>| opt.map(f!()),
-                |_: Option<meta::FracBonds>| { super_bonds },
-            ])
-        };
+            let prim_displacements = crate::math::displacements::compute_displacements(
+                directions,
+                cart_ops.iter().map(|c| {
+                    c.int_rot(prim_coords.lattice()).expect("bad operator from spglib!?")
+                }),
+                &prim_stars,
+                &prim_coords,
+                settings.phonons.displacement_distance,
+            );
 
-        let super_displacements: Vec<_> = {
-            prim_displacements.iter()
-                .map(|&(prim, disp)| {
-                    let atom = sc.atom_from_cell(prim, ForceConstants::DESIGNATED_CELL);
-                    (atom, disp)
-                })
-                .collect()
-        };
+            let super_displacements: Vec<_> = {
+                prim_displacements.iter()
+                    .map(|&(prim, disp)| {
+                        let atom = sc.atom_from_cell(prim, ForceConstants::DESIGNATED_CELL);
+                        (atom, disp)
+                    })
+                    .collect()
+            };
 
-        trace!("num spacegroup ops: {}", cart_ops.len());
-        trace!("num displacements:  {}", super_displacements.len());
-        let force_sets = do_force_sets_at_disps_for_sparse(
-            pot,
-            &settings.threading,
-            &super_displacements,
-            &super_coords,
-            super_meta.sift(),
-        )?;
+            (super_displacements, cart_ops)
+        },
+    };
+
+    // Generate supercell metadata by repeating the unit cell metadata.
+    let (super_meta, super_deperms);
+    {
+        // macro to generate a closure, because generic closures don't exist
+        macro_rules! f {
+            () => { |x: Rc<[_]>| -> Rc<[_]> {
+                sc.replicate(&x[..]).into()
+            }};
+        }
+
+        // deriving these from the primitive cell bonds is not worth the trouble
+        trace!("Computing bonds in supercell");
+        let super_bonds = settings.bond_radius.map(|bond_radius| FailOk({
+            Rc::new(FracBonds::from_brute_force(&super_coords, bond_radius)?)
+        })).fold_ok()?;
+        super_meta = prim_meta.clone().map(hlist![
+            f!(),
+            f!(),
+            |opt: Option<_>| opt.map(f!()),
+            |_: Option<meta::FracBonds>| { super_bonds },
+        ]);
+
+        trace!("Computing deperms in supercell");
+        super_deperms = do_compute_deperms(&settings.phonons, &super_coords, &cart_ops)?;
+    };
+
+    trace!("num spacegroup ops: {}", cart_ops.len());
+    trace!("num displacements:  {}", super_displacements.len());
+    let force_sets = do_force_sets_at_disps_for_sparse(
+        pot,
+        &settings.threading,
+        &super_displacements,
+        &super_coords,
+        super_meta.sift(),
+    )?;
 //        { // FIXME add special log flag
 //            writeln!(_trial.create_file("force-sets")?, "{:?}", force_sets).unwrap();
 //        }
 
-        let cart_rots: Vec<_> = {
-            cart_ops.iter().map(|c| c.cart_rot()).collect()
-        };
+    let cart_rots: Vec<_> = {
+        cart_ops.iter().map(|c| c.cart_rot()).collect()
+    };
 
-        trace!("Computing deperms in supercell");
-        let super_deperms = compute_deperms(&super_coords, &cart_ops)?;
-
-        if log_enabled!(target: "rsp2_tasks::special::visualize_sparse_forces", log::Level::Trace) {
+    if log_enabled!(target: "rsp2_tasks::special::visualize_sparse_forces", log::Level::Trace) {
+        if let Some(trial_dir) = trial_dir {
             trace!("Creating force log files for rsp2_tasks::special::visualize_sparse_forces=trace");
             visualize_sparse_force_sets(
-                self,
+                trial_dir,
                 &super_coords,
                 &super_displacements,
                 &super_deperms,
                 &cart_ops,
                 &force_sets,
             )?;
+        } else {
+            warn_once!("\
+                rsp2_tasks::special::visualize_sparse_forces tracing is enabled, \
+                but has no effect in commands that don't operate on a trial directory.\
+            ");
         }
+    }
 
-        trace!("Computing sparse force constants");
-        let force_constants = crate::math::dynmat::ForceConstants::compute_required_rows(
-            &super_displacements,
-            &force_sets,
-            &cart_rots,
-            &super_deperms,
-            &sc,
-        )?;
+    trace!("Computing sparse force constants");
+    let force_constants = crate::math::dynmat::ForceConstants::compute_required_rows(
+        &super_displacements,
+        &force_sets,
+        &cart_rots,
+        &super_deperms,
+        &sc,
+    )?;
 
-        trace!("Computing sparse dynamical matrix");
-        let dynmat = {
-            force_constants
-                .dynmat_at_q(&super_coords, qpoint_sfrac, &sc, prim_meta.pick())
-                .hermitianize()
-        };
-        trace!("Done computing dynamical matrix");
+    trace!("Computing sparse dynamical matrix");
+    let dynmat = {
+        force_constants
+            .dynmat_at_q(&super_coords, qpoint_sfrac, &sc, prim_meta.pick())
+            .hermitianize()
+    };
+    trace!("Done computing dynamical matrix");
 
-        dynmat
-    })}
+    Ok(dynmat)
+}
+
+fn do_compute_deperms(
+    phonon_settings: &cfg::Phonons,
+    coords: &Coords,
+    cart_ops: &[CartOp],
+) -> FailResult<Vec<Perm>> {
+    rsp2_structure::find_perm::spacegroup_deperms(
+        coords,
+        cart_ops,
+        // larger than SYMPREC because the coords we see may may be slightly
+        // different from what spglib saw, but not so large that we risk pairing
+        // the wrong atoms
+        //
+        // the case of symmetry_tolerance = 0 is explicitly supported by the method
+        phonon_settings.symmetry_tolerance * 3.0,
+    )
 }
 
 fn do_diagonalize_dynmat(
@@ -540,7 +554,8 @@ impl TrialDir {
 // In case you haven't guessed, I've given up all hope on keeping rsp2-tasks maintainable.
 // I need to rip out all of the legacy and/or experimental features I'm not using or start fresh.
 #[derive(Debug, Fail)]
-#[fail(display = "stopped after dynmat.  THIS IS NOT AN ACTUAL ERROR. THIS IS A DUMB HACK.")]
+#[fail(display = "stopped after dynmat.  THIS IS NOT AN ACTUAL ERROR. THIS IS A DUMB HACK. \
+You should not see this message.")]
 pub(crate) struct StoppedAfterDynmat;
 
 use rsp2_soa_ops::{Perm, Permute};
@@ -600,7 +615,6 @@ fn visualize_sparse_force_sets(
                 elements,
             }.save(disp_dir.join(format!("{:03}.vasp", oper_i)))?;
         }
-
     }
 })}
 
@@ -897,8 +911,8 @@ impl TrialDir {
         let pot = PotentialBuilder::from_root_config(Some(&self), on_demand, &settings)?;
 
         let qpoint = V3::zero();
-        let dynmat = self.do_compute_dynmat(
-            settings, &*pot, qpoint, &stored.coords, stored.meta().sift(),
+        let dynmat = do_compute_dynmat(
+            Some(&self), settings, &*pot, qpoint, &stored.coords, stored.meta().sift(),
         )?;
         // Don't write the dynamical matrix; unclear where to put it.
         let (freqs, evecs) = pot.eco_mode(|eco_proof| {
@@ -1117,17 +1131,16 @@ pub(crate) fn run_single_force_computation(
 pub(crate) fn run_dynmat_at_q(
     on_demand: Option<LammpsOnDemand>,
     settings: &Settings,
+    qpoint_sfrac: V3,
     structure: StoredStructure,
-) -> FailResult<DynamicalMatrix>
-{Ok({
+) -> FailResult<DynamicalMatrix> {
     let pot = PotentialBuilder::from_root_config(None, on_demand, &settings)?;
 
     let meta = structure.meta();
     let coords = structure.coords;
 
-    let _ = (pot, meta, coords);
-    unimplemented!()
-})}
+    do_compute_dynmat(None, settings, &pot, qpoint_sfrac, &coords, meta.sift())
+}
 
 //=================================================================
 
@@ -1213,7 +1226,7 @@ impl TrialDir {
         }
 
         let qpoint = V3::zero();
-        let dynmat = self.do_compute_dynmat(settings, &pot, qpoint, &coords, meta.sift())?;
+        let dynmat = do_compute_dynmat(Some(self), settings, &pot, qpoint, &coords, meta.sift())?;
         dynmat.save(self.gamma_dynmat_path(next_iteration))?;
 
         Ok(did_ev_chasing)

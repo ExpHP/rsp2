@@ -66,7 +66,9 @@ impl TrialDir {
             )?;
 
             let qpoint = V3::zero();
-            let dynmat = self.do_compute_dynmat(settings, pot, qpoint, &coords, meta.sift())?;
+            let dynmat = super::do_compute_dynmat(
+                Some(self), settings, pot, qpoint, &coords, meta.sift(),
+            )?;
             dynmat.save(self.gamma_dynmat_path(iteration))?;
 
             // rsp2-acgsd-and-dynmat stops here

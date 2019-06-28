@@ -650,15 +650,17 @@ pub fn compute_for_phonopy(bin_name: &str, version: VersionInfo) -> ! {
 
 // %% CRATES: binary: rsp2-dynmat-at-q %%
 pub fn dynmat_at_q(bin_name: &str, version: VersionInfo) -> ! {
+    use crate::ui::parse_qpoint::parse_qpoint;
+
     wrap_main(version, |logfile, mpi_on_demand| {
         let (app, de) = CliDeserialize::augment_clap_app({
             clap::App::new(bin_name)
                 .about("Computes the dynamical matrix at a qpoint.")
                 .args(&[
                     arg!( input=STRUCTURE "Input structure, in rsp2 structure directory format."),
-                    arg!( qpoint [--qpoint]=KPOINT "\
-                        json-serialized array of 3 numbers describing the location in \
-                        units of the reciprocal cell.\
+                    arg!(*qpoint [--qpoint]=KPOINT "\
+                        space-separated list of 3 numbers (integers, reals, or rationals as X/Y) \
+                        describing the location in units of the reciprocal cell.\
                     "),
                     arg!(*output [-o][--output]=PATH "Path for output dynmat.npz file."),
                     arg!( log [--log]=LOGFILE "append to this logfile"),
@@ -673,9 +675,10 @@ pub fn dynmat_at_q(bin_name: &str, version: VersionInfo) -> ! {
 
         let ValidatedSettings(settings) = config.deserialize()?;
 
+        let qpoint_sfrac = parse_qpoint(&matches.expect_value_of("qpoint"))?;
         let structure = StoredStructure::load(matches.expect_value_of("input"))?;
 
-        let dynmat = crate::cmd::run_dynmat_at_q(mpi_on_demand, &settings, structure)?;
+        let dynmat = crate::cmd::run_dynmat_at_q(mpi_on_demand, &settings, qpoint_sfrac, structure)?;
 
         dynmat.save(matches.expect_value_of("output"))?;
 
@@ -697,3 +700,5 @@ pub fn print_library_paths(bin_name: &str, _version: VersionInfo) -> ! {
     println!("{}", std::env::var("LD_LIBRARY_PATH").unwrap());
     exit(0);
 }
+
+// -------------------------------------------------------------------------------------

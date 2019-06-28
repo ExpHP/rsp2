@@ -26,18 +26,19 @@ fn dynmat_at_q() -> Result<()> {
     let env = cli_test::Environment::init();
 
     for &(ref expected_outfile, kpoint) in &[
-        (resource("dynmat-at-q/dynmat-gamma.npz"), "[0, 0, 0]"),
-        (resource("dynmat-at-q/dynmat-k.npz"), "[0.3333333333333, 0.3333333333333, 0]"),
-        (resource("dynmat-at-q/dynmat-m.npz"), "[0.5, 0, 0]"),
+        (resource("dynmat-at-q/dynmat-gamma.npz"), "0 0 0"),
+        (resource("dynmat-at-q/dynmat-k.npz"), "1/3 1/3 0"),
+        (resource("dynmat-at-q/dynmat-m.npz"), "0.5 0 0"),
+        (resource("dynmat-at-q/dynmat-m.npz"), "-0.5 0 0"),
     ] {
         println!("Testing kpoint {}", kpoint);
-        CliTest::cargo_binary(&env, "rsp2")
+        CliTest::cargo_binary(&env, "rsp2-dynmat-at-q")
             .arg("-c").arg(resource("dynmat-at-q/settings.yaml"))
-            .arg(resource("dynmat-at-q/initial.structure"))
+            .arg(resource("dynmat-at-q/input.structure"))
             .arg("--qpoint").arg(kpoint)
             .arg("-o").arg("dynmat.npz")
             .check_file::<filetypes::Dynmat>(
-                "out/gammat.npz".as_ref(),
+                "dynmat.npz".as_ref(),
                 expected_outfile.as_ref(),
                 filetypes::DynmatTolerances {
                     rel_tol: 1e-9,
