@@ -901,12 +901,20 @@ impl FailMessage for MessagePhononEigensolverPhonopy {
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub enum PhononDispFinder {
-    Phonopy(AlwaysFail<MessagePhononDispFinderPhonopy>),
     /// Use built-in methods to compute the displacements.
     Rsp2 {
         #[serde(default = "_phonon_disp_finder__rsp2__directions")]
         directions: PhononDispFinderRsp2Directions,
-    }
+    },
+    /// Use phonopy to compute the displacements.  This will likely cause different images
+    /// of atoms to be displaced, and in a different order.
+    ///
+    /// This is mostly for debugging purposes, but on some occasions it may produce fewer disps.
+    Phonopy {
+        /// Corresponds to phonopy's DIAG option.
+        #[serde(default = "_phonon_disp_finder__phonopy__diag")]
+        diag: bool,
+    },
 }
 fn _phonon_disp_finder__phonopy__diag() -> bool { true }
 fn _phonon_disp_finder__rsp2__directions() -> PhononDispFinderRsp2Directions { PhononDispFinderRsp2Directions::Diag }

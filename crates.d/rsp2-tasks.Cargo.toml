@@ -32,6 +32,7 @@ path = "lib.rs"
 !!rsp2-newtype-indices
 !!rsp2-python
 !!rsp2-dftbplus { optional = true, default-features = false }
+!!rsp2-phonopy-io
 
 !!clap
 !!slice-of-array

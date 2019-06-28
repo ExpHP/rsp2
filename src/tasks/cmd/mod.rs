@@ -33,6 +33,8 @@ mod param_optimization;
 
 pub(crate) mod python;
 
+mod phonopy;
+
 use crate::{FailResult, FailOk};
 use rsp2_tasks_config::{self as cfg, Settings, NormalizationMode, SupercellSpec};
 use crate::traits::{AsPath, Load, Save};
@@ -59,7 +61,7 @@ use rsp2_structure::{
     bonds::FracBonds,
 };
 
-use rsp2_fs_util::{rm_rf, hard_link};
+use rsp2_fs_util::{create, rm_rf, hard_link};
 
 use std::{
     path::{PathBuf},
@@ -303,35 +305,47 @@ fn do_compute_dynmat(
     //
     // (but last time I tried to do so, I found the resulting function signature too obnoxious)
     trace!("Constructing supercell");
-    let (super_coords, sc) = {
+    let (ref super_coords, ref sc) = {
         let sc_dim = settings.phonons.supercell.dim_for_unitcell(prim_coords.lattice());
         rsp2_structure::supercell::diagonal(sc_dim).build(prim_coords)
     };
 
-    let (super_displacements, cart_ops) = match settings.phonons.disp_finder {
-        cfg::PhononDispFinder::Phonopy(cfg::AlwaysFail(never, _)) => match never { },
+    let symprec = settings.phonons.symmetry_tolerance;
+    let cart_ops = if symprec == 0.0 {
+        trace!("Not computing symmetry (symmetry-tolerance = 0)");
+        info!(" Spacegroup: P1 (1)");
+        info!("Point group: 1");
+        vec![CartOp::eye()]
+    } else {
+        use self::python::SpgDataset;
+
+        trace!("Computing symmetry");
+        let atom_types: Vec<u32> = {
+            let elements: meta::SiteElements = prim_meta.pick();
+            elements.iter().map(|e| e.atomic_number()).collect()
+        };
+
+        let spg = SpgDataset::compute(prim_coords, &atom_types, symprec)?;
+        info!(" Spacegroup: {} ({})", spg.international_symbol, spg.spacegroup_number);
+        info!("Point group: {}", spg.point_group);
+
+        spg.cart_ops()
+    };
+
+    let mut phonopy_info = None;
+    let prim_displacements = match settings.phonons.disp_finder {
+        cfg::PhononDispFinder::Phonopy { diag: _ } => {
+            let the_phonopy_info = self::phonopy::phonopy_displacements(
+                settings, prim_coords, prim_meta.sift(), sc, super_coords,
+            )?;
+
+            let prim_displacements = the_phonopy_info.prim_displacements.clone();
+
+            phonopy_info = Some(the_phonopy_info);
+
+            prim_displacements
+        },
         cfg::PhononDispFinder::Rsp2 { ref directions } => {
-            use self::python::SpgDataset;
-
-            let symprec = settings.phonons.symmetry_tolerance;
-            let cart_ops = if symprec == 0.0 {
-                trace!("Not computing symmetry (symmetry-tolerance = 0)");
-                info!(" Spacegroup: P1 (1)");
-                info!("Point group: 1");
-                vec![CartOp::eye()]
-            } else {
-                trace!("Computing symmetry");
-                let atom_types: Vec<u32> = {
-                    let elements: meta::SiteElements = prim_meta.pick();
-                    elements.iter().map(|e| e.atomic_number()).collect()
-                };
-
-                let spg = SpgDataset::compute(prim_coords, &atom_types, symprec)?;
-                info!(" Spacegroup: {} ({})", spg.international_symbol, spg.spacegroup_number);
-                info!("Point group: {}", spg.point_group);
-
-                spg.cart_ops()
-            };
 
             trace!("Computing deperms in primitive cell");
             let prim_deperms = do_compute_deperms(&settings.phonons, &prim_coords, &cart_ops)?;
@@ -347,17 +361,17 @@ fn do_compute_dynmat(
                 settings.phonons.displacement_distance,
             );
 
-            let super_displacements: Vec<_> = {
-                prim_displacements.iter()
-                    .map(|&(prim, disp)| {
-                        let atom = sc.atom_from_cell(prim, ForceConstants::DESIGNATED_CELL);
-                        (atom, disp)
-                    })
-                    .collect()
-            };
-
-            (super_displacements, cart_ops)
+            prim_displacements
         },
+    };
+
+    let super_displacements: Vec<_> = {
+        prim_displacements.iter()
+            .map(|&(prim, disp)| {
+                let atom = sc.atom_from_cell(prim, ForceConstants::DESIGNATED_CELL);
+                (atom, disp)
+            })
+            .collect()
     };
 
     // Generate supercell metadata by repeating the unit cell metadata.
@@ -403,23 +417,35 @@ fn do_compute_dynmat(
         cart_ops.iter().map(|c| c.cart_rot()).collect()
     };
 
-    if log_enabled!(target: "rsp2_tasks::special::visualize_sparse_forces", log::Level::Trace) {
-        if let Some(trial_dir) = trial_dir {
-            trace!("Creating force log files for rsp2_tasks::special::visualize_sparse_forces=trace");
-            visualize_sparse_force_sets(
-                trial_dir,
-                &super_coords,
-                &super_displacements,
-                &super_deperms,
-                &cart_ops,
-                &force_sets,
-            )?;
+
+    let debug_files_root = match trial_dir {
+        Some(d) => d.as_path().to_owned(),
+        None => std::env::current_dir()?,
+    };
+    if log_enabled!(target: "rsp2_tasks::special::phonopy_force_sets", log::Level::Trace) {
+        if let Some(phonopy_info) = phonopy_info {
+            let w = create(debug_files_root.join("FORCE_SETS"))?;
+            if let Err(e) = phonopy_info.write_force_sets_for_phonopy(w, &force_sets) {
+                warn!("Error writing phonopy force sets: {}", e);
+            }
         } else {
             warn_once!("\
-                rsp2_tasks::special::visualize_sparse_forces tracing is enabled, \
-                but has no effect in commands that don't operate on a trial directory.\
+                rsp2_tasks::special::phonopy_force_sets tracing was enabled, but cannot \
+                do anything because the phonopy disp-finder was not used.\
             ");
         }
+    }
+
+    if log_enabled!(target: "rsp2_tasks::special::visualize_sparse_forces", log::Level::Trace) {
+        trace!("Creating force log files for rsp2_tasks::special::visualize_sparse_forces=trace");
+        visualize_sparse_force_sets(
+            &debug_files_root,
+            &super_coords,
+            &super_displacements,
+            &super_deperms,
+            &cart_ops,
+            &force_sets,
+        )?;
     }
 
     trace!("Computing sparse force constants");
@@ -564,7 +590,7 @@ use rsp2_structure::CartOp;
 //       the displaced atom to the correct image after rotation. (this would be easiest to
 //       do using the functionality in the ForceConstants code)
 fn visualize_sparse_force_sets(
-    trial: &TrialDir,
+    trial: impl AsPath,
     super_coords: &Coords,
     super_disps: &[(usize, V3)],
     super_deperms: &[Perm],
