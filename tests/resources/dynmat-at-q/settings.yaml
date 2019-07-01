@@ -18,15 +18,15 @@ ev-chase:
     alpha-guess-first: 0.01
 phonons:
   supercell:
-    target: [30, 30, 0]
+    dim: [13, 13, 1]
   disp-finder:
-    rsp2:
-      directions: survey
+    phonopy:
+      diag: true
   eigensolver:
     rsp2:
       dense: true
   symmetry-tolerance: 1e-10
-  displacement-distance: 0.0001
+  displacement-distance: 0.01 # default for phonopy
 
 layer-gamma-threshold: 0.2
 bond-radius: 1.8

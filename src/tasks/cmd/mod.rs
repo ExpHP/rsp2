@@ -289,7 +289,7 @@ fn do_compute_dynmat(
     trial_dir: Option<&TrialDir>,
     settings: &Settings,
     pot: &dyn PotentialBuilder,
-    qpoint_sfrac: V3,
+    qpoint_pfrac: V3,
     prim_coords: &Coords,
     prim_meta: HList4<
         meta::SiteElements,
@@ -346,8 +346,8 @@ fn do_compute_dynmat(
             prim_displacements
         },
         cfg::PhononDispFinder::Rsp2 { ref directions } => {
-
             trace!("Computing deperms in primitive cell");
+
             let prim_deperms = do_compute_deperms(&settings.phonons, &prim_coords, &cart_ops)?;
             let prim_stars = crate::math::stars::compute_stars(&prim_deperms);
 
@@ -365,10 +365,11 @@ fn do_compute_dynmat(
         },
     };
 
+    let ref rsp2_displaced_site_cells = vec![ForceConstants::DESIGNATED_CELL; prim_displacements.len()];
     let super_displacements: Vec<_> = {
-        prim_displacements.iter()
-            .map(|&(prim, disp)| {
-                let atom = sc.atom_from_cell(prim, ForceConstants::DESIGNATED_CELL);
+        zip_eq!(&prim_displacements, rsp2_displaced_site_cells)
+            .map(|(&(prim, disp), &cell)| {
+                let atom = sc.atom_from_cell(prim, cell);
                 (atom, disp)
             })
             .collect()
@@ -417,15 +418,27 @@ fn do_compute_dynmat(
         cart_ops.iter().map(|c| c.cart_rot()).collect()
     };
 
-
     let debug_files_root = match trial_dir {
         Some(d) => d.as_path().to_owned(),
         None => std::env::current_dir()?,
     };
     if log_enabled!(target: "rsp2_tasks::special::phonopy_force_sets", log::Level::Trace) {
-        if let Some(phonopy_info) = phonopy_info {
+        use self::phonopy::{PhonopyDisplacements, PhonopyForceSets};
+
+        if let Some(phonopy_info) = &phonopy_info {
+            trace!("Creating FORCE_SETS file for rsp2_tasks::special::phonopy_force_sets");
             let w = create(debug_files_root.join("FORCE_SETS"))?;
-            if let Err(e) = phonopy_info.write_force_sets_for_phonopy(w, &force_sets) {
+
+            let PhonopyDisplacements {
+                phonopy_super_displacements, coperm_from_phonopy, ..
+            } = phonopy_info;
+
+            if let Err(e) = (PhonopyForceSets {
+                phonopy_super_displacements,
+                coperm_from_phonopy,
+                rsp2_displaced_site_cells,
+                sc,
+            }).write(w, &force_sets) {
                 warn!("Error writing phonopy force sets: {}", e);
             }
         } else {
@@ -457,10 +470,29 @@ fn do_compute_dynmat(
         &sc,
     )?;
 
+    if log_enabled!(target: "rsp2_tasks::special::phonopy_force_constants", log::Level::Trace) {
+        use crate::traits::save::{Json};
+
+        if let Some(phonopy_info) = &phonopy_info {
+            trace!("Creating rsp2-fcs.json file for rsp2_tasks::special::phonopy_force_constants");
+            let deperm_to_phonopy = &phonopy_info.coperm_from_phonopy; // inverse of inverse
+            let phonopy_fcs = force_constants.clone().permuted_by(deperm_to_phonopy);
+            if let Err(e) = Json(phonopy_fcs.to_dense_matrix()).save(debug_files_root.join("rsp2-fcs.json")) {
+                warn!("Error writing force constants debug file: {}", e);
+            }
+        } else {
+            warn_once!("\
+                rsp2_tasks::special::phonopy_force_constants tracing was enabled, but cannot \
+                do anything because the phonopy disp-finder was not used.\
+            ");
+        }
+    }
+
     trace!("Computing sparse dynamical matrix");
     let dynmat = {
+        let qpoint_cart = qpoint_pfrac * &prim_coords.lattice().reciprocal();
         force_constants
-            .dynmat_at_q(&super_coords, qpoint_sfrac, &sc, prim_meta.pick())
+            .dynmat_at_cart_q(&super_coords, qpoint_cart, &sc, prim_meta.pick())
             .hermitianize()
     };
     trace!("Done computing dynamical matrix");
@@ -1157,7 +1189,7 @@ pub(crate) fn run_single_force_computation(
 pub(crate) fn run_dynmat_at_q(
     on_demand: Option<LammpsOnDemand>,
     settings: &Settings,
-    qpoint_sfrac: V3,
+    qpoint_frac: V3,
     structure: StoredStructure,
 ) -> FailResult<DynamicalMatrix> {
     let pot = PotentialBuilder::from_root_config(None, on_demand, &settings)?;
@@ -1165,7 +1197,7 @@ pub(crate) fn run_dynmat_at_q(
     let meta = structure.meta();
     let coords = structure.coords;
 
-    do_compute_dynmat(None, settings, &pot, qpoint_sfrac, &coords, meta.sift())
+    do_compute_dynmat(None, settings, &pot, qpoint_frac, &coords, meta.sift())
 }
 
 //=================================================================

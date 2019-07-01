@@ -278,6 +278,37 @@ mod builder {
 
                     log_stdio_and_wait(command, None)?;
                 }
+
+                {
+                    trace!("Producing {}...", FNAME_OUT_SYMMETRY);
+                    let mut command = Command::new("phonopy");
+                    command
+                        .args(&extra_args.0)
+                        .arg(FNAME_CONF_DISPS)
+                        .arg("--sym")
+                        .current_dir(&dir)
+                        .stdout(fsx::create(dir.join(FNAME_OUT_SYMMETRY))?);
+
+                    check_status(command.status()?)?;
+
+                    //---------------------------
+                    // NOTE: Even though integer-based FracTrans is gone, this limitation is
+                    //       still necessary because we're only capable of hashing the rotations
+                    //       when using GroupTree. (meaning they must be unique, meaning there
+                    //       must be no pure translations)
+                    //       (though maybe it would be better to check for pure translations *there*,
+                    //        rather than checking PPOSCAR *here*)
+                    //---------------------------
+                    //
+                    // check if input structure was primitive
+                    let Poscar { coords: prim, .. } = Poscar::load(dir.join("PPOSCAR"))?;
+
+                    let ratio = coords.lattice().volume() / prim.lattice().volume();
+                    let ratio = round_checked(ratio, 1e-4)?;
+
+                    ensure!(ratio == 1, "attempted to compute symmetry of a supercell");
+                }
+
             }
             DirWithDisps::from_existing(dir)?
         })}
@@ -496,16 +527,31 @@ pub fn phonopy_displacements(
     })
 }
 
-impl PhonopyDisplacements {
-    pub fn write_force_sets_for_phonopy(
-        &self,
+/// Struct to simulate named arguments
+pub struct PhonopyForceSets<'a> {
+    /// The original displacements exactly as they were chosen by phonopy.
+    pub phonopy_super_displacements: &'a [(usize, V3)],
+
+    /// Which cell (as defined in the docs for [`SupercellToken`]) did rsp2 choose for each displacement?
+    pub rsp2_displaced_site_cells: &'a [[u32; 3]],
+
+    /// Perm that rearranges phonopy's superstructure to match rsp2's superstructure.
+    pub coperm_from_phonopy: &'a Perm,
+
+    pub sc: &'a SupercellToken,
+}
+
+impl PhonopyForceSets<'_> {
+    pub fn write(
+        self,
         w: impl Write,
         force_sets: &Vec<std::collections::BTreeMap<usize, V3>>,
     ) -> FailResult<()> {
-        let PhonopyDisplacements {
+        let PhonopyForceSets {
             coperm_from_phonopy,
             phonopy_super_displacements,
-            ..
+            rsp2_displaced_site_cells,
+            sc,
         } = self;
         let num_atoms = coperm_from_phonopy.len();
 
@@ -516,22 +562,51 @@ impl PhonopyDisplacements {
         // * The supercell atoms may be in a different order.
 
         // permutation that turns our metadata into phonopy's metadata
-        let deperm_to_phonopy = coperm_from_phonopy; // inverse of inverse of perm
+        let ref deperm_from_phonopy = coperm_from_phonopy.inverted();
+        let deperm_to_phonopy = coperm_from_phonopy; // inverse of inverse
 
-        // Densify while permuting the atoms
-        let phonopy_force_sets: Vec<Vec<V3>> = { 
-            unimplemented!("Need to perform translations to fix the displaced atom");
-            force_sets.clone().into_iter().map(|our_row| {
-                let mut phonopy_row = vec![V3::zero(); num_atoms];
+        let site_cells = sc.atom_cells();
 
-                for (our_index, vector) in our_row {
-                    // columns are permuted here
-                    let phonopy_index = deperm_to_phonopy.permute_index(our_index);
-                    phonopy_row[phonopy_index] = vector;
+        let ref phonopy_displaced_site_cells: Vec<[u32; 3]> = {
+            phonopy_super_displacements.iter().map(|&(phonopy_site, _)| {
+                // FIXME I can't quite figure out whether this should use the
+                //       coperm or the deperm, but the deperm seems to make the most sense.
+                //
+                // Currently it doesn't seem to matter which one we use, because the permutation
+                // between rsp2 and phonopy always seems to be involutory; that is, it is equal to
+                // its own inverse.
+                if coperm_from_phonopy != deperm_from_phonopy {
+                    warn_once!("Untested code path: 94111e7c-3afe-4838-948a-108580e8d252");
                 }
-
-                phonopy_row
+                let rsp2_site = deperm_from_phonopy.permute_index(phonopy_site);
+                site_cells[rsp2_site]
             }).collect()
+        };
+
+        let phonopy_force_sets: Vec<Vec<V3>> = {
+            zip_eq!(force_sets, phonopy_displaced_site_cells, rsp2_displaced_site_cells)
+                .map(|(rsp2_row, &phonopy_cell, &rsp2_cell)| {
+                    // First, perform a translation that translates rsp2_cell to phonopy_cell,
+                    // so that the correct site is displaced.
+                    let rsp2_latt = sc.lattice_point_from_cell(rsp2_cell);
+                    let phonopy_latt = sc.lattice_point_from_cell(phonopy_cell);
+                    let translation_latt = phonopy_latt - rsp2_latt;
+
+                    let deperm = sc.lattice_point_translation_deperm(translation_latt);
+
+                    // Then, permute into phonopy's supercell convention
+
+                    let deperm = deperm.then(deperm_to_phonopy);
+
+                    // Apply this permutation to the columns while densifying
+                    let mut phonopy_row = vec![V3::zero(); num_atoms];
+                    for (&our_index, &vector) in rsp2_row {
+                        let phonopy_index = deperm.permute_index(our_index);
+                        phonopy_row[phonopy_index] = vector;
+                    }
+
+                    phonopy_row
+                }).collect()
         };
 
         rsp2_phonopy_io::force_sets::write(w, phonopy_super_displacements, phonopy_force_sets)
@@ -540,6 +615,13 @@ impl PhonopyDisplacements {
 
 //-----------------------------
 // helpers
+
+fn round_checked(x: f64, tol: f64) -> FailResult<i32>
+{Ok({
+    let r = x.round();
+    ensure!((r - x).abs() < tol, "not nearly integral: {}", x);
+    r as i32
+})}
 
 fn fortran_bool(b: bool) -> &'static str {
     match b {

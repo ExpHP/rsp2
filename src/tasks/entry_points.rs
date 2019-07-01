@@ -661,7 +661,7 @@ pub fn dynmat_at_q(bin_name: &str, version: VersionInfo) -> ! {
                     arg!(*qpoint [--qpoint]=KPOINT "\
                         space-separated list of 3 numbers (integers, reals, or rationals as X/Y) \
                         describing the location in units of the reciprocal cell.\
-                    "),
+                    ").allow_hyphen_values(true),
                     arg!(*output [-o][--output]=PATH "Path for output dynmat.npz file."),
                     arg!( log [--log]=LOGFILE "append to this logfile"),
                 ])
@@ -675,10 +675,10 @@ pub fn dynmat_at_q(bin_name: &str, version: VersionInfo) -> ! {
 
         let ValidatedSettings(settings) = config.deserialize()?;
 
-        let qpoint_sfrac = parse_qpoint(&matches.expect_value_of("qpoint"))?;
+        let qpoint_frac = parse_qpoint(&matches.expect_value_of("qpoint"))?;
         let structure = StoredStructure::load(matches.expect_value_of("input"))?;
 
-        let dynmat = crate::cmd::run_dynmat_at_q(mpi_on_demand, &settings, qpoint_sfrac, structure)?;
+        let dynmat = crate::cmd::run_dynmat_at_q(mpi_on_demand, &settings, qpoint_frac, structure)?;
 
         dynmat.save(matches.expect_value_of("output"))?;
 

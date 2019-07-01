@@ -434,6 +434,8 @@ impl<'ctx> Context<'ctx> {
                 computed_rows[&representative].iter()
                     .map(|(&affected, fc_matrix)| {
                         let affected = apply_deperm(affected);
+                        // FIXME: This could use a test where cart_rot != cart_rot.t()
+                        // (for AB blg, cart_rot is currently always able to be E or i)
                         let fc_matrix = cart_rot * fc_matrix * cart_rot.t();
                         (affected, fc_matrix)
                     })
@@ -580,10 +582,10 @@ impl ForceConstants {
     ///
     /// The force constants do not need to contain data for rows outside the
     /// designated cell. (but if they do, it won't hurt)
-    pub fn dynmat_at_q(
+    pub fn dynmat_at_cart_q(
         &self,
         super_coords: &Coords,
-        qpoint_sfrac: V3,
+        qpoint_cart: V3,
         sc: &SupercellToken,
         masses: meta::SiteMasses,
     ) -> DynamicalMatrix {
@@ -595,8 +597,6 @@ impl ForceConstants {
         let primitive_atoms = sc.atom_primitive_atoms();
         let cells = sc.atom_cells();
         let get_prim = |SuperI(r)| PrimI(primitive_atoms[r.index()]);
-
-        let qpoint_cart = qpoint_sfrac * &super_coords.lattice().reciprocal();
 
         // Since rsp2 pays so much attention to image vectors (see FracBond) in places,
         // one might wonder why it is now doing brute-force searches for nearest images.
@@ -674,8 +674,17 @@ impl ForceConstants {
                         .sum::<f64>() * 2.0 * std::f64::consts::PI
                 };
                 let (phase_real, phase_imag) = (arg.cos(), arg.sin());
-                let real = scale * phase_real * mat;
-                let imag = scale * phase_imag * mat;
+
+                // NOTE: dividing by the multiplicity here is something that phonopy does.
+                //       I'm not sure precisely *why* it does so. (simply summing over the images
+                //       seems more natural than averaging over them).  But for our sanity,
+                //       we'll do what they do.
+                //
+                //       (I don't think it matters much anyways in the end, because multiplicity
+                //        should only ever exceed 1 for distant atoms (about half of the supercell),
+                //        so the forces are small to begin with)
+                let real = scale * phase_real * mat / shortest_images_buf.len() as f64;
+                let imag = scale * phase_imag * mat / shortest_images_buf.len() as f64;
 
                 ((prim_r, prim_c), Complex33(real, imag))
             });

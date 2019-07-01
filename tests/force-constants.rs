@@ -144,7 +144,7 @@ fn check(
 
     let prim_masses: Vec<_> = prim_masses.into_iter().map(Mass).collect();
     let qpoint = V3::zero();
-    let dynamical_matrix = force_constants.dynmat_at_q(&super_coords, qpoint, &sc, prim_masses.into());
+    let dynamical_matrix = force_constants.dynmat_at_cart_q(&super_coords, qpoint, &sc, prim_masses.into());
 
     {
         let real = dynamical_matrix.0.to_coo().map(|c| c.0).into_dense();
