@@ -54,7 +54,7 @@ use rsp2_structure::consts::CARBON;
 use rsp2_slice_math::{vnorm};
 
 use slice_of_array::prelude::*;
-use rsp2_array_types::{V3, Unvee};
+use rsp2_array_types::{V3, M33, Unvee};
 use rsp2_structure::{Coords, Lattice};
 use rsp2_structure::{
     layer::LayersPerUnitCell,
@@ -104,6 +104,16 @@ impl fmt::Display for Iteration {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result
     { fmt::Display::fmt(&self.0, f) }
 }
+
+// HACK
+// used to simulate a sort of unwind on successful exiting.
+//
+// In case you haven't guessed, I've given up all hope on keeping rsp2-tasks maintainable.
+// I need to rip out all of the legacy and/or experimental features I'm not using or start fresh.
+#[derive(Debug, Fail)]
+#[fail(display = "stopped after dynmat.  THIS IS NOT AN ACTUAL ERROR. THIS IS A DUMB HACK. \
+You should not see this message.")]
+pub(crate) struct StoppedAfterDynmat;
 
 impl TrialDir {
     pub(crate) fn run_relax_with_eigenvectors(
@@ -186,7 +196,6 @@ pub(crate) fn write_ev_analysis_output_files(
 ) -> FailResult<()>
 {Ok({
     use path_abs::FileWrite;
-    use rsp2_array_types::M33;
 
     if let (Some(frequency), Some(raman)) = (&eva.ev_frequencies, &eva.ev_raman_tensors) {
         #[derive(Serialize)]
@@ -304,6 +313,8 @@ fn do_compute_dynmat(
     // so that this function doesn't have so many responsibilities.
     //
     // (but last time I tried to do so, I found the resulting function signature too obnoxious)
+    //
+    // For now, we just make heavy use of scoping to keep the number of names in scope smallish.
     trace!("Constructing supercell");
     let (ref super_coords, ref sc) = {
         let sc_dim = settings.phonons.supercell.dim_for_unitcell(prim_coords.lattice());
@@ -336,10 +347,27 @@ fn do_compute_dynmat(
     let prim_displacements = match settings.phonons.disp_finder {
         cfg::PhononDispFinder::Phonopy { diag: _ } => {
             let the_phonopy_info = self::phonopy::phonopy_displacements(
-                settings, prim_coords, prim_meta.sift(), sc, super_coords,
+                &settings.phonons, prim_coords, prim_meta.sift(), sc, super_coords,
             )?;
 
             let prim_displacements = the_phonopy_info.prim_displacements.clone();
+
+            match the_phonopy_info.spacegroup_op_count.cmp(&cart_ops.len()) {
+                // note: this case should never fire because we give phonopy a smaller symprec
+                std::cmp::Ordering::Greater => panic!(
+                    "Phonopy found more spacegroup operations than rsp2! ({} > {}). \
+                    This makes it impossible to reconstruct the force constants.",
+                    the_phonopy_info.spacegroup_op_count,
+                    cart_ops.len(),
+                ),
+                std::cmp::Ordering::Less => warn!(
+                    "Phonopy found fewer spacegroup operations than rsp2! ({} < {}). \
+                    This is surprising, but shouldn't cause any problems...",
+                    the_phonopy_info.spacegroup_op_count,
+                    cart_ops.len(),
+                ),
+                std::cmp::Ordering::Equal => {},
+            }
 
             phonopy_info = Some(the_phonopy_info);
 
@@ -422,6 +450,8 @@ fn do_compute_dynmat(
         Some(d) => d.as_path().to_owned(),
         None => std::env::current_dir()?,
     };
+
+    // Log target for comparison to phonopy
     if log_enabled!(target: "rsp2_tasks::special::phonopy_force_sets", log::Level::Trace) {
         use self::phonopy::{PhonopyDisplacements, PhonopyForceSets};
 
@@ -496,6 +526,22 @@ fn do_compute_dynmat(
             .hermitianize()
     };
     trace!("Done computing dynamical matrix");
+
+    // Log target for tests/resources/force-constants fc files
+    if log_enabled!(target: "rsp2_tasks::special::fc_test_files", log::Level::Trace) {
+        trace!("Creating force log files for rsp2_tasks::special::fc_test_files=trace");
+        save_force_sets_for_tests(
+            &debug_files_root,
+            &prim_coords,
+            prim_meta.sift(),
+            &super_coords,
+            &sc,
+            &cart_ops,
+            &super_displacements,
+            &force_sets,
+            &dynmat,
+        );
+    }
 
     Ok(dynmat)
 }
@@ -605,24 +651,13 @@ impl TrialDir {
     })}
 }
 
-// HACK
-// used to simulate a sort of unwind on successful exiting.
-// Take a look at the places where it's used and try not to throw up.
-//
-// In case you haven't guessed, I've given up all hope on keeping rsp2-tasks maintainable.
-// I need to rip out all of the legacy and/or experimental features I'm not using or start fresh.
-#[derive(Debug, Fail)]
-#[fail(display = "stopped after dynmat.  THIS IS NOT AN ACTUAL ERROR. THIS IS A DUMB HACK. \
-You should not see this message.")]
-pub(crate) struct StoppedAfterDynmat;
-
 use rsp2_soa_ops::{Perm, Permute};
 use rsp2_structure::CartOp;
 // FIXME incorrect for nontrivial supercells. Should use primitive stars and translate
 //       the displaced atom to the correct image after rotation. (this would be easiest to
 //       do using the functionality in the ForceConstants code)
 fn visualize_sparse_force_sets(
-    trial: impl AsPath,
+    debug_files_root: impl AsPath,
     super_coords: &Coords,
     super_disps: &[(usize, V3)],
     super_deperms: &[Perm],
@@ -633,7 +668,7 @@ fn visualize_sparse_force_sets(
     use rsp2_structure::consts;
     use rsp2_structure_io::Poscar;
 
-    let subdir = trial.join("visualize-forces");
+    let subdir = debug_files_root.join("visualize-forces");
     if let Ok(dir) = PathDir::new(&subdir) {
         dir.remove_all()?;
     }
@@ -675,6 +710,72 @@ fn visualize_sparse_force_sets(
         }
     }
 })}
+
+fn save_force_sets_for_tests(
+    debug_files_root: impl AsPath,
+    prim_coords: &Coords,
+    prim_meta: HList1<meta::SiteMasses>,
+    super_coords: &Coords,
+    sc: &rsp2_structure::supercell::SupercellToken,
+    cart_ops: &[CartOp],
+    super_displacements: &[(usize, V3<f64>)],
+    force_sets: &Vec<BTreeMap<usize, V3<f64>>>,
+    dynmat: &DynamicalMatrix,
+) {
+    use crate::traits::save::{Json};
+
+    #[derive(Serialize, Deserialize)]
+    #[serde(rename_all = "kebab-case")]
+    struct Primitive {
+        structure: Coords,
+        masses: Vec<meta::Mass>,
+        cart_ops: Vec<CartOp>,
+    }
+
+    #[derive(Serialize, Deserialize)]
+    struct ForceSets {
+        #[serde(rename = "sc-dims")] sc_dims: [u32; 3],
+        #[serde(rename = "structure")] super_coords: Coords,
+        #[serde(rename = "force-sets")] force_sets: Vec<Vec<(usize, V3)>>, // [disp] -> [(super, V3)]
+        #[serde(rename = "displacements")] super_displacements: Vec<(usize, V3)>, // [disp] -> (super, V3)
+    }
+
+    #[derive(Serialize, Deserialize)]
+    struct DenseDynmat {
+        real: Vec<Vec<M33>>,
+        imag: Vec<Vec<M33>>,
+    }
+
+    let prim_masses: meta::SiteMasses = prim_meta.pick();
+
+    let primitive = Primitive {
+        structure: prim_coords.clone(),
+        masses: prim_masses.to_vec(),
+        cart_ops: cart_ops.to_vec(),
+    };
+
+    let force_sets = ForceSets {
+        sc_dims: sc.periods(),
+        super_coords: super_coords.clone(),
+        force_sets: force_sets.clone().into_iter().map(|row| row.into_iter().collect()).collect(),
+        super_displacements: super_displacements.to_vec(),
+    };
+
+    let dense_dynmat = DenseDynmat {
+        real: dynmat.0.to_coo().map(|c| c.0).into_dense(),
+        imag: dynmat.0.to_coo().map(|c| c.1).into_dense(),
+    };
+
+    if let Err(e) = Json(primitive).save(debug_files_root.join("primitive.json")) {
+        warn!("{}", e);
+    }
+    if let Err(e) = Json(force_sets).save(debug_files_root.join("super.json")) {
+        warn!("{}", e);
+    }
+    if let Err(e) = Json(dense_dynmat).save(debug_files_root.join("dynmat.json")) {
+        warn!("{}", e);
+    }
+}
 
 // wrapper around the gamma_system_analysis module which handles all the newtype conversions
 fn do_gamma_system_analysis(

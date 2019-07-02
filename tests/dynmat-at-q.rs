@@ -38,8 +38,8 @@ fn dynmat_at_q() -> Result<()> {
                 "dynmat.npz".as_ref(),
                 expected_outfile.as_ref(),
                 filetypes::DynmatTolerances {
-                    rel_tol: 1e-6,
-                    abs_tol: 1e-9,
+                    rel_tol: 1e-4,
+                    abs_tol: 1e-7,
                 },
             )
             .run()?;

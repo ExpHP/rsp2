@@ -24,7 +24,7 @@ pub use failure::Error;
 use slice_of_array::prelude::*;
 use path_abs::{FileRead, FileWrite};
 use rsp2_structure::{Coords, CartOp};
-use rsp2_array_types::{V3, M33, Unvee};
+use rsp2_array_types::{M33, Unvee};
 
 #[macro_export]
 macro_rules! impl_json {
@@ -137,8 +137,6 @@ pub struct Primitive {
     pub masses: Vec<f64>,
     #[serde(rename = "structure")]
     pub coords: Coords,
-    // FIXME move to ForceConstants test
-    pub displacements: Vec<(usize, V3)>, // [disp] -> (prim, v)
 }
 impl_json!{ (Primitive)[save, load] }
 
@@ -309,8 +307,15 @@ impl CheckFile for Dynmat {
 pub fn load_json<T>(path: impl AsRef<Path>) -> Result<T, Error>
 where T: serde::de::DeserializeOwned,
 {
-    let file = FileRead::read(path)?;
-    Ok(::serde_json::from_reader(file)?)
+    let file = FileRead::read(path.as_ref())?;
+
+    // HACK; I'd really like to have something more akin
+    // to the dwim module in rsp2's python parts...
+    if path.as_ref().extension() == Some("xz".as_ref()) {
+        Ok(::serde_json::from_reader(xz2::read::XzDecoder::new(file))?)
+    } else {
+        Ok(::serde_json::from_reader(file)?)
+    }
 }
 
 pub fn save_json<T>(path: impl AsRef<Path>, obj: &T) -> Result<(), Error>

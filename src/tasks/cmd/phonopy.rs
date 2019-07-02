@@ -28,7 +28,7 @@ use std::path::{Path};
 
 use rsp2_fs_util::{TempDir};
 use rsp2_fs_util as fsx;
-use rsp2_structure::{Coords, Lattice};
+use rsp2_structure::{Coords};
 use rsp2_structure::supercell::{SupercellToken};
 use rsp2_soa_ops::{Permute, Perm};
 use rsp2_structure_io::Poscar;
@@ -313,23 +313,6 @@ mod builder {
             DirWithDisps::from_existing(dir)?
         })}
     }
-
-    // constructor that used to be in cmd/mod.rs
-    pub fn from_settings(
-        settings: &cfg::Phonons,
-        lattice: &Lattice,
-    ) -> Builder {
-        let mut phonopy = {
-            Builder::new()
-                .symmetry_tolerance(settings.symmetry_tolerance)
-                .conf("DISPLACEMENT_DISTANCE", format!("{:e}", settings.displacement_distance))
-                .supercell_dim(settings.supercell.dim_for_unitcell(lattice))
-        };
-        if let cfg::PhononDispFinder::Phonopy { diag } = settings.disp_finder {
-            phonopy = phonopy.diagonal_disps(diag);
-        }
-        phonopy
-    }
 }
 
 //--------------------------------------------------------
@@ -425,10 +408,10 @@ impl DirWithDisps {
     // (as otherwise we might end up with e.g. underdetermined force constants)
     //
     // So we call `phonopy --sym` for the sole purpose of validating that the spacegroup
-    // returned is the same. This could fail if our method of assigning integer atom types
-    // differed from phonopy (e.g. are masses checked?).
-    fn _phonopy_sg_number(&self) -> FailResult<u32>
-    { Ok(SymmetryYaml::load(self.dir.join(FNAME_OUT_SYMMETRY))?.space_group_number) }
+    // returned is the same (or a subgroup). This could fail if our method of assigning
+    // integer atom types differed from phonopy (e.g. are masses checked?).
+    fn phonopy_sg_op_count(&self) -> FailResult<usize>
+    { Ok(SymmetryYaml::load(self.dir.join(FNAME_OUT_SYMMETRY))?.space_group_operations.len()) }
 }
 
 /// A smattering of information about the displacements chosen by phonopy, and how they
@@ -450,12 +433,18 @@ pub struct PhonopyDisplacements {
     /// of any size, and obviously does not depend on the convention for ordering
     /// sites in a supercell.
     pub prim_displacements: Vec<(usize, V3)>,
+
+    /// Number of spacegroup operations detected by phonopy when it generated its displacements.
+    ///
+    /// If this is larger than the amount found by rsp2, the force constants will end up
+    /// missing some terms.
+    pub spacegroup_op_count: usize,
 }
 
 /// Produce a variety of data describing the displacements in terms of rsp2's conventions
 /// (whereas most other methods on `DirWithDisps` use phonopy's conventions).
 pub fn phonopy_displacements(
-    settings: &cfg::Settings,
+    settings: &cfg::Phonons,
     prim_coords: &Coords,
     prim_meta: HList2<
         meta::SiteElements,
@@ -466,11 +455,22 @@ pub fn phonopy_displacements(
     our_super_coords: &Coords,
 ) -> FailResult<PhonopyDisplacements> {
     let dir = {
-        builder::from_settings(&settings.phonons, prim_coords.lattice())
-            .displacements(prim_coords, prim_meta.sift())?
+        let mut builder = {
+            builder::Builder::new()
+                // HACK: Give phonopy a slightly smaller symprec to ensure that, in case
+                // rsp2 and phonopy find different spacegroups, phonopy should find the
+                // smaller one.
+                .symmetry_tolerance(settings.symmetry_tolerance * 0.99)
+                .conf("DISPLACEMENT_DISTANCE", format!("{:e}", settings.displacement_distance))
+                .supercell_dim(settings.supercell.dim_for_unitcell(prim_coords.lattice()))
+        };
+        if let cfg::PhononDispFinder::Phonopy { diag } = settings.disp_finder {
+            builder = builder.diagonal_disps(diag);
+        }
+        builder.displacements(prim_coords, prim_meta.sift())?
     };
     let sc_dims = sc.periods();
-    assert_eq!(settings.phonons.supercell.dim_for_unitcell(prim_coords.lattice()), sc_dims);
+    assert_eq!(settings.supercell.dim_for_unitcell(prim_coords.lattice()), sc_dims);
 
     // cmon, big money, big money....
     // if these assertions always succeed, it will save us a
@@ -524,6 +524,7 @@ pub fn phonopy_displacements(
         prim_displacements,
         coperm_from_phonopy: perm_from_phonopy,
         phonopy_super_displacements: dir.displacements().to_vec(),
+        spacegroup_op_count: dir.phonopy_sg_op_count()?,
     })
 }
 

@@ -31,6 +31,7 @@ itertools = "0.7"
 failure = "0.1.2"
 path_abs = "0.4.1"
 pretty_assertions = "0.5.1"
+xz2 = "0.1.6"
 
 [features]
 test-diff = []

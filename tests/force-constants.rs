@@ -6,7 +6,6 @@
 use ::rsp2_integration_test::filetypes::Primitive;
 
 type FailResult<T> = Result<T, ::failure::Error>;
-use ::std::path::Path;
 
 use ::rsp2_array_types::{M33, V3, Unvee};
 use ::rsp2_structure::{Coords};
@@ -17,12 +16,10 @@ use ::rsp2_tasks::exposed_for_testing::meta::Mass;
 
 #[derive(Deserialize)]
 pub struct ForceSets {
-    #[serde(rename =         "sc-dims")] sc_dims: [u32; 3],
-    // supercell coordinates and "designated cell indices" are used to make the test
-    // robust to changes in supercell ordering convention
-    #[serde(rename = "designated-cell")] orig_designated_images: Vec<usize>, // [prim] -> super
-    #[serde(rename =       "structure")] orig_super_coords: Coords,
-    #[serde(rename =      "force-sets")] orig_super_force_sets: Vec<Vec<(usize, V3)>>, // [disp] -> [(super, V3)]
+    #[serde(rename =       "sc-dims")] sc_dims: [u32; 3],
+    #[serde(rename =    "force-sets")] orig_super_force_sets: Vec<Vec<(usize, V3)>>, // [disp] -> [(super, V3)]
+    #[serde(rename = "displacements")] orig_displacements: Vec<(usize, V3)>, // [disp] -> (super, V3)
+    #[serde(rename =     "structure")] orig_super_coords: Coords,
 }
 impl_json!{ (ForceSets)[load] }
 
@@ -40,10 +37,11 @@ struct OutputDynMat {
 impl_json!{ (OutputDynMat)[load] }
 
 fn check(
-    prim_info: impl AsRef<Path>,
-    super_info: impl AsRef<Path>,
-    expected_fc: impl AsRef<Path>,
-    expected_dynmat: impl AsRef<Path>,
+    prim_info: &str,
+    super_info: &str,
+    expected_fc: Option<&str>,
+    expected_dynmat: &str,
+    qpoint_frac: V3,
     rel_tol: f64,
     abs_tol: f64,
 ) -> FailResult<()> {
@@ -51,16 +49,13 @@ fn check(
         cart_ops,
         masses: prim_masses,
         coords: prim_coords,
-        displacements: prim_displacements,
     } = Primitive::load(prim_info)?;
 
     let ForceSets {
-        sc_dims, orig_super_coords, orig_super_force_sets, orig_designated_images,
+        sc_dims, orig_super_coords, orig_super_force_sets, orig_displacements,
     } = ForceSets::load(super_info)?;
 
-    let OutputForceConstants {
-        orig_force_constants,
-    } = OutputForceConstants::load(expected_fc)?;
+    let orig_force_constants = expected_fc.map(|path| OutputForceConstants::load(path).unwrap().orig_force_constants);
 
     let OutputDynMat {
         expected_dynmat_real,
@@ -70,6 +65,7 @@ fn check(
     let (super_coords, sc) = ::rsp2_structure::supercell::diagonal(sc_dims).build(&prim_coords);
 
     // permute expected output into correct order for the current supercell convention
+    // (this is to be robust to changes in supercell ordering convention)
     let perm_from_orig = orig_super_coords.perm_to_match(&super_coords, 1e-10)?;
     let super_force_sets: Vec<_> = {
         orig_super_force_sets
@@ -81,19 +77,10 @@ fn check(
             })
             .collect()
     };
-    // (permute both the rows and cols of a dense matrix from the original supercell
-    // order into the current)
-    let permute_block = |m: Vec<Vec<M33>>| {
-        m.permuted_by(&perm_from_orig)
-            .into_iter().map(|x| x.permuted_by(&perm_from_orig))
-            .collect::<Vec<_>>()
-    };
-    let expected_force_constants: Vec<_> = permute_block(orig_force_constants);
 
     let super_displacements: Vec<_> = {
-        prim_displacements.into_iter()
-            .map(|(prim, v3)| {
-                let orig_atom = orig_designated_images[prim];
+        orig_displacements.into_iter()
+            .map(|(orig_atom, v3)| {
                 let atom = perm_from_orig.permute_index(orig_atom);
                 (atom, v3)
             })
@@ -122,7 +109,16 @@ fn check(
         &sc,
     )?;
 
-    {
+    if let Some(orig_force_constants) = orig_force_constants {
+        // (permute both the rows and cols of a dense matrix from the original supercell
+        // order into the current)
+        let permute_block = |m: Vec<Vec<M33>>| {
+            m.permuted_by(&perm_from_orig)
+                .into_iter().map(|x| x.permuted_by(&perm_from_orig))
+                .collect::<Vec<_>>()
+        };
+        let expected_force_constants: Vec<_> = permute_block(orig_force_constants);
+
         let raw = force_constants.to_dense_matrix();
         assert_eq!(raw.len(), sc.num_supercell_atoms());
         assert_eq!(raw[0].len(), sc.num_supercell_atoms());
@@ -142,9 +138,14 @@ fn check(
     // ------- Dynamical Matrix ---------
     // ----------------------------------
 
-    let prim_masses: Vec<_> = prim_masses.into_iter().map(Mass).collect();
-    let qpoint = V3::zero();
-    let dynamical_matrix = force_constants.dynmat_at_cart_q(&super_coords, qpoint, &sc, prim_masses.into());
+    let dynamical_matrix = {
+        let prim_masses: Vec<_> = prim_masses.into_iter().map(Mass).collect();
+        let qpoint_cart = qpoint_frac * &prim_coords.lattice().reciprocal();
+
+        force_constants
+            .dynmat_at_cart_q(&super_coords, qpoint_cart, &sc, prim_masses.into())
+            .hermitianize()
+    };
 
     {
         let real = dynamical_matrix.0.to_coo().map(|c| c.0).into_dense();
@@ -179,8 +180,9 @@ fn graphene_denseforce_771() {
         // * Dense force sets
         // * [7, 7, 1] supercell
         "tests/resources/force-constants/graphene-771-dense.super.json",
-        "tests/resources/force-constants/graphene-771.fc.json",
+        Some("tests/resources/force-constants/graphene-771.fc.json.xz"),
         "tests/resources/force-constants/graphene-gamma.dynmat.json",
+        V3::zero(),
         1e-10,
         1e-12,
     ).unwrap()
@@ -194,15 +196,16 @@ fn graphene_denseforce_111() {
         // * Dense force sets
         // * [1, 1, 1] supercell
         "tests/resources/force-constants/graphene-111-dense.super.json",
-        "tests/resources/force-constants/graphene-111.fc.json",
+        Some("tests/resources/force-constants/graphene-111.fc.json"),
         // * same dynmat output as for 771; a supercell should not be necessary
         //   for the dynamical matrix at gamma
         //
         // FIXME:
         //   That is not true! If multiple images of an atom move in graphene,
         //   it will affect the bond angle terms.
-        //   What's going on here?  How were these force constants obtained?
+        //   What's going on here?  How were these force sets obtained?
         "tests/resources/force-constants/graphene-gamma.dynmat.json",
+        V3::zero(),
         1e-10,
         1e-12,
     ).unwrap()
@@ -216,12 +219,52 @@ fn graphene_sparseforce_771() {
         // * Sparse force sets (clipped to zero at 1e-12, ~70% sparse)
         // * [7, 7, 1] supercell
         "tests/resources/force-constants/graphene-771-sparse.super.json",
-        "tests/resources/force-constants/graphene-771.fc.json",
+        Some("tests/resources/force-constants/graphene-771.fc.json.xz"),
 
         // I don't have data computed specifically for this, just use
         // the existing data with a more relaxed tolerance
         "tests/resources/force-constants/graphene-gamma.dynmat.json",
+        V3::zero(),
         1e-6,
         1e-7,
+    ).unwrap()
+}
+
+#[test]
+fn blg_force_sets_gamma() {
+    check(
+        "tests/resources/primitive/blg.json",
+        "tests/resources/force-constants/blg.super.json",
+        None, // no fc file
+        "tests/resources/force-constants/blg-gamma.dynmat.json",
+        V3::zero(),
+        1e-10,
+        1e-12,
+    ).unwrap()
+}
+
+#[test]
+fn blg_force_sets_k() {
+    check(
+        "tests/resources/primitive/blg.json",
+        "tests/resources/force-constants/blg.super.json",
+        None, // no fc file
+        "tests/resources/force-constants/blg-k.dynmat.json",
+        V3([1.0/3.0, 1.0/3.0, 0.0]),
+        1e-10,
+        1e-12,
+    ).unwrap()
+}
+
+#[test]
+fn blg_force_sets_m() {
+    check(
+        "tests/resources/primitive/blg.json",
+        "tests/resources/force-constants/blg.super.json",
+        None, // no fc file
+        "tests/resources/force-constants/blg-m.dynmat.json",
+        V3([0.5, 0.0, 0.0]),
+        1e-10,
+        1e-12,
     ).unwrap()
 }

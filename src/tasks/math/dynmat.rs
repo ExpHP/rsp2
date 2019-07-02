@@ -668,12 +668,13 @@ impl ForceConstants {
                     ", super_coords.lattice(), shortest_images_buf, mat);
                 }
 
-                let arg: f64 = {
+                let (phase_real, phase_imag) = {
                     shortest_images_buf.iter()
                         .map(|cart_diff| V3::dot(&qpoint_cart, cart_diff))
-                        .sum::<f64>() * 2.0 * std::f64::consts::PI
+                        .map(|arg| 2.0 * std::f64::consts::PI * arg)
+                        .map(|arg| (arg.cos(), arg.sin()))
+                        .fold((0.0, 0.0), |(ar, ai), (br, bi)| (ar + br, ai + bi))
                 };
-                let (phase_real, phase_imag) = (arg.cos(), arg.sin());
 
                 // NOTE: dividing by the multiplicity here is something that phonopy does.
                 //       I'm not sure precisely *why* it does so. (simply summing over the images
@@ -683,6 +684,9 @@ impl ForceConstants {
                 //       (I don't think it matters much anyways in the end, because multiplicity
                 //        should only ever exceed 1 for distant atoms (about half of the supercell),
                 //        so the forces are small to begin with)
+                //
+                //       Notably, this also makes the graphene_denseforce_111 test succeed...
+                //       though I am still suspicious as to how that test is even correct!
                 let real = scale * phase_real * mat / shortest_images_buf.len() as f64;
                 let imag = scale * phase_imag * mat / shortest_images_buf.len() as f64;
 
