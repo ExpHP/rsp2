@@ -1,0 +1,20 @@
+[package]
+!!CRATE-NAME-LINE
+version = "0.1.0"
+authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
+description = "Sparse matrix types used by rsp2."
+!!LICENSE-PERMISSIVE
+!!DEFAULT-EDITION
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+!!rsp2-newtype-indices
+!!rsp2-util-macros
+
+!!failure
+!!num-traits
+
+[features]
+!!NIGHTLY-FEATURE-LINE

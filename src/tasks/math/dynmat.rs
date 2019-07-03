@@ -16,9 +16,9 @@ use rsp2_soa_ops::{Perm, Permute};
 use rsp2_structure::{Coords};
 use rsp2_structure::supercell::SupercellToken;
 use rsp2_newtype_indices::{Idx, Indexed, index_cast};
+use rsp2_sparse::{RawBee, RawCoo, RawCsr};
 use std::collections::BTreeMap;
 use slice_of_array::prelude::*;
-use crate::math::sparse::{self, RawCoo, RawCsr};
 
 use crate::util::ext_traits::OptionExpectNoneExt;
 
@@ -158,7 +158,7 @@ impl<'ctx> Context<'ctx> {
                     .map(|(prim, row_map)| (self.designated_super(prim), row_map))
                     .collect()
             };
-            sparse::RawBee { dim, map }.into_coo()
+            RawBee { dim, map }.into_coo()
         };
         Ok(ForceConstants(matrix))
     }

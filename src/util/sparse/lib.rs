@@ -21,11 +21,32 @@
 //! chosen generic bounds). That's why they don't provide very many mathematical
 //! operations.
 
-use crate::FailResult;
+#[macro_use] extern crate rsp2_util_macros;
+#[macro_use] extern crate failure;
+
 use std::collections::BTreeMap;
 use std::ops::{Range, Add, AddAssign};
 use num_traits::Zero;
 use rsp2_newtype_indices::{Idx, Indexed};
+
+/// Returned by `validate` to indicate that a sparse matrix is invalid.
+#[derive(Fail, Debug)]
+#[fail(display = "{}", message)]
+pub struct SparseMatrixError {
+    message: String,
+    backtrace: failure::Backtrace,
+}
+
+macro_rules! ensure {
+    ($cond:expr, $($arg:tt)*) => {
+        if !$cond {
+            return Err(SparseMatrixError {
+                message: format!($($arg)*),
+                backtrace: failure::Backtrace::new(),
+            })
+        }
+    }
+}
 
 //=============================================================================================
 
@@ -50,7 +71,7 @@ impl<T, R: Idx, C: Idx> RawCoo<T, R, C> {
     // Check properties that would typically be considered invariants of the format.
     // It is a logic error to call other methods on this type when these properties
     // are not satisfied.
-    pub fn validate(&self) -> FailResult<()> {
+    pub fn validate(&self) -> Result<(), SparseMatrixError> {
         let RawCoo { dim, ref val, ref row, ref col } = *self;
         ensure!(row.iter().max().map(|x| x.index() < dim.0).unwrap_or(true), "row out of range");
         ensure!(col.iter().max().map(|x| x.index() < dim.1).unwrap_or(true), "col out of range");
@@ -257,7 +278,7 @@ impl<T, R: Idx, C: Idx> RawCsr<T, R, C> {
     // Check properties that would typically be considered invariants of the format.
     // It is a logic error to call other methods on this type when these properties
     // are not satisfied.
-    pub fn validate(&self) -> FailResult<()> {
+    pub fn validate(&self) -> Result<(), SparseMatrixError>  {
         let RawCsr { dim, ref val, ref col, ref row_ptr } = *self;
         ensure!(val.len() == col.len(), "mismatched val/col len");
         ensure!(col.iter().max().unwrap().index() < dim.1, "col index out of range");
@@ -351,7 +372,7 @@ impl<T, R: Idx, C: Idx> RawBee<T, R, C> {
     // Check properties that would typically be considered invariants of the format.
     // It is a logic error to call other methods on this type when these properties
     // are not satisfied.
-    pub fn validate(&self) -> FailResult<()> {
+    pub fn validate(&self) -> Result<(), SparseMatrixError>  {
         let RawBee { dim, ref map } = *self;
         ensure!(map.keys().max().unwrap().index() < dim.0, "row out of range");
         ensure!(map.values().filter_map(|m| m.keys().max()).max().unwrap().index() < dim.1, "col out of range");

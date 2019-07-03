@@ -52,6 +52,7 @@ rsp2-potentials     = "src/potentials"
 rsp2-dftbplus       = "src/io/dftbplus"
 rsp2c-unfold        = "scripts/unfold_lib"
 rsp2-phonopy-io = "src/io/phonopy"
+rsp2-sparse = "src/util/sparse"
 #!!INSERTION POINT FOR NEW CRATES!!#
 # (do not edit the above line!)
 

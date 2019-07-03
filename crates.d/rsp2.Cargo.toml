@@ -37,6 +37,7 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 !!rsp2-dftbplus { optional = true, default-features = false }
 !!rsp2c_unfold
 !!rsp2-phonopy-io
+!!rsp2-sparse
 #!!INSERTION POINT FOR NEW CRATES!!#
 # (do not edit the above line!)
 
