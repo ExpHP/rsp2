@@ -34,6 +34,7 @@ path = "lib.rs"
 !!rsp2-dftbplus { optional = true, default-features = false }
 !!rsp2-phonopy-io
 !!rsp2-sparse
+!!rsp2-dynmat
 
 !!clap
 !!slice-of-array

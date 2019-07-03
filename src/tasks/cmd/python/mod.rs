@@ -10,7 +10,7 @@
 ** ************************************************************************ */
 
 pub use self::spglib::SpgDataset;
-mod scipy_eigsh;
+pub mod scipy_eigsh;
 mod spglib;
 pub mod convert;
 

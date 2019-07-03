@@ -109,3 +109,17 @@ where
     fn save(&self, path: impl AsPath) -> FailResult<()>
     { Ok(self.to_writer(FileWrite::create(path.as_path())?)?) }
 }
+
+impl Load for rsp2_dynmat::DynamicalMatrix {
+    /// Read a dynamical matrix in any format supported by the rsp2.io python module.
+    fn load(path: impl AsPath) -> FailResult<Self> {
+        crate::cmd::python::convert::read_dynmat(path)
+    }
+}
+
+impl Save for rsp2_dynmat::DynamicalMatrix {
+    /// Read a dynamical matrix in any format supported by the rsp2.io python module.
+    fn save(&self, path: impl AsPath) -> FailResult<()> {
+        crate::cmd::python::convert::write_dynmat(path, self)
+    }
+}

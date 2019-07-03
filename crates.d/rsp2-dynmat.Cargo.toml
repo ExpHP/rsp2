@@ -1,0 +1,27 @@
+[package]
+!!CRATE-NAME-LINE
+version = "0.1.0"
+authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
+description = "Code for computing the phonon dynamical matrix."
+!!LICENSE-PERMISSIVE
+!!DEFAULT-EDITION
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+!!rsp2-array-types
+!!rsp2-soa-ops
+!!rsp2-structure
+!!rsp2-newtype-indices
+!!rsp2-sparse
+!!rsp2-util-macros
+!!rsp2-linalg
+!!serde { features = ["derive"] }
+!!slice-of-array
+!!failure
+!!num-traits
+!!log
+
+[features]
+!!NIGHTLY-FEATURE-LINE

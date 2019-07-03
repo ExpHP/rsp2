@@ -39,13 +39,13 @@ use crate::{FailResult, FailOk};
 use rsp2_tasks_config::{self as cfg, Settings, NormalizationMode, SupercellSpec};
 use crate::traits::{AsPath, Load, Save};
 use rsp2_lammps_wrap::LammpsOnDemand;
+use rsp2_dynmat::{ForceConstants, DynamicalMatrix};
 
 use crate::meta::{self, prelude::*};
 use crate::util::ext_traits::{OptionResultExt, PathNiceExt};
 use crate::math::{
     basis::{GammaBasis3, EvDirection},
     bands::{ScMatrix},
-    dynmat::{ForceConstants, DynamicalMatrix},
 };
 use self::acoustic_search::ModeKind;
 
@@ -492,7 +492,7 @@ fn do_compute_dynmat(
     }
 
     trace!("Computing sparse force constants");
-    let force_constants = crate::math::dynmat::ForceConstants::compute_required_rows(
+    let force_constants = ForceConstants::compute_required_rows(
         &super_displacements,
         &force_sets,
         &cart_rots,
@@ -521,8 +521,10 @@ fn do_compute_dynmat(
     trace!("Computing sparse dynamical matrix");
     let dynmat = {
         let qpoint_cart = qpoint_pfrac * &prim_coords.lattice().reciprocal();
+        let masses: meta::SiteMasses = prim_meta.pick();
+        let masses = masses.iter().map(|&meta::Mass(m)| m).collect::<Vec<_>>();
         force_constants
-            .dynmat_at_cart_q(&super_coords, qpoint_cart, &sc, prim_meta.pick())
+            .dynmat_at_cart_q(&super_coords, qpoint_cart, &sc, &masses)
             .hermitianize()
     };
     trace!("Done computing dynamical matrix");
@@ -581,10 +583,13 @@ fn do_diagonalize_dynmat(
         match settings.phonons.eigensolver {
             cfg::PhononEigensolver::Phonopy(cfg::AlwaysFail(never, _)) => match never {},
             cfg::PhononEigensolver::Rsp2 { dense: true, .. } => {
-                dynmat.compute_eigensolutions_dense_gamma()
+                // FIXME: the location of this function is misleading;
+                //        it doesn't actually use eigsh.
+                python::scipy_eigsh::compute_eigensolutions_dense_gamma(&dynmat)
             },
             cfg::PhononEigensolver::Rsp2 { dense: false, how_many, shift_invert_attempts } => {
-                dynmat.compute_negative_eigensolutions_gamma(
+                python::scipy_eigsh::compute_negative_eigensolutions_gamma(
+                    &dynmat,
                     how_many,
                     shift_invert_attempts,
                 )?

@@ -14,7 +14,7 @@
 
 use crate::FailResult;
 use crate::traits::AsPath;
-use crate::math::dynmat::DynamicalMatrix;
+use rsp2_dynmat::DynamicalMatrix;
 
 use super::{call_script_and_communicate_with_args, Script};
 

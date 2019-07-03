@@ -19,6 +19,7 @@
 // Basically, everything in this crate is purely ad-hoc.
 
 #![deny(unused_must_use)]
+#![recursion_limit="128"]
 
 #[macro_use] extern crate rsp2_newtype_indices;
 #[macro_use] extern crate rsp2_util_macros;
@@ -167,7 +168,8 @@ mod hlist_aliases {
 }
 
 pub mod exposed_for_testing {
-    pub use crate::math::dynmat::ForceConstants;
+    // FIXME move tests
+    pub use rsp2_dynmat::ForceConstants;
     pub use crate::meta;
 }
 

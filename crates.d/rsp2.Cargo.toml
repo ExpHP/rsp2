@@ -38,6 +38,7 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 !!rsp2c_unfold
 !!rsp2-phonopy-io
 !!rsp2-sparse
+!!rsp2-dynmat
 #!!INSERTION POINT FOR NEW CRATES!!#
 # (do not edit the above line!)
 

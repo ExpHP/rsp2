@@ -73,7 +73,7 @@ mod scripts {
     #[derive(Serialize)]
     #[serde(rename_all = "kebab-case")]
     pub(super) struct Eigsh {
-        pub(super) matrix: crate::math::dynmat::Cereal,
+        pub(super) matrix: rsp2_dynmat::Cereal,
         pub(super) kw: PyKw,
         // permits non-convergence exceptions
         pub(super) allow_fewer_solutions: bool,
@@ -95,7 +95,7 @@ mod scripts {
     #[derive(Serialize)]
     #[serde(rename_all = "kebab-case")]
     pub(super) struct Negative {
-        pub(super) matrix: crate::math::dynmat::Cereal,
+        pub(super) matrix: rsp2_dynmat::Cereal,
         pub(super) max_solutions: usize,
         pub(super) shift_invert_attempts: u32,
         pub(super) dense: bool,
@@ -180,81 +180,75 @@ pub struct ScipyAvailabilityError;
 
 //-------------------------------------------------------------------------------
 
-use crate::math::dynmat::DynamicalMatrix;
+use rsp2_dynmat::DynamicalMatrix;
 
-impl DynamicalMatrix {
-    /// Requesting more than this number of eigensolutions will fail.
-    ///
-    /// (inherent limitation of the method used by ARPACK)
-    pub fn max_sparse_eigensolutions(&self) -> usize
-    { 3 * self.num_atoms() - 1 }
+/// Requesting more than this number of eigensolutions will fail.
+///
+/// (inherent limitation of the method used by ARPACK)
+pub fn max_sparse_eigensolutions(dynmat: &DynamicalMatrix) -> usize
+{ 3 * dynmat.num_atoms() - 1 }
 
-    pub fn num_atoms(&self) -> usize
-    { self.0.dim.0 }
+/// Clip `how_many` for the max possible value for sparse solver methods.
+pub fn clip_how_many(dynmat: &DynamicalMatrix, how_many: usize) -> usize
+{ usize::min(how_many, max_sparse_eigensolutions(dynmat)) }
 
-    /// Clip `how_many` for the max possible value for sparse solver methods.
-    pub fn clip_how_many(&self, how_many: usize) -> usize
-    { usize::min(how_many, self.max_sparse_eigensolutions()) }
+/// Intended to be used during relaxation.
+///
+/// *Attempts* to produce a set of eigenkets containing many or all of the non-acoustic modes of
+/// negative eigenvalue (possibly along with other modes that do not meet this condition);
+/// however, it may very well miss some.
+///
+/// If none of the modes produced are negative, then it is safe (-ish) to assume that the matrix
+/// has no such eigenmodes.  (At least, that is the intent!)
+pub fn compute_negative_eigensolutions_gamma(
+    dynmat: &DynamicalMatrix,
+    max_solutions: usize,
+    shift_invert_attempts: u32,
+) -> FailResult<(Vec<f64>, GammaBasis3)> {
+    trace!("Computing most negative eigensolutions.");
+    scripts::Negative {
+        matrix: dynmat.cereal(),
+        max_solutions,
+        shift_invert_attempts,
+        dense: false,
+    }.invoke_gamma()
+}
 
-    /// Intended to be used during relaxation.
-    ///
-    /// *Attempts* to produce a set of eigenkets containing many or all of the non-acoustic modes of
-    /// negative eigenvalue (possibly along with other modes that do not meet this condition);
-    /// however, it may very well miss some.
-    ///
-    /// If none of the modes produced are negative, then it is safe (-ish) to assume that the matrix
-    /// has no such eigenmodes.  (At least, that is the intent!)
-    pub fn compute_negative_eigensolutions_gamma(
-        &self,
-        max_solutions: usize,
-        shift_invert_attempts: u32,
-    ) -> FailResult<(Vec<f64>, GammaBasis3)> {
-        trace!("Computing most negative eigensolutions.");
-        scripts::Negative {
-            max_solutions,
-            shift_invert_attempts,
-            dense: false,
-            matrix: self.cereal(),
-        }.invoke_gamma()
+pub fn compute_most_extreme_eigensolutions_gamma(
+    dynmat: &DynamicalMatrix,
+    how_many: usize,
+) -> FailResult<(Vec<f64>, GammaBasis3)> {
+    scripts::Eigsh {
+        matrix: dynmat.cereal(),
+        allow_fewer_solutions: false,
+        kw: PyKw {
+            how_many: Some(how_many),
+            ..Default::default()
+        },
+    }.invoke_gamma()
+}
+
+/// Produce all eigensolutions of a dynamical matrix at gamma.
+pub fn compute_eigensolutions_dense_gamma(dynmat: &DynamicalMatrix) -> (Vec<f64>, GammaBasis3) {
+    use crate::math::basis::GammaKet3;
+
+    trace!("Computing all eigensolutions.");
+    let mut flat = dynmat.to_dense_flat_real().expect("(BUG!) expected real matrix!");
+    let mut eigenvalues = vec![std::f64::NAN; 3 * dynmat.num_atoms()];
+    let mut eigenvectors_flat = vec![std::f64::NAN; flat.len()];
+
+    rsp2_linalg::dynmat::diagonalize_real(&mut flat, &mut eigenvalues, &mut eigenvectors_flat);
+
+    // save that precious memory!
+    drop(flat);
+
+    let mut kets = vec![];
+    for eigenvector_data in eigenvectors_flat.chunks(3 * dynmat.num_atoms()) {
+        kets.push(GammaKet3(eigenvector_data.nest().to_vec()));
     }
+    let eigenvectors = GammaBasis3(Arc::new(kets));
 
-    pub fn compute_most_extreme_eigensolutions_gamma(&self, how_many: usize) -> FailResult<(Vec<f64>, GammaBasis3)> {
-        scripts::Eigsh {
-            matrix: self.cereal(),
-            allow_fewer_solutions: false,
-            kw: PyKw {
-                how_many: Some(how_many),
-                ..Default::default()
-            },
-        }.invoke_gamma()
-    }
+    let frequencies = eigenvalues.into_iter().map(crate::filetypes::eigensols::eigenvalue_to_frequency).collect();
 
-    /// Produce all eigensolutions of a dynamical matrix at gamma.
-    ///
-    /// This function has vastly less memory overhead than the ones that invoke python scripts.
-    //
-    // FIXME: That also kind of suggests it's out of place!
-    pub fn compute_eigensolutions_dense_gamma(&self) -> (Vec<f64>, GammaBasis3) {
-        use crate::math::basis::GammaKet3;
-
-        trace!("Computing all eigensolutions.");
-        let mut flat = self.to_dense_flat_real().expect("(BUG!) expected real matrix!");
-        let mut eigenvalues = vec![std::f64::NAN; 3 * self.num_atoms()];
-        let mut eigenvectors_flat = vec![std::f64::NAN; flat.len()];
-
-        rsp2_linalg::dynmat::diagonalize_real(&mut flat, &mut eigenvalues, &mut eigenvectors_flat);
-
-        // save that precious memory!
-        drop(flat);
-
-        let mut kets = vec![];
-        for eigenvector_data in eigenvectors_flat.chunks(3 * self.num_atoms()) {
-            kets.push(GammaKet3(eigenvector_data.nest().to_vec()));
-        }
-        let eigenvectors = GammaBasis3(Arc::new(kets));
-
-        let frequencies = eigenvalues.into_iter().map(crate::filetypes::eigensols::eigenvalue_to_frequency).collect();
-
-        (frequencies, eigenvectors)
-    }
+    (frequencies, eigenvectors)
 }

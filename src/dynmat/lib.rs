@@ -9,8 +9,12 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use crate::FailResult;
-use crate::meta;
+#[macro_use] extern crate log;
+#[macro_use] extern crate serde;
+#[macro_use] extern crate failure;
+#[macro_use] extern crate rsp2_newtype_indices;
+#[macro_use] extern crate rsp2_util_macros;
+
 use rsp2_array_types::{V3, M33, M3};
 use rsp2_soa_ops::{Perm, Permute};
 use rsp2_structure::{Coords};
@@ -20,7 +24,7 @@ use rsp2_sparse::{RawBee, RawCoo, RawCsr};
 use std::collections::BTreeMap;
 use slice_of_array::prelude::*;
 
-use crate::util::ext_traits::OptionExpectNoneExt;
+pub type FailResult<T> = Result<T, failure::Error>;
 
 // index types for local use, to aid in reasoning
 newtype_index!{DispI}  // index of a displacement
@@ -295,8 +299,9 @@ impl<'ctx> Context<'ctx> {
                     .collect()
             };
 
-            computed_rows.insert(representative, force_constants_row)
-                .expect_none("(BUG) computed same row of FCs twice!?");
+            if let Some(_) = computed_rows.insert(representative, force_constants_row) {
+                panic!("(BUG) computed same row of FCs twice!?");
+            }
         } // for star
         Ok(computed_rows)
     }
@@ -359,11 +364,14 @@ impl<'ctx> Context<'ctx> {
                     let new_affected_atom = rotate_and_translate_atom(affected_atom);
                     let new_cart_force = rotate_vector(cart_force);
 
-                    all_sparse_forces
-                        .entry(new_affected_atom)
-                        .or_insert_with(BTreeMap::new)
-                        .insert(eqn_i, new_cart_force)
-                        .expect_none("BUG! multiple affected atoms rotated to same one?!")
+                    if let Some(_) = {
+                        all_sparse_forces
+                            .entry(new_affected_atom)
+                            .or_insert_with(BTreeMap::new)
+                            .insert(eqn_i, new_cart_force)
+                    } {
+                        panic!("BUG! multiple affected atoms rotated to same one?!");
+                    }
                 }
             }
         }
@@ -587,7 +595,7 @@ impl ForceConstants {
         super_coords: &Coords,
         qpoint_cart: V3,
         sc: &SupercellToken,
-        masses: meta::SiteMasses,
+        masses: &[f64],
     ) -> DynamicalMatrix {
         assert_eq!(masses.len(), sc.num_primitive_atoms());
         let masses: &Indexed<PrimI, _> = Indexed::from_raw_ref(&masses[..]);
@@ -625,7 +633,7 @@ impl ForceConstants {
                 let prim_c = get_prim(super_c);
 
                 // mass-normalizing scale factor
-                let scale = 1.0 / f64::sqrt(masses[prim_r].0 * masses[prim_c].0);
+                let scale = 1.0 / f64::sqrt(masses[prim_r] * masses[prim_c]);
 
                 // vector from atom in primitive cell to atom in supercell.
                 //
@@ -747,6 +755,9 @@ impl DynamicalMatrix {
             })
             .sqrt()
     }
+
+    pub fn num_atoms(&self) -> usize
+    { self.0.dim.0 }
 
     pub fn hermitianize(&self) -> Self {
         let coo_1 = self.0.to_coo();
@@ -871,25 +882,6 @@ mod complex_33 {
         fn add_assign(&mut self, Complex33(real, imag): Complex33) {
             self.0 += real;
             self.1 += imag;
-        }
-    }
-}
-
-mod io_impls {
-    use super::*;
-    use crate::traits::{Save, Load, AsPath};
-
-    impl Load for crate::math::dynmat::DynamicalMatrix {
-        /// Read a dynamical matrix in any format supported by the rsp2.io python module.
-        fn load(path: impl AsPath) -> FailResult<Self> {
-            crate::cmd::python::convert::read_dynmat(path)
-        }
-    }
-
-    impl Save for crate::math::dynmat::DynamicalMatrix {
-        /// Read a dynamical matrix in any format supported by the rsp2.io python module.
-        fn save(&self, path: impl AsPath) -> FailResult<()> {
-            crate::cmd::python::convert::write_dynmat(path, self)
         }
     }
 }
