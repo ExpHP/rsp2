@@ -79,8 +79,8 @@ mod scripts {
         pub(super) allow_fewer_solutions: bool,
     }
 
+    #[allow(unused)]
     impl Eigsh {
-        #[allow(unused)]
         pub(super) fn invoke(self) -> FailResult<(Vec<Frequency>, Basis3)> {
             call_script_and_communicate(PY_CALL, self)
                 .and_then(read_py_output)
@@ -101,8 +101,8 @@ mod scripts {
         pub(super) dense: bool,
     }
 
+    #[allow(unused)]
     impl Negative {
-        #[allow(unused)]
         pub(super) fn invoke(self) -> FailResult<(Vec<Frequency>, Basis3)> {
             call_script_and_communicate(PY_NEGATIVE, self)
                 .and_then(read_py_output)
@@ -182,16 +182,6 @@ pub struct ScipyAvailabilityError;
 
 use rsp2_dynmat::DynamicalMatrix;
 
-/// Requesting more than this number of eigensolutions will fail.
-///
-/// (inherent limitation of the method used by ARPACK)
-pub fn max_sparse_eigensolutions(dynmat: &DynamicalMatrix) -> usize
-{ 3 * dynmat.num_atoms() - 1 }
-
-/// Clip `how_many` for the max possible value for sparse solver methods.
-pub fn clip_how_many(dynmat: &DynamicalMatrix, how_many: usize) -> usize
-{ usize::min(how_many, max_sparse_eigensolutions(dynmat)) }
-
 /// Intended to be used during relaxation.
 ///
 /// *Attempts* to produce a set of eigenkets containing many or all of the non-acoustic modes of
@@ -211,20 +201,6 @@ pub fn compute_negative_eigensolutions_gamma(
         max_solutions,
         shift_invert_attempts,
         dense: false,
-    }.invoke_gamma()
-}
-
-pub fn compute_most_extreme_eigensolutions_gamma(
-    dynmat: &DynamicalMatrix,
-    how_many: usize,
-) -> FailResult<(Vec<f64>, GammaBasis3)> {
-    scripts::Eigsh {
-        matrix: dynmat.cereal(),
-        allow_fewer_solutions: false,
-        kw: PyKw {
-            how_many: Some(how_many),
-            ..Default::default()
-        },
     }.invoke_gamma()
 }
 

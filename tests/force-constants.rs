@@ -11,9 +11,6 @@ use ::rsp2_array_types::{M33, V3, Unvee};
 use ::rsp2_structure::{Coords};
 use ::rsp2_soa_ops::{Permute};
 
-use ::rsp2_tasks::exposed_for_testing::ForceConstants;
-use ::rsp2_tasks::exposed_for_testing::meta::Mass;
-
 #[derive(Deserialize)]
 pub struct ForceSets {
     #[serde(rename =       "sc-dims")] sc_dims: [u32; 3],
@@ -101,7 +98,7 @@ fn check(
     // ------- Force constants ---------
     // ---------------------------------
 
-    let force_constants = ForceConstants::compute_required_rows(
+    let force_constants = rsp2_dynmat::ForceConstants::compute_required_rows(
         &super_displacements,
         &super_force_sets,
         &cart_rots,
@@ -139,11 +136,10 @@ fn check(
     // ----------------------------------
 
     let dynamical_matrix = {
-        let prim_masses: Vec<_> = prim_masses.into_iter().map(Mass).collect();
         let qpoint_cart = qpoint_frac * &prim_coords.lattice().reciprocal();
 
         force_constants
-            .dynmat_at_cart_q(&super_coords, qpoint_cart, &sc, prim_masses.into())
+            .dynmat_at_cart_q(&super_coords, qpoint_cart, &sc, &prim_masses)
             .hermitianize()
     };
 

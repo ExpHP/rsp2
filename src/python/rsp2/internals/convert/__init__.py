@@ -33,7 +33,7 @@ def _main(
 ):
     keep = keep or output_is_stdout
 
-    if os.path.exists(output):
+    if os.path.exists(output) and os.path.exists(input):
         if os.path.samefile(output, input):
             return
 
