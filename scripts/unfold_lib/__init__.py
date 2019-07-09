@@ -6,23 +6,38 @@ ROOT = os.path.dirname(__file__)
 LIBDIR = os.path.join(ROOT, '../../target/release')
 
 __all__ = [
+    "BuildError",
     "build",
     "unfold_all",
 ]
 
 unfold_all = None
+diagonalize_dynmat = None
+
+class BuildError(Exception):
+    """ Indicates that the rust extension cannot be built or linked for some reason. """
+    pass
 
 def build():
     global unfold_all
 
     import ctypes
 
-    subprocess.check_call(['cargo', 'build', '--release'], cwd=ROOT)
+    try:
+        subprocess.check_call(['cargo', 'build', '--release'], cwd=ROOT)
+    except (FileNotFoundError, IOError, OSError, subprocess.SubprocessError) as e:
+        raise BuildError(e)
 
-    imp = ctypes.cdll.LoadLibrary(os.path.join(LIBDIR, 'librsp2c_unfold.so'))
+    library_path = os.path.join(LIBDIR, 'librsp2c_unfold.so')
+    try:
+        imp = ctypes.cdll.LoadLibrary(library_path)
+    except Exception as e: # I don't know what this can throw on linker errors
+        if isinstance(e, (TypeError, NameError, AttributeError, ValueError)):
+            raise e # legitimate python errors; don't wrap them
+        raise BuildError(e)
 
     # This definition gets written to the exported global name
-    def unfold_all(
+    def _unfold_all(
             superstructure,
             translation_carts,
             gpoint_sfracs,
@@ -66,11 +81,15 @@ def build():
         else:
             progress_prefix = ctypes.c_char_p(progress_prefix.encode('utf-8'))
 
-        imp.rsp2c_unfold_all(
+        code = imp.rsp2c_unfold_all(
             ctypes.c_int64(nquotient),
             ctypes.c_int64(nsite),
             ctypes.c_int64(nev),
             progress_prefix,
             *pointers,
         )
+        if code:
+            raise RuntimeError('rsp2c failed')
+
         return output
+    unfold_all = _unfold_all

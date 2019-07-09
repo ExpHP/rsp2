@@ -83,7 +83,8 @@ def main():
     if args.debug:
         SHOW_ACTION_STACK = True
 
-    unfold_lib.build()
+    for task in all_tasks:
+        task.check_upfront(args)
 
     for task in all_tasks:
         if task.has_action(args):
@@ -106,6 +107,9 @@ class Task:
         self.cached = Task.NOT_YET_COMPUTED
 
     def add_parser_opts(self, parser):
+        pass
+
+    def check_upfront(self, args):
         pass
 
     def has_action(self, args):
@@ -210,6 +214,10 @@ class TaskDeperms(Task):
             'Path to file previously written through --write-perms.',
         )
 
+    def check_upfront(self, args):
+        check_optional_input(args.perms)
+        check_optional_output_ext('--write-perms', args.write_perms, forbid='.npz')
+
     def has_action(self, args):
         return bool(args.write_perms)
 
@@ -241,6 +249,9 @@ class TaskDynmat(Task):
             '--dynmat', metavar='FILE', help='rsp2 dynmat file (.npz)',
         )
 
+    def check_upfront(self, args):
+        check_optional_input(args.dynmat)
+
     def _compute(self, args):
         if not args.dynmat:
             die('--dynmat is required for this action')
@@ -262,6 +273,10 @@ class TaskEigensols(Task):
             '--write-eigensols', metavar='FILE',
             help='write rsp2 eigensols file. (.npz)',
         )
+
+    def check_upfront(self, args):
+        check_optional_input(args.eigensols)
+        check_optional_output_ext('--write-eigensols', args.write_eigensols, forbid='.npy')
 
     def has_action(self, args):
         return bool(args.write_eigensols)
@@ -319,6 +334,10 @@ class TaskEigenmodeData(Task):
             'Read data previously written using --write-mode-data so that reading '
             'the (large) eigensols file is not necessary to produce a plot.',
         )
+
+    def check_upfront(self, args):
+        check_optional_input(args.mode_data)
+        check_optional_output_ext('--write-mode-data', args.write_perms, forbid='.npy')
 
     def has_action(self, args):
         return bool(args.write_mode_data)
@@ -385,7 +404,7 @@ class TaskQProbs(Task):
         )
 
         parser.add_argument(
-            '--probs-impl', choices=['rust', 'python'], default='python', help=
+            '--probs-impl', choices=['auto', 'rust', 'python'], default='auto', help=
             'Enable the experimental rust unfolder.',
         )
 
@@ -393,6 +412,18 @@ class TaskQProbs(Task):
             '--probs', metavar='FILE', help=
             'Path to .npz file previously written through --write-probs.',
         )
+
+    def check_upfront(self, args):
+        check_optional_input(args.probs)
+        check_optional_output_ext('--write-probs', args.write_perms, forbid='.npy')
+
+        if args.probs_impl in ['rust', 'auto']:
+            try:
+                unfold_lib.build()
+            except unfold_lib.BuildError:
+                assert unfold_lib.unfold_all is None
+                if args.probs_impl == 'rust':
+                    raise
 
     def has_action(self, args):
         return bool(args.write_probs)
@@ -512,6 +543,10 @@ class TaskBands(Task):
             '--bands', metavar='FILE', help=
             'Path to file previously written through --write-bands.',
         )
+
+    def check_upfront(self, args):
+        check_optional_input(args.bands)
+        check_optional_output_ext('--write-bands', args.write_bands, forbid='.npy')
 
     def has_action(self, args):
         return bool(args.write_bands)
@@ -965,11 +1000,7 @@ def unfold_all(
 
     # debug_quotient_points((gpoint_sfracs @ np.linalg.inv(super_lattice).T)[:, :2], np.linalg.inv(prim_lattice).T[:2,:2])
 
-    if implementation == 'rust':
-        import unfold_lib
-        if unfold_lib.unfold_all is None:
-            unfold_lib.build()
-
+    if unfold_lib.unfold_all is not None and implementation != 'python':
         return unfold_lib.unfold_all(
             superstructure=superstructure,
             translation_carts=translation_carts,
@@ -979,7 +1010,7 @@ def unfold_all(
             translation_deperms=translation_deperms,
             progress_prefix=progress_prefix,
         )
-    elif implementation == 'python':
+    else:
         progress = None
         if progress_prefix is not None:
             def progress(done, count):
@@ -995,7 +1026,6 @@ def unfold_all(
                 eigenvector=eigenvector.reshape((-1, 3)),
             )
         )))
-    else: assert False, 'complete switch'
 
 def unfold_one(
         translation_sfracs,
@@ -1305,6 +1335,42 @@ def check_arrays(**kw):
     return {dim:tup[0] for (dim, tup) in previous_values.items()}
 
 #---------------------------------------------------------------
+
+def check_optional_input(path):
+    if path is not None and not os.path.exists(path):
+        die(f'Does not exist: \'{path}\'')
+
+def check_optional_output_ext(argument, path, only=None, forbid=None):
+    """ Validate the extension for an output file.
+
+    Because this script uses DWIM facilities, some arguments support many possible
+    filetypes.  However, there are some cases where it's easy to forget whether
+    something should be .npy or .npz.  Calling this function with `forbid=` in this
+    case can be helpful.
+    """
+    if path is None:
+        return
+
+    if only is None and forbid is None:
+        raise TypeError('must supply only or forbid')
+
+    if forbid is not None:
+        if type(forbid) is str:
+            forbid = [forbid]
+
+        for ext in forbid:
+            if path.endswith(ext) or path.endswith(ext + '.gz') or path.endswith(ext + '.xz'):
+                die(f'Invalid extension for {argument}: {path}')
+
+    if only is not None:
+        if type(only) is str:
+            only = [only]
+
+        if not any(path.endswith(ext) for ext in only):
+            expected = ', '.join(only)
+            die(f'Invalid extension for {argument}: expected one of: {expected}')
+
+#---------------------------------------------------------------
 # utils
 
 def map_with_progress(
@@ -1328,7 +1394,6 @@ def iter_with_progress(
 
     if progress:
         progress(len(xs), len(xs))
-
 
 def cartesian_product(*arrays):
     la = len(arrays)

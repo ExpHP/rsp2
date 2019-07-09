@@ -828,11 +828,7 @@ pub struct Phonons {
     pub supercell: SupercellSpec,
 }
 fn _phonons__eigensolver() -> PhononEigensolver {
-    PhononEigensolver::Rsp2 {
-        dense: _phonon_eigen_solver__rsp2__dense(),
-        shift_invert_attempts: _phonon_eigen_solver__rsp2__shift_invert_attempts(),
-        how_many: _phonon_eigen_solver__rsp2__how_many(),
-    }
+    PhononEigensolver::Dense {}
 }
 fn _phonons__disp_finder() -> PhononDispFinder {
     PhononDispFinder::Rsp2 {
@@ -844,25 +840,12 @@ fn _phonons__disp_finder() -> PhononDispFinder {
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub enum PhononEigensolver {
+    /// No longer supported.
     Phonopy(AlwaysFail<MessagePhononEigensolverPhonopy>),
-    // FIXME: This should be split into two separate eigensolvers 'Sparse' and 'Dense',
-    //        but it seems tricky to rewrite the code in rsp2_tasks::cmd that matches on it
-    //        without introducing code duplication.  What a mess...
-    //
-    /// Diagonalize the dynamical matrix using ARPACK through Scipy or Numpy
-    /// (dense). Aliased to 'sparse' for backwards compatibility.
-    #[serde(rename_all = "kebab-case")]
-    #[serde(alias = "sparse")]
-    Rsp2 {
-        /// Use a dense matrix eigensolver.
-        /// This can be more reliable than the sparse eigensolver,
-        /// and may even be faster (if you can afford the memory!).
-        ///
-        /// `shift_invert_attempts` and `how_many` will be ignored.
-        /// It will always produce all eigensolutions.
-        #[serde(default = "_phonon_eigen_solver__rsp2__dense")]
-        dense: bool,
 
+    /// Diagonalize the dynamical matrix using ARPACK through Scipy.
+    #[serde(rename_all = "kebab-case")]
+    Sparse {
         /// The sparse eigensolver first attempts to perform shift-invert mode with a shift
         /// of zero.  This can converge much faster (especially when large, negative modes exist).
         ///
@@ -872,7 +855,7 @@ pub enum PhononEigensolver {
         ///
         /// When none of the shift-inversion attempts produce any non-acoustic negative modes,
         /// the sparse eigensolver falls back to non-shift-invert mode, which is far more reliable.
-        #[serde(default = "_phonon_eigen_solver__rsp2__shift_invert_attempts")]
+        #[serde(default = "_phonon_eigen_solver__sparse__shift_invert_attempts")]
         shift_invert_attempts: u32,
 
         /// How many eigensolutions the sparse eigensolver should seek.
@@ -881,13 +864,36 @@ pub enum PhononEigensolver {
         ///
         /// The most negative eigenvalues will be sought first.
         /// Fewer will be sought if the number of atoms is insufficient.
-        #[serde(default = "_phonon_eigen_solver__rsp2__how_many")]
+        #[serde(default = "_phonon_eigen_solver__sparse__how_many")]
+        how_many: usize,
+    },
+
+    /// Diagonalize the dynamical matrix using dense matrix methods in LAPACKe.
+    ///
+    /// This can be more reliable than the sparse eigensolver,
+    /// and may even be faster (if you can afford the memory!).
+    #[serde(rename_all = "kebab-case")]
+    Dense {},
+
+    // FIXME: This should be split into two separate eigensolvers 'Sparse' and 'Dense',
+    //        but it seems tricky to rewrite the code in rsp2_tasks::cmd that matches on it
+    //        without introducing code duplication.  What a mess...
+    //
+    /// Deprecated.  Use either 'sparse' or 'dense'.
+    #[serde(rename_all = "kebab-case")]
+    Rsp2 {
+        #[serde(default = "_phonon_eigen_solver__rsp2__dense")]
+        dense: bool,
+
+        #[serde(default = "_phonon_eigen_solver__sparse__shift_invert_attempts")]
+        shift_invert_attempts: u32,
+
+        #[serde(default = "_phonon_eigen_solver__sparse__how_many")]
         how_many: usize,
     },
 }
-fn _phonon_eigen_solver__phonopy__save_bands() -> bool { false }
-fn _phonon_eigen_solver__rsp2__shift_invert_attempts() -> u32 { 4 }
-fn _phonon_eigen_solver__rsp2__how_many() -> usize { 12 }
+fn _phonon_eigen_solver__sparse__shift_invert_attempts() -> u32 { 4 }
+fn _phonon_eigen_solver__sparse__how_many() -> usize { 12 }
 fn _phonon_eigen_solver__rsp2__dense() -> bool { false }
 
 #[derive(Serialize)]
@@ -1118,7 +1124,7 @@ fn _ev_loop__fail() -> bool { true }
 ///
 /// **Note:** Even though this appears as by-element in the config file, rsp2 internally
 /// stores masses by site, and that is what it also writes to `.structure` directories.
-/// When a `.structure` directory provides masses, those take precedence over the config file.
+/// When a `.structure` directory provides masses, those take precedence over this setting.
 pub struct Masses(pub HashMap<String, f64>);
 
 // --------------------------------------------------------
@@ -1223,6 +1229,7 @@ impl Settings {
             &mut self.lammps,
             &mut self._deprecated_lammps_settings,
         );
+        fix_deprecated_eigensolver(&mut self.phonons.eigensolver);
 
         Ok(ValidatedSettings(self))
     }
@@ -1234,8 +1241,25 @@ impl EnergyPlotSettings {
             &mut self.lammps,
             &mut self._deprecated_lammps_settings,
         );
+
         Ok(ValidatedEnergyPlotSettings(self))
     }
+}
+
+fn fix_deprecated_eigensolver(it: &mut PhononEigensolver) {
+    match *it {
+        PhononEigensolver::Phonopy(AlwaysFail(never, _)) => match never {},
+        PhononEigensolver::Rsp2 { dense: true, .. } => {
+            warn!("`phonon.eigensolver: rsp2 {{ dense: true }}` is deprecated. Use the `dense` eigensolver.");
+            *it = PhononEigensolver::Dense {};
+        },
+        PhononEigensolver::Rsp2 { dense: false, shift_invert_attempts, how_many } => {
+            warn!("`phonon.eigensolver: rsp2 {{ dense: false }}` is deprecated. Use the `sparse` eigensolver.");
+            *it = PhononEigensolver::Sparse { shift_invert_attempts, how_many };
+        },
+        PhononEigensolver::Dense { .. } => {},
+        PhononEigensolver::Sparse { .. } => {},
+    };
 }
 
 fn fill_lammps_from_deprecated(

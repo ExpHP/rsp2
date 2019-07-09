@@ -582,12 +582,13 @@ fn do_diagonalize_dynmat(
     let (freqs, evecs) = {
         match settings.phonons.eigensolver {
             cfg::PhononEigensolver::Phonopy(cfg::AlwaysFail(never, _)) => match never {},
-            cfg::PhononEigensolver::Rsp2 { dense: true, .. } => {
+            cfg::PhononEigensolver::Rsp2 { .. } => panic!("(BUG!) setting phonons.eigensolver is not normalized!"),
+            cfg::PhononEigensolver::Dense {} => {
                 // FIXME: the location of this function is misleading;
                 //        it doesn't actually use eigsh.
                 python::scipy_eigsh::compute_eigensolutions_dense_gamma(&dynmat)
             },
-            cfg::PhononEigensolver::Rsp2 { dense: false, how_many, shift_invert_attempts } => {
+            cfg::PhononEigensolver::Sparse { how_many, shift_invert_attempts } => {
                 python::scipy_eigsh::compute_negative_eigensolutions_gamma(
                     &dynmat,
                     how_many,

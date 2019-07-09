@@ -14,7 +14,6 @@ cg.stop-condition: true # stop immediately
 
 phonons:
   eigensolver:
-    rsp2:
-      dense: true
+    dense: {}
 
 bond-radius: 1.8

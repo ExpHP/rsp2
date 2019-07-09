@@ -19,8 +19,7 @@ parameters: [a, a, ~]
 
 phonons:
   eigensolver:
-    rsp2:
-      dense: true
+    dense: {}
 
 bond-radius: 1.8
 lammps:
