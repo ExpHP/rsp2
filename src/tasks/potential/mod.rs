@@ -513,29 +513,33 @@ impl dyn PotentialBuilder {
 
     pub(crate) fn from_config_parts(
         trial_dir: Option<&TrialDir>,
-        on_demand: Option<LammpsOnDemand>,
+        mut on_demand: Option<LammpsOnDemand>,
         threading: &cfg::Threading,
         lammps: &cfg::Lammps,
-        config: &cfg::Potential,
+        config: &cfg::ValidatedPotential,
     ) -> FailResult<Box<dyn PotentialBuilder>> {
-        match config {
-            cfg::Potential::Single(cfg) => {
-                PotentialBuilder::single_from_config_parts(trial_dir, on_demand, threading, lammps, &cfg)
-            },
-            cfg::Potential::Sum(cfgs) => {
-                let mut iter = {
-                    cfgs.into_iter()
-                        // (we simply cannot support LammpsOnDemand here)
-                        .map(|cfg| PotentialBuilder::single_from_config_parts(trial_dir, None, threading, lammps, &cfg))
-                        .collect::<FailResult<Vec<_>>>()?
-                        .into_iter()
-                };
-                let first = match iter.next() {
-                    None => return Ok(Box::new(self::test_functions::Zero)),
-                    Some(x) => x,
-                };
-                Ok(iter.fold(first, |a, b| Box::new(helper::Sum(a, b))))
-            },
+        let cfg::ValidatedPotential(config) = config;
+        let mut iter = {
+            let mut found_lammps = false;
+            config.as_slice().iter()
+                .map(|cfg| {
+                    match cfg {
+                        // (give the LammpsOnDemand to the Lammps potential if there is one)
+                        cfg::PotentialKind::Lammps(_) => {
+                            assert!(!found_lammps, "(BUG!) more than one lammps potential after validation!?");
+                            found_lammps = true;
+                            PotentialBuilder::single_from_config_parts(trial_dir, on_demand.take(), threading, lammps, &cfg)
+                        },
+                        _ => PotentialBuilder::single_from_config_parts(trial_dir, None, threading, lammps, &cfg),
+                    }
+                })
+                .collect::<FailResult<Vec<_>>>()?
+                .into_iter()
+        };
+
+        match iter.next() {
+            None => Ok(Box::new(self::test_functions::Zero)),
+            Some(first) => Ok(iter.fold(first, |a, b| Box::new(helper::Sum(a, b)))),
         }
     }
 
@@ -547,32 +551,42 @@ impl dyn PotentialBuilder {
         config: &cfg::PotentialKind,
     ) -> FailResult<Box<dyn PotentialBuilder>> {
         match config {
-            cfg::PotentialKind::Rebo(cfg) => {
-                let lammps_pot = self::lammps::Airebo::from(cfg);
-                let pot = self::lammps::Builder::new(trial_dir, on_demand, threading, lammps, lammps_pot)?;
-                Ok(Box::new(pot))
-            }
-            cfg::PotentialKind::Airebo(cfg) => {
-                let lammps_pot = self::lammps::Airebo::from(cfg);
-                let pot = self::lammps::Builder::new(trial_dir, on_demand, threading, lammps, lammps_pot)?;
-                Ok(Box::new(pot))
+            cfg::PotentialKind::OldReboNew(_) |
+            cfg::PotentialKind::OldLammpsRebo(_) |
+            cfg::PotentialKind::OldLammpsAirebo(_) |
+            cfg::PotentialKind::OldLammpsKolmogorovCrespiZ { .. } |
+            cfg::PotentialKind::OldLammpsKolmogorovCrespiFull { .. } => {
+                panic!("(BUG!) deprecated potential should have been replaced during validation: {:?}", config);
             },
-            cfg::PotentialKind::KolmogorovCrespiZ(cfg) => {
-                let lammps_pot = self::lammps::KolmogorovCrespiZ::from(cfg);
-                let pot = self::lammps::Builder::new(trial_dir, on_demand, threading, lammps, lammps_pot)?;
-                Ok(Box::new(pot))
-            },
-            cfg::PotentialKind::KolmogorovCrespiFull(cfg) => {
-                let lammps_pot = self::lammps::KolmogorovCrespiFull::from(cfg);
-                let pot = self::lammps::Builder::new(trial_dir, on_demand, threading, lammps, lammps_pot)?;
-                Ok(Box::new(pot))
+
+            cfg::PotentialKind::Lammps(cfg) => match cfg {
+                cfg::LammpsPotentialKind::Rebo(cfg) => {
+                    let lammps_pot = self::lammps::Airebo::from(cfg);
+                    let pot = self::lammps::Builder::new(trial_dir, on_demand, threading, lammps, lammps_pot)?;
+                    Ok(Box::new(pot))
+                },
+                cfg::LammpsPotentialKind::Airebo(cfg) => {
+                    let lammps_pot = self::lammps::Airebo::from(cfg);
+                    let pot = self::lammps::Builder::new(trial_dir, on_demand, threading, lammps, lammps_pot)?;
+                    Ok(Box::new(pot))
+                },
+                cfg::LammpsPotentialKind::KolmogorovCrespiZ(cfg) => {
+                    let lammps_pot = self::lammps::KolmogorovCrespiZ::from(cfg);
+                    let pot = self::lammps::Builder::new(trial_dir, on_demand, threading, lammps, lammps_pot)?;
+                    Ok(Box::new(pot))
+                },
+                cfg::LammpsPotentialKind::KolmogorovCrespiFull(cfg) => {
+                    let lammps_pot = self::lammps::KolmogorovCrespiFull::from(cfg);
+                    let pot = self::lammps::Builder::new(trial_dir, on_demand, threading, lammps, lammps_pot)?;
+                    Ok(Box::new(pot))
+                },
             },
             cfg::PotentialKind::KolmogorovCrespiZNew(cfg) => {
                 let cfg = cfg.clone();
                 let parallel = threading == &cfg::Threading::Rayon;
                 Ok(Box::new(self::homestyle::KolmogorovCrespiZ { cfg, parallel }))
             },
-            cfg::PotentialKind::ReboNew(cfg) => {
+            cfg::PotentialKind::ReboNonreactive(cfg) => {
                 let cfg = cfg.clone();
                 let parallel = threading == &cfg::Threading::Rayon;
                 Ok(Box::new(self::homestyle::Rebo { cfg, parallel }))

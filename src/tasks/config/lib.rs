@@ -31,7 +31,12 @@ use serde::de::{self, IntoDeserializer};
 
 #[macro_use]
 extern crate log;
+#[macro_use]
 extern crate failure;
+#[macro_use]
+extern crate rsp2_util_macros;
+
+pub const MAX_VERSION: u32 = 1;
 
 use std::io::Read;
 use std::collections::HashMap;
@@ -143,13 +148,22 @@ pub struct ValidatedSettings(pub Settings);
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub struct Settings {
+    /// Identifies the version of the settings that this file uses.
+    ///
+    /// rsp2 increments the max supported version number when breaking changes are made to
+    /// config files.  Old config files with an older version continue to use the old behavior.
+    ///
+    /// If not specified, assumes a value of 1.
+    #[serde(default)]
+    pub version: OrDefault<u32>,
+
     #[serde(default)]
     pub threading: Threading,
 
     /// Specifies the potential to be used.
     ///
     /// See [`PotentialKind`] for the list of possibilities.
-    pub potential: Potential,
+    pub potential: ValidatedPotential,
 
     // (FIXME: weird name)
     /// Used to optimize lattice parameters prior to relaxation.
@@ -178,6 +192,7 @@ pub struct Settings {
     /// parameters: [~, ~, c]
     /// ```
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub parameters: Nullable<Parameters>,
 
     /// See the type for documentation.
@@ -196,10 +211,12 @@ pub struct Settings {
     /// `None` disables layer search.
     /// (layer_search is also ignored if layers.yaml is provided)
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub layer_search: Nullable<LayerSearch>,
 
     /// `None` disables bond graph.
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub bond_radius: Nullable<f64>,
 
     // FIXME move
@@ -207,6 +224,7 @@ pub struct Settings {
 
     /// See the type for documentation.
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub masses: Nullable<Masses>,
 
     /// See the type for documentation.
@@ -215,10 +233,12 @@ pub struct Settings {
 
     /// `None` disables band unfolding.
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub unfold_bands: Option<UnfoldBands>,
 
     /// `None` disables animations.
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub animate: Option<Animate>,
 
     #[serde(default)]
@@ -247,9 +267,12 @@ impl<'de> de::Deserialize<'de> for ValidatedSettings {
 pub struct DeprecatedLammpsSettings {
     #[serde(default)]
     #[serde(rename = "lammps-update-style")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub lammps_update_style: Option<LammpsUpdateStyle>,
+
     #[serde(default)]
     #[serde(rename = "lammps-processor-axis-mask")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub lammps_processor_axis_mask: Option<[bool; 3]>,
 }
 
@@ -275,6 +298,7 @@ pub struct ScaleRanges {
     ///
     /// If null (`~`), no check is performed.
     #[serde(default="_scale_ranges__warn_threshold")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub warn_threshold: Nullable<f64>,
 
     /// Panic on violations of `warn_threshold`.
@@ -532,6 +556,7 @@ pub struct LayerSearch {
     /// Expected number of layers, for a sanity check.
     /// (rsp2 will fail if this is provided and does not match the count found)
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub count: Nullable<u32>,
 }
 derive_yaml_read!{LayerSearch}
@@ -545,6 +570,8 @@ pub struct ValidatedEnergyPlotSettings(pub EnergyPlotSettings);
 #[serde(rename_all = "kebab-case")]
 pub struct EnergyPlotSettings {
     #[serde(default)]
+    pub version: OrDefault<u32>,
+    #[serde(default)]
     pub threading: Threading,
     pub xlim: [f64; 2],
     pub ylim: [f64; 2],
@@ -554,7 +581,7 @@ pub struct EnergyPlotSettings {
     pub normalization: NormalizationMode,
     //pub phonons: Phonons,
 
-    pub potential: Potential,
+    pub potential: ValidatedPotential,
 
     #[serde(default)]
     #[serde(flatten)]
@@ -581,22 +608,65 @@ pub enum EnergyPlotEvIndices {
     These(usize, usize),
 }
 
+/// Potential settings known to satisfy certain properties:
+///
+/// * No deprecated items.
+/// * Is known to have at most one `lammps` entry.
+/// * Is known to have at most one `dftb+` entry.
+#[derive(Serialize)]
+#[derive(Debug, Clone, PartialEq)]
+pub struct ValidatedPotential(pub Potential);
+impl<'de> de::Deserialize<'de> for ValidatedPotential {
+    fn deserialize<D: de::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let cereal: Potential = de::Deserialize::deserialize(deserializer)?;
+
+        cereal.validate().map_err(de::Error::custom)
+    }
+}
+derive_yaml_read!{ValidatedPotential}
+
+pub type Potential = OneOrMany<PotentialKind>;
+
 #[derive(Serialize)]
 #[derive(Debug, Clone, PartialEq)]
 #[serde(untagged)]
-pub enum Potential {
-    Single(PotentialKind),
-    Sum(Vec<PotentialKind>),
+pub enum OneOrMany<T> {
+    Single(T),
+    Sum(Vec<T>),
 }
-derive_yaml_read!{Potential}
+
+impl<T> OneOrMany<T> {
+    pub fn into_vec(self) -> Vec<T> {
+        match self {
+            OneOrMany::Single(x) => vec![x],
+            OneOrMany::Sum(xs) => xs,
+        }
+    }
+
+    pub fn prefer_single(self) -> OneOrMany<T> {
+        let mut items = self.into_vec();
+        match items.len() {
+            1 => OneOrMany::Single(items.pop().unwrap()),
+            _ => OneOrMany::Sum(items),
+        }
+    }
+
+    pub fn as_slice(&self) -> &[T] {
+        match self {
+            OneOrMany::Single(x) => std::slice::from_ref(x),
+            OneOrMany::Sum(xs) => xs,
+        }
+    }
+}
 
 // Manual impl, because #[derive(Deserialize)] on untagged enums discard
 // all error messages.
-impl<'de> de::Deserialize<'de> for Potential {
+impl<'de, T: de::Deserialize<'de>> de::Deserialize<'de> for OneOrMany<T> {
     fn deserialize<D: de::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct MyVisitor;
-        impl<'de> de::Visitor<'de> for MyVisitor {
-            type Value = Potential;
+        struct MyVisitor<U>(std::marker::PhantomData<U>);
+
+        impl<'de, U: de::Deserialize<'de>> de::Visitor<'de> for MyVisitor<U> {
+            type Value = OneOrMany<U>;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
                 write!(formatter, "a potential or array of potentials")
@@ -607,36 +677,68 @@ impl<'de> de::Deserialize<'de> for Potential {
                 while let Some(pot) = seq.next_element()? {
                     vec.push(pot);
                 }
-                Ok(Potential::Sum(vec))
+                Ok(OneOrMany::Sum(vec))
             }
 
             fn visit_str<E: de::Error>(self, s: &str) -> Result<Self::Value, E> {
                 de::Deserialize::deserialize(s.into_deserializer())
-                    .map(Potential::Single)
+                    .map(OneOrMany::Single)
             }
 
             fn visit_map<A: de::MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {
                 de::Deserialize::deserialize(de::value::MapAccessDeserializer::new(map))
-                    .map(Potential::Single)
+                    .map(OneOrMany::Single)
             }
         }
 
-        deserializer.deserialize_any(MyVisitor)
+        deserializer.deserialize_any(MyVisitor(std::marker::PhantomData))
     }
 }
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum PotentialKind {
-    #[serde(rename = "rebo")] Rebo(PotentialRebo),
-    #[serde(rename = "airebo")] Airebo(PotentialAirebo),
-    #[serde(rename = "kc-z")] KolmogorovCrespiZ(PotentialKolmogorovCrespiZ),
+    /// Deprecated.  LAMMPS `rebo`.
+    #[serde(rename = "rebo")] OldLammpsRebo(LammpsPotentialRebo),
+    /// Deprecated.  LAMMPS `airebo`.
+    #[serde(rename = "airebo")] OldLammpsAirebo(LammpsPotentialAirebo),
+    /// Deprecated.  LAMMPS `rebo + kolmogorov/crespi/z`.
+    #[serde(rename = "kc-z")] OldLammpsKolmogorovCrespiZ(LammpsPotentialKolmogorovCrespiZ),
+    /// Deprecated.  LAMMPS `rebo + kolmogorov/crespi/full`.
+    #[serde(rename = "kc-full")] OldLammpsKolmogorovCrespiFull(LammpsPotentialKolmogorovCrespiFull),
+
+    // TODO: Rename to kc-z once the old kc-z is gone.
+    /// Reimplementation of LAMMPS' `kolmogorov/crespi/z`.
+    ///
+    /// Typically summed together with `rebo-nonreactive`.
+    ///
+    /// This is implemented directly in rsp2 and supports lattice parameter optimization.
+    /// It can also be optionally given a smooth cutoff with C(1) continuity.
     #[serde(rename = "kc-z-new")] KolmogorovCrespiZNew(PotentialKolmogorovCrespiZNew),
-    #[serde(rename = "kc-full")] KolmogorovCrespiFull(PotentialKolmogorovCrespiFull),
-    #[serde(rename = "rebo-new")] ReboNew(PotentialReboNew),
+
+    /// REBO, without fractional bond orders.
+    ///
+    /// This is implemented directly in rsp2 and supports lattice parameter optimization.
+    /// It also supports a variety of parameters.
+    #[serde(rename = "rebo-nonreactive")] ReboNonreactive(PotentialReboNonreactive),
+
+    // TODO: remove
+    /// Deprecated; renamed to `rebo-nonreactive`.
+    #[serde(rename = "rebo-new")] OldReboNew(PotentialReboNonreactive),
+
+    /// Use potentials implemented in Lammps.  Only a few specific potentials are supported.
+    ///
+    /// This potential cannot be listed multiple times.
+    #[serde(rename = "lammps")] Lammps(LammpsPotentialKind),
+
+    /// Use arbitrary potentials implemented in DFTB+.
+    ///
+    /// This potential cannot be listed multiple times.
     #[serde(rename = "dftb+")] DftbPlus(PotentialDftbPlus),
+
     /// V = 0
     #[serde(rename = "test-func-zero")] TestZero,
+
     /// Arranges atoms into a chain along the first lattice vector.
     #[serde(rename = "test-func-chainify")] TestChainify,
 }
@@ -644,57 +746,93 @@ pub enum PotentialKind {
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
-pub struct PotentialAirebo {
-    /// Cutoff radius (x3.4A)
-    pub lj_sigma: OrDefault<f64>,
-    // (I'm too lazy to make an ADT for this)
-    pub lj_enabled: OrDefault<bool>,
-    pub torsion_enabled: OrDefault<bool>,
-    pub omp: OrDefault<bool>,
+pub enum LammpsPotentialKind {
+    /// `pair_style rebo`
+    #[serde(rename = "rebo")] Rebo(LammpsPotentialRebo),
+    /// `pair_style airebo`
+    #[serde(rename = "airebo")] Airebo(LammpsPotentialAirebo),
+    /// `pair_style hybrid rebo kolmogorov/crespi/z`
+    ///
+    /// Notice how, unlike the reimplementation of `kc-z`, this potential automatically includes REBO.
+    #[serde(rename = "kc-z")] KolmogorovCrespiZ(LammpsPotentialKolmogorovCrespiZ),
+    /// `pair_style hybrid rebo kolmogorov/crespi/full`
+    #[serde(rename = "kc-full")] KolmogorovCrespiFull(LammpsPotentialKolmogorovCrespiFull),
 }
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
-pub struct PotentialRebo {
-    pub omp: OrDefault<bool>,
-}
-
-#[derive(Serialize, Deserialize)]
-#[derive(Debug, Clone, PartialEq)]
-#[serde(rename_all = "kebab-case")]
-pub struct PotentialKolmogorovCrespiZ {
+pub struct LammpsPotentialAirebo {
     // NOTE: some defaults are not here because they are defined in rsp2_tasks,
     //       which depends on this crate
-    #[serde(default = "_potential_kolmogorov_crespi_z__rebo")]
+
+    /// Cutoff radius (x3.4A)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lj_sigma: OrDefault<f64>,
+
+    // (I'm too lazy to make an ADT for this)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lj_enabled: OrDefault<bool>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub torsion_enabled: OrDefault<bool>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub omp: OrDefault<bool>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub struct LammpsPotentialRebo {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub omp: OrDefault<bool>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub struct LammpsPotentialKolmogorovCrespiZ {
+    #[serde(default = "_potential__lammps_kolmogorov_crespi_z__rebo")]
+    #[serde(skip_serializing_if = "_potential__lammps_kolmogorov_crespi_z__rebo__skip")]
     pub rebo: bool,
+
     /// Cutoff radius (Angstrom?)
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cutoff: OrDefault<f64>,
+
     /// Separations larger than this are regarded as vacuum and do not interact. (Angstrom)
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub max_layer_sep: OrDefault<f64>,
 
     /// Enable a smooth cutoff starting at `r = cutoff - cutoff_interval` and ending at
     /// `r = cutoff`.
     ///
     /// NOTE: This requires a patched lammps.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cutoff_interval: Nullable<f64>,
 }
-fn _potential_kolmogorov_crespi_z__rebo() -> bool { true }
+fn _potential__lammps_kolmogorov_crespi_z__rebo() -> bool { true }
+fn _potential__lammps_kolmogorov_crespi_z__rebo__skip(&x: &bool) -> bool { x == true }
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
-pub struct PotentialKolmogorovCrespiFull {
-    // NOTE: some defaults are not here because they are defined in rsp2_tasks,
-    //       which depends on this crate
-    #[serde(default = "_potential_kolmogorov_crespi_full__rebo")]
+pub struct LammpsPotentialKolmogorovCrespiFull {
+    #[serde(default = "_potential__lammps_kolmogorov_crespi_full__rebo")]
+    #[serde(skip_serializing_if = "_potential__lammps_kolmogorov_crespi_full__rebo__skip")]
     pub rebo: bool,
+
     /// Cutoff radius (Angstrom?)
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cutoff: OrDefault<f64>,
+
     /// Enable taper function.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub taper: OrDefault<bool>,
 }
-fn _potential_kolmogorov_crespi_full__rebo() -> bool { true }
+fn _potential__lammps_kolmogorov_crespi_full__rebo() -> bool { true }
+fn _potential__lammps_kolmogorov_crespi_full__rebo__skip(&x: &bool) -> bool { x == true }
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
@@ -706,6 +844,7 @@ pub struct PotentialKolmogorovCrespiZNew {
     ///
     /// More specifically, it is the maximum radius where the cutoff prefactor has a value of 1.
     #[serde(rename = "cutoff")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cutoff_begin: OrDefault<f64>,
 
     /// Thickness of the "smooth cutoff" shell. (Angstrom)
@@ -713,6 +852,7 @@ pub struct PotentialKolmogorovCrespiZNew {
     /// NOTE: If a value of 0.0 is used, the value is offset to maintain C0 continuity.
     /// (This makes it effectively identical to LAMMPS)
     #[serde(rename = "cutoff-length")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cutoff_transition_dist: OrDefault<f64>,
 
     /// Skin depth for neighbor searches. (Angstrom)
@@ -737,15 +877,17 @@ pub struct PotentialKolmogorovCrespiZNew {
     /// Because various parts of the code may call the potential any arbitrary number of times,
     /// the frequency here does not necessarily correspond to anything meaningful.
     #[serde(default = "_potential_kolmogorov_crespi_z_new__skin_check_frequency")]
+    #[serde(skip_serializing_if = "_potential_kolmogorov_crespi_z_new__skin_check_frequency__skip")]
     pub skin_check_frequency: u64,
 }
 fn _potential_kolmogorov_crespi_z_new__skin_depth() -> f64 { 1.0 }
 fn _potential_kolmogorov_crespi_z_new__skin_check_frequency() -> u64 { 1 }
+fn _potential_kolmogorov_crespi_z_new__skin_check_frequency__skip(&x: &u64) -> bool { x == 1 }
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
-pub struct PotentialReboNew {
+pub struct PotentialReboNonreactive {
     /// "brenner" or "lammps"
     pub params: PotentialReboNewParams,
 }
@@ -1024,22 +1166,12 @@ pub enum Threading {
     /// allowing LAMMPS to use as many cores as it pleases.
     Lammps,
 
-    /// This currently does two things:
-    ///
-    /// * during force sets generation, rsp2 will work on multiple displaced structures
-    ///   in parallel.
-    /// * Enables parallel code in `rebo-new` and `kc-z-new`
-    ///
-    /// ...it should probably stop doing one of those two things. (FIXME!)
-    ///
-    /// (on the bright side, thanks to rayon's design, this doesn't necessarily result in
-    ///  wasted CPU time on blocked threads; but it might increase cache misses)
+    /// This currently enables parallel code in `rebo-new` and `kc-z-new`
     Rayon,
 
     /// Everything (or almost everything) should run in serial.
     Serial,
 }
-
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
@@ -1229,6 +1361,7 @@ impl Settings {
             &mut self.lammps,
             &mut self._deprecated_lammps_settings,
         );
+        fix_version(&mut self.version)?;
         fix_deprecated_eigensolver(&mut self.phonons.eigensolver);
 
         Ok(ValidatedSettings(self))
@@ -1241,9 +1374,96 @@ impl EnergyPlotSettings {
             &mut self.lammps,
             &mut self._deprecated_lammps_settings,
         );
+        fix_version(&mut self.version)?;
 
         Ok(ValidatedEnergyPlotSettings(self))
     }
+}
+
+impl Potential {
+    pub fn validate(self) -> Result<ValidatedPotential, Error> {
+        let mut found_deprecated = false;
+
+        // Replace all deprecated potentials.
+        let potentials: Vec<_> = {
+            self.into_vec().into_iter().map(|pot| match pot {
+                PotentialKind::OldLammpsRebo(inner) => {
+                    found_deprecated = true;
+                    PotentialKind::Lammps(LammpsPotentialKind::Rebo(inner))
+                },
+
+                PotentialKind::OldLammpsAirebo(inner) => {
+                    found_deprecated = true;
+                    PotentialKind::Lammps(LammpsPotentialKind::Airebo(inner))
+                },
+
+                PotentialKind::OldLammpsKolmogorovCrespiZ(inner) => {
+                    found_deprecated = true;
+                    PotentialKind::Lammps(LammpsPotentialKind::KolmogorovCrespiZ(inner))
+                },
+
+                PotentialKind::OldLammpsKolmogorovCrespiFull(inner) => {
+                    found_deprecated = true;
+                    PotentialKind::Lammps(LammpsPotentialKind::KolmogorovCrespiFull(inner))
+                },
+
+                PotentialKind::OldReboNew(inner) => {
+                    found_deprecated = true;
+                    PotentialKind::ReboNonreactive(inner)
+                },
+
+                pot => pot,
+            }).collect()
+        };
+
+        let out = OneOrMany::Sum(potentials).prefer_single();
+
+        if found_deprecated {
+            let yaml: HashMap<String, Potential> = from_json!({
+                "potential": out.clone(),
+            });
+
+            warn!("\
+                Found deprecated items in `potential` config! \
+                The equivalent config is:\n{}\
+            ", ::serde_yaml::to_string(&yaml).expect("should not fail"));
+        }
+
+        if out.as_slice().iter().filter(|x| matches!(PotentialKind::DftbPlus(_), x)).count() > 1 {
+            bail!("The `dftb+` potential may only be listed at most once!");
+        }
+
+        if out.as_slice().iter().filter(|x| matches!(PotentialKind::Lammps(_), x)).count() > 1 {
+            bail!("The `lammps` potential may only be listed at most once!");
+        }
+
+        if matches!([PotentialKind::KolmogorovCrespiZNew(_)], out.as_slice()) {
+            warn!("\
+                You are using the Kolmogorov/Crespi potential alone, with no intralayer term. \
+                This is a bit unusual; did you mean to add a REBO term? (e.g. `nonreactive-rebo`)\
+            ");
+        }
+
+        Ok(ValidatedPotential(out))
+    }
+}
+
+fn fix_version(it: &mut Option<u32>) -> Result<(), Error> {
+    match *it {
+        Some(x) if x == 0 || x > MAX_VERSION => {
+            bail!("`version: {}` is invalid. (1 <= version <= {})", x, MAX_VERSION);
+        },
+        None => {
+            warn!("\
+                Settings file has no `version` field! Assuming `version: 1`. \
+                (the latest is version {})\
+            ", MAX_VERSION);
+            *it = Some(1);
+        },
+        _ => {},
+    };
+
+    Ok(())
 }
 
 fn fix_deprecated_eigensolver(it: &mut PhononEigensolver) {

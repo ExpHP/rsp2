@@ -299,7 +299,7 @@ mod rebo {
     ///       must not change after the construction of the DiffFn.
     #[derive(Debug, Clone)]
     pub struct Rebo {
-        pub(in crate::potential) cfg: cfg::PotentialReboNew,
+        pub(in crate::potential) cfg: cfg::PotentialReboNonreactive,
         pub(in crate::potential) parallel: bool,
     }
 
@@ -316,7 +316,7 @@ mod rebo {
         fn initialize_bond_diff_fn(&self, coords: &Coords, meta: CommonMeta) -> FailResult<Option<Box<dyn BondDiffFn<CommonMeta>>>>
         {
             fn fn_body(me: &Rebo, coords: &Coords, meta: CommonMeta) -> FailResult<Option<Box<dyn BondDiffFn<CommonMeta>>>> {
-                let cfg::PotentialReboNew { params } = me.cfg;
+                let cfg::PotentialReboNonreactive { params } = me.cfg;
                 let params = match params {
                     cfg::PotentialReboNewParams::Lammps => rebo_imp::Params::new_lammps(),
                     cfg::PotentialReboNewParams::LammpsFavata => rebo_imp::Params::new_favata(),

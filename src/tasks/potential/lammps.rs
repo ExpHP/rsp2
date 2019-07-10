@@ -423,9 +423,9 @@ mod airebo {
         },
     }
 
-    impl<'a> From<&'a cfg::PotentialAirebo> for Airebo {
-        fn from(cfg: &'a cfg::PotentialAirebo) -> Self {
-            let cfg::PotentialAirebo { lj_sigma, lj_enabled, torsion_enabled, omp } = *cfg;
+    impl<'a> From<&'a cfg::LammpsPotentialAirebo> for Airebo {
+        fn from(cfg: &'a cfg::LammpsPotentialAirebo) -> Self {
+            let cfg::LammpsPotentialAirebo { lj_sigma, lj_enabled, torsion_enabled, omp } = *cfg;
             Airebo::Airebo {
                 lj_sigma: lj_sigma.unwrap_or(DEFAULT_AIREBO_LJ_SIGMA),
                 lj_enabled: lj_enabled.unwrap_or(DEFAULT_AIREBO_LJ_ENABLED),
@@ -435,9 +435,9 @@ mod airebo {
         }
     }
 
-    impl<'a> From<&'a cfg::PotentialRebo> for Airebo {
-        fn from(cfg: &'a cfg::PotentialRebo) -> Self {
-            let cfg::PotentialRebo { omp } = *cfg;
+    impl<'a> From<&'a cfg::LammpsPotentialRebo> for Airebo {
+        fn from(cfg: &'a cfg::LammpsPotentialRebo) -> Self {
+            let cfg::LammpsPotentialRebo { omp } = *cfg;
             Airebo::Rebo {
                 omp: omp.unwrap_or(DEFAULT_REBO_OMP),
             }
@@ -509,9 +509,9 @@ mod kc_z {
     #[derive(Debug, Clone, Copy)]
     enum GapKind { Interacting, Vacuum }
 
-    impl<'a> From<&'a cfg::PotentialKolmogorovCrespiZ> for KolmogorovCrespiZ {
-        fn from(cfg: &'a cfg::PotentialKolmogorovCrespiZ) -> Self {
-            let cfg::PotentialKolmogorovCrespiZ {
+    impl<'a> From<&'a cfg::LammpsPotentialKolmogorovCrespiZ> for KolmogorovCrespiZ {
+        fn from(cfg: &'a cfg::LammpsPotentialKolmogorovCrespiZ) -> Self {
+            let cfg::LammpsPotentialKolmogorovCrespiZ {
                 rebo, cutoff, max_layer_sep, cutoff_interval,
             } = *cfg;
             KolmogorovCrespiZ {
@@ -738,9 +738,9 @@ mod kc_full {
         cutoff_end: f64,
     }
 
-    impl<'a> From<&'a cfg::PotentialKolmogorovCrespiFull> for KolmogorovCrespiFull {
-        fn from(cfg: &'a cfg::PotentialKolmogorovCrespiFull) -> Self {
-            let cfg::PotentialKolmogorovCrespiFull {
+    impl<'a> From<&'a cfg::LammpsPotentialKolmogorovCrespiFull> for KolmogorovCrespiFull {
+        fn from(cfg: &'a cfg::LammpsPotentialKolmogorovCrespiFull) -> Self {
+            let cfg::LammpsPotentialKolmogorovCrespiFull {
                 rebo, taper, cutoff,
             } = *cfg;
             KolmogorovCrespiFull {

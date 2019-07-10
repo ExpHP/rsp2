@@ -6,6 +6,8 @@
 
 # potential: (no default)
 
+version: 1
+
 scale-ranges:
   repeat-count: 2
   warn-threshold: 1e-2

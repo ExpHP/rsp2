@@ -24,7 +24,7 @@ macro_rules! collect {
 /// already quite certain that it is valid!
 #[macro_export]
 macro_rules! from_json {
-    ($($arg:tt)*) => { serde_json::from_value(json!($($arg)*)).unwrap() };
+    ($($arg:tt)*) => { serde_json::from_value(serde_json::json!($($arg)*)).unwrap() };
 }
 
 #[macro_export]
@@ -100,4 +100,14 @@ macro_rules! nd {
 
     ($T:ty)
     => { $T };
+}
+
+#[macro_export]
+macro_rules! matches {
+    ($pat:pat, $place:expr) => {
+        match $place {
+            $pat => true,
+            _ => false,
+        }
+    };
 }

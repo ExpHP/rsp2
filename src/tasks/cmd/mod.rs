@@ -1157,7 +1157,7 @@ pub(crate) fn run_dynmat_analysis(
 
 pub(crate) fn run_plot_vdw(
     on_demand: Option<LammpsOnDemand>,
-    pot: &cfg::Potential,
+    pot: &cfg::ValidatedPotential,
     z: f64,
     rs: &[f64],
 ) -> FailResult<()>
@@ -1210,7 +1210,7 @@ pub(crate) fn run_plot_vdw(
 
 pub(crate) fn run_converge_vdw(
     on_demand: Option<LammpsOnDemand>,
-    pot: &cfg::Potential,
+    pot: &cfg::ValidatedPotential,
     z: f64,
     (r_min, r_max): (f64, f64),
 ) -> FailResult<()>

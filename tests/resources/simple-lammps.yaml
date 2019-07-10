@@ -1,8 +1,9 @@
 # NOTE: apply this after defaults.yaml
 
 potential:
-  kc-z:
-     cutoff: 14
+  lammps:
+    kc-z:
+      cutoff: 14
 
 scale-ranges:
   scalables: []

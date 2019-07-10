@@ -11,11 +11,13 @@ path = "lib.rs"
 
 [dependencies]
 !!rsp2-minimize
+!!rsp2-util-macros
 
 !!log
 !!failure
 !!serde
 !!serde-derive
+!!serde-json
 !!serde-yaml
 !!serde-ignored
 
