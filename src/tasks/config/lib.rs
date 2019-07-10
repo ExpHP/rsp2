@@ -625,48 +625,23 @@ impl<'de> de::Deserialize<'de> for ValidatedPotential {
 }
 derive_yaml_read!{ValidatedPotential}
 
-pub type Potential = OneOrMany<PotentialKind>;
-
 #[derive(Serialize)]
 #[derive(Debug, Clone, PartialEq)]
-#[serde(untagged)]
-pub enum OneOrMany<T> {
-    Single(T),
-    Sum(Vec<T>),
-}
+pub struct Potential(pub Vec<PotentialKind>);
 
-impl<T> OneOrMany<T> {
-    pub fn into_vec(self) -> Vec<T> {
-        match self {
-            OneOrMany::Single(x) => vec![x],
-            OneOrMany::Sum(xs) => xs,
-        }
-    }
-
-    pub fn prefer_single(self) -> OneOrMany<T> {
-        let mut items = self.into_vec();
-        match items.len() {
-            1 => OneOrMany::Single(items.pop().unwrap()),
-            _ => OneOrMany::Sum(items),
-        }
-    }
-
-    pub fn as_slice(&self) -> &[T] {
-        match self {
-            OneOrMany::Single(x) => std::slice::from_ref(x),
-            OneOrMany::Sum(xs) => xs,
-        }
-    }
+impl Potential {
+    pub fn into_vec(self) -> Vec<PotentialKind> { self.0 }
+    pub fn as_slice(&self) -> &[PotentialKind] { &self.0 }
 }
 
 // Manual impl, because #[derive(Deserialize)] on untagged enums discard
 // all error messages.
-impl<'de, T: de::Deserialize<'de>> de::Deserialize<'de> for OneOrMany<T> {
+impl<'de> de::Deserialize<'de> for Potential {
     fn deserialize<D: de::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct MyVisitor<U>(std::marker::PhantomData<U>);
+        struct MyVisitor;
 
-        impl<'de, U: de::Deserialize<'de>> de::Visitor<'de> for MyVisitor<U> {
-            type Value = OneOrMany<U>;
+        impl<'de> de::Visitor<'de> for MyVisitor {
+            type Value = Potential;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
                 write!(formatter, "a potential or array of potentials")
@@ -677,21 +652,21 @@ impl<'de, T: de::Deserialize<'de>> de::Deserialize<'de> for OneOrMany<T> {
                 while let Some(pot) = seq.next_element()? {
                     vec.push(pot);
                 }
-                Ok(OneOrMany::Sum(vec))
+                Ok(Potential(vec))
             }
 
             fn visit_str<E: de::Error>(self, s: &str) -> Result<Self::Value, E> {
                 de::Deserialize::deserialize(s.into_deserializer())
-                    .map(OneOrMany::Single)
+                    .map(|x| Potential(vec![x]))
             }
 
             fn visit_map<A: de::MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {
                 de::Deserialize::deserialize(de::value::MapAccessDeserializer::new(map))
-                    .map(OneOrMany::Single)
+                    .map(|x| Potential(vec![x]))
             }
         }
 
-        deserializer.deserialize_any(MyVisitor(std::marker::PhantomData))
+        deserializer.deserialize_any(MyVisitor)
     }
 }
 
@@ -1416,7 +1391,7 @@ impl Potential {
             }).collect()
         };
 
-        let out = OneOrMany::Sum(potentials).prefer_single();
+        let out = Potential(potentials);
 
         if found_deprecated {
             let yaml: HashMap<String, Potential> = from_json!({
