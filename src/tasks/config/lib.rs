@@ -78,7 +78,9 @@ pub trait YamlRead: for <'de> serde::Deserialize<'de> {
 
     // trait-provided function definitions seem to be lazily monomorphized, so we
     // must put the meat of what we need monomorphized directly into the impls
+    #[doc(hidden)]
     fn __serde_ignored__from_value(value: serde_yaml::Value) -> Result<Self, Error>;
+    #[doc(hidden)]
     fn __serde_yaml__from_str(s: &str) -> Result<Self, Error>;
 }
 
@@ -276,8 +278,6 @@ pub struct DeprecatedLammpsSettings {
     pub lammps_processor_axis_mask: Option<[bool; 3]>,
 }
 
-fn _settings__update_large_neighbor_lists() -> bool { true }
-
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
@@ -289,7 +289,7 @@ pub struct ScaleRanges {
     ///
     /// This may yield better results if one of the parameters relaxed
     /// earlier in the sequence impacts one of the ones relaxed earlier.
-    #[serde(default="_scale_ranges__repeat_count")]
+    #[serde(default="scale_ranges__repeat_count")]
     pub repeat_count: u32,
 
     /// Warn if the optimized value of a parameter falls within this amount of
@@ -297,17 +297,17 @@ pub struct ScaleRanges {
     /// which likely indicates that the search window was not big enough.
     ///
     /// If null (`~`), no check is performed.
-    #[serde(default="_scale_ranges__warn_threshold")]
+    #[serde(default="scale_ranges__warn_threshold")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub warn_threshold: Nullable<f64>,
 
     /// Panic on violations of `warn_threshold`.
-    #[serde(default="_scale_ranges__fail")]
+    #[serde(default="scale_ranges__fail")]
     pub fail: bool,
 }
-fn _scale_ranges__repeat_count() -> u32 { 1 }
-fn _scale_ranges__warn_threshold() -> Nullable<f64> { Some(0.01) }
-fn _scale_ranges__fail() -> bool { false }
+fn scale_ranges__repeat_count() -> u32 { 1 }
+fn scale_ranges__warn_threshold() -> Nullable<f64> { Some(0.01) }
+fn scale_ranges__fail() -> bool { false }
 
 // Require "scalables" if "scale-ranges" is provided, but allow it to be defaulted to
 // an empty list otherwise.
@@ -315,9 +315,9 @@ impl Default for ScaleRanges {
     fn default() -> Self {
         ScaleRanges {
             scalables: vec![],
-            repeat_count: _scale_ranges__repeat_count(),
-            warn_threshold: _scale_ranges__warn_threshold(),
-            fail: _scale_ranges__fail(),
+            repeat_count: scale_ranges__repeat_count(),
+            warn_threshold: scale_ranges__warn_threshold(),
+            fail: scale_ranges__fail(),
         }
     }
 }
@@ -488,16 +488,16 @@ pub struct Cg {
     pub on_ls_failure: CgOnLsFailure,
 
     /// Clip initial guesses for linesearch at this value each iteration.
-    #[serde(default = "_cg__alpha_guess_first")]
+    #[serde(default = "cg__alpha_guess_first")]
     pub alpha_guess_first: f64,
 
     /// Initial guess for linesearch on the very first iteration.
-    #[serde(default)]
+    #[serde(default = "cg__alpha_guess_max")]
     pub alpha_guess_max: f64,
 }
 // Been using these values for a while on structures of arbitrary size.
-fn _cg__alpha_guess_first() -> f64 { 0.01 }
-fn _cg__alpha_guess_max() -> f64 { 0.1 }
+fn cg__alpha_guess_first() -> f64 { 0.01 }
+fn cg__alpha_guess_max() -> f64 { 0.1 }
 
 pub type CgStopCondition = rsp2_minimize::cg::StopCondition;
 
@@ -573,13 +573,6 @@ pub struct EnergyPlotSettings {
     pub version: OrDefault<u32>,
     #[serde(default)]
     pub threading: Threading,
-    pub xlim: [f64; 2],
-    pub ylim: [f64; 2],
-    pub dim: [usize; 2],
-    pub ev_indices: EnergyPlotEvIndices,
-    /// Defines scale of xlim/ylim.
-    pub normalization: NormalizationMode,
-    //pub phonons: Phonons,
 
     pub potential: ValidatedPotential,
 
@@ -598,14 +591,6 @@ impl<'de> de::Deserialize<'de> for ValidatedEnergyPlotSettings {
 
         cereal.validate().map_err(de::Error::custom)
     }
-}
-
-#[derive(Serialize, Deserialize)]
-#[derive(Debug, Clone, PartialEq)]
-#[serde(rename_all = "kebab-case")]
-pub enum EnergyPlotEvIndices {
-    Shear,
-    These(usize, usize),
 }
 
 /// Potential settings known to satisfy certain properties:
@@ -768,8 +753,8 @@ pub struct LammpsPotentialRebo {
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub struct LammpsPotentialKolmogorovCrespiZ {
-    #[serde(default = "_potential__lammps_kolmogorov_crespi_z__rebo")]
-    #[serde(skip_serializing_if = "_potential__lammps_kolmogorov_crespi_z__rebo__skip")]
+    #[serde(default = "potential__lammps_kolmogorov_crespi_z__rebo")]
+    #[serde(skip_serializing_if = "potential__lammps_kolmogorov_crespi_z__rebo__skip")]
     pub rebo: bool,
 
     /// Cutoff radius (Angstrom?)
@@ -787,15 +772,15 @@ pub struct LammpsPotentialKolmogorovCrespiZ {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cutoff_interval: Nullable<f64>,
 }
-fn _potential__lammps_kolmogorov_crespi_z__rebo() -> bool { true }
-fn _potential__lammps_kolmogorov_crespi_z__rebo__skip(&x: &bool) -> bool { x == true }
+fn potential__lammps_kolmogorov_crespi_z__rebo() -> bool { true }
+fn potential__lammps_kolmogorov_crespi_z__rebo__skip(&x: &bool) -> bool { x == true }
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub struct LammpsPotentialKolmogorovCrespiFull {
-    #[serde(default = "_potential__lammps_kolmogorov_crespi_full__rebo")]
-    #[serde(skip_serializing_if = "_potential__lammps_kolmogorov_crespi_full__rebo__skip")]
+    #[serde(default = "potential__lammps_kolmogorov_crespi_full__rebo")]
+    #[serde(skip_serializing_if = "potential__lammps_kolmogorov_crespi_full__rebo__skip")]
     pub rebo: bool,
 
     /// Cutoff radius (Angstrom?)
@@ -806,8 +791,8 @@ pub struct LammpsPotentialKolmogorovCrespiFull {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub taper: OrDefault<bool>,
 }
-fn _potential__lammps_kolmogorov_crespi_full__rebo() -> bool { true }
-fn _potential__lammps_kolmogorov_crespi_full__rebo__skip(&x: &bool) -> bool { x == true }
+fn potential__lammps_kolmogorov_crespi_full__rebo() -> bool { true }
+fn potential__lammps_kolmogorov_crespi_full__rebo__skip(&x: &bool) -> bool { x == true }
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
@@ -836,7 +821,7 @@ pub struct PotentialKolmogorovCrespiZNew {
     ///
     /// This should be larger than the phonon displacement distance, or else phonon forces
     /// may be incorrect.
-    #[serde(default = "_potential_kolmogorov_crespi_z_new__skin_depth")]
+    #[serde(default = "potential_kolmogorov_crespi_z_new__skin_depth")]
     pub skin_depth: f64,
 
     // FIXME: hack
@@ -851,13 +836,13 @@ pub struct PotentialKolmogorovCrespiZNew {
     ///
     /// Because various parts of the code may call the potential any arbitrary number of times,
     /// the frequency here does not necessarily correspond to anything meaningful.
-    #[serde(default = "_potential_kolmogorov_crespi_z_new__skin_check_frequency")]
-    #[serde(skip_serializing_if = "_potential_kolmogorov_crespi_z_new__skin_check_frequency__skip")]
+    #[serde(default = "potential_kolmogorov_crespi_z_new__skin_check_frequency")]
+    #[serde(skip_serializing_if = "potential_kolmogorov_crespi_z_new__skin_check_frequency__skip")]
     pub skin_check_frequency: u64,
 }
-fn _potential_kolmogorov_crespi_z_new__skin_depth() -> f64 { 1.0 }
-fn _potential_kolmogorov_crespi_z_new__skin_check_frequency() -> u64 { 1 }
-fn _potential_kolmogorov_crespi_z_new__skin_check_frequency__skip(&x: &u64) -> bool { x == 1 }
+fn potential_kolmogorov_crespi_z_new__skin_depth() -> f64 { 1.0 }
+fn potential_kolmogorov_crespi_z_new__skin_check_frequency() -> u64 { 1 }
+fn potential_kolmogorov_crespi_z_new__skin_check_frequency__skip(&x: &u64) -> bool { x == 1 }
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
@@ -911,10 +896,10 @@ pub struct Phonons {
     pub symmetry_tolerance: f64,
     pub displacement_distance: f64,
 
-    #[serde(default = "_phonons__disp_finder")]
+    #[serde(default = "phonons__disp_finder")]
     pub disp_finder: PhononDispFinder,
 
-    #[serde(default = "_phonons__eigensolver")]
+    #[serde(default = "phonons__eigensolver")]
     pub eigensolver: PhononEigensolver,
 
     /// Supercell used for force constants.
@@ -944,12 +929,12 @@ pub struct Phonons {
     /// undesirable impact on the bond angle terms.
     pub supercell: SupercellSpec,
 }
-fn _phonons__eigensolver() -> PhononEigensolver {
+fn phonons__eigensolver() -> PhononEigensolver {
     PhononEigensolver::Dense {}
 }
-fn _phonons__disp_finder() -> PhononDispFinder {
+fn phonons__disp_finder() -> PhononDispFinder {
     PhononDispFinder::Rsp2 {
-        directions: _phonon_disp_finder__rsp2__directions()
+        directions: phonon_disp_finder__rsp2__directions()
     }
 }
 
@@ -972,7 +957,7 @@ pub enum PhononEigensolver {
         ///
         /// When none of the shift-inversion attempts produce any non-acoustic negative modes,
         /// the sparse eigensolver falls back to non-shift-invert mode, which is far more reliable.
-        #[serde(default = "_phonon_eigen_solver__sparse__shift_invert_attempts")]
+        #[serde(default = "phonon_eigen_solver__sparse__shift_invert_attempts")]
         shift_invert_attempts: u32,
 
         /// How many eigensolutions the sparse eigensolver should seek.
@@ -981,7 +966,7 @@ pub enum PhononEigensolver {
         ///
         /// The most negative eigenvalues will be sought first.
         /// Fewer will be sought if the number of atoms is insufficient.
-        #[serde(default = "_phonon_eigen_solver__sparse__how_many")]
+        #[serde(default = "phonon_eigen_solver__sparse__how_many")]
         how_many: usize,
     },
 
@@ -999,19 +984,19 @@ pub enum PhononEigensolver {
     /// Deprecated.  Use either 'sparse' or 'dense'.
     #[serde(rename_all = "kebab-case")]
     Rsp2 {
-        #[serde(default = "_phonon_eigen_solver__rsp2__dense")]
+        #[serde(default = "phonon_eigen_solver__rsp2__dense")]
         dense: bool,
 
-        #[serde(default = "_phonon_eigen_solver__sparse__shift_invert_attempts")]
+        #[serde(default = "phonon_eigen_solver__sparse__shift_invert_attempts")]
         shift_invert_attempts: u32,
 
-        #[serde(default = "_phonon_eigen_solver__sparse__how_many")]
+        #[serde(default = "phonon_eigen_solver__sparse__how_many")]
         how_many: usize,
     },
 }
-fn _phonon_eigen_solver__sparse__shift_invert_attempts() -> u32 { 4 }
-fn _phonon_eigen_solver__sparse__how_many() -> usize { 12 }
-fn _phonon_eigen_solver__rsp2__dense() -> bool { false }
+fn phonon_eigen_solver__sparse__shift_invert_attempts() -> u32 { 4 }
+fn phonon_eigen_solver__sparse__how_many() -> usize { 12 }
+fn phonon_eigen_solver__rsp2__dense() -> bool { false }
 
 #[derive(Serialize)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -1026,7 +1011,7 @@ impl FailMessage for MessagePhononEigensolverPhonopy {
 pub enum PhononDispFinder {
     /// Use built-in methods to compute the displacements.
     Rsp2 {
-        #[serde(default = "_phonon_disp_finder__rsp2__directions")]
+        #[serde(default = "phonon_disp_finder__rsp2__directions")]
         directions: PhononDispFinderRsp2Directions,
     },
     /// Use phonopy to compute the displacements.  This will likely cause different images
@@ -1035,19 +1020,12 @@ pub enum PhononDispFinder {
     /// This is mostly for debugging purposes, but on some occasions it may produce fewer disps.
     Phonopy {
         /// Corresponds to phonopy's DIAG option.
-        #[serde(default = "_phonon_disp_finder__phonopy__diag")]
+        #[serde(default = "phonon_disp_finder__phonopy__diag")]
         diag: bool,
     },
 }
-fn _phonon_disp_finder__phonopy__diag() -> bool { true }
-fn _phonon_disp_finder__rsp2__directions() -> PhononDispFinderRsp2Directions { PhononDispFinderRsp2Directions::Diag }
-
-#[derive(Serialize)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct MessagePhononDispFinderPhonopy;
-impl FailMessage for MessagePhononDispFinderPhonopy {
-    const FAIL_MESSAGE: &'static str = "`phonon.disp-finder: phonopy` is no longer implemented";
-}
+fn phonon_disp_finder__phonopy__diag() -> bool { true }
+fn phonon_disp_finder__rsp2__directions() -> PhononDispFinderRsp2Directions { PhononDispFinderRsp2Directions::Diag }
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
@@ -1079,9 +1057,9 @@ pub enum PhononDispFinderRsp2Directions {
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub struct Animate {
-    #[serde(default = "_animate__which")]
+    #[serde(default = "animate__which")]
     pub which: AnimateWhich,
-    #[serde(default = "_animate__format")]
+    #[serde(default = "animate__format")]
     pub format: AnimateFormat,
     /// Include no more than this many eigenvectors.  This is a safeguard against
     /// the possibility of an unexpectedly large number of negative eigenvalues
@@ -1091,8 +1069,8 @@ pub struct Animate {
     #[serde(default)]
     pub max_count: Option<usize>,
 }
-fn _animate__which() -> AnimateWhich { AnimateWhich::Negative }
-fn _animate__format() -> AnimateFormat { AnimateFormat::VSim {} }
+fn animate__which() -> AnimateWhich { AnimateWhich::Negative }
+fn animate__format() -> AnimateFormat { AnimateFormat::VSim {} }
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
@@ -1157,47 +1135,24 @@ pub struct AcousticSearch {
     pub expected_non_translations: Nullable<usize>,
 
     /// Displacement to use for checking changes in force along the mode.
-    #[serde(default = "_acoustic_search__displacement_distance")]
+    #[serde(default = "acoustic_search__displacement_distance")]
     pub displacement_distance: f64,
 
     /// `-1 <= threshold < 1`.  How anti-parallel the changes in force
     /// have to be at small displacements along the mode for it to be classified
     /// as rotational.
-    #[serde(default = "_acoustic_search__rotational_fdot_threshold")]
+    #[serde(default = "acoustic_search__rotational_fdot_threshold")]
     pub rotational_fdot_threshold: f64,
 
     /// `-1 <= threshold < 1`.  How, uh, "pro-parallel" the changes in force
     /// have to be at small displacements along the mode for it to be classified
     /// as imaginary.
-    #[serde(default = "_acoustic_search__imaginary_fdot_threshold")]
+    #[serde(default = "acoustic_search__imaginary_fdot_threshold")]
     pub imaginary_fdot_threshold: f64,
 }
-fn _acoustic_search__displacement_distance() -> f64 { 1e-5 }
-fn _acoustic_search__imaginary_fdot_threshold() -> f64 { 0.80 }
-fn _acoustic_search__rotational_fdot_threshold() -> f64 { 0.80 }
-
-#[derive(Serialize, Deserialize)]
-#[derive(Debug, Clone, PartialEq)]
-#[serde(rename_all = "kebab-case")]
-pub enum NormalizationMode {
-    /// Normalize the 2-norm of the 3N-component vector.
-    CoordNorm,
-
-    // These are anticipated but YAGNI for now.
-    //    /// Normalize rms of the 3N-component vector to 1.
-    //    CoordRms,
-    //    /// Normalize mean of the 3N-component vector to 1.
-    //    CoordMean,
-    //    /// Normalize max value of the 3N-component vector to 1.
-    //    CoordMax,
-
-    /// Normalize rms atomic displacement distance to 1.
-    AtomRms,
-    /// Normalize mean atomic displacement distance to 1.
-    AtomMean,
-    /// Normalize max atomic displacement distance to 1.
-    AtomMax,
-}
+fn acoustic_search__displacement_distance() -> f64 { 1e-5 }
+fn acoustic_search__imaginary_fdot_threshold() -> f64 { 0.80 }
+fn acoustic_search__rotational_fdot_threshold() -> f64 { 0.80 }
 
 /// Options describing the ev-loop.
 ///
@@ -1208,22 +1163,22 @@ pub enum NormalizationMode {
 #[serde(rename_all = "kebab-case")]
 pub struct EvLoop {
     /// Exit after all eigenvalues are positive for this many consecutive ev-loop iterations.
-    #[serde(default = "_ev_loop__min_positive_iter")]
+    #[serde(default = "ev_loop__min_positive_iter")]
     pub min_positive_iter: u32,
 
     /// Give up after this many iterations.
-    #[serde(default = "_ev_loop__max_iter")]
+    #[serde(default = "ev_loop__max_iter")]
     pub max_iter: u32,
 
     /// Return a nonzero exit code when we reach max-iter.
     ///
     /// Default is false because there can be unanticipated rotational modes.
-    #[serde(default = "_ev_loop__fail")]
+    #[serde(default = "ev_loop__fail")]
     pub fail: bool,
 }
-fn _ev_loop__min_positive_iter() -> u32 { 3 }
-fn _ev_loop__max_iter() -> u32 { 15 }
-fn _ev_loop__fail() -> bool { true }
+fn ev_loop__min_positive_iter() -> u32 { 3 }
+fn ev_loop__max_iter() -> u32 { 15 }
+fn ev_loop__fail() -> bool { true }
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]

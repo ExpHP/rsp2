@@ -18,31 +18,34 @@ use slice_of_array::prelude::*;
 use rsp2_slice_math::{v, V, vdot};
 use rsp2_array_types::{V3};
 
-pub fn integrate_two_eigenvectors<E, F>(
-    dims: (usize, usize),
+// Note: directions do not need to be normalized.
+// (The ranges are in units of these norms)
+pub fn integrate_two_directions<E, F>(
+    // dims must be greater than 1
+    dims: [usize; 2],
     init_pos: &[V3],
-    ranges: (Range<f64>, Range<f64>),
-    eigenvecs: (&[V3], &[V3]),
-    compute_grad: F,
-) -> Result<Vec<f64>, E>
+    ranges: [Range<f64>; 2],
+    extend_borders: [bool; 2],
+    directions: [&[V3]; 2],
+    mut compute_grad: F,
+) -> Result<TwoDeeIntegrated, E>
 where
-    F: Fn(&[V3]) -> Result<Vec<V3>, E> + Sync,
-    E: Send,
+    F: FnMut(&[V3]) -> Result<Vec<V3>, E>,
 {
-    let xs = linspace(ranges.0, dims.0);
-    let ys = linspace(ranges.1, dims.1);
+    let (ixs, xs) = linspace(ranges[0].clone(), dims[0], extend_borders[0]);
+    let (iys, ys) = linspace(ranges[1].clone(), dims[1], extend_borders[1]);
 
-    integrate_grid_random(
-        dims,
+    let indices = iproduct!(ixs, iys).map(|(ix, iy)| [ix, iy]).collect();
+    let coords = iproduct!(&xs, &ys).map(|(&x, &y)| [x, y]).collect();
+
+    let values = integrate_grid_random(
+        (dims[0], dims[1]),
         |(x, y)| {Ok::<_,E>({
-//            println!("XY {:?} {:?}", xs[x], ys[y]);
             let V(pos) = v(init_pos.flat())
-                + xs[x] * v(eigenvecs.0.flat())
-                + ys[y] * v(eigenvecs.1.flat());
+                + xs[x] * v(directions[0].flat())
+                + ys[y] * v(directions[1].flat());
 
             let pos = pos.to_vec();
-//            println!("IP {:?}", init_pos.flat().iter().sum::<f64>());
-//            println!("PP {:?}", pos.iter().sum::<f64>());
             let grad = compute_grad(pos.nest())?.flat().to_vec();
             (pos, grad)
         })},
@@ -53,7 +56,16 @@ where
             let V(d_pos) = v(pos2) - v(pos1);
             vdot(&grad[..], &d_pos)
         })},
-    )
+    )?;
+
+    Ok(TwoDeeIntegrated { indices, values, coords })
+}
+
+#[derive(Debug, Clone)]
+pub struct TwoDeeIntegrated {
+    pub indices: Vec<[i32; 2]>,
+    pub coords: Vec<[f64; 2]>,
+    pub values: Vec<f64>,
 }
 
 #[derive(Debug, Clone)]
@@ -112,14 +124,11 @@ where V: Clone + Hash + Eq,
 
 pub fn integrate_grid_random<M, E>(
     (n_x, n_y): (usize, usize),
-    compute_meta: impl Fn(Point) -> Result<M, E> + Sync,
+    mut compute_meta: impl FnMut(Point) -> Result<M, E>,
     mut integrate: impl FnMut((Point, &M), (Point, &M)) -> Result<f64, E>,
 ) -> Result<Vec<f64>, E>
-where M: Send, E: Send,
 {Ok({
-    use rayon::prelude::*;
-
-    let vertices = (0..n_x).flat_map(|x| (0..n_y).map(move |y| (x, y))).collect::<Vec<_>>();
+    let vertices = iproduct!(0..n_x, 0..n_y).collect::<Vec<_>>();
     let out_edges = |(x, y)| {
         let mut out = vec![];
         if 0 < x { out.push((x - 1, y)); }
@@ -134,7 +143,7 @@ where M: Send, E: Send,
     let Tree { root, edges } = random_tree(vertices.clone(), out_edges);
 
     let index = |(x, y)| (y * n_x + x);
-    let metas = vertices.par_iter()
+    let metas = vertices.iter()
         .map(|&v| compute_meta(v))
         .collect::<Result<Vec<_>, E>>()?;
 
@@ -150,16 +159,27 @@ where M: Send, E: Send,
     values
 })}
 
-fn linspace(r: Range<f64>, n: usize) -> Vec<f64>
+fn linspace(r: Range<f64>, n: usize, extend_borders: bool) -> (Vec<i32>, Vec<f64>)
 {
-    let out: Vec<_> = (0..n as u32)
-        .map(|i| i as f64 / (n as f64 - 1f64))
-        .map(|a| (1.0 - a) * r.start + a * r.end)
-        .collect();
+    assert!(n > 1, "cannot perform linspace with n < 2");
 
-    assert_eq!(out[0], r.start);
-    assert_eq!(*out.last().unwrap(), r.end);
-    assert_eq!(out.len(), n);
-    out
+    let (mut indices, mut values): (Vec<i32>, Vec<f64>) = (0..n as i32)
+        .map(|i| (i, i as f64 / (n as f64 - 1f64)))
+        .map(|(i, a)| (i, (1.0 - a) * r.start + a * r.end))
+        .unzip();
+
+    assert_eq!(values[0], r.start);
+    assert_eq!(*values.last().unwrap(), r.end);
+    assert_eq!(values.len(), n);
+
+    if extend_borders {
+        let step = values[1] - values[0];
+        values.push(r.end + step);
+        indices.push(n as i32);
+        values.insert(0, r.start - step);
+        indices.insert(0, -1);
+    }
+
+    (indices, values)
 }
 

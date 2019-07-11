@@ -211,7 +211,6 @@ impl CliDeserialize for ConfigOverrideArgs {
     }
 }
 
-
 impl CliDeserialize for NewTrialDirArgs {
     fn _augment_clap_app<'a, 'b>(app: clap::App<'a, 'b>) -> clap::App<'a, 'b> {
         let app = app.args(&[
@@ -282,6 +281,38 @@ impl OptionalFileType {
                 default
             }
         })
+    }
+}
+
+/// Used by entry points that have no trial directory, but where the user may wish to save
+/// log output to a specified path, at their choosing.
+pub struct AppendLog(pub AppendLogInner);
+
+pub struct AppendLogInner {
+    path: Option<String>,
+}
+
+impl CliDeserialize for AppendLog {
+    fn _augment_clap_app<'a, 'b>(app: clap::App<'a, 'b>) -> clap::App<'a, 'b> {
+        app.args(&[
+            arg!( log [--log]=LOGFILE "append to this logfile"),
+        ])
+    }
+
+    fn _resolve_args(m: &clap::ArgMatches<'_>) -> FailResult<Self> {
+        Ok(AppendLog(AppendLogInner {
+            path: m.value_of("log").map(|s| s.to_string()),
+        }))
+    }
+}
+
+impl AppendLogInner {
+    fn start(self, logfile: SetGlobalLogfile) -> FailResult<()> {
+        if let Some(path) = self.path {
+            // (NOTE: create does not truncate)
+            logfile.start(PathFile::create(path)?)?;
+        }
+        Ok(())
     }
 }
 
@@ -376,19 +407,20 @@ pub fn shear_plot(bin_name: &str, version: VersionInfo) -> ! {
         let (app, de) = CliDeserialize::augment_clap_app({
             clap::App::new(bin_name)
                 .args(&[
-                    arg!( input=FORCES_DIR "phonopy forces dir (try --save-bands in main script)"),
+                    arg!( input=STRUCTURE "existing structure directory"),
+                    arg!(*output [--output][-o]=OUTPUT "output JSON file"),
                 ])
         });
         let matches = app.get_matches();
-        let dir_args = de.resolve_args(&matches)?;
+        let ((ConfigArgs(config), AppendLog(append_log)), plot_args) = de.resolve_args(&matches)?;
 
-        let input = PathDir::new(matches.expect_value_of("input"))?;
+        append_log.start(logfile)?;
 
-        let mut trial = TrialDir::create_new(dir_args)?;
-        logfile.start(PathFile::new(trial.new_logfile_path()?)?)?;
+        let input = StoredStructure::load(matches.expect_value_of("input"))?;
+        let output = matches.expect_value_of("output");
 
-        let ValidatedEnergyPlotSettings(settings) = trial.read_base_settings()?;
-        trial.run_energy_surface(mpi_on_demand, &settings, &input)
+        let ValidatedEnergyPlotSettings(settings) = config.deserialize()?;
+        crate::cmd::run_shear_plot(mpi_on_demand, &settings, input, plot_args, output)
     });
 }
 
@@ -430,17 +462,13 @@ pub fn sparse_analysis(bin_name: &str, version: VersionInfo) -> ! {
                         output directory. This can be the trial directory. Existing analysis \
                         output files will be clobbered.\
                     "),
-                    arg!( log [--log]=LOGFILE "append to this logfile"),
                 ])
         });
         let matches = app.get_matches();
-        let () = de.resolve_args(&matches)?;
+        let AppendLog(append_log) = de.resolve_args(&matches)?;
+        append_log.start(logfile)?;
 
         let structure = StoredStructure::load(matches.expect_value_of("structure"))?;
-
-        if let Some(path) = matches.value_of("log") {
-            logfile.start(PathFile::create(path)?)?; // (NOTE: create does not truncate)
-        }
 
         let (freqs, evecs) = {
             let path = PathFile::new(matches.expect_value_of("eigensols"))?;
@@ -475,17 +503,13 @@ pub fn dynmat_analysis(bin_name: &str, version: VersionInfo) -> ! {
                         output directory. This can be the trial directory. Existing analysis \
                         output files will be clobbered.\
                     "),
-                    arg!( log [--log]=LOGFILE "append to this logfile"),
                 ])
         });
         let matches = app.get_matches();
-        let ConfigArgs(config) = de.resolve_args(&matches)?;
+        let (ConfigArgs(config), AppendLog(append_log)) = de.resolve_args(&matches)?;
+        append_log.start(logfile)?;
 
         let structure = StoredStructure::load(matches.expect_value_of("structure"))?;
-
-        if let Some(path) = matches.value_of("log") {
-            logfile.start(PathFile::create(path)?)?; // (NOTE: create does not truncate)
-        }
 
         let dynmat = Load::load(PathFile::new(matches.expect_value_of("dynmat"))?)?;
 
@@ -663,15 +687,11 @@ pub fn dynmat_at_q(bin_name: &str, version: VersionInfo) -> ! {
                         describing the location in units of the reciprocal cell.\
                     ").allow_hyphen_values(true),
                     arg!(*output [-o][--output]=PATH "Path for output dynmat.npz file."),
-                    arg!( log [--log]=LOGFILE "append to this logfile"),
                 ])
         });
         let matches = app.get_matches();
-        let ConfigArgs(config) = de.resolve_args(&matches)?;
-
-        if let Some(path) = matches.value_of("log") {
-            logfile.start(PathFile::create(path)?)?; // (NOTE: create does not truncate)
-        }
+        let (ConfigArgs(config), AppendLog(append_log)) = de.resolve_args(&matches)?;
+        append_log.start(logfile)?;
 
         let ValidatedSettings(settings) = config.deserialize()?;
 

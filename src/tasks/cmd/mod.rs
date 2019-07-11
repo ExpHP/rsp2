@@ -36,8 +36,8 @@ pub(crate) mod python;
 mod phonopy;
 
 use crate::{FailResult, FailOk};
-use rsp2_tasks_config::{self as cfg, Settings, NormalizationMode, SupercellSpec};
-use crate::traits::{AsPath, Load, Save};
+use rsp2_tasks_config::{self as cfg, Settings, SupercellSpec};
+use crate::traits::{AsPath, Load, Save, save::Json};
 use rsp2_lammps_wrap::LammpsOnDemand;
 use rsp2_dynmat::{ForceConstants, DynamicalMatrix};
 
@@ -51,10 +51,9 @@ use self::acoustic_search::ModeKind;
 
 use path_abs::{PathAbs, PathFile, PathDir};
 use rsp2_structure::consts::CARBON;
-use rsp2_slice_math::{vnorm};
 
 use slice_of_array::prelude::*;
-use rsp2_array_types::{V3, M33, Unvee};
+use rsp2_array_types::{V3, M33};
 use rsp2_structure::{Coords, Lattice};
 use rsp2_structure::{
     layer::LayersPerUnitCell,
@@ -501,8 +500,6 @@ fn do_compute_dynmat(
     )?;
 
     if log_enabled!(target: "rsp2_tasks::special::phonopy_force_constants", log::Level::Trace) {
-        use crate::traits::save::{Json};
-
         if let Some(phonopy_info) = &phonopy_info {
             trace!("Creating rsp2-fcs.json file for rsp2_tasks::special::phonopy_force_constants");
             let deperm_to_phonopy = &phonopy_info.coperm_from_phonopy; // inverse of inverse
@@ -728,8 +725,6 @@ fn save_force_sets_for_tests(
     force_sets: &Vec<BTreeMap<usize, V3<f64>>>,
     dynmat: &DynamicalMatrix,
 ) {
-    use crate::traits::save::{Json};
-
     #[derive(Serialize, Deserialize)]
     #[serde(rename_all = "kebab-case")]
     struct Primitive {
@@ -926,86 +921,147 @@ fn do_force_sets_at_disps_for_sparse(
 
 //=================================================================
 
-impl TrialDir {
-    pub(crate) fn run_energy_surface(
-        self,
-        on_demand: Option<LammpsOnDemand>,
-        settings: &cfg::EnergyPlotSettings,
-        _input: &PathDir,
-    ) -> FailResult<()>
-    {Ok({
-        // (IIFEs to silence dead code warnings.)
-        let (coords, meta): (Coords, CommonMeta) = {|| unimplemented!("\
-            rsp2-shear-plot has not yet been fixed to accept non-phonopy-based \
-            input files.\
-        ")}();
-        let (freqs, evecs): (Vec<f64>, GammaBasis3) = {|| unreachable!()}();
-
-        let plot_ev_indices = {
-            use rsp2_tasks_config::EnergyPlotEvIndices::*;
-
-            let (i, j) = match settings.ev_indices {
-                Shear => {
-                    // FIXME: This should just find layers, check that there's two
-                    //        and then move one along x and y instead
-                    panic!("energy plot using shear modes is no longer supported")
-                },
-                These(i, j) => (i, j),
-            };
-
-            // (in case of confusion about 0-based/1-based indices)
-            trace!("X: Eigensolution {:>3}, frequency {}", i, freqs[i]);
-            trace!("Y: Eigensolution {:>3}, frequency {}", j, freqs[j]);
-            (i, j)
-        };
-
-        let get_real_ev = |i: usize| {
-            let ev = &evecs.0[i].0;
-            settings.normalization.normalize(ev)
-        };
-
-        let pot = PotentialBuilder::from_config_parts(
-            Some(&self),
-            on_demand,
-            &settings.threading,
-            &settings.lammps,
-            &settings.potential,
-        )?;
-
-        let [xmin, xmax] = settings.xlim;
-        let [ymin, ymax] = settings.ylim;
-        let [w, h] = settings.dim;
-        let data = {
-            crate::cmd::integrate_2d::integrate_two_eigenvectors(
-                (w, h),
-                &coords.to_carts(),
-                (xmin..xmax, ymin..ymax),
-                (&get_real_ev(plot_ev_indices.0), &get_real_ev(plot_ev_indices.1)),
-                {
-                    use std::sync::atomic::{AtomicUsize, Ordering};
-                    let counter = AtomicUsize::new(0);
-                    let get_meta = meta.sendable();
-
-                    move |pos| {FailOk({
-                        let i = counter.fetch_add(1, Ordering::SeqCst);
-                        // println!("{:?}", pos.flat().iter().sum::<f64>());
-
-                        eprint!("\rdatapoint {:>6} of {}", i, w * h);
-                        pot.one_off()
-                            .compute_grad(
-                                &coords.clone().with_carts(pos.to_vec()),
-                                get_meta().sift(),
-                            )?
-                    })}
-                }
-            )?
-        };
-        eprintln!();
-
-        let chunked: Vec<_> = data.chunks(w).collect();
-        serde_json::to_writer_pretty(self.create_file("out.json")?, &chunked)?;
-    })}
+pub struct EnergySurfaceArgs {
+    density: usize,
+    extend_border: bool,
+    layer: meta::Layer,
 }
+
+impl crate::ui::cli_deserialize::CliDeserialize for EnergySurfaceArgs {
+    fn _augment_clap_app<'a, 'b>(app: clap::App<'a, 'b>) -> clap::App<'a, 'b> {
+        app.args(&[
+            arg!( density [--density]=NPOINTS "number of points along each lattice vector"),
+            arg!( extend_border [--extend-border] "\
+                Include an extra point in each direction around the chosen range. \
+                (these points are not counted in the density). Useful to ensure there are values \
+                at all points along the edges if the data is to be resampled in some way.\
+            "),
+            arg!( layer [--layer]=LAYER "select which layer moves"),
+        ])
+    }
+
+    fn _resolve_args(m: &clap::ArgMatches<'_>) -> FailResult<Self> {
+        Ok(EnergySurfaceArgs {
+            density: m.value_of("density").unwrap_or("100").parse()?,
+            extend_border: m.is_present("extend_border"),
+            layer: meta::Layer(m.value_of("layer").unwrap_or("0").parse()?),
+        })
+    }
+}
+
+pub(crate) fn run_shear_plot(
+    on_demand: Option<LammpsOnDemand>,
+    settings: &cfg::EnergyPlotSettings,
+    structure: StoredStructure,
+    plot_args: EnergySurfaceArgs,
+    output_path: impl AsPath,
+) -> FailResult<()>
+{Ok({
+    use rsp2_array_types::M22;
+
+    let meta = structure.meta();
+    let coords = structure.coords;
+
+    let EnergySurfaceArgs { density, extend_border, layer: translated_layer } = plot_args;
+
+    let pot = PotentialBuilder::from_config_parts(
+        None,
+        on_demand,
+        &settings.threading,
+        &settings.lammps,
+        &settings.potential,
+    )?;
+
+    let lattice_matrix_22 = {
+        let matrix = coords.lattice().matrix();
+        if (0..2).any(|k| matrix[2][k] != 0.0 || matrix[k][2] != 0.0) {
+            bail!("Structure must be planar in xy plane.");
+        }
+
+        M22::from_fn(|r, c| matrix[r][c])
+    };
+
+    let site_layers: meta::SiteLayers = match meta.pick() {
+        None => bail!("The structure for a shear plot must store layers."),
+        Some(x) => x,
+    };
+
+    let mask: Vec<bool> = {
+        site_layers.iter().map(|&x| x == translated_layer).collect()
+    };
+
+    // Vector that translates a layer by a lattice basis vector.
+    let get_translation_vector = |k: usize| {
+        let lattice_vector = coords.lattice().vectors()[k];
+
+        let mut out = vec![V3::zero(); coords.len()];
+        for (i, &mask_bit) in mask.iter().enumerate() {
+            if mask_bit {
+                out[i] = lattice_vector;
+            }
+        }
+        out
+    };
+
+    let a_density = density;
+    let b_density = density;
+    let a_range = 0.0..1.0;
+    let b_range = 0.0..1.0;
+    let data = {
+        crate::cmd::integrate_2d::integrate_two_directions(
+            [a_density, b_density],
+            &coords.to_carts(),
+            [a_range, b_range],
+            [extend_border, extend_border],
+            [&get_translation_vector(0), &get_translation_vector(1)],
+            {
+                use std::sync::atomic::{AtomicUsize, Ordering};
+                let coords = coords.clone();
+                let counter = AtomicUsize::new(0);
+
+                let mut diff_fn = pot.initialize_diff_fn(&coords, meta.sift())?;
+
+                move |pos| {FailOk({
+                    let i = counter.fetch_add(1, Ordering::SeqCst);
+                    // println!("{:?}", pos.flat().iter().sum::<f64>());
+
+                    eprint!("\rdatapoint {:>6} of {}", i, a_density * b_density);
+                    diff_fn.compute_grad(
+                        &coords.clone().with_carts(pos.to_vec()),
+                        meta.sift(),
+                    )?
+                })}
+            }
+        )?
+    };
+    eprintln!();
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "kebab-case")]
+    struct Output {
+        lattice: M22,
+        index: Vec<[i32; 2]>,
+        cart_translation: Vec<[f64; 2]>,
+        energy_per_atom: Vec<f64>,
+    }
+
+    let output = Output {
+        lattice: lattice_matrix_22,
+        index: data.indices,
+        cart_translation: {
+            data.coords.iter()
+                .map(|&[a, b]| {
+                    let V3([x, y, z]) = V3([a, b, 0.0]) * coords.lattice();
+                    assert_eq!(z, 0.0);
+                    [x, y]
+                })
+                .collect()
+        },
+        energy_per_atom: data.values.iter().map(|v| v / (coords.len() as f64)).collect(),
+    };
+
+    Json(&output).save(output_path)?;
+})}
 
 //=================================================================
 
@@ -1022,43 +1078,6 @@ extension_trait!{
                     }).0
                 },
             }
-        }
-    }
-}
-
-extension_trait! {
-    NormalizationModeExt for NormalizationMode {
-        fn norm(&self, ev: &[V3]) -> f64
-        {
-            let atom_rs = || ev.iter().map(V3::norm).collect::<Vec<_>>();
-
-            match *self {
-                NormalizationMode::CoordNorm => vnorm(ev.unvee().flat()),
-                NormalizationMode::AtomMean => {
-                    let rs = atom_rs();
-                    rs.iter().sum::<f64>() / (rs.len() as f64)
-                },
-                NormalizationMode::AtomRms => {
-                    let rs = atom_rs();
-                    vnorm(&rs) / (rs.len() as f64).sqrt()
-                },
-                NormalizationMode::AtomMax => {
-                    let rs = atom_rs();
-                    rs.iter().cloned()
-                        .max_by(|a, b| a.partial_cmp(b).expect("NaN?!")).expect("zero-dim ev?!")
-                },
-            }
-        }
-
-        fn normalize(&self, ev: &[V3]) -> Vec<V3>
-        {
-            let norm = self.norm(ev);
-
-            let mut ev = ev.to_vec();
-            for v in &mut ev {
-                *v /= norm;
-            }
-            ev
         }
     }
 }
