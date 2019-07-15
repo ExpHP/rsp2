@@ -70,7 +70,9 @@ def main():
 
     mode_data = register(TaskEigenmodeData(eigensols))
 
-    _bandplot = register(TaskBandPlot(structure, mode_data, ev_gpoint_probs, band_path, bands))
+    raman_json = register(TaskRamanJson())
+
+    _bandplot = register(TaskBandPlot(structure, mode_data, ev_gpoint_probs, band_path, bands, raman_json))
 
     for task in all_tasks:
         task.add_parser_opts(parser)
@@ -148,6 +150,22 @@ class TaskKpointSfrac(Task):
 
     def _compute(self, args):
         return [1.0 * x for x in json.loads(args.kpoint)]
+
+class TaskRamanJson(Task):
+    def add_parser_opts(self, parser):
+        parser.add_argument(
+            '--raman-file', help=
+            'rsp2 raman.json output file. Required if colorizing a plot by raman.',
+        )
+
+    def check_upfront(self, args):
+        check_optional_input(args.raman_file)
+
+    def _compute(self, args):
+        if not args.raman_file:
+            die('--raman-file is required for this action')
+
+        return dwim.from_path(args.raman_file)
 
 class TaskStructure(Task):
     def add_parser_opts(self, parser):
@@ -585,6 +603,7 @@ class TaskBandPlot(Task):
             ev_gpoint_probs: TaskQProbs,
             band_path: TaskBandPath,
             bands: TaskBands,
+            raman_json: TaskRamanJson,
     ):
         super().__init__()
         self.structure = structure
@@ -592,6 +611,7 @@ class TaskBandPlot(Task):
         self.ev_gpoint_probs = ev_gpoint_probs
         self.band_path = band_path
         self.bands = bands
+        self.raman_json = raman_json
 
     def add_parser_opts(self, parser):
         parser.add_argument('--show', action='store_true', help='show plot')
@@ -619,9 +639,9 @@ class TaskBandPlot(Task):
         )
 
         parser.add_argument(
-            '--plot-color', type=str, default='zpol', metavar='FILE', help=
-            'How the plot points are colored. Choices: [zpol, sign, uniform:COLOR] '
-            '(e.g. --plot-color uniform:blue)'
+            '--plot-color', type=str, default='zpol', metavar='SCHEME', help=
+            'How the plot points are colored. Choices: [zpol, sign, uniform:COLOR, raman:POL] '
+            '(e.g. --plot-color uniform:blue). POL is either "average-3d" or "backscatter".'
         )
 
         parser.add_argument(
@@ -644,6 +664,10 @@ class TaskBandPlot(Task):
         return args.show or bool(args.write_plot)
 
     def _compute(self, args):
+        raman_dict = None
+        if args.plot_color.startswith('raman:'):
+            raman_dict = self.raman_json.require(args)
+
         return probs_to_band_plot(
             ev_frequencies=self.mode_data.require(args)['ev_frequencies'],
             ev_z_projections=self.mode_data.require(args)['ev_z_projections'],
@@ -654,6 +678,7 @@ class TaskBandPlot(Task):
             alpha_exponent=args.plot_exponent,
             alpha_max=args.plot_max_alpha,
             alpha_truncate=args.plot_truncate,
+            raman_dict=raman_dict,
             plot_baseline_path=args.plot_baseline_file,
             plot_color=args.plot_color,
             plot_ylim=args.plot_ylim,
@@ -738,6 +763,7 @@ def probs_to_band_plot(
         plot_xticklabels,
         plot_color,
         plot_ylim,
+        raman_dict,
         alpha_truncate,
         alpha_exponent,
         alpha_max,
@@ -747,6 +773,42 @@ def probs_to_band_plot(
         verbose=False,
 ):
     import matplotlib.pyplot as plt
+
+    # Switch based on plot_color so we can validate it before doing anything expensive.
+    if plot_color == 'zpol':
+        # colorize Z projection
+        def set_plot_color(C, *, Z_proj, **_kw):
+            from matplotlib.colors import LinearSegmentedColormap
+            cmap = LinearSegmentedColormap.from_list('', [[0, 0, 1], [0, 0.5, 0]])
+            C[:, :3] = cmap(Z_proj)[:, :3]
+
+    elif plot_color == 'sign':
+        def set_plot_color(C, *, Y, **_kw):
+            from matplotlib.colors import to_rgb
+            C[:,:3] = to_rgb('y')
+            C[:,:3] = np.where((Y < -1e-3)[:, None], to_rgb('g'), C[:,:3])
+            C[:,:3] = np.where((Y > +1e-3)[:, None], to_rgb('r'), C[:,:3])
+
+    elif plot_color.startswith('uniform:'):
+        from matplotlib.colors import to_rgb
+        fixed_color = to_rgb(plot_color[len('uniform:'):].strip())
+        def set_plot_color(C, **_kw):
+            # use given color
+            C[:, :3] = fixed_color
+
+    elif plot_color.startswith('raman:'):
+        raman_dict_key = plot_color[len('raman:'):]
+        if raman_dict_key not in ['average-3d', 'backscatter']:
+            die('Invalid raman polarization mode: {raman_dict_key}')
+        raman_intensity = raman_dict[raman_dict_key]
+
+        def set_plot_color(C, **_kw):
+            cmap = plt.get_cmap('cool_r')
+            C[:, :3] = cmap(raman_intensity)[:, :3]
+
+    else:
+        die(f'invalid --plot-color: {repr(plot_color)}')
+        raise RuntimeError('unreachable')
 
     if plot_baseline_path is not None:
         base_X, base_Y = read_baseline_plot(plot_baseline_path)
@@ -793,23 +855,7 @@ def probs_to_band_plot(
         print(f'Plotting {len(X)} points!')
 
     C = np.hstack([np.zeros((len(S), 3)), S[:, None]])
-
-    if plot_color == 'zpol':
-        # colorize Z projection
-        from matplotlib.colors import LinearSegmentedColormap
-        cmap = LinearSegmentedColormap.from_list('', [[0, 0, 1], [0, 0.5, 0]])
-        C[:, :3] = cmap(Z_proj)[:, :3]
-    elif plot_color == 'sign':
-        from matplotlib.colors import to_rgb
-        C[:,:3] = to_rgb('y')
-        C[:,:3] = np.where((Y < -1e-3)[:, None], to_rgb('g'), C[:,:3])
-        C[:,:3] = np.where((Y > +1e-3)[:, None], to_rgb('r'), C[:,:3])
-    elif plot_color.startswith('uniform:'):
-        from matplotlib.colors import to_rgb
-        # use given color
-        C[:, :3] = to_rgb(plot_color[len('uniform:'):].strip())
-    else:
-        die(f'invalid --plot-color: {repr(plot_color)}'),
+    set_plot_color(C, X=X, Y=Y, Z_proj=Z_proj)
 
     fig = plt.figure(figsize=(7, 8), constrained_layout=True)
     #fig.set_tight_layout(True)
