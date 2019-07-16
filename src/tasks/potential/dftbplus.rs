@@ -53,13 +53,12 @@ impl Builder {
         let hsd = cfg.hsd.parse::<wrapper::Hsd>()?;
         let mut inner = wrapper::Builder::from_hsd(&hsd);
         if let Some(trial_dir) = trial_dir {
-            inner.append_log(trial_dir.join("dftb+.log"));
+            inner.append_log(trial_dir.as_path().join("dftb+.log"));
         }
 
         Ok(Builder { inner })
     }
 }
-
 
 // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 // FIXME: Workaround for https://github.com/dftbplus/dftbplus/issues/247 .

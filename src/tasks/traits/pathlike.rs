@@ -32,15 +32,14 @@ pub trait AsPath {
 }
 
 pub trait DirLike: AsPath {
-
     fn create_file(&self, name: &Path) -> FailResult<FileWrite>
     { Ok(FileWrite::create(self.as_path().join(name))?) }
 
     fn open(&self, name: &Path) -> FailResult<FileRead>
-    { Ok(FileRead::read(self.as_path().join(name))?) }
+    { Ok(FileRead::open(self.as_path().join(name))?) }
 
     fn append_file(&self, name: &Path) -> FailResult<FileWrite>
-    { Ok(FileWrite::append(self.as_path().join(name.as_path()))?) }
+    { Ok(FileWrite::open_append(self.as_path().join(name.as_path()))?) }
 
     // // A form of 'join' where path is verified to be a relative path.
     // // (however, it makes no further guarantee that `self.join(path)`
@@ -94,10 +93,9 @@ as_path_impl!{
     (by Deref) [P: AsPath + ?Sized] std::rc::Rc<P>;
     (by Deref) [P: AsPath + ?Sized] std::sync::Arc<P>;
     (by Deref) ['p, P: AsPath + ToOwned + ?Sized] std::borrow::Cow<'p, P>;
-    (by Deref) [] path_abs::PathArc;
-    (by Deref) [] path_abs::PathAbs;
-    (by Deref) [] path_abs::PathFile;
-    (by Deref) [] path_abs::PathDir;
+    (by AsRef) [] path_abs::PathAbs;
+    (by AsRef) [] path_abs::PathFile;
+    (by AsRef) [] path_abs::PathDir;
 }
 
 impl<'p, P: AsPath + ?Sized> AsPath for &'p P

@@ -77,11 +77,12 @@ mod lockfile {
     use crate::FailResult;
     use std::fs::{OpenOptions};
     use std::io;
-    use path_abs::{PathArc, PathFile, FileWrite};
+    use std::path::{Path, PathBuf};
+    use path_abs::{PathFile, FileWrite};
 
     /// Handle with methods for creating a lockfile without race conditions.
     #[derive(Debug, Clone)]
-    pub struct LockfilePath(pub PathArc);
+    pub struct LockfilePath(pub PathBuf);
 
     /// RAII guard for a lockfile.
     #[derive(Debug)]
@@ -102,7 +103,7 @@ mod lockfile {
                         _ => bail!(e),
                     }
                 },
-                Ok(_) => Ok(Some(LockfileGuard(self.0.canonicalize()?.into_file()?))),
+                Ok(_) => Ok(Some(LockfileGuard(PathFile::new(self.0.canonicalize()?)?))),
             }
         }
 
@@ -118,8 +119,8 @@ mod lockfile {
     }
 
     impl std::ops::Deref for LockfilePath {
-        type Target = PathArc;
-        fn deref(&self) -> &PathArc { &self.0 }
+        type Target = Path;
+        fn deref(&self) -> &Path { &self.0 }
     }
 
     #[allow(dead_code)]
@@ -194,7 +195,7 @@ pub mod ext_traits {
 
             fn nice_or_bust(&self) -> Option<String> {
                 let cwd = PathDir::current_dir().ok()?;
-                let absolute = cwd.join(self.as_ref());
+                let absolute = cwd.as_path().join(self.as_ref());
 
                 // (just bail if it's not a child. "../../../other/place" would hardly be nice.)
                 let relative = absolute.as_path().strip_prefix(&cwd).ok()?;

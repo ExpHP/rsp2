@@ -63,7 +63,7 @@ serde_derive = "1.0.91"
 serde_json = "1"
 serde_yaml = "0.7"
 serde_ignored = "0.0.4"
-path_abs = { git = "https://github.com/vitiral/path_abs", rev = "614f6317" }
+path_abs = "0.5.0"
 enum-map = "0.4.1"
 frunk = "0.2.0"
 shlex = "0.1.1"

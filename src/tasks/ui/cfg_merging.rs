@@ -14,7 +14,7 @@ use crate::FailResult;
 use rsp2_tasks_config::YamlRead;
 
 use serde_yaml::{Value, Mapping};
-use path_abs::PathFile;
+use path_abs::{PathFile, FileRead};
 use std::path::Path;
 
 pub const CONFIG_HELP_STR: &'static str = "\
@@ -78,7 +78,7 @@ impl Config {
 
     fn _read_file(path: &Path) -> FailResult<Config> {
         let path = PathFile::new(path)?;
-        let yaml = YamlRead::from_reader(path.read()?)?;
+        let yaml = YamlRead::from_reader(FileRead::open(&path)?)?;
         let yaml = expand_dot_keys(yaml)?;
         let yaml = validate_replacements_from_one_config(yaml)?;
 

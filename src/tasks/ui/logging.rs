@@ -72,7 +72,7 @@ mod loggers {
                 assert!(inner.delayed_messages.is_some(), "(bug) The logfile was set twice!");
                 assert!(inner.file.is_none(), "(bug) impossible state!");
 
-                let mut file = path.append()?;
+                let mut file = path.open_append()?;
                 for line in inner.delayed_messages.take().unwrap() {
                     writeln!(file, "{}", line)?;
                 }

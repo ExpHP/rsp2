@@ -17,8 +17,8 @@ use crate::util::{LockfilePath, LockfileGuard};
 use crate::util::ext_traits::PathNiceExt;
 use crate::ui::cfg_merging::ConfigSources;
 
-use std::path::{Path};
-use path_abs::{PathArc, PathDir, PathFile, FileRead, FileWrite};
+use std::path::{Path, PathBuf};
+use path_abs::{PathDir, PathFile, FileRead, FileWrite};
 use rsp2_tasks_config::YamlRead;
 use rsp2_fs_util::rm_rf;
 
@@ -30,11 +30,11 @@ pub struct TrialDir {
 }
 
 impl AsPath for TrialDir {
-    fn as_path(&self) -> &Path { &self.path }
+    fn as_path(&self) -> &Path { self.path.as_path() }
 }
 
 pub struct NewTrialDirArgs {
-    pub trial_dir: PathArc,
+    pub trial_dir: PathBuf,
     pub config_sources: ConfigSources,
     pub err_if_existing: bool,
 }
@@ -89,14 +89,14 @@ impl TrialDir {
     fn lockfile_path(dir: &PathDir) -> LockfilePath
     { LockfilePath(dir.join("rsp2.lock").into()) }
 
-    fn _base_settings_path(path: &PathDir) -> PathArc
-    { PathArc::new(path.join("settings.yaml")) }
+    fn _base_settings_path(path: &PathDir) -> PathBuf
+    { path.join("settings.yaml") }
 
     fn base_settings_path(&self) -> FailResult<PathFile>
-    { Ok(Self::_base_settings_path(self).canonicalize()?.into_file()?) }
+    { Ok(PathFile::new(Self::_base_settings_path(self).canonicalize()?)?) }
 
-    pub fn from_existing(path: &PathArc) -> FailResult<Self> {
-        let path = PathArc::new(path).canonicalize()?.into_dir()?;
+    pub fn from_existing(path: &Path) -> FailResult<Self> {
+        let path = PathDir::new(path.canonicalize()?)?;
         TrialDir {
             settings_were_read: false,
             _lock: match Self::lockfile_path(&path).try_lock()? {
@@ -110,7 +110,7 @@ impl TrialDir {
     pub fn validate(self) -> FailResult<Self> {
         // Double-check that these files exist.
         let _ = self.base_settings_path()?;
-        let _ = Self::lockfile_path(&self).canonicalize()?.into_file()?;
+        let _ = PathFile::new(Self::lockfile_path(&self).canonicalize()?)?;
         Ok(self)
     }
 
@@ -118,7 +118,7 @@ impl TrialDir {
     ///
     /// This uses a lockfile (not the same as 'lockfile_path()'), and will
     /// fail if it cannot be created for some reason other than being locked.
-    pub fn new_logfile_path(&self) -> FailResult<PathArc>
+    pub fn new_logfile_path(&self) -> FailResult<PathBuf>
     {
         let paths = {
             std::iter::once("rsp2.log".into())
@@ -144,7 +144,7 @@ impl TrialDir {
 
     #[allow(unused)]
     pub fn read_file(&self, path: impl AsPath) -> FailResult<FileRead>
-    { Ok(PathFile::new(self.join(path))?.read()?) }
+    { Ok(FileRead::open(PathFile::new(self.join(path))?)?) }
 
     // HACK: A quick check for a simple logic error.
     //       (settings should ONLY be read in the entry_point, with borrows propagated
@@ -164,7 +164,7 @@ impl TrialDir {
     where T: YamlRead,
     {
         self.mark_settings_read();
-        let file = FileRead::read(self.base_settings_path()?)?;
+        let file = FileRead::open(self.base_settings_path()?)?;
         Ok(YamlRead::from_reader(file)?)
     }
 

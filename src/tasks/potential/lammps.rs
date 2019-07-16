@@ -85,7 +85,7 @@ impl<P: Clone> Builder<P>
 
         let mut inner = InnerBuilder::new();
         if let Some(trial_dir) = trial_dir {
-            inner.append_log(trial_dir.join("lammps.log"));
+            inner.append_log(trial_dir.as_path().join("lammps.log"));
             inner.debug_dir(Some(trial_dir.as_path()));
         }
         inner.update_style(match *update_style {

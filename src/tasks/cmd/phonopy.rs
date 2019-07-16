@@ -16,7 +16,7 @@ use crate::FailResult;
 use crate::traits::{AsPath, Save, Load};
 use crate::meta::{self, prelude::*};
 use crate::hlist_aliases::*;
-use crate::errors::DisplayPathArcNice;
+use crate::errors::DisplayPathNice;
 
 use crate::cmd::SupercellSpecExt;
 
@@ -56,7 +56,7 @@ const FNAME_OUT_SYMMETRY: &'static str = "symmetry.yaml";
 pub(crate) struct MissingFileError {
     backtrace: Backtrace,
     ty: &'static str,
-    dir: DisplayPathArcNice,
+    dir: DisplayPathNice,
     filename: String,
 }
 
@@ -70,7 +70,7 @@ pub(crate) struct PhonopyFailed {
 impl MissingFileError {
     fn new(ty: &'static str, dir: &dyn AsPath, filename: String) -> Self {
         let backtrace = Backtrace::new();
-        let dir = DisplayPathArcNice(dir.as_path().to_owned().into());
+        let dir = DisplayPathNice(dir.as_path().to_owned().into());
         MissingFileError { backtrace, ty, dir, filename }
     }
 }
@@ -132,7 +132,7 @@ impl Load for Args {
         use crate::util::ext_traits::PathNiceExt;
         let path = path.as_path();
 
-        let text = FileRead::read(path)?.read_string()?;
+        let text = FileRead::open(path)?.read_string()?;
         if let Some(args) = shlex::split(&text) {
             Ok(Args(args))
         } else {

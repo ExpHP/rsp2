@@ -225,7 +225,7 @@ impl CliDeserialize for NewTrialDirArgs {
         config_sources: ConfigArgs::_resolve_args(m)?.0,
         err_if_existing: !m.is_present("force"),
         // FIXME factor out 'absolute()'
-        trial_dir: PathDir::current_dir()?.join(m.expect_value_of("trial_dir")),
+        trial_dir: PathDir::current_dir()?.as_path().join(m.expect_value_of("trial_dir")),
     })}
 }
 
@@ -263,13 +263,13 @@ impl OptionalFileType {
         let default = StructureFileType::Poscar;
 
         self.0.unwrap_or_else(|| {
-            let meta = match path.metadata() {
+            let meta = match path.as_path().metadata() {
                 Ok(meta) => meta,
                 Err(_) => return default,
             };
 
             if meta.is_file() {
-                match path.extension().and_then(|s| s.to_str()) {
+                match path.as_path().extension().and_then(|s| s.to_str()) {
                     Some("yaml") => StructureFileType::LayersYaml,
                     Some("vasp") => StructureFileType::Poscar,
                     Some("xyz") => StructureFileType::Xyz,
@@ -309,7 +309,6 @@ impl CliDeserialize for AppendLog {
 impl AppendLogInner {
     fn start(self, logfile: SetGlobalLogfile) -> FailResult<()> {
         if let Some(path) = self.path {
-            // (NOTE: create does not truncate)
             logfile.start(PathFile::create(path)?)?;
         }
         Ok(())
@@ -375,7 +374,7 @@ pub fn after_diagonalization(bin_name: &str, version: VersionInfo) -> ! {
         let ConfigOverrideArgs(overrides) = de.resolve_args(&matches)?;
 
         let dir = PathDir::new(matches.expect_value_of("dir"))?;
-        let mut trial = TrialDir::from_existing(&dir)?;
+        let mut trial = TrialDir::from_existing(dir.as_path())?;
 
         // Make sure the run is valid before making a logfile
         let will_diagonalize = matches.is_present("diagonalize");
@@ -437,7 +436,7 @@ pub fn rerun_analysis(bin_name: &str, version: VersionInfo) -> ! {
         let () = de.resolve_args(&matches)?;
 
         let dir = PathDir::new(matches.expect_value_of("dir"))?;
-        let (mut trial, structure) = crate::cmd::resolve_trial_or_structure_path(&dir, "final.structure")?;
+        let (mut trial, structure) = crate::cmd::resolve_trial_or_structure_path(dir.as_ref(), "final.structure")?;
 
         logfile.start(PathFile::new(trial.new_logfile_path()?)?)?;
 

@@ -73,14 +73,13 @@ mod errors {
     use std::fmt;
 
     #[derive(Debug, Clone)]
-    pub struct DisplayPathArcNice(pub path_abs::PathArc);
-    impl fmt::Display for DisplayPathArcNice {
+    pub struct DisplayPathNice(pub std::path::PathBuf);
+    impl fmt::Display for DisplayPathNice {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             use crate::util::ext_traits::PathNiceExt;
             fmt::Display::fmt(&self.0.as_path().nice(), f)
         }
     }
-
 }
 
 /// This module only exists to have its name appear in logs.

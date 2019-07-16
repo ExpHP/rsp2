@@ -3,7 +3,7 @@ extern crate rsp2_assert_close;
 
 use rsp2_integration_test::{CliTest, filetypes, resource, cli_test, Result};
 use rsp2_structure_io::Poscar;
-use path_abs::PathFile;
+use path_abs::{FileRead, PathOps};
 use std::path::Path;
 
 // A single raman output file is used for all of these tests.
@@ -149,5 +149,5 @@ fn simple_test_scale_ranges() -> Result<()> {
 }
 
 fn read_poscar(path: impl AsRef<Path>) -> Result<Poscar> {
-    Ok(Poscar::from_reader(PathFile::new(path)?.read()?)?)
+    Ok(Poscar::from_reader(FileRead::open(path)?)?)
 }

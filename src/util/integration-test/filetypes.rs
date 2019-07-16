@@ -307,7 +307,7 @@ impl CheckFile for Dynmat {
 pub fn load_json<T>(path: impl AsRef<Path>) -> Result<T, Error>
 where T: serde::de::DeserializeOwned,
 {
-    let file = FileRead::read(path.as_ref())?;
+    let file = FileRead::open(path.as_ref())?;
 
     // HACK; I'd really like to have something more akin
     // to the dwim module in rsp2's python parts...

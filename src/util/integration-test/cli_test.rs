@@ -12,7 +12,7 @@
 // NOTE: This draws heavily off of assert-cli (MIT 2.0/Apache)
 
 use crate::fsx::TempDir;
-use path_abs::{PathDir, FileWrite, FileRead};
+use path_abs::{PathDir, FileWrite, FileRead, PathOps};
 use failure::Error;
 
 use std::fmt::Debug;
@@ -109,8 +109,8 @@ impl CliTest {
         let path_in_trial = path_in_trial.to_owned();
         let expected_path = expected_path.to_owned();
         let checker = move |dir: &PathDir| {
-            let actual = T::read_file(&dir.join(&path_in_trial))?;
-            let expected = T::read_file(&expected_path)?;
+            let actual = T::read_file(dir.join(&path_in_trial).as_path())?;
+            let expected = T::read_file(expected_path.as_path())?;
             check_against_with_diff(&expected, &actual, other.clone());
             Ok(())
         };
@@ -132,7 +132,7 @@ impl CliTest {
         let tmp = PathDir::new(_tmp.path())?;
 
         let cwd = PathDir::current_dir()?;
-        cwd.join("tests/resources").absolute()?.into_dir()?.symlink(tmp.join("resources"))?;
+        PathDir::new(cwd.join("tests/resources"))?.symlink(tmp.join("resources"))?;
 
         // HACK to help tame useless rebuilds:
         //
@@ -142,7 +142,7 @@ impl CliTest {
         // that e.g. adds "-fopenmp".
         //
         // TODO: How does rsmpi manage to change linker arguments so easily?
-        if let Ok(dot_cargo) = cwd.join(".cargo").absolute()?.into_dir() {
+        if let Ok(dot_cargo) = PathDir::new(cwd.join(".cargo")) {
             dot_cargo.symlink(tmp.join(".cargo"))?;
         };
 
@@ -161,8 +161,8 @@ impl CliTest {
             println!("Running {:?}", cmd);
             cmd.status()?
         };
-        print!("{}", FileRead::read(stdout_path)?.read_string()?);
-        eprint!("{}", FileRead::read(stderr_path)?.read_string()?);
+        print!("{}", FileRead::open(stdout_path)?.read_string()?);
+        eprint!("{}", FileRead::open(stderr_path)?.read_string()?);
 
         if let Some(success) = expect_success {
             assert_eq!(success, status.success(), "{}", status);

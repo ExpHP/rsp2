@@ -54,7 +54,7 @@ pub struct Yaml<T: ?Sized>(pub T);
 
 impl<T> Load for Json<T> where T: for<'de> serde::Deserialize<'de> {
     fn load(path: impl AsPath) -> FailResult<Json<T>>
-    {Ok(::serde_json::from_reader(FileRead::read(path.as_path())?)?).map(Json)}
+    {Ok(::serde_json::from_reader(FileRead::open(path.as_path())?)?).map(Json)}
 }
 
 // Direct parsing of yaml must be done in extreme moderation due to compile times.
@@ -86,7 +86,7 @@ where
 impl Load for Poscar {
     fn load(path: impl AsPath) -> FailResult<Poscar>
     {
-        let file = BufReader::new(FileRead::read(path.as_path())?);
+        let file = BufReader::new(FileRead::open(path.as_path())?);
         Ok(Poscar::from_buf_reader(file)?)
     }
 }
@@ -94,7 +94,7 @@ impl Load for Poscar {
 impl Load for Xyz {
     fn load(path: impl AsPath) -> FailResult<Xyz>
     {
-        let file = BufReader::new(FileRead::read(path.as_path())?);
+        let file = BufReader::new(FileRead::open(path.as_path())?);
         Ok(Xyz::from_buf_reader(file)?)
     }
 }

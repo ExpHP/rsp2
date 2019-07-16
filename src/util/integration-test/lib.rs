@@ -31,9 +31,9 @@ pub use self::cli_test::Result;
 // used to make queries into tests/resources dryer, with quicker error messages on nonexistent paths
 pub fn resource(path: &str) -> PathBuf {
     let dir = path_abs::PathDir::new("tests/resources").unwrap_or_else(|e| panic!("{}", e));
-    let path = path_abs::PathAbs::new(dir.join(path)).unwrap_or_else(|e| panic!("{}", e));
-    if !path.exists() {
-        panic!("{}: Path does not exist", path.display())
+    let path = path_abs::PathAbs::new(dir.as_path().join(path)).unwrap_or_else(|e| panic!("{}", e));
+    if !path.as_path().exists() {
+        panic!("{}: Path does not exist", path.as_path().display())
     }
     path.as_path().to_owned()
 }

@@ -95,11 +95,7 @@ rsp2-kets = { tag = "v0.4.0", git = "https://github.com/ExpHP/rsp2-kets", featur
 lammps-sys = "0.5.2"
 rayon = "1.0.1"
 vasp-poscar = "0.3.1"
-# As of July 2019, the latest release of path_abs still has an embarrassing bug that
-# it can't canonicalize the path "." .  They fixed this a year ago on master!
-#
-# This rev is chosen to be before the 0.5 breaking changes.
-path_abs = { git = "https://github.com/vitiral/path_abs", rev = "614f6317" }
+path_abs = "0.5.0"
 enum-map = "0.4.1"
 frunk = "0.2.0"
 shlex = "0.1.1"

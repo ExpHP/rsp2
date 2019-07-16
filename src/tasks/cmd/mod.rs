@@ -49,7 +49,7 @@ use crate::math::{
 };
 use self::acoustic_search::ModeKind;
 
-use path_abs::{PathAbs, PathFile, PathDir};
+use path_abs::{PathAbs, PathDir, FileRead};
 use rsp2_structure::consts::CARBON;
 
 use slice_of_array::prelude::*;
@@ -1568,10 +1568,10 @@ pub(crate) fn read_optimizable_structure(
             use rsp2_structure_io::layers_yaml::load;
             use rsp2_structure_io::layers_yaml::load_layer_sc_info;
 
-            let layer_builder = load(PathFile::new(input)?.read()?)?;
+            let layer_builder = load(FileRead::open(input)?)?;
 
             out_sc_mats = Some({
-                load_layer_sc_info(PathFile::new(input)?.read()?)?
+                load_layer_sc_info(FileRead::open(input)?)?
                     .into_iter()
                     .map(|(matrix, periods, _)| ScMatrix::new(&matrix, &periods))
                     .collect_vec()
@@ -1712,15 +1712,15 @@ pub(crate) fn resolve_trial_or_structure_path(
     let structure_name: OsString;
     let trial_path: PathDir;
     if StoredStructure::path_is_structure(&path) {
-        let parent = path.parent().ok_or_else(|| format_err!("no parent for structure dir"))?;
-        structure_name = path.file_name().unwrap().into();
+        let parent = path.as_path().parent().ok_or_else(|| format_err!("no parent for structure dir"))?;
+        structure_name = path.as_path().file_name().unwrap().into();
         trial_path = PathDir::new(parent)?;
     } else {
         trial_path = PathDir::new(path)?;
         structure_name = default_subdir.as_ref().into();
     }
 
-    let trial = TrialDir::from_existing(&trial_path)?;
+    let trial = TrialDir::from_existing(trial_path.as_path())?;
     let structure = trial.read_stored_structure(structure_name)?;
     (trial, structure)
 })}
