@@ -849,8 +849,10 @@ impl TrialDir {
         use crate::ui::cfg_merging::{make_nested_mapping, no_summary, merge_summaries};
 
         #[derive(Serialize)]
+        #[serde(rename_all = "kebab-case")]
         struct EnergyPerAtom {
             initial: f64,
+            #[serde(rename = "final")]
             final_: f64,
             before_ev_chasing: f64,
         }

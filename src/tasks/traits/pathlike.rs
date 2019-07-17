@@ -9,10 +9,8 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use crate::FailResult;
 use std::path::Path;
 use std::path::PathBuf;
-use path_abs::{FileRead, FileWrite};
 
 /// AsRef<Path> with more general impls on smart pointer types.
 ///
@@ -26,34 +24,6 @@ pub trait AsPath {
     fn join(&self, path: impl AsPath) -> PathBuf
     where Self: Sized, // generic functions are not object-safe
     { self.as_path().join(path.as_path()) }
-
-//    fn exists(&self) -> bool
-//    { self.as_path().exists() }
-}
-
-pub trait DirLike: AsPath {
-    fn create_file(&self, name: &Path) -> FailResult<FileWrite>
-    { Ok(FileWrite::create(self.as_path().join(name))?) }
-
-    fn open(&self, name: &Path) -> FailResult<FileRead>
-    { Ok(FileRead::open(self.as_path().join(name))?) }
-
-    fn append_file(&self, name: &Path) -> FailResult<FileWrite>
-    { Ok(FileWrite::open_append(self.as_path().join(name.as_path()))?) }
-
-    // // A form of 'join' where path is verified to be a relative path.
-    // // (however, it makes no further guarantee that `self.join(path)`
-    // // points to a location inside `self`)
-    // fn _descend(&self, path: &Path) -> Result<PathArc>
-    // {
-    //     if path.is_absolute() {
-    //         bail!("Did not expect an absolute path: {}", path.display());
-    //     }
-    //     PathArc::new(self.as_path().join(path))
-    // }
-
-//    fn exists(&self) -> bool
-//    { self.as_path().exists() }
 }
 
 macro_rules! as_path_impl {
@@ -100,4 +70,3 @@ as_path_impl!{
 
 impl<'p, P: AsPath + ?Sized> AsPath for &'p P
 { fn as_path(&self) -> &Path { P::as_path(self) } }
-
