@@ -1,7 +1,6 @@
 use rsp2_array_types::{V3, M33, M3};
 use rsp2_soa_ops::{Perm, Permute};
 
-use std::f64::consts::PI;
 use std::os::raw::c_char;
 use std::ffi::CStr;
 
@@ -91,6 +90,19 @@ fn unfold_all(
             .collect()
     };
 
+    let translation_phases: Vec<Vec<Complex64>> = {
+        let super_lattice_recip = super_lattice_inv.t();
+        let kpoint_cart = kpoint_sfrac * super_lattice_recip;
+        zip_eq!(translation_carts, translation_deperms)
+            .map(|(&translation_cart, translation_deperm)| get_translation_phases(
+                kpoint_cart,
+                super_carts,
+                translation_cart,
+                translation_deperm,
+            ))
+            .collect()
+    };
+
     let progress = progress_prefix.map(|prefix| {
         move |done, total| println!("{}Unfolded {:>5} of {} eigenvectors", prefix, done, total)
     });
@@ -105,6 +117,7 @@ fn unfold_all(
         let dense_row = unfold_one(
             translation_sfracs,
             translation_deperms,
+            &translation_phases,
             gpoint_sfracs,
             kpoint_sfrac,
             eigenvector,
@@ -120,6 +133,7 @@ fn unfold_all(
 fn unfold_one(
     translation_sfracs: &[V3],
     translation_deperms: &[Perm],
+    translation_phases: &[Vec<Complex64>],
     gpoint_sfracs: &[V3],
     kpoint_sfrac: &V3,
     eigenvector: &[V3<Complex64>],
@@ -127,9 +141,14 @@ fn unfold_one(
     let num_quotient = translation_sfracs.len();
 
     let inner_prods: Vec<_> = {
-        translation_deperms.par_iter().map(|perm| {
+        translation_deperms.par_iter().zip_eq(translation_phases).map(|(perm, image_phases)| {
             let permuted = eigenvector.to_vec().permuted_by(perm);
-            inner_prod_ev(eigenvector, &permuted)
+            zip_eq!(eigenvector, image_phases, permuted)
+                .map(|(orig_v3, &image_phase, perm_v3)| {
+                    let true_translated_v3 = perm_v3.map(|x| x * image_phase);
+                    inner_prod_v3(orig_v3, &true_translated_v3)
+                })
+                .sum::<Complex64>()
         }).collect()
     };
 
@@ -137,9 +156,8 @@ fn unfold_one(
         gpoint_sfracs.par_iter().map(|g| {
             // SBZ kpoint dot r for every r
             let phases: Vec<_> = {
-                let i = Complex64::i();
                 translation_sfracs.iter()
-                    .map(|t| Complex64::exp(&(-2.0 * PI * i * V3::dot(&(kpoint_sfrac + g), t))))
+                    .map(|t| exp_i2pi(-V3::dot(&(kpoint_sfrac + g), t)))
                     .collect()
             };
             let prob = zip_eq!(&inner_prods, phases).map(|(a, b)| a * b).sum::<Complex64>() / num_quotient as f64;
@@ -160,6 +178,75 @@ fn unfold_one(
         inner_prod_ev(eigenvector, eigenvector).norm(),
     );
     gpoint_probs
+}
+
+const TWO_PI_I: Complex64 = Complex64 { re: 0.0, im: 2.0 * std::f64::consts::PI };
+fn exp_i2pi(x: f64) -> Complex64 {
+    Complex64::exp(&(TWO_PI_I * x))
+}
+
+//======================================================================
+// When we apply the translation operators, some atoms will map to images under the supercell that
+// are different from the ones we have eigenvector data for. For kpoints away from supercell gamma,
+// those images should have different phases in their eigenvector components.
+//
+// Picture that the supercell looks like this:
+//
+// Legend:
+// - a diagram of integers (labeled "Indices") depicts coordinates, by displaying the number `i`
+//   at the position of the `i`th atom.
+// - a diagram with letters depicts a list of metadata (such as elements or eigenvector components)
+//   by arranging them starting from index 0 in the lower left, and etc. as if they were applied
+//   to the coords in their original order.
+// - Parentheses surround the position of the original zeroth atom.
+//
+//                 6  7  8                    g  h  i
+//    Indices:    3  4  5     Eigenvector:   d  e  f
+//              (0) 1  2                   (a) b  c
+//
+// Consider the translation that moves the 0th atom to the location originally at index 3.
+// Applying the deperm to the eigenvector (to "translate" it by this vector) yields:
+//
+//                       d  e  f
+//      Eigenvector:    a  b  c
+//                    (g) h  i
+//
+// In this example, g, h, and i do not have the correct phases because those atoms mapped to
+// different images. To find the superlattice translation that describes these images, we must look
+// at the coords.  First, translate the coords by literally applying the translation.  Then, apply
+// the inverse coperm to make the indices match their original sites.
+//
+//   (applying translation...)      (...then applying inverse coperm)
+//                  6  7  8                     0  1  2
+//                 3  4  5                     6  7  8
+//    Indices:    0  1  2         Indices:    3  4  5
+//              (x) x  x                    (x) x  x
+//
+// If you subtract the original coordinates from these, you get a list of metadata describing the
+// super-lattice translations for each site in the permuted structure; atoms 3..9 need no
+// correction, while atoms 0..3 require a phase correction by some super-lattice vector R.
+//
+//                      R  R  R
+//    Translations:    0  0  0
+//                   (0) 0  0
+//
+fn get_translation_phases(
+    kpoint_cart: V3,
+    super_carts: &[V3],
+    translation_cart: V3,
+    translation_deperm: &Perm,
+) -> Vec<Complex64> {
+    let inverse_coperm = translation_deperm; // inverse of inverse
+
+    let mut translated_carts = super_carts.to_vec().permuted_by(inverse_coperm);
+    for v in &mut translated_carts {
+        *v += translation_cart;
+    }
+
+    zip_eq!(translated_carts, super_carts)
+        .map(|(new, &orig)| new - orig)
+        .map(|r| exp_i2pi(V3::dot(&kpoint_cart, &r)))
+        .collect()
 }
 
 fn inner_prod_ev(a: &[V3<Complex64>], b: &[V3<Complex64>]) -> Complex64 {

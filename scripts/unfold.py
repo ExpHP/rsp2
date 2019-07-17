@@ -690,13 +690,13 @@ class TaskBandPlot(Task):
     def _do_action(self, args):
         fig, ax = self.require(args)
 
+        if args.write_plot:
+            fig.savefig(args.write_plot)
+
         if args.show:
             import matplotlib.pyplot as plt
             # fig.show() # doesn't do anything :/
             plt.show()
-
-        if args.write_plot:
-            fig.savefig(args.write_plot)
 
 #----------------------------------------------------------------
 
