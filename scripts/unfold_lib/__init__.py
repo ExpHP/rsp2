@@ -44,6 +44,7 @@ def build():
             kpoint_sfrac,
             eigenvectors,
             translation_deperms,
+            translation_phases,
             progress_prefix,
     ):
         from ctypes import c_double, c_int32
@@ -65,6 +66,7 @@ def build():
             (kpoint_sfrac, (3,), [c_double, None]),
             (eigenvectors, (nev, nsite, 3), [c_double, np.complex128]),
             (translation_deperms, (nquotient, nsite), [c_int32, None]),
+            (translation_phases, (nquotient, nsite), [c_double, np.complex128]),
             (output, (nev, nquotient), [c_double, None]),
         ]
 

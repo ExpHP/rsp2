@@ -143,13 +143,14 @@ class Task:
 class TaskKpointSfrac(Task):
     def add_parser_opts(self, parser):
         parser.add_argument(
-            '--kpoint', default='[0,0,0]', help=
+            '--kpoint', type=(lambda s: parse_kpoint(s, parser)), help=
             'kpoint in fractional coordinates of the superstructure reciprocal '
-            'cell, as a json array of 3 floats',
+            'cell, as a whitespace-separated list of 3 integers, floats, or '
+            'rational numbers.',
         )
 
     def _compute(self, args):
-        return [1.0 * x for x in json.loads(args.kpoint)]
+        return list(args.kpoint)
 
 class TaskRamanJson(Task):
     def add_parser_opts(self, parser):
@@ -1046,6 +1047,23 @@ def unfold_all(
 
     # debug_quotient_points((gpoint_sfracs @ np.linalg.inv(super_lattice).T)[:, :2], np.linalg.inv(prim_lattice).T[:2,:2])
 
+    super_lattice_recip = superstructure.lattice.inv_matrix.T
+    kpoint_cart = kpoint_sfrac @ super_lattice_recip
+    super_carts = superstructure.cart_coords
+    translation_phases = np.vstack([
+        get_translation_phases(
+            kpoint_cart=kpoint_cart,
+            super_carts=super_carts,
+            translation_cart=translation_cart,
+            translation_deperm=translation_deperm,
+        )
+        for (translation_cart, translation_deperm)
+        in zip(translation_carts, translation_deperms)
+    ])
+
+    #----------------------------
+    # Rust impl
+
     if unfold_lib.unfold_all is not None and implementation != 'python':
         return unfold_lib.unfold_all(
             superstructure=superstructure,
@@ -1054,28 +1072,34 @@ def unfold_all(
             kpoint_sfrac=kpoint_sfrac,
             eigenvectors=eigenvectors,
             translation_deperms=translation_deperms,
+            translation_phases=translation_phases,
             progress_prefix=progress_prefix,
         )
-    else:
-        progress = None
-        if progress_prefix is not None:
-            def progress(done, count):
-                print(f'{progress_prefix}Unfolding {done:>5} of {count} eigenvectors')
 
-        return np.array(list(map_with_progress(
-            eigenvectors, progress,
-            lambda eigenvector: unfold_one(
-                translation_sfracs=translation_sfracs,
-                translation_deperms=translation_deperms,
-                gpoint_sfracs=gpoint_sfracs,
-                kpoint_sfrac=kpoint_sfrac,
-                eigenvector=eigenvector.reshape((-1, 3)),
-            )
-        )))
+    #----------------------------
+    # Python impl
+
+    progress = None
+    if progress_prefix is not None:
+        def progress(done, count):
+            print(f'{progress_prefix}Unfolding {done:>5} of {count} eigenvectors')
+
+    return np.array(list(map_with_progress(
+        eigenvectors, progress,
+        lambda eigenvector: unfold_one(
+            translation_sfracs=translation_sfracs,
+            translation_deperms=translation_deperms,
+            translation_phases=translation_phases,
+            gpoint_sfracs=gpoint_sfracs,
+            kpoint_sfrac=kpoint_sfrac,
+            eigenvector=eigenvector.reshape((-1, 3)),
+        )
+    )))
 
 def unfold_one(
         translation_sfracs,
         translation_deperms,
+        translation_phases,
         gpoint_sfracs,
         kpoint_sfrac,
         eigenvector,
@@ -1120,12 +1144,12 @@ def unfold_one(
         translation_deperms = (translation_deperms, ['quotient', 'sc_sites'], np.integer),
         gpoint_sfracs = (gpoint_sfracs, ['quotient', 3], np.floating),
         kpoint_sfrac = (kpoint_sfrac, [3], np.floating),
-        eigenvector = (eigenvector, ['sc_sites', 3], np.floating),
+        eigenvector = (eigenvector, ['sc_sites', 3], [np.floating, np.complexfloating]),
     )
 
     inner_prods = np.array([
-        np.vdot(eigenvector, eigenvector[deperm])
-        for deperm in translation_deperms
+        np.vdot(eigenvector, t_phases[:, None] * eigenvector[t_deperm])
+        for (t_deperm, t_phases) in zip(translation_deperms, translation_phases)
     ])
 
     gpoint_probs = []
@@ -1172,6 +1196,68 @@ def get_translation_deperm(
     return compute_permutation_for_rotation(
         fracs_translated, fracs_original, lattice, tol,
     )
+
+# When we apply the translation operators, some atoms will map to images under
+# the supercell that are different from the ones we have eigenvector data for.
+# For kpoints away from supercell gamma, those images should have different
+# phases in their eigenvector components.
+#
+# Picture that the supercell looks like this:
+#
+# Legend:
+# - a diagram of integers (labeled "Indices") depicts coordinates, by displaying
+#   the number `i` at the position of the `i`th atom.
+# - a diagram with letters depicts a list of metadata (such as elements or
+#   eigenvector components) by arranging them starting from index 0 in the lower
+#   left, and etc. as if they were to label the original coords.
+# - Parentheses surround the position of the original zeroth atom.
+#
+#                 6  7  8                    g  h  i
+#    Indices:    3  4  5     Eigenvector:   d  e  f
+#              (0) 1  2                   (a) b  c
+#
+# Consider the translation that moves the 0th atom to the location originally at
+# index 3. Applying the deperm to the eigenvector (to "translate" it by this
+# vector) yields:
+#
+#                       d  e  f
+#      Eigenvector:    a  b  c
+#                    (g) h  i
+#
+# In this example, g, h, and i do not have the correct phases because those
+# atoms mapped to different images. To find the superlattice translation that
+# describes these images, we must look at the coords.  First, translate the
+# coords by literally applying the translation.  Then, apply the inverse coperm
+# to make the indices match their original sites.
+#
+#   (applying translation...)      (...then applying inverse coperm)
+#                  6  7  8                     0  1  2
+#                 3  4  5                     6  7  8
+#    Indices:    0  1  2         Indices:    3  4  5
+#              (x) x  x                    (x) x  x
+#
+# If you subtract the original coordinates from these, you get a list of
+# metadata describing the super-lattice translations for each site in the
+# permuted structure; atoms 3..9 need no correction, while atoms 0..3 require a
+# phase correction by some super-lattice vector R.
+#
+#                       0  0  0
+#    Image vectors:    0  0  0
+#                    (R) R  R
+#
+def get_translation_phases(
+        kpoint_cart,
+        super_carts,
+        translation_cart,
+        translation_deperm,
+):
+    inverse_coperm = translation_deperm # inverse of inverse
+
+    # translate, permute, and subtract to get superlattice points
+    image_carts = (super_carts + translation_cart)[inverse_coperm] - super_carts
+
+    # dot each atom's R with the kpoint to produce its phase correction
+    return np.exp(2j * np.pi * image_carts @ kpoint_cart)
 
 def find_repeats(supercell_matrix):
     """
@@ -1284,6 +1370,31 @@ def product(iter):
     return reduce((lambda a, b: a * b), iter)
 
 #---------------------------------------------------------------
+# CLI types
+
+def parse_kpoint(s, parser):
+    def parse_number(word):
+        try:
+            if '/' in word:
+                numer, denom = (int(x.strip()) for x in word.split('/'))
+                return numer / denom
+            else:
+                return float(word.strip())
+        except ValueError:
+            parser.error('{} is not an integer, float, or rational number')
+
+    if '[' in s:
+        warn('JSON input for --kpoint is deprecated; use a whitespace separated list of numbers.')
+        lst = [1.0 * x for x in json.loads(s)]
+    else:
+        lst = [parse_number(word) for word in s.split()]
+
+    if len(lst) != 3:
+        parser.error('--kpoint must be of dimension 3')
+
+    return lst
+
+#---------------------------------------------------------------
 # debugging
 
 def debug_quotient_points(points2, lattice2):
@@ -1354,8 +1465,12 @@ def check_arrays(**kw):
         else:
             raise TypeError(f'{name}: Expected (array, shape) or (array, shape, dtype)')
 
-        if dtype and not issubclass(np.dtype(array.dtype).type, dtype):
-            raise TypeError(f'{name}: Expected data type {dtype}, got {array.dtype}')
+        if dtype:
+            # support one dtype or a list of them
+            if type(dtype) is type:
+                dtype = [dtype]
+            if not any(issubclass(np.dtype(array.dtype).type, d) for d in dtype):
+                raise TypeError(f'{name}: Expected one of {dtype}, got {array.dtype}')
 
         # format names without quotes
         nice_expected = '[' + ', '.join(map(str, dims)) + ']'
@@ -1449,8 +1564,11 @@ def cartesian_product(*arrays):
         arr[..., i] = a
     return arr.reshape(-1, la)
 
-def die(*args, **kw):
+def warn(*args, **kw):
     print('unfold:', *args, **kw, file=sys.stderr)
+
+def die(*args, **kw):
+    warn(*args, **kw)
     if SHOW_ACTION_STACK:
         for name in ACTION_STACK[::-1]:
             print(f"  while computing {name}", file=sys.stderr)
