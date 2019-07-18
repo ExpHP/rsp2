@@ -355,7 +355,7 @@ class TaskEigenmodeData(Task):
 
     def check_upfront(self, args):
         check_optional_input(args.mode_data)
-        check_optional_output_ext('--write-mode-data', args.write_perms, forbid='.npy')
+        check_optional_output_ext('--write-mode-data', args.write_mode_data, forbid='.npy')
 
     def has_action(self, args):
         return bool(args.write_mode_data)
@@ -433,7 +433,7 @@ class TaskQProbs(Task):
 
     def check_upfront(self, args):
         check_optional_input(args.probs)
-        check_optional_output_ext('--write-probs', args.write_perms, forbid='.npy')
+        check_optional_output_ext('--write-probs', args.write_probs, forbid='.npy')
 
         if args.probs_impl in ['rust', 'auto']:
             try:
