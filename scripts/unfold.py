@@ -62,17 +62,17 @@ def main():
 
     translation_deperms = register(TaskDeperms(structure))
 
-    ev_gpoint_probs = register(TaskQProbs(structure, kpoint_sfrac, eigensols, translation_deperms))
+    ev_gpoint_probs = register(TaskGProbs(structure, kpoint_sfrac, eigensols, translation_deperms))
 
     band_path = register(TaskBandPath(structure))
 
-    bands = register(TaskBands(structure, kpoint_sfrac, band_path, ev_gpoint_probs))
+    band_qg_indices = register(TaskBandQGIndices(structure, kpoint_sfrac, band_path))
 
     mode_data = register(TaskEigenmodeData(eigensols))
 
     raman_json = register(TaskRamanJson())
 
-    _bandplot = register(TaskBandPlot(structure, mode_data, ev_gpoint_probs, band_path, bands, raman_json))
+    _bandplot = register(TaskBandPlot(structure, mode_data, ev_gpoint_probs, band_path, band_qg_indices, raman_json))
 
     for task in all_tasks:
         task.add_parser_opts(parser)
@@ -396,7 +396,7 @@ class TaskEigenmodeData(Task):
 # Arguments related to probabilities
 # (an intermediate file format that can be significantly smaller than the
 #  input eigenvectors and thus easier to transmit)
-class TaskQProbs(Task):
+class TaskGProbs(Task):
     def __init__(
             self,
             structure: TaskStructure,
@@ -536,74 +536,35 @@ class TaskBandPath(Task):
             'plot_xticklabels': point_names,
         }
 
-# Arguments related to high symmetry path resampling
-# (an intermediate file format that allows skipping the griddata computations)
-class TaskBands(Task):
+# Performs resampling along the high symmetry path.
+class TaskBandQGIndices(Task):
     def __init__(
             self,
             structure: TaskStructure,
             kpoint_sfrac: TaskKpointSfrac,
             band_path: TaskBandPath,
-            ev_gpoint_probs: TaskQProbs,
     ):
         super().__init__()
         self.structure = structure
         self.band_path = band_path
-        self.ev_gpoint_probs = ev_gpoint_probs
         self.kpoint_sfrac = kpoint_sfrac
 
-    def add_parser_opts(self, parser):
-        parser.add_argument(
-            '--write-bands', metavar='FILE', help=
-            'Write data resampled onto layer high sym path. (.npz)',
-        )
-
-        parser.add_argument(
-            '--bands', metavar='FILE', help=
-            'Path to file previously written through --write-bands.',
-        )
-
-    def check_upfront(self, args):
-        check_optional_input(args.bands)
-        check_optional_output_ext('--write-bands', args.write_bands, forbid='.npy')
-
-    def has_action(self, args):
-        return bool(args.write_bands)
-
     def _compute(self, args):
-        if args.bands:
-            ev_path_probs = dwim.from_path(args.bands)
-        else:
-            progress_callback = None
-            if args.verbose:
-                print('--bands not supplied. Will compute by resampling from Q probabilities.')
-                def progress_callback(done, count):
-                    print(f'Resampling: {done:>5} of {count} eigenvectors')
-
-            ev_path_probs = resample_gprobs_on_kpath(
-                    super_lattice=self.structure.require(args)['structure'].lattice.matrix,
-                    supercell=self.structure.require(args)['supercell'],
-                    ev_gpoint_probs=self.ev_gpoint_probs.require(args),
-                    kpoint_sfrac=self.kpoint_sfrac.require(args),
-                    plot_kpoint_pfracs=self.band_path.require(args)['plot_kpoint_pfracs'],
-                    progress=progress_callback,
-            )
-
-        return { 'ev_path_probs': ev_path_probs }
-
-    def _do_action(self, args):
-        if args.write_bands:
-            ev_path_probs = self.require(args)['ev_path_probs']
-            dwim.to_path(args.write_bands, ev_path_probs)
+        return resample_qg_indices(
+                super_lattice=self.structure.require(args)['structure'].lattice.matrix,
+                supercell=self.structure.require(args)['supercell'],
+                kpoint_sfrac=self.kpoint_sfrac.require(args),
+                plot_kpoint_pfracs=self.band_path.require(args)['plot_kpoint_pfracs'],
+        )
 
 class TaskBandPlot(Task):
     def __init__(
             self,
             structure: TaskStructure,
             mode_data: TaskEigenmodeData,
-            ev_gpoint_probs: TaskQProbs,
+            ev_gpoint_probs: TaskGProbs,
             band_path: TaskBandPath,
-            bands: TaskBands,
+            band_qg_indices: TaskBandQGIndices,
             raman_json: TaskRamanJson,
     ):
         super().__init__()
@@ -611,7 +572,7 @@ class TaskBandPlot(Task):
         self.mode_data = mode_data
         self.ev_gpoint_probs = ev_gpoint_probs
         self.band_path = band_path
-        self.bands = bands
+        self.band_qg_indices = band_qg_indices
         self.raman_json = raman_json
 
     def add_parser_opts(self, parser):
@@ -672,7 +633,8 @@ class TaskBandPlot(Task):
         return probs_to_band_plot(
             ev_frequencies=self.mode_data.require(args)['ev_frequencies'],
             ev_z_projections=self.mode_data.require(args)['ev_z_projections'],
-            ev_path_probs=self.bands.require(args)['ev_path_probs'],
+            ev_gpoint_probs=self.ev_gpoint_probs.require(args),
+            path_g_indices=self.band_qg_indices.require(args),
             plot_x_coordinates=self.band_path.require(args)['plot_x_coordinates'],
             plot_xticks=self.band_path.require(args)['plot_xticks'],
             plot_xticklabels=self.band_path.require(args)['plot_xticklabels'],
@@ -701,64 +663,58 @@ class TaskBandPlot(Task):
 
 #----------------------------------------------------------------
 
-def resample_gprobs_on_kpath(
+# Here we encounter a big problem:
+#
+#     The points at which we want to draw bands are not necessarily
+#     images of the qpoint at which we computed eigenvectors.
+#
+# Our solution is not very rigorous. For each point on the plot's x-axis, we
+# will simply produce the projected probabilities onto the nearest image of
+# the supercell qpoint.
+#
+# The idea is that for large supercells, every point in the primitive BZ
+# is close to an image of the supercell qpoint point. (though this scheme
+# may fail to produce certain physical effects that are specifically enabled
+# by the symmetry of a high-symmetry point when that point is not an image
+# of the qpoint)
+#
+# With the addition of --multi-kpoint-file, the density of the points we
+# are sampling from can be even further increased.
+def resample_qg_indices(
         super_lattice,
         supercell,
-        ev_gpoint_probs,
         kpoint_sfrac,
         plot_kpoint_pfracs,
-        progress=None,
 ):
-    check_arrays(
+    # All of the (Q + G) points at which probabilities were computed.
+    qg_sfracs = supercell.gpoint_sfracs() + kpoint_sfrac
+    qg_carts = qg_sfracs @ np.linalg.inv(super_lattice).T
+
+    sizes = check_arrays(
         super_lattice = (super_lattice, [3, 3], np.floating),
-        ev_gpoint_probs = (ev_gpoint_probs, ['ev', 'quotient'], np.floating),
+        qg_carts = (qg_carts, ['quotient', 3], np.floating),
         kpoint_sfrac = (kpoint_sfrac, [3], np.floating),
-        plot_kpoint_pfracs = (plot_kpoint_pfracs, ['x', 3], np.floating),
+        plot_kpoint_pfracs = (plot_kpoint_pfracs, ['plot-x', 3], np.floating),
     )
 
     prim_lattice = np.linalg.inv(supercell.matrix) @ super_lattice
 
-    # Grid of kpoints at which probabilities were computed
-    kpoint_sfracs = supercell.gpoint_sfracs() + kpoint_sfrac
-    kpoint_carts = kpoint_sfracs @ np.linalg.inv(super_lattice).T
-
+    # For every point on the plot x-axis, the G index of the closest Q + G point
     plot_kpoint_carts = plot_kpoint_pfracs @ np.linalg.inv(prim_lattice).T
-
-    ev_path_probs = []
-    for gpoint_probs in iter_with_progress(ev_gpoint_probs, progress):
-        if sparse.issparse(gpoint_probs):
-            gpoint_probs = np.asarray(gpoint_probs.todense()).squeeze(axis=0)
-
-        # Here we encounter a big problem:
-        #
-        #     The points at which we want to draw bands are not necessarily
-        #     images of the kpoint at which we computed eigenvectors.
-        #
-        # Our solution is not very rigorous.
-        #
-        # For each band, we will take its probabilities at each discrete image
-        # of the kpoint, and use them to define a surface, performing
-        # interpolation in the areas in-between.
-        #
-        # This is obviously not correct, but the idea is that for large
-        # supercells, every point in the primitive BZ is close to an image of
-        # the supercell gamma point, limiting the negative impact of this
-        # interpolation scheme... I hope.
-        ev_path_probs.append(griddata_periodic(
-            points=kpoint_carts,
-            values=gpoint_probs,
-            xi=plot_kpoint_carts,
-            lattice=np.linalg.inv(prim_lattice).T,
-            periodic_axis_mask=[1,1,0], # FIXME
-            method='nearest',
-        ))
-
-    return sparse.csr_matrix(ev_path_probs)
+    return griddata_periodic(
+        points=qg_carts,
+        values=np.arange(sizes['quotient']),
+        xi=plot_kpoint_carts,
+        lattice=np.linalg.inv(prim_lattice).T,
+        periodic_axis_mask=[1,1,0],
+        method='nearest',
+    )
 
 def probs_to_band_plot(
         ev_frequencies,
         ev_z_projections,
-        ev_path_probs,
+        ev_gpoint_probs,
+        path_g_indices,
         plot_x_coordinates,
         plot_xticks,
         plot_xticklabels,
@@ -775,64 +731,27 @@ def probs_to_band_plot(
 ):
     import matplotlib.pyplot as plt
 
-    ev_raman_intensities = np.zeros(len(ev_frequencies))
+    set_plot_color, ev_extra = get_plot_color_setter(plot_color, z_pol=ev_z_projections, raman_dict=raman_dict)
 
-    # Switch based on plot_color so we can validate it before doing anything expensive.
-    if plot_color == 'zpol':
-        # colorize Z projection
-        def set_plot_color(C, *, Z_proj, **_kw):
-            from matplotlib.colors import LinearSegmentedColormap
-            cmap = LinearSegmentedColormap.from_list('', [[0, 0, 1], [0, 0.5, 0]])
-            C[:, :3] = cmap(Z_proj)[:, :3]
+    check_arrays(
+        ev_frequencies = (ev_frequencies, ['ev'], np.floating),
+        ev_z_projections = (ev_z_projections, ['ev'], np.floating),
+        ev_gpoint_probs = (ev_gpoint_probs, ['ev', 'quotient'], np.floating),
+        path_g_indices = (path_g_indices, ['plot-x'], np.integer),
+        plot_x_coordinates = (plot_x_coordinates, ['plot-x'], np.floating),
+        plot_xticks = (plot_xticks, ['special_point'], np.floating),
+    )
 
-    elif plot_color == 'sign':
-        def set_plot_color(C, *, Y, **_kw):
-            from matplotlib.colors import to_rgb
-            C[:,:3] = to_rgb('y')
-            C[:,:3] = np.where((Y < -1e-3)[:, None], to_rgb('g'), C[:,:3])
-            C[:,:3] = np.where((Y > +1e-3)[:, None], to_rgb('r'), C[:,:3])
-
-    elif plot_color.startswith('uniform:'):
-        from matplotlib.colors import to_rgb
-        fixed_color = to_rgb(plot_color[len('uniform:'):].strip())
-        def set_plot_color(C, **_kw):
-            # use given color
-            C[:, :3] = fixed_color
-
-    elif plot_color.startswith('raman:'):
-        raman_dict_key = plot_color[len('raman:'):]
-        if raman_dict_key not in ['average-3d', 'backscatter']:
-            die('Invalid raman polarization mode: {raman_dict_key}')
-        ev_raman_intensities = raman_dict[raman_dict_key]
-
-        def set_plot_color(C, *, Raman, **_kw):
-            Raman = np.log(np.maximum(Raman.max() * 1e-7, Raman))
-            Raman -= Raman.min()
-            Raman /= Raman.max()
-
-            cmap = plt.get_cmap('cool_r')
-            C[:, :3] = cmap(Raman)[:, :3]
-
-    else:
-        die(f'invalid --plot-color: {repr(plot_color)}')
-        raise RuntimeError('unreachable')
+    ev_path_probs = ev_gpoint_probs[:, path_g_indices]
 
     if plot_baseline_path is not None:
         base_X, base_Y = read_baseline_plot(plot_baseline_path)
     else:
         base_X, base_Y = [], []
 
-    check_arrays(
-        ev_frequencies = (ev_frequencies, ['ev'], np.floating),
-        ev_z_projections = (ev_z_projections, ['ev'], np.floating),
-        ev_path_probs = (ev_path_probs, ['ev', 'x'], np.floating),
-        plot_x_coordinates = (plot_x_coordinates, ['x'], np.floating),
-        plot_xticks = (plot_xticks, ['special_point'], np.floating),
-    )
-
-    X, Y, S, Z_proj, Raman = [], [] ,[], [], []
-    iterator = zip(ev_frequencies, ev_z_projections, ev_path_probs, ev_raman_intensities)
-    for (frequency, z_projection, path_probs, raman_intensity) in iterator:
+    X, Y, S, Extra = [], [] ,[], []
+    iterator = zip(ev_frequencies, ev_path_probs, ev_extra)
+    for (frequency, path_probs, extra_elem) in iterator:
         if sparse.issparse(path_probs):
             path_probs = np.asarray(path_probs.todense()).squeeze(axis=0)
 
@@ -842,14 +761,12 @@ def probs_to_band_plot(
         X.append(plot_x_coordinates[mask])
         Y.append([frequency] * mask.sum())
         S.append(path_probs[mask])
-        Z_proj.append([z_projection] * mask.sum())
-        Raman.append([raman_intensity] * mask.sum())
+        Extra.append([extra_elem] * mask.sum())
 
     X = np.hstack(X)
     Y = np.hstack(Y)
     S = np.hstack(S)
-    Z_proj = np.hstack(Z_proj)
-    Raman = np.hstack(Raman)
+    Extra = np.hstack(Extra)
 
     S **= alpha_exponent
     S *= alpha_max
@@ -858,14 +775,13 @@ def probs_to_band_plot(
     X = X[mask]
     Y = Y[mask]
     S = S[mask]
-    Z_proj = Z_proj[mask]
-    Raman = Raman[mask]
+    Extra = Extra[mask]
 
     if verbose:
         print(f'Plotting {len(X)} points!')
 
     C = np.hstack([np.zeros((len(S), 3)), S[:, None]])
-    set_plot_color(C, X=X, Y=Y, Z_proj=Z_proj, Raman=Raman)
+    set_plot_color(C, X=X, Y=Y, Extra=Extra)
 
     fig = plt.figure(figsize=(7, 8), constrained_layout=True)
     #fig.set_tight_layout(True)
@@ -906,6 +822,51 @@ def probs_to_band_plot(
         plt.setp(ax_sidebar.get_yticklabels(), visible=False)
 
     return fig, ax
+
+def get_plot_color_setter(plot_color, z_pol, raman_dict):
+    from matplotlib import colors, cm
+
+    # Switch based on plot_color so we can validate it before doing anything expensive.
+    extra = np.zeros_like(z_pol)
+
+    if plot_color == 'zpol':
+        # colorize Z projection
+        extra = z_pol
+        def set_plot_color(C, *, Extra, **_kw):
+            cmap = colors.LinearSegmentedColormap.from_list('', [[0, 0, 1], [0, 0.5, 0]])
+            C[:, :3] = cmap(Extra)[:, :3]
+
+    elif plot_color == 'sign':
+        def set_plot_color(C, *, Y, **_kw):
+            C[:,:3] = colors.to_rgb('y')
+            C[:,:3] = np.where((Y < -1e-3)[:, None], colors.to_rgb('g'), C[:,:3])
+            C[:,:3] = np.where((Y > +1e-3)[:, None], colors.to_rgb('r'), C[:,:3])
+
+    elif plot_color.startswith('uniform:'):
+        fixed_color = colors.to_rgb(plot_color[len('uniform:'):].strip())
+        def set_plot_color(C, **_kw):
+            # use given color
+            C[:, :3] = fixed_color
+
+    elif plot_color.startswith('raman:'):
+        raman_dict_key = plot_color[len('raman:'):]
+        if raman_dict_key not in ['average-3d', 'backscatter']:
+            die('Invalid raman polarization mode: {raman_dict_key}')
+        extra = raman_dict[raman_dict_key]
+
+        def set_plot_color(C, *, Extra, **_kw):
+            Extra = np.log(np.maximum(Extra.max() * 1e-7, Extra))
+            Extra -= Extra.min()
+            Extra /= Extra.max()
+
+            cmap = cm.get_cmap('cool_r')
+            C[:, :3] = cmap(Extra)[:, :3]
+
+    else:
+        die(f'invalid --plot-color: {repr(plot_color)}')
+        raise RuntimeError('unreachable')
+
+    return set_plot_color, extra
 
 def read_baseline_plot(path):
     X, Y = [], []
