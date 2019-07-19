@@ -775,6 +775,8 @@ def probs_to_band_plot(
 ):
     import matplotlib.pyplot as plt
 
+    ev_raman_intensities = np.zeros(len(ev_frequencies))
+
     # Switch based on plot_color so we can validate it before doing anything expensive.
     if plot_color == 'zpol':
         # colorize Z projection
@@ -801,11 +803,15 @@ def probs_to_band_plot(
         raman_dict_key = plot_color[len('raman:'):]
         if raman_dict_key not in ['average-3d', 'backscatter']:
             die('Invalid raman polarization mode: {raman_dict_key}')
-        raman_intensity = raman_dict[raman_dict_key]
+        ev_raman_intensities = raman_dict[raman_dict_key]
 
-        def set_plot_color(C, **_kw):
+        def set_plot_color(C, *, Raman, **_kw):
+            Raman = np.log(np.maximum(Raman.max() * 1e-7, Raman))
+            Raman -= Raman.min()
+            Raman /= Raman.max()
+
             cmap = plt.get_cmap('cool_r')
-            C[:, :3] = cmap(raman_intensity)[:, :3]
+            C[:, :3] = cmap(Raman)[:, :3]
 
     else:
         die(f'invalid --plot-color: {repr(plot_color)}')
@@ -824,9 +830,9 @@ def probs_to_band_plot(
         plot_xticks = (plot_xticks, ['special_point'], np.floating),
     )
 
-    X, Y, S, Z_proj = [], [] ,[], []
-    iterator = zip(ev_frequencies, ev_z_projections, ev_path_probs)
-    for (frequency, z_projection, path_probs) in iterator:
+    X, Y, S, Z_proj, Raman = [], [] ,[], [], []
+    iterator = zip(ev_frequencies, ev_z_projections, ev_path_probs, ev_raman_intensities)
+    for (frequency, z_projection, path_probs, raman_intensity) in iterator:
         if sparse.issparse(path_probs):
             path_probs = np.asarray(path_probs.todense()).squeeze(axis=0)
 
@@ -837,11 +843,13 @@ def probs_to_band_plot(
         Y.append([frequency] * mask.sum())
         S.append(path_probs[mask])
         Z_proj.append([z_projection] * mask.sum())
+        Raman.append([raman_intensity] * mask.sum())
 
     X = np.hstack(X)
     Y = np.hstack(Y)
     S = np.hstack(S)
     Z_proj = np.hstack(Z_proj)
+    Raman = np.hstack(Raman)
 
     S **= alpha_exponent
     S *= alpha_max
@@ -851,12 +859,13 @@ def probs_to_band_plot(
     Y = Y[mask]
     S = S[mask]
     Z_proj = Z_proj[mask]
+    Raman = Raman[mask]
 
     if verbose:
         print(f'Plotting {len(X)} points!')
 
     C = np.hstack([np.zeros((len(S), 3)), S[:, None]])
-    set_plot_color(C, X=X, Y=Y, Z_proj=Z_proj)
+    set_plot_color(C, X=X, Y=Y, Z_proj=Z_proj, Raman=Raman)
 
     fig = plt.figure(figsize=(7, 8), constrained_layout=True)
     #fig.set_tight_layout(True)
