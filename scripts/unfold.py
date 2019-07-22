@@ -7,6 +7,7 @@ import sys
 import typing as tp
 from scipy import interpolate as scint
 from scipy import sparse
+import argparse
 from pymatgen import Structure
 
 import unfold_lib
@@ -32,8 +33,6 @@ B = tp.TypeVar('B')
 def main():
     global SHOW_ACTION_STACK
 
-    import argparse
-
     parser = argparse.ArgumentParser(
         description="Unfold phonon eigenvectors",
         epilog=
@@ -52,27 +51,36 @@ def main():
         all_tasks.append(task)
         return task
 
+    # Considering that all of the constructor args are explicitly type-annotated,
+    # and that IntelliJ has no problem here telling you when you have the wrong
+    # number of arguments, you would think that IntelliJ should be able to tell
+    # you when you mix up the order of two of the arguments.
+    #
+    # You would be wrong.  Hence all the keyword arguments.
+
     structure = register(TaskStructure())
 
     kpoint_sfrac = register(TaskKpointSfrac())
 
     dynmat = register(TaskDynmat())
 
-    eigensols = register(TaskEigensols(structure, dynmat))
+    eigensols = register(TaskEigensols(structure=structure, dynmat=dynmat))
 
-    translation_deperms = register(TaskDeperms(structure))
+    translation_deperms = register(TaskDeperms(structure=structure))
 
-    ev_gpoint_probs = register(TaskGProbs(structure, kpoint_sfrac, eigensols, translation_deperms))
+    ev_gpoint_probs = register(TaskGProbs(structure=structure, kpoint_sfrac=kpoint_sfrac, eigensols=eigensols, translation_deperms=translation_deperms))
 
-    band_path = register(TaskBandPath(structure))
+    band_path = register(TaskBandPath(structure=structure))
 
-    band_qg_indices = register(TaskBandQGIndices(structure, kpoint_sfrac, band_path))
-
-    mode_data = register(TaskEigenmodeData(eigensols))
+    mode_data = register(TaskEigenmodeData(eigensols=eigensols))
 
     raman_json = register(TaskRamanJson())
 
-    _bandplot = register(TaskBandPlot(structure, mode_data, ev_gpoint_probs, band_path, band_qg_indices, raman_json))
+    multi_qpoint_data = register(TaskMultiQpointData(mode_data=mode_data, kpoint_sfrac=kpoint_sfrac, ev_gpoint_probs=ev_gpoint_probs))
+
+    band_qg_indices = register(TaskBandQGIndices(structure=structure, multi_qpoint_data=multi_qpoint_data, band_path=band_path))
+
+    _bandplot = register(TaskBandPlot(band_path=band_path, band_qg_indices=band_qg_indices, raman_json=raman_json, multi_qpoint_data=multi_qpoint_data))
 
     for task in all_tasks:
         task.add_parser_opts(parser)
@@ -102,13 +110,14 @@ def main():
 ACTION_STACK = []
 SHOW_ACTION_STACK = False
 
+T = tp.TypeVar
 class Task:
     NOT_YET_COMPUTED = object()
 
     def __init__(self):
         self.cached = Task.NOT_YET_COMPUTED
 
-    def add_parser_opts(self, parser):
+    def add_parser_opts(self, parser: argparse.ArgumentParser):
         pass
 
     def check_upfront(self, args):
@@ -143,14 +152,19 @@ class Task:
 class TaskKpointSfrac(Task):
     def add_parser_opts(self, parser):
         parser.add_argument(
-            '--kpoint', type=(lambda s: parse_kpoint(s, parser)), help=
-            'kpoint in fractional coordinates of the superstructure reciprocal '
+            '--kpoint', type=type(self).parse, help=
+            'Q-point in fractional coordinates of the superstructure reciprocal '
             'cell, as a whitespace-separated list of 3 integers, floats, or '
             'rational numbers.',
         )
 
     def _compute(self, args):
         return list(args.kpoint)
+
+    @classmethod
+    def parse(cls, s):
+        """ Can be used by other tasks to replicate the behavior of --kpoint. """
+        return parse_kpoint(s)
 
 class TaskRamanJson(Task):
     def add_parser_opts(self, parser):
@@ -363,14 +377,10 @@ class TaskEigenmodeData(Task):
 
     def _compute(self, args):
         if args.mode_data:
-            npz = np.load(args.mode_data)
-            return {
-                'ev_frequencies': npz.f.ev_frequencies,
-                'ev_z_projections': npz.f.ev_z_projections,
-            }
-        else:
-            if args.verbose:
-                print('--mode-data not supplied. Computing from eigensols.')
+            return type(self).read_file(args.mode_data)
+
+        if args.verbose:
+            print('--mode-data not supplied. Computing from eigensols.')
 
         ev_eigenvalues = self.eigensols.require(args)['ev_eigenvalues']
         ev_eigenvectors = self.eigensols.require(args)['ev_eigenvectors']
@@ -392,6 +402,15 @@ class TaskEigenmodeData(Task):
                 ev_frequencies=d['ev_frequencies'],
                 ev_z_projections=d['ev_z_projections'],
             )
+
+    @classmethod
+    def read_file(cls, path):
+        """ Can be used by other tasks to replicate the behavior of --mode-data. """
+        npz = np.load(path)
+        return {
+            'ev_frequencies': npz.f.ev_frequencies,
+            'ev_z_projections': npz.f.ev_z_projections,
+        }
 
 # Arguments related to probabilities
 # (an intermediate file format that can be significantly smaller than the
@@ -449,7 +468,7 @@ class TaskGProbs(Task):
 
     def _compute(self, args):
         if args.probs:
-            ev_gpoint_probs = dwim.from_path(args.probs)
+            return type(self).read_file(args.probs, args)
         else:
             if args.verbose:
                 print('--probs not supplied. Will compute by unfolding eigensols.')
@@ -471,7 +490,21 @@ class TaskGProbs(Task):
                 implementation=args.probs_impl,
                 progress_prefix=progress_prefix,
             )
+            return type(self).__postprocess(ev_gpoint_probs, args)
 
+    def _do_action(self, args):
+        ev_gpoint_probs = self.require(args)
+        if args.write_probs:
+            dwim.to_path(args.write_probs, ev_gpoint_probs)
+
+    @classmethod
+    def read_file(cls, path, args):
+        """ Can be used by other tasks to replicate the behavior of --probs. """
+        ev_gpoint_probs = dwim.from_path(path)
+        return cls.__postprocess(ev_gpoint_probs, args)
+
+    @classmethod
+    def __postprocess(cls, ev_gpoint_probs, args):
         if args.verbose:
             debug_bin_magnitudes(ev_gpoint_probs)
 
@@ -483,11 +516,6 @@ class TaskGProbs(Task):
             print('Probs matrix density: {:.4g}%'.format(100.0 * density))
 
         return ev_gpoint_probs
-
-    def _do_action(self, args):
-        ev_gpoint_probs = self.require(args)
-        if args.write_probs:
-            dwim.to_path(args.write_probs, ev_gpoint_probs)
 
 class TaskBandPath(Task):
     def __init__(
@@ -536,44 +564,115 @@ class TaskBandPath(Task):
             'plot_xticklabels': point_names,
         }
 
+class TaskMultiQpointData(Task):
+    def __init__(
+            self,
+            mode_data: TaskEigenmodeData,
+            kpoint_sfrac: TaskKpointSfrac,
+            ev_gpoint_probs: TaskGProbs,
+    ):
+        super().__init__()
+        self.mode_data = mode_data
+        self.kpoint_sfrac = kpoint_sfrac
+        self.ev_gpoint_probs = ev_gpoint_probs
+
+    def add_parser_opts(self, parser):
+        parser.add_argument(
+            '--multi-qpoint-file', help=
+            "Multi-kpoint manifest file.  This allows using data from multiple "
+            "kpoints to be included on a single plot. If this is supplied, many "
+            "arguments for dealing with a single kpoint (e.g. --dynmat, --kpoint) "
+            f"will be ignored.\n\n{MULTI_KPOINT_FILE_HELP_STR}"
+        )
+
+    def check_upfront(self, args):
+        check_optional_input(args.multi_qpoint_file)
+
+    def _compute(self, args):
+        if args.multi_qpoint_file:
+            return type(self).read_file(args.multi_qpoint_file, args)
+        else:
+            return type(self).__process_dicts({
+                "qpoint-sfrac": self.kpoint_sfrac.require(args),
+                "mode-data": self.mode_data.require(args),
+                "probs": self.ev_gpoint_probs.require(args),
+            })
+
+    @classmethod
+    def read_file(cls, path, args):
+        d = dwim.from_path(path)
+        if not isinstance(d, list):
+            die(f'Expected {path} to contain a sequence/array.')
+
+        base_dir = os.path.dirname(path)
+        rel_path = lambda name: os.path.join(base_dir, name)
+
+        dicts = []
+        unrecognized_keys = set()
+        for item in d:
+            dicts.append({
+                "qpoint-sfrac": TaskKpointSfrac.parse(item.pop('kpoint')),
+                "mode-data": TaskEigenmodeData.read_file(rel_path(item.pop('mode-data'))),
+                "probs": TaskGProbs.read_file(rel_path(item.pop('probs')), args),
+            })
+            unrecognized_keys.update(item)
+
+        if unrecognized_keys:
+            warn(f"Unrecognized keys in multi-kpoint manifest: {repr(sorted(unrecognized_keys))}")
+
+        return cls.__process_dicts(*dicts)
+
+    @classmethod
+    def __process_dicts(cls, *dicts):
+        dict_of_lists = dict_zip(*dicts)
+        dict_of_lists['mode-data'] = dict_zip(*dict_of_lists['mode-data'])
+        dict_of_lists['num-qpoints'] = len(dict_of_lists['qpoint-sfrac'])
+        return dict_of_lists
+
+MULTI_KPOINT_FILE_KEYS = ["kpoint", "probs", "mode-data"]
+
+MULTI_KPOINT_FILE_HELP_STR = f"""
+The multi-kpoint manifest is a sequence (encoded in JSON or YAML) whose elements
+are mappings with the keys: {repr(MULTI_KPOINT_FILE_KEYS)}. Each of these keys
+maps to a string exactly like the corresponding CLI argument.  This means that
+in order to use this option, you will first need to generate files at each
+Q-point in individual runs using --write-probs and --write-mode-data.
+""".strip().replace('\n', ' ')
+
 # Performs resampling along the high symmetry path.
 class TaskBandQGIndices(Task):
     def __init__(
             self,
             structure: TaskStructure,
-            kpoint_sfrac: TaskKpointSfrac,
             band_path: TaskBandPath,
+            multi_qpoint_data: TaskMultiQpointData,
     ):
         super().__init__()
         self.structure = structure
         self.band_path = band_path
-        self.kpoint_sfrac = kpoint_sfrac
+        self.multi_qpoint_data = multi_qpoint_data
 
     def _compute(self, args):
         return resample_qg_indices(
                 super_lattice=self.structure.require(args)['structure'].lattice.matrix,
                 supercell=self.structure.require(args)['supercell'],
-                kpoint_sfrac=self.kpoint_sfrac.require(args),
+                qpoint_sfrac=self.multi_qpoint_data.require(args)['qpoint-sfrac'],
                 plot_kpoint_pfracs=self.band_path.require(args)['plot_kpoint_pfracs'],
         )
 
 class TaskBandPlot(Task):
     def __init__(
             self,
-            structure: TaskStructure,
-            mode_data: TaskEigenmodeData,
-            ev_gpoint_probs: TaskGProbs,
             band_path: TaskBandPath,
             band_qg_indices: TaskBandQGIndices,
             raman_json: TaskRamanJson,
+            multi_qpoint_data: TaskMultiQpointData,
     ):
         super().__init__()
-        self.structure = structure
-        self.mode_data = mode_data
-        self.ev_gpoint_probs = ev_gpoint_probs
         self.band_path = band_path
         self.band_qg_indices = band_qg_indices
         self.raman_json = raman_json
+        self.multi_qpoint_data = multi_qpoint_data
 
     def add_parser_opts(self, parser):
         parser.add_argument('--show', action='store_true', help='show plot')
@@ -626,16 +725,31 @@ class TaskBandPlot(Task):
         return args.show or bool(args.write_plot)
 
     def _compute(self, args):
+        multi_qpoint_data = self.multi_qpoint_data.require(args)
+
         raman_dict = None
         if args.plot_color.startswith('raman:'):
-            raman_dict = self.raman_json.require(args)
+            if multi_qpoint_data['num-qpoints'] == 1:
+                # make the dict items indexed by [qpoint (just the one)][ev]
+                raman_dict = self.raman_json.require(args)
+                raman_dict = { k: np.array([v]) for (k, v) in raman_dict.items() }
+            else:
+                warn('raman coloring cannot be used with multiple kpoints')
+                args.plot_color = 'zpol'
+
+        mode_data = multi_qpoint_data['mode-data']
+        q_ev_gpoint_probs = np.array(multi_qpoint_data['probs'])
+
+        if args.plot_sidebar and len(multi_qpoint_data) > 1:
+            warn("--plot-sidebar doesn't make sense with multiple kpoints")
 
         return probs_to_band_plot(
-            ev_frequencies=self.mode_data.require(args)['ev_frequencies'],
-            ev_z_projections=self.mode_data.require(args)['ev_z_projections'],
-            ev_gpoint_probs=self.ev_gpoint_probs.require(args),
-            path_g_indices=self.band_qg_indices.require(args),
-            plot_x_coordinates=self.band_path.require(args)['plot_x_coordinates'],
+            q_ev_frequencies=np.array(mode_data['ev_frequencies']),
+            q_ev_z_projections=np.array(mode_data['ev_z_projections']),
+            q_ev_gpoint_probs=q_ev_gpoint_probs ,
+            path_g_indices=self.band_qg_indices.require(args)['G'],
+            path_q_indices=self.band_qg_indices.require(args)['Q'],
+            path_x_coordinates=self.band_path.require(args)['plot_x_coordinates'],
             plot_xticks=self.band_path.require(args)['plot_xticks'],
             plot_xticklabels=self.band_path.require(args)['plot_xticklabels'],
             alpha_exponent=args.plot_exponent,
@@ -683,39 +797,56 @@ class TaskBandPlot(Task):
 def resample_qg_indices(
         super_lattice,
         supercell,
-        kpoint_sfrac,
+        qpoint_sfrac,
         plot_kpoint_pfracs,
 ):
-    # All of the (Q + G) points at which probabilities were computed.
-    qg_sfracs = supercell.gpoint_sfracs() + kpoint_sfrac
-    qg_carts = qg_sfracs @ np.linalg.inv(super_lattice).T
+    gpoint_sfracs = supercell.gpoint_sfracs()
 
     sizes = check_arrays(
         super_lattice = (super_lattice, [3, 3], np.floating),
-        qg_carts = (qg_carts, ['quotient', 3], np.floating),
-        kpoint_sfrac = (kpoint_sfrac, [3], np.floating),
+        gpoint_sfracs = (gpoint_sfracs, ['quotient', 3], np.floating),
+        qpoint_sfrac = (qpoint_sfrac, ['qpoint', 3], np.floating),
         plot_kpoint_pfracs = (plot_kpoint_pfracs, ['plot-x', 3], np.floating),
     )
 
     prim_lattice = np.linalg.inv(supercell.matrix) @ super_lattice
 
-    # For every point on the plot x-axis, the G index of the closest Q + G point
+    # All of the (Q + G) points at which probabilities were computed.
+    qg_sfracs = np.vstack([
+        supercell.gpoint_sfracs() + sfrac
+        for sfrac in qpoint_sfrac
+    ])
+    qg_carts = qg_sfracs @ np.linalg.inv(super_lattice).T
+    assert qg_carts.shape == (sizes['qpoint'] * sizes['quotient'], 3)
+
+    # For each of those (Q + G) points, the index of its Q point and its K point.
+    qg_q_ids, qg_g_ids = np.mgrid[0:sizes['qpoint'], 0:sizes['quotient']].reshape((2, -1))
+
+    # For every point on the plot x-axis, the index of the closest Q + G point
     plot_kpoint_carts = plot_kpoint_pfracs @ np.linalg.inv(prim_lattice).T
-    return griddata_periodic(
+    plot_kpoint_qg_ids = griddata_periodic(
         points=qg_carts,
-        values=np.arange(sizes['quotient']),
+        values=np.arange(sizes['qpoint'] * sizes['quotient']),
         xi=plot_kpoint_carts,
         lattice=np.linalg.inv(prim_lattice).T,
         periodic_axis_mask=[1,1,0],
         method='nearest',
     )
 
+    # For every plot on the plot x-axis, the indices of Q and G for the
+    # nearest (Q + G)
+    return {
+        'Q': qg_q_ids[plot_kpoint_qg_ids],
+        'G': qg_g_ids[plot_kpoint_qg_ids],
+    }
+
 def probs_to_band_plot(
-        ev_frequencies,
-        ev_z_projections,
-        ev_gpoint_probs,
+        q_ev_frequencies,
+        q_ev_z_projections,
+        q_ev_gpoint_probs,
         path_g_indices,
-        plot_x_coordinates,
+        path_q_indices,
+        path_x_coordinates,
         plot_xticks,
         plot_xticklabels,
         plot_color,
@@ -731,18 +862,41 @@ def probs_to_band_plot(
 ):
     import matplotlib.pyplot as plt
 
-    set_plot_color, ev_extra = get_plot_color_setter(plot_color, z_pol=ev_z_projections, raman_dict=raman_dict)
+    set_plot_color, q_ev_extra = get_plot_color_setter(plot_color, z_pol=q_ev_z_projections, raman_dict=raman_dict)
 
-    check_arrays(
-        ev_frequencies = (ev_frequencies, ['ev'], np.floating),
-        ev_z_projections = (ev_z_projections, ['ev'], np.floating),
-        ev_gpoint_probs = (ev_gpoint_probs, ['ev', 'quotient'], np.floating),
+    sizes = check_arrays(
+        q_ev_frequencies = (q_ev_frequencies, ['qpoint', 'ev'], np.floating),
+        q_ev_z_projections = (q_ev_z_projections, ['qpoint', 'ev'], np.floating),
+        q_ev_gpoint_probs = (q_ev_gpoint_probs, ['qpoint'], object),
+        q_ev_gpoint_probs_row = (q_ev_gpoint_probs[0], ['ev', 'quotient'], np.floating),
         path_g_indices = (path_g_indices, ['plot-x'], np.integer),
-        plot_x_coordinates = (plot_x_coordinates, ['plot-x'], np.floating),
+        path_q_indices = (path_q_indices, ['plot-x'], np.integer),
+        path_x_coordinates = (path_x_coordinates, ['plot-x'], np.floating),
         plot_xticks = (plot_xticks, ['special_point'], np.floating),
     )
+    if raman_dict is not None:
+        assert raman_dict['average-3d'].shape == (sizes['qpoint'], sizes['ev'])
 
-    ev_path_probs = ev_gpoint_probs[:, path_g_indices]
+    def get_ev_path_probs():
+        # If ev_gpoint_probs were a dense, 3d array, we could just write
+        # ev_gpoint_probs[path_q_indices, :, path_g_indices]... but because
+        # there are sparse matrices in there we must do this.
+        q_g_ev_probs = np.array([
+            list(ev_g_probs.T)
+            for ev_g_probs in q_ev_gpoint_probs
+        ])
+        assert q_g_ev_probs.shape == (sizes['qpoint'], sizes['quotient']), (q_g_ev_probs.shape, (sizes['qpoint'], sizes['quotient']))
+        assert sparse.issparse(q_g_ev_probs[0][0])
+
+        path_ev_probs = sparse.vstack(q_g_ev_probs[path_q_indices, path_g_indices])
+        return np.asarray(path_ev_probs.todense()) # it's no longer N^2 but rather X*N
+
+    path_ev_probs = get_ev_path_probs()
+    path_ev_frequencies = q_ev_frequencies[path_q_indices]
+    path_ev_extra = q_ev_extra[path_q_indices]
+    assert path_ev_probs.shape == (sizes['plot-x'], sizes['ev'])
+    assert path_ev_frequencies.shape == (sizes['plot-x'], sizes['ev'])
+    assert path_ev_extra.shape == (sizes['plot-x'], sizes['ev'])
 
     if plot_baseline_path is not None:
         base_X, base_Y = read_baseline_plot(plot_baseline_path)
@@ -750,18 +904,15 @@ def probs_to_band_plot(
         base_X, base_Y = [], []
 
     X, Y, S, Extra = [], [] ,[], []
-    iterator = zip(ev_frequencies, ev_path_probs, ev_extra)
-    for (frequency, path_probs, extra_elem) in iterator:
-        if sparse.issparse(path_probs):
-            path_probs = np.asarray(path_probs.todense()).squeeze(axis=0)
-
+    iterator = zip(path_x_coordinates, path_ev_frequencies, path_ev_probs, path_ev_extra)
+    for (x_coord, ev_frequencies, ev_probs, ev_extra) in iterator:
         # Don't ask matplotlib to draw thousands of points with alpha=0
-        mask = path_probs != 0
+        mask = ev_probs != 0
 
-        X.append(plot_x_coordinates[mask])
-        Y.append([frequency] * mask.sum())
-        S.append(path_probs[mask])
-        Extra.append([extra_elem] * mask.sum())
+        X.append([x_coord] * mask.sum())
+        Y.append(ev_frequencies[mask])
+        S.append(ev_probs[mask])
+        Extra.append(ev_extra[mask])
 
     X = np.hstack(X)
     Y = np.hstack(Y)
@@ -995,9 +1146,6 @@ def unfold_all(
     The K point in the SC reciprocal cell at which the eigenvector was computed,
     in fractional coords.
 
-    :param progress: Progress callback.
-    Called as ``progress(num_done, num_total)``.
-
     :return: Shape ``(num_evecs, quotient)``
     For each vector in ``eigenvectors``, its projected probabilities
     onto ``k + g`` for each g in ``supercell.gpoint_sfracs()``.
@@ -1086,6 +1234,11 @@ def unfold_one(
 
     For any vector of per-site metadata ``values``, ``values[deperms[i]]`` is
     effectively translated by ``translation_carts[i]``.
+
+    :param translation_phases: Shape ``(quotient, sc_sites)``, complex.
+    The phase factors that must be factored into each atom's components after
+    a translation to account for the fact that permuting the sites does not
+    produce the same images of sites as actually translating them would.
 
     :param gpoint_sfracs: Shape ``(quotient, 3)``, real.
     Translations in the reciprocal quotient space, in units of the reciprocal
@@ -1322,9 +1475,6 @@ def truncate(array, tol):
 def debug_bin_magnitudes(array):
     from collections import Counter
 
-    print(array)
-    print(array.dtype)
-
     zero_count = product(array.shape) - np.sum(array != 0)
     if sparse.issparse(array):
         array = array.data
@@ -1342,7 +1492,7 @@ def product(iter):
 #---------------------------------------------------------------
 # CLI types
 
-def parse_kpoint(s, parser):
+def parse_kpoint(s):
     def parse_number(word):
         try:
             if '/' in word:
@@ -1351,7 +1501,7 @@ def parse_kpoint(s, parser):
             else:
                 return float(word.strip())
         except ValueError:
-            parser.error('{} is not an integer, float, or rational number')
+            raise ValueError(f'{repr(word)} is not an integer, float, or rational number')
 
     if '[' in s:
         warn('JSON input for --kpoint is deprecated; use a whitespace separated list of numbers.')
@@ -1360,7 +1510,7 @@ def parse_kpoint(s, parser):
         lst = [parse_number(word) for word in s.split()]
 
     if len(lst) != 3:
-        parser.error('--kpoint must be of dimension 3')
+        raise ValueError('--kpoint must be of dimension 3')
 
     return lst
 
@@ -1533,6 +1683,18 @@ def cartesian_product(*arrays):
     for i, a in enumerate(np.ix_(*arrays)):
         arr[..., i] = a
     return arr.reshape(-1, la)
+
+def dict_zip(*dicts):
+    """
+    Take a series of dicts that share the same keys, and reduce the values
+    for each key as if folding an iterator.
+    """
+    keyset = set(dicts[0])
+    for d in dicts:
+        if set(d) != keyset:
+            raise KeyError(f"Mismatched keysets in fold_dicts: {sorted(keyset)}, {sorted(set(d))}")
+
+    return { key: [d[key] for d in dicts] for key in keyset }
 
 def warn(*args, **kw):
     print('unfold:', *args, **kw, file=sys.stderr)
