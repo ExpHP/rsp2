@@ -874,6 +874,7 @@ def resample_qg_indices(
         lattice=np.linalg.inv(prim_lattice).T,
         periodic_axis_mask=[1,1,0],
         method='nearest',
+        _supercell=supercell,
     )
 
     # For every plot on the plot x-axis, the indices of Q and G for the
@@ -1151,6 +1152,13 @@ class Supercell:
         in units of the supercell reciprocal lattice basis vectors.
         """
         return cartesian_product(*(np.arange(n) for n in self.t_repeats)).astype(float)
+
+    def recip(self):
+        """
+        Get a supercell that describes the reciprocal primitive lattice in terms
+        of the reciprocal supercell lattice.
+        """
+        return Supercell(self.matrix.T)
 
 def collect_translation_deperms(
         superstructure: Structure,
@@ -1494,6 +1502,7 @@ def griddata_periodic(
         values,
         xi,
         lattice,
+        _supercell=None,
         # set this to reduce memory overhead
         periodic_axis_mask=(1,1,1),
         **kwargs,
@@ -1507,7 +1516,8 @@ def griddata_periodic(
     """
     points_frac = reduce_carts(points, lattice) @ np.linalg.inv(lattice)
     xi_frac = reduce_carts(xi, lattice) @ np.linalg.inv(lattice)
-    #debug_path((points_frac @ lattice)[:,:2], lattice[:2,:2], (xi_frac @ lattice)[:,:2])
+
+    #debug_path((points_frac @ lattice)[:,:2], lattice[:2,:2], (xi_frac @ lattice)[:,:2], _supercell.recip())
 
     for axis, mask_bit in enumerate(periodic_axis_mask):
         if mask_bit:
@@ -1606,43 +1616,98 @@ def debug_quotient_points(points2, lattice2):
     ax.set_aspect('equal', 'box')
     plt.show()
 
-def debug_path(points, lattice, path):
+def debug_path(points, lattice, path, supercell=None):
     import matplotlib.pyplot as plt
-    from matplotlib.path import Path
-    import matplotlib.patches as patches
-
-    lattice = lattice[:, :2] # FIXME
-    lattice_path = Path(
-        vertices=[[0,0], lattice[0,], lattice[0]+lattice[1], lattice[1], [0,0]],
-        codes = [Path.MOVETO] + [Path.LINETO] * 4,
-    )
-    mpl_path = Path(
-        vertices=path,
-        codes = [Path.MOVETO] + [Path.LINETO] * (len(path) - 1),
-    )
 
     fig, ax = plt.subplots(figsize=(7, 8))
     ax.scatter(points[:, 0], points[:, 1])
-    ax.add_patch(patches.PathPatch(lattice_path, facecolor='none', lw=2))
-    ax.add_patch(patches.PathPatch(mpl_path, facecolor='none', ls=':', lw=1))
+    ax.set(aspect='equal', adjustable='box')
+    if supercell:
+        prim_lattice = np.linalg.inv(supercell.matrix)[:2, :2] @ lattice[:2, :2]
+        draw_prim_cell_boundaries(ax, prim_lattice, lattice, ls=':', color='k')
+        draw_axis_vectors(ax, prim_lattice)
+
+    draw_unit_cell(ax, lattice[:2, :2], lw=2)
+    draw_path(ax, path, ls=':', lw=2)
+
     plt.show()
+
+def draw_axis_vectors(ax, lattice, **kw):
+    from matplotlib.collections import LineCollection
+
+    lines = LineCollection(
+        np.array(np.array([[(0, 0), (1, 0)], [(0, 0), (0, 1)]]) @ lattice),
+        colors=[(1, 0, 0, 1), (0, 0, 1, 1)],
+        **kw
+    )
+    ax.add_collection(lines)
+    return lines
+
+def draw_prim_cell_boundaries(ax, prim_lattice, super_lattice, **kw):
+    import itertools
+    from shapely.geometry import Polygon, LineString, Point
+    from matplotlib.collections import LineCollection
+
+    super_lattice = super_lattice[:2, :2]
+
+    # Inverses of matrices of the form  [ A  -a ].T, where a is a primitive
+    # lattice basis vector and A is a superlattice basis vector.
+    solvers = [[None for _ in range(2)] for _ in range(2)]
+    for time_axis in range(2):
+        for super_time_axis in range(2):
+            matrix = np.array([
+                super_lattice[super_time_axis],
+                -prim_lattice[time_axis],
+            ])
+
+            if abs(np.linalg.det(matrix)) < 1e-4:
+                continue # leave None in the list
+
+            solvers[time_axis][super_time_axis] = np.linalg.inv(matrix)
+
+    super_polygon = Polygon(np.array([(0, 0), (1, 0), (1, 1), (0, 1), (0, 0)]) @ super_lattice)
+
+    # Draw lines of the form  'n a + t b', or 'n b + t a'
+    # (where n is an integer, and a and b are the basis vectors),
+    # considering either only non-negative n or only negative n.
+    segments = []
+    for int_axis, time_axis in [(0, 1), (1, 0)]:
+        for n_start, n_step in [(0, 1), (-1, -1)]:
+            for n in itertools.count(n_start, n_step):
+                overly_long_line_segment = [
+                    n * prim_lattice[int_axis] + t * prim_lattice[time_axis]
+                    for t in [-999999, 999999]
+                ]
+
+                # Use shapely to find the true intersections
+                true_intersection = super_polygon.intersection(LineString(overly_long_line_segment))
+
+                # If there were no intersections, we are outside the cell.
+                # We don't need to consider values of n further in this direction.
+                if true_intersection.is_empty:
+                    break
+
+                if isinstance(true_intersection, Point):
+                    continue # "tangent" to polygon? could easily happen for n = 0
+
+                assert isinstance(true_intersection, LineString)
+                segments.append(true_intersection.coords)
+
+    lines = LineCollection(segments, **kw)
+    ax.add_collection(lines)
+    return lines
 
 def draw_path(ax, path, **kw):
     from matplotlib.path import Path
     import matplotlib.patches as patches
 
-    path = np.array(path)
-    print(path.shape)
-    mpl_path = Path(
-        vertices=path,
-        codes=[Path.MOVETO] + [Path.LINETO] * (len(path) - 1),
-    )
-    ax.add_patch(patches.PathPatch(mpl_path, facecolor='none', **kw))
+    mpl_path = Path(vertices=np.array(path))
+    return ax.add_patch(patches.PathPatch(mpl_path, facecolor='none', **kw))
 
 def draw_unit_cell(ax, lattice2, **kw):
     np.testing.assert_equal(lattice2.shape, [2,2])
     path = [[0,0], lattice2[0], lattice2[0]+lattice2[1], lattice2[1], [0,0]]
-    draw_path(ax, path, **kw)
+    return draw_path(ax, path, **kw)
 
 def draw_reduced_points(ax, points2, lattice2, **kw):
     points2 = reduce_carts(points2, lattice2)
