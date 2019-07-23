@@ -80,7 +80,12 @@ def main():
 
     band_qg_indices = register(TaskBandQGIndices(structure=structure, multi_qpoint_data=multi_qpoint_data, band_path=band_path))
 
-    _bandplot = register(TaskBandPlot(band_path=band_path, band_qg_indices=band_qg_indices, raman_json=raman_json, multi_qpoint_data=multi_qpoint_data))
+    zone_crossings = register(TaskPlotZoneCrossings(structure=structure, band_path=band_path))
+
+    _bandplot = register(TaskBandPlot(
+        band_path=band_path, band_qg_indices=band_qg_indices, raman_json=raman_json,
+        multi_qpoint_data=multi_qpoint_data, zone_crossings=zone_crossings,
+    ))
 
     for task in all_tasks:
         task.add_parser_opts(parser)
@@ -199,7 +204,7 @@ class TaskStructure(Task):
             'some eigenvectors in the output may be less than 1. (or even =0)',
         )
 
-    def _compute(self, args, **_kw):
+    def _compute(self, args):
         layer = args.layer
 
         if not os.path.isdir(args.STRUCTURE):
@@ -548,7 +553,8 @@ class TaskBandPath(Task):
         #       function) do adapt to the user's specific choice of primitive cell.
         #       (at least, for reasonable cells; I haven't tested it with a highly
         #       skewed cell). Respect!
-        bandpath_output = bandpath(args.plot_kpath, prim_lattice, 300)
+        plot_kpoint_pfracs, plot_x_coordinates, plot_xticks = bandpath(args.plot_kpath, prim_lattice, 300)
+        highsym_pfracs = bandpath(args.plot_kpath, prim_lattice, 1)[0]
 
         point_names = parse_path_string(args.plot_kpath)
         if len(point_names) > 1:
@@ -558,10 +564,11 @@ class TaskBandPath(Task):
         point_names = [r'$\mathrm{\Gamma}$' if x == 'G' else x for x in point_names]
 
         return {
-            'plot_kpoint_pfracs': bandpath_output[0],
-            'plot_x_coordinates': bandpath_output[1],
-            'plot_xticks': bandpath_output[2],
+            'plot_kpoint_pfracs': plot_kpoint_pfracs,
+            'plot_x_coordinates': plot_x_coordinates,
+            'plot_xticks': plot_xticks,
             'plot_xticklabels': point_names,
+            'highsym_pfracs': highsym_pfracs,
         }
 
 class TaskMultiQpointData(Task):
@@ -660,6 +667,39 @@ class TaskBandQGIndices(Task):
                 plot_kpoint_pfracs=self.band_path.require(args)['plot_kpoint_pfracs'],
         )
 
+class TaskPlotZoneCrossings(Task):
+    def __init__(
+            self,
+            structure: TaskStructure,
+            band_path: TaskBandPath,
+    ):
+        super().__init__()
+        self.structure = structure
+        self.band_path = band_path
+
+    def add_parser_opts(self, parser):
+        parser.add_argument(
+            '--plot-zone-crossings', choices=['parallel', 'voronoi'], help=
+            'Draw lines at each zone crossing.'
+        )
+
+    def check_upfront(self, args):
+        if args.plot_zone_crossings == 'voronoi':
+            die('--plot-zone-crossings=voronoi is not implemented')
+
+    def _compute(self, args):
+        if args.plot_zone_crossings:
+            assert args.plot_zone_crossings == 'parallel'
+            zone_crossing_xs = get_parallelogram_zone_crossings(
+                highsym_pfracs=self.band_path.require(args)['highsym_pfracs'],
+                supercell=self.structure.require(args)['supercell'],
+                plot_xticks=self.band_path.require(args)['plot_xticks'],
+            )
+        else:
+            zone_crossing_xs = np.array([])
+
+        return { "xs": zone_crossing_xs }
+
 class TaskBandPlot(Task):
     def __init__(
             self,
@@ -667,12 +707,14 @@ class TaskBandPlot(Task):
             band_qg_indices: TaskBandQGIndices,
             raman_json: TaskRamanJson,
             multi_qpoint_data: TaskMultiQpointData,
+            zone_crossings: TaskPlotZoneCrossings,
     ):
         super().__init__()
         self.band_path = band_path
         self.band_qg_indices = band_qg_indices
         self.raman_json = raman_json
         self.multi_qpoint_data = multi_qpoint_data
+        self.zone_crossings = zone_crossings
 
     def add_parser_opts(self, parser):
         parser.add_argument('--show', action='store_true', help='show plot')
@@ -756,6 +798,7 @@ class TaskBandPlot(Task):
             alpha_max=args.plot_max_alpha,
             alpha_truncate=args.plot_truncate,
             raman_dict=raman_dict,
+            plot_zone_crossing_xs=self.zone_crossings.require(args)['xs'],
             plot_baseline_path=args.plot_baseline_file,
             plot_color=args.plot_color,
             plot_ylim=args.plot_ylim,
@@ -851,6 +894,7 @@ def probs_to_band_plot(
         plot_xticklabels,
         plot_color,
         plot_ylim,
+        plot_zone_crossing_xs,
         raman_dict,
         alpha_truncate,
         alpha_exponent,
@@ -954,6 +998,9 @@ def probs_to_band_plot(
     for x in plot_xticks:
         ax.axvline(x, color='k')
 
+    for x in plot_zone_crossing_xs:
+        ax.axvline(x, color='k', ls=':')
+
     ax.set_xlim(X.min(), X.max())
     ax.set_xticks(plot_xticks)
     ax.set_xticklabels(plot_xticklabels, fontsize=20)
@@ -1018,6 +1065,39 @@ def get_plot_color_setter(plot_color, z_pol, raman_dict):
         raise RuntimeError('unreachable')
 
     return set_plot_color, extra
+
+def get_parallelogram_zone_crossings(
+    supercell,
+    highsym_pfracs,
+    plot_xticks,
+):
+    check_arrays(
+        highsym_pfracs = (highsym_pfracs, ['special_point', 3], np.floating),
+        plot_xticks = (plot_xticks, ['special_point'], np.floating),
+    )
+
+    highsym_sfracs = highsym_pfracs @ supercell.matrix.T
+
+    out = []
+    for ((pred_x, pred_sfrac), (succ_x, succ_sfrac)) in window2(zip(plot_xticks, highsym_sfracs)):
+        # Skip discontiguous regions in kpath (denoted by the same x coord appearing twice in a row)
+        if pred_x == succ_x:
+            continue
+
+        # consider one family of plane boundaries at a time
+        for k in range(3):
+            # find integer values (plane indices) of the fractional coordinate on this line
+            min_coord, max_coord = sorted([pred_sfrac[k], succ_sfrac[k]])
+            crossed_ints = np.arange(np.floor(min_coord), np.ceil(max_coord))
+            if not crossed_ints.size:
+                continue # no boundaries crossed; avoid potential division by zero
+
+            # Solve the linear equation between this fractional coordinate and the plot x axis
+            # to find the x values of those planes
+            m = (succ_x - pred_x) / (succ_sfrac[k] - pred_sfrac[k])
+            out.extend(pred_x + m * (crossed_ints - pred_sfrac[k]))
+
+    return np.array(sorted(out))
 
 def read_baseline_plot(path):
     X, Y = [], []
@@ -1587,7 +1667,7 @@ def check_arrays(**kw):
 
         if dtype:
             # support one dtype or a list of them
-            if type(dtype) is type:
+            if isinstance(dtype, type):
                 dtype = [dtype]
             if not any(issubclass(np.dtype(array.dtype).type, d) for d in dtype):
                 raise TypeError(f'{name}: Expected one of {dtype}, got {array.dtype}')
@@ -1615,6 +1695,12 @@ def check_arrays(**kw):
 
     return {dim:tup[0] for (dim, tup) in previous_values.items()}
 
+def window2(xs):
+    prev = next(xs)
+    for x in xs:
+        yield (prev, x)
+        prev = x
+
 #---------------------------------------------------------------
 
 def check_optional_input(path):
@@ -1636,7 +1722,7 @@ def check_optional_output_ext(argument, path, only=None, forbid=None):
         raise TypeError('must supply only or forbid')
 
     if forbid is not None:
-        if type(forbid) is str:
+        if isinstance(forbid, str):
             forbid = [forbid]
 
         for ext in forbid:
@@ -1644,7 +1730,7 @@ def check_optional_output_ext(argument, path, only=None, forbid=None):
                 die(f'Invalid extension for {argument}: {path}')
 
     if only is not None:
-        if type(only) is str:
+        if isinstance(only, str):
             only = [only]
 
         if not any(path.endswith(ext) for ext in only):
