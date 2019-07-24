@@ -1630,6 +1630,10 @@ def debug_path(points, lattice, path, supercell=None):
     draw_unit_cell(ax, lattice[:2, :2], lw=2)
     draw_path(ax, path, ls=':', lw=2)
 
+    cell_path = lattice_path(lattice[:2, :2])
+    ax.set_xlim(add_fuzz_to_interval((min(cell_path[:, 0]), max(cell_path[:, 0])), 0.05))
+    ax.set_ylim(add_fuzz_to_interval((min(cell_path[:, 1]), max(cell_path[:, 1])), 0.05))
+
     plt.show()
 
 def draw_axis_vectors(ax, lattice, **kw):
@@ -1705,9 +1709,11 @@ def draw_path(ax, path, **kw):
     return ax.add_patch(patches.PathPatch(mpl_path, facecolor='none', **kw))
 
 def draw_unit_cell(ax, lattice2, **kw):
+    return draw_path(ax, lattice_path(lattice2), **kw)
+
+def lattice_path(lattice2):
     np.testing.assert_equal(lattice2.shape, [2,2])
-    path = [[0,0], lattice2[0], lattice2[0]+lattice2[1], lattice2[1], [0,0]]
-    return draw_path(ax, path, **kw)
+    return np.array([[0,0], lattice2[0], lattice2[0]+lattice2[1], lattice2[1], [0,0]])
 
 def draw_reduced_points(ax, points2, lattice2, **kw):
     points2 = reduce_carts(points2, lattice2)
@@ -1826,6 +1832,10 @@ def iter_with_progress(
 
     if progress:
         progress(len(xs), len(xs))
+
+def add_fuzz_to_interval(ivl, fuzz):
+    a, b = ivl
+    return a + (a - b) * fuzz, b + (b - a) * fuzz
 
 def cartesian_product(*arrays):
     la = len(arrays)
