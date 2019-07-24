@@ -162,19 +162,27 @@ class VSim:
     # deserialize from lines ('\n' included)
     @classmethod
     def parse(cls, lines):
-        # No idea what the format spec is so let's be careful
-        assert lines[0][0] == '#'
+        # FIXME: We don't exactly follow the spec here.
+        # http://inac.cea.fr/sp2m/L_Sim/V_Sim/sample.html#sample_ascii
         assert len(lines[1].split()) == 3
         assert len(lines[2].split()) == 3
         header, lines = lines[:3], lines[3:]
 
+        atom_lines = []
         for i, line in enumerate(lines):
             if line[0] == '#':
-                break
+                # FIXME this assumes metaData comes after all keywords
+                #       and coordinates
+                if 'metaData' in line:
+                    break
+                else:
+                    header.append(line)
+            else:
+                atom_lines.append(line)
         else:
             i = len(lines)
 
-        atom_lines, meta_lines = lines[:i], lines[i:]
+        meta_lines = lines[i:]
         atoms = Atoms.parse(atom_lines)
         metas = Metas.parse(meta_lines)
 
