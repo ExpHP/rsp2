@@ -125,14 +125,28 @@ pub struct ScMatrix {
 }
 
 impl ScMatrix {
-    pub fn new(matrix: &M33<i32>, periods: &[u32; 3]) -> Self
-    {
+    pub fn new(matrix: &M33<i32>, periods: &[u32; 3]) -> Self {
         // sanity check
         // (NOTE: this condition is necessary, but not sufficient)
         // (NOTE: this is obviously not considered to be an invariant of this type,
         //        due to public members and Deserialize)
         assert_eq!(matrix.det().abs() as u32, periods.iter().product::<u32>());
         ScMatrix { matrix: *matrix, periods: *periods }
+    }
+
+    pub fn from_diagonal(diagonal: &V3<u32>) -> Self {
+        ScMatrix {
+            matrix: M33::from_diag(diagonal.map(|x| x as i32)),
+            periods: diagonal.0,
+        }
+    }
+
+    /// Take a diagonal supercell of this supercell.
+    pub fn multiply_diagonal(&self, &diagonal: &V3<u32>) -> Self {
+        ScMatrix {
+            matrix: &M33::from_diag(diagonal.map(|x| x as i32)) * &self.matrix,
+            periods: V3::from_fn(|k| self.periods[k] * diagonal[k]).0,
+        }
     }
 }
 

@@ -1421,29 +1421,25 @@ impl TrialDir {
 
 //=================================================================
 
+pub enum LayerScMode { Auto, Assign, Multiply, None }
+
 pub fn run_make_supercell(
     structure: StoredStructure,
     dims_str: &str,
+    layer_sc_mode: LayerScMode,
     output: impl AsPath,
 ) -> FailResult<()> {
     let StoredStructure {
         title, mut coords, mut elements, mut layers, mut masses,
-        mut layer_sc_matrices, mut frac_bonds,
+        mut layer_sc_matrices, frac_bonds,
     } = structure;
 
-    if let Some(_) = frac_bonds.take() {
+    if let Some(_) = frac_bonds {
         // TODO: support this properly.
         warn!("\
             Supercells of bond graphs are not yet implemented, so the created supercell will be \
             missing a bond graph.  (don't worry too much about this; rsp2 will typically \
             generate a new bond graph when run on the output).\
-        ");
-    };
-    if let Some(_) = frac_bonds.take() {
-        // TODO: support this properly.
-        warn!("\
-            Layer SC matrices will be lost.  This means that some layer-specific data won't \
-            be included in rsp2's output. (like band unfolding)\
         ");
     };
 
@@ -1454,7 +1450,30 @@ pub fn run_make_supercell(
     elements = sc.replicate(&elements).into();
     masses = sc.replicate(&masses).into();
     layers = layers.as_mut().map(|x| sc.replicate(&x).into());
-    layer_sc_matrices = layer_sc_matrices.map(|x| sc.replicate(&x).into());
+    layer_sc_matrices = match (layer_sc_mode, layer_sc_matrices) {
+        (LayerScMode::None, _) => None,
+        (LayerScMode::Multiply, None) => {
+            bail!("--layer-scs=multiply requires existing layer SC matrices.")
+        },
+        (LayerScMode::Auto, Some(old_mats)) |
+        (LayerScMode::Multiply, Some(old_mats)) => Some({
+            old_mats.into_iter().map(|old| old.multiply_diagonal(&V3(sc_dim)))
+                .collect::<Vec<_>>().into()
+        }),
+        (LayerScMode::Auto, None) |
+        (LayerScMode::Assign, _) => {
+            let layers = match layers {
+                None => bail!("--layer-scs=assign requires layer indices to be stored."),
+                Some(ref layers) => layers,
+            };
+
+            let num_layers = layers.iter().max().unwrap().0 as usize + 1;
+            Some({
+                std::iter::repeat(ScMatrix::from_diagonal(&V3(sc_dim))).take(num_layers)
+                    .collect::<Vec<_>>().into()
+            })
+        },
+    };
 
     StoredStructure {
         title, coords, elements, layers, masses,
@@ -1476,7 +1495,7 @@ fn parse_sc_dims_argument(arg: &str) -> FailResult<[u32; 3]> {
         Cereal::Scalar(x) => Ok([x as u32; 3]),
         Cereal::Vector(v) => {
             if v.iter().any(|&x| x <= 0) {
-                bail!("A vector supercell must consist of non-negative integers.")
+                bail!("A vector supercell must consist of positive integers.")
             } else {
                 let [a, b, c] = v;
                 Ok([a as u32, b as u32, c as u32])

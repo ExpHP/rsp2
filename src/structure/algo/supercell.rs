@@ -180,6 +180,8 @@ impl SupercellToken {
     pub fn replicate_with<M, M2, F>(&self, vec: &[M], mut make_meta: F) -> Vec<M2>
     where F: FnMut(&M, [u32; 3]) -> M2,
     {
+        assert_eq!(vec.len(), self.num_primitive_atoms());
+
         let sc_idx = image_cells(self.periods);
         let mut out = Vec::with_capacity(self.num_supercell_atoms());
         for m in vec {

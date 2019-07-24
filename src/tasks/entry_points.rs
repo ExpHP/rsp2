@@ -615,6 +615,8 @@ pub fn converge_vdw(bin_name: &str, version: VersionInfo) -> ! {
 // %% CRATES: binary: rsp2-make-supercell %%
 pub fn make_supercell(bin_name: &str, _version: VersionInfo) -> ! {
     wrap_main_just_for_ui(|logfile| {
+        use crate::cmd::LayerScMode;
+
         let (app, de) = CliDeserialize::augment_clap_app({
             clap::App::new(bin_name)
                 .about("Makes a supercell of a structure that is in rsp2's 'directory.structure' format.")
@@ -625,6 +627,15 @@ pub fn make_supercell(bin_name: &str, _version: VersionInfo) -> ! {
                         combination of the basis vectors in the original lattice. \
                         A vector is interpreted as a diagonal matrix, and an integer is interpreted \
                         as multiplied by the identity.\
+                    "),
+                    arg!( primitive [--primitive]=MODE "\
+                        Choices: [keep, input, auto, none]. Default: auto. Determines how the \
+                        'layer_sc_matrices' field of the output is written, which is used for \
+                        unfolding. 'keep' requires the input to contain layer SC matrices, and \
+                        will preserve the original primitive cells by multiplying against those \
+                        matrices. 'input' defines the input structure to be the the primitive by \
+                        setting all SC matrices equal to 'dims'. 'auto' is equivalent to either \
+                        'keep' or 'input' based on whether the input contains SC matrices.\
                     "),
                     arg!( input=INPUT_DIR ""),
                     arg!(*output [-o][--output]=PATH ""),
@@ -637,9 +648,16 @@ pub fn make_supercell(bin_name: &str, _version: VersionInfo) -> ! {
 
         let input = StoredStructure::load(matches.expect_value_of("input"))?;
         let dim_string = matches.expect_value_of("dims");
+        let layer_sc_mode = match matches.value_of("primitive").unwrap_or("auto".into()) {
+            "auto" => LayerScMode::Auto,
+            "input" => LayerScMode::Assign,
+            "keep" => LayerScMode::Multiply,
+            "none" => LayerScMode::None,
+            s => bail!("invalid --layer-scs: {:?}", s),
+        };
         let output = matches.expect_value_of("output");
 
-        crate::cmd::run_make_supercell(input, &dim_string, output)
+        crate::cmd::run_make_supercell(input, &dim_string, layer_sc_mode, output)
     });
 }
 
