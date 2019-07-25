@@ -38,33 +38,29 @@ def build():
 
     # This definition gets written to the exported global name
     def _unfold_all(
-            superstructure,
-            translation_carts,
+            site_phases,
             gpoint_sfracs,
             kpoint_sfrac,
             eigenvectors,
+            translation_sfracs,
             translation_deperms,
             translation_phases,
             progress_prefix,
     ):
         from ctypes import c_double, c_int32
 
-        super_lattice = superstructure.lattice.matrix
-        super_carts = superstructure.cart_coords
-
-        nquotient = len(translation_carts)
-        nsite = len(super_carts)
+        nquotient = len(translation_sfracs)
+        nsite = len(site_phases)
         nev = len(eigenvectors)
 
         output = np.zeros((nev, nquotient), dtype=c_double)
         arrays = [
             # array, check_shape, [ffi_pointer_type, py_type (if different)]
-            (super_lattice, (3, 3), [c_double, None]),
-            (super_carts, (nsite, 3), [c_double, None]),
-            (translation_carts, (nquotient, 3), [c_double, None]),
+            (site_phases, (nsite,), [c_double, np.complex128]),
             (gpoint_sfracs, (nquotient, 3), [c_double, None]),
             (kpoint_sfrac, (3,), [c_double, None]),
             (eigenvectors, (nev, nsite, 3), [c_double, np.complex128]),
+            (translation_sfracs, (nquotient, 3), [c_double, None]),
             (translation_deperms, (nquotient, nsite), [c_int32, None]),
             (translation_phases, (nquotient, nsite), [c_double, np.complex128]),
             (output, (nev, nquotient), [c_double, None]),

@@ -1,4 +1,4 @@
-use rsp2_array_types::{V3, M33, M3};
+use rsp2_array_types::{V3};
 use rsp2_soa_ops::{Perm, Permute};
 
 use std::os::raw::c_char;
@@ -17,12 +17,11 @@ pub extern "C" fn rsp2c_unfold_all(
     num_sites: i64,
     num_evecs: i64,
     progress_prefix: *const c_char, // NUL-terminated UTF-8, possibly NULL
-    super_lattice: *const f64, // shape (3, 3)
-    super_carts: *const f64, // shape (sites, 3)
-    translation_carts: *const f64, // shape (quotient, 3)
+    site_phases: *const Complex64, // shape (sites,)
     gpoint_sfracs: *const f64, // shape (quotient, 3)
     kpoint_sfrac: *const f64, // shape (3,)
     eigenvectors: *const Complex64, // shape (evecs, sites, 3)
+    translation_sfracs: *const f64, // shape (quotient, 3)
     translation_deperms: *const i32, // shape (quotient, sites)
     translation_phases: *const Complex64, // shape (quotient, sites)
     output: *mut f64, // shape (evecs, quotient)
@@ -35,12 +34,11 @@ pub extern "C" fn rsp2c_unfold_all(
 
         use std::slice::{from_raw_parts, from_raw_parts_mut};
         unsafe {
-            let ref super_lattice = M3(*from_raw_parts(super_lattice, 3 * 3).nest().as_array());
-            let super_carts = from_raw_parts(super_carts, num_sites * 3).nest();
-            let translation_carts = from_raw_parts(translation_carts, num_quotient * 3).nest();
+            let site_phases = from_raw_parts(site_phases, num_sites);
             let gpoint_sfracs = from_raw_parts(gpoint_sfracs, num_quotient * 3).nest();
             let kpoint_sfrac = from_raw_parts(kpoint_sfrac, 3).as_array();
             let eigenvectors = from_raw_parts(eigenvectors, num_evecs * num_sites * 3).nest();
+            let translation_sfracs = from_raw_parts(translation_sfracs, num_quotient * 3).nest();
             let translation_deperms = from_raw_parts(translation_deperms, num_quotient * num_sites);
             let translation_phases = from_raw_parts(translation_phases, num_quotient * num_sites);
             let output = from_raw_parts_mut(output, num_evecs * num_quotient);
@@ -53,12 +51,11 @@ pub extern "C" fn rsp2c_unfold_all(
 
             unfold_all(
                 progress_prefix,
-                super_lattice,
-                super_carts,
-                translation_carts,
+                site_phases,
                 gpoint_sfracs,
                 kpoint_sfrac,
                 eigenvectors,
+                translation_sfracs,
                 translation_deperms,
                 translation_phases,
                 output,
@@ -72,21 +69,17 @@ pub extern "C" fn rsp2c_unfold_all(
 
 fn unfold_all(
     progress_prefix: Option<&str>,
-    super_lattice: &M33,
-    super_carts: &[V3],
-    translation_carts: &[V3],
+    site_phases: &[Complex64],
     gpoint_sfracs: &[V3],
     kpoint_sfrac: &V3,
     eigenvectors: &[V3<Complex64>],
+    translation_sfracs: &[V3],
     translation_deperms: &[i32],
     translation_phases: &[Complex64],
     output: &mut [f64],
 ) {
-    let num_sites = super_carts.len();
-    let num_quotient = translation_carts.len();
-
-    let super_lattice_inv = M33::inv(super_lattice);
-    let ref translation_sfracs: Vec<_> = translation_carts.iter().map(|v| v * super_lattice_inv).collect();
+    let num_sites = site_phases.len();
+    let num_quotient = translation_sfracs.len();
 
     let ref translation_deperms: Vec<Perm> = {
         translation_deperms.chunks(num_sites)
@@ -110,6 +103,7 @@ fn unfold_all(
         }
 
         let dense_row = unfold_one(
+            site_phases,
             translation_sfracs,
             translation_deperms,
             translation_phases,
@@ -125,7 +119,9 @@ fn unfold_all(
     }
 }
 
+/// See `unfold_one` in the python code for documentation of the arguments.
 fn unfold_one(
+    site_phases: &[Complex64],
     translation_sfracs: &[V3],
     translation_deperms: &[Perm],
     translation_phases: &[&[Complex64]],
@@ -135,10 +131,18 @@ fn unfold_one(
 ) -> Vec<f64> {
     let num_quotient = translation_sfracs.len();
 
+    // our "Frankenstein bloch function" with the magnitudes of the eigenvector and
+    // the phases of the displacement vector.
+    let ref bloch_function: Vec<_> = {
+        zip_eq!(eigenvector, site_phases)
+            .map(|(&v3, phase)| v3.map(|x| x * phase))
+            .collect()
+    };
+
     let inner_prods: Vec<_> = {
         translation_deperms.par_iter().zip_eq(translation_phases).map(|(perm, &image_phases)| {
-            let permuted = eigenvector.to_vec().permuted_by(perm);
-            zip_eq!(eigenvector, image_phases, permuted)
+            let permuted = bloch_function.to_vec().permuted_by(perm);
+            zip_eq!(bloch_function, image_phases, permuted)
                 .map(|(orig_v3, &image_phase, perm_v3)| {
                     let true_translated_v3 = perm_v3.map(|x| x * image_phase);
                     inner_prod_v3(orig_v3, &true_translated_v3)

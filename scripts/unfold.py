@@ -1256,6 +1256,24 @@ def unfold_all(
     super_lattice_recip = superstructure.lattice.inv_matrix.T
     kpoint_cart = kpoint_sfrac @ super_lattice_recip
     super_carts = superstructure.cart_coords
+
+    # The method is defined on a Bloch function with wavevector q.  The
+    # eigenvector does not satisfy this property; it is periodic under the
+    # lattice. Rather, the *displacements* are a Bloch function.
+    #
+    # Because the sqrt(mass) factors could mess with our normalization, we don't
+    # construct the true displacement vectors, but rather some sort of
+    # Frankenstein creation that has magnitudes of the eigenvector and the
+    # phases of the displacement vector.
+    #
+    # These are the phase factors we require.
+    # (we follow the sign convention of Allen, rather than of Phonopy)
+    site_phases = np.exp(-2j * np.pi * np.dot(super_carts, kpoint_cart))
+
+    # We also require correction phase factors to accompany the permutation
+    # representation of our translation operators, to handle when sites are
+    # mapped to different images of the supercell.
+    # See the comment above get_translation_phases for more details.
     translation_phases = np.vstack([
         get_translation_phases(
             kpoint_cart=kpoint_cart,
@@ -1267,24 +1285,32 @@ def unfold_all(
         in zip(translation_carts, translation_deperms)
     ])
 
-    #----------------------------
-    # Rust impl
-
     if unfold_lib.unfold_all is not None and implementation != 'python':
-        return unfold_lib.unfold_all(
-            superstructure=superstructure,
-            translation_carts=translation_carts,
-            gpoint_sfracs=gpoint_sfracs,
-            kpoint_sfrac=kpoint_sfrac,
-            eigenvectors=eigenvectors,
-            translation_deperms=translation_deperms,
-            translation_phases=translation_phases,
-            progress_prefix=progress_prefix,
-        )
+        func = unfold_lib.unfold_all # Rust
+    else:
+        func = unfold_all__python # Python
 
-    #----------------------------
-    # Python impl
+    return func(
+        site_phases=site_phases,
+        translation_sfracs=translation_sfracs,
+        translation_deperms=translation_deperms,
+        translation_phases=translation_phases,
+        gpoint_sfracs=gpoint_sfracs,
+        kpoint_sfrac=kpoint_sfrac,
+        eigenvectors=eigenvectors,
+        progress_prefix=progress_prefix,
+    )
 
+def unfold_all__python(
+        site_phases,
+        translation_sfracs,
+        translation_deperms,
+        translation_phases,
+        gpoint_sfracs,
+        kpoint_sfrac,
+        eigenvectors,
+        progress_prefix,
+):
     progress = None
     if progress_prefix is not None:
         def progress(done, count):
@@ -1293,6 +1319,7 @@ def unfold_all(
     return np.array(list(map_with_progress(
         eigenvectors, progress,
         lambda eigenvector: unfold_one(
+            site_phases=site_phases,
             translation_sfracs=translation_sfracs,
             translation_deperms=translation_deperms,
             translation_phases=translation_phases,
@@ -1302,7 +1329,10 @@ def unfold_all(
         )
     )))
 
+# NOTE: For any change to this function, the corresponding function
+#       in the Rust unfold_lib must be changed accordingly!
 def unfold_one(
+        site_phases,
         translation_sfracs,
         translation_deperms,
         translation_phases,
@@ -1311,6 +1341,10 @@ def unfold_one(
         eigenvector,
 ):
     """
+    :param site_phases: Shape ``(quotient,)``, complex.
+    The phase factors that must be multiplied into each site when producing
+    displacements from the eigenvector. Should be of the form ``e ^ (i q.x)``.
+
     :param translation_sfracs: Shape ``(quotient, 3)``, real.
     The quotient space translations (PC lattice modulo super cell),
     in units of the supercell basis vectors.
@@ -1345,21 +1379,28 @@ def unfold_one(
     ``kpoint + qpoints[i]``.
     """
 
+    site_phases = np.array(site_phases)
     translation_sfracs = np.array(translation_sfracs)
     translation_deperms = np.array(translation_deperms)
     gpoint_sfracs = np.array(gpoint_sfracs)
     kpoint_sfrac = np.array(kpoint_sfrac)
     eigenvector = np.array(eigenvector)
     sizes = check_arrays(
+        site_phases = (site_phases, ['sc_sites'], np.complexfloating),
         translation_sfracs = (translation_sfracs, ['quotient', 3], np.floating),
         translation_deperms = (translation_deperms, ['quotient', 'sc_sites'], np.integer),
         gpoint_sfracs = (gpoint_sfracs, ['quotient', 3], np.floating),
         kpoint_sfrac = (kpoint_sfrac, [3], np.floating),
         eigenvector = (eigenvector, ['sc_sites', 3], [np.floating, np.complexfloating]),
     )
+    # print(repr(eigenvector))
+
+    # Function with the magnitudes of the eigenvector, but the phases
+    # of the displacement vector.
+    bloch_function = eigenvector * site_phases[:, None]
 
     inner_prods = np.array([
-        np.vdot(eigenvector, t_phases[:, None] * eigenvector[t_deperm])
+        np.vdot(bloch_function, t_phases[:, None] * bloch_function[t_deperm])
         for (t_deperm, t_phases) in zip(translation_deperms, translation_phases)
     ])
 
@@ -1377,6 +1418,8 @@ def unfold_one(
         gpoint_probs.append(max(prob.real, 0.0))
     gpoint_probs = np.array(gpoint_probs)
 
+    # Recall that the eigenvector is not normalized because it could be the zero
+    # vector (due to projection onto a layer).
     np.testing.assert_allclose(gpoint_probs.sum(), np.linalg.norm(eigenvector)**2, atol=1e-7)
     return gpoint_probs
 
