@@ -818,397 +818,12 @@ class TaskBandPlot(Task):
             # fig.show() # doesn't do anything :/
             plt.show()
 
-#----------------------------------------------------------------
-
-# Here we encounter a big problem:
-#
-#     The points at which we want to draw bands are not necessarily
-#     images of the qpoint at which we computed eigenvectors.
-#
-# Our solution is not very rigorous. For each point on the plot's x-axis, we
-# will simply produce the projected probabilities onto the nearest image of
-# the supercell qpoint.
-#
-# The idea is that for large supercells, every point in the primitive BZ
-# is close to an image of the supercell qpoint point. (though this scheme
-# may fail to produce certain physical effects that are specifically enabled
-# by the symmetry of a high-symmetry point when that point is not an image
-# of the qpoint)
-#
-# With the addition of --multi-kpoint-file, the density of the points we
-# are sampling from can be even further increased.
-def resample_qg_indices(
-        super_lattice,
-        supercell,
-        qpoint_sfrac,
-        plot_kpoint_pfracs,
-):
-    gpoint_sfracs = supercell.gpoint_sfracs()
-
-    sizes = check_arrays(
-        super_lattice = (super_lattice, [3, 3], np.floating),
-        gpoint_sfracs = (gpoint_sfracs, ['quotient', 3], np.floating),
-        qpoint_sfrac = (qpoint_sfrac, ['qpoint', 3], np.floating),
-        plot_kpoint_pfracs = (plot_kpoint_pfracs, ['plot-x', 3], np.floating),
-    )
-
-    prim_lattice = np.linalg.inv(supercell.matrix) @ super_lattice
-
-    # All of the (Q + G) points at which probabilities were computed.
-    qg_sfracs = np.vstack([
-        supercell.gpoint_sfracs() + sfrac
-        for sfrac in qpoint_sfrac
-    ])
-    qg_carts = qg_sfracs @ np.linalg.inv(super_lattice).T
-    assert qg_carts.shape == (sizes['qpoint'] * sizes['quotient'], 3)
-
-    # For each of those (Q + G) points, the index of its Q point and its K point.
-    qg_q_ids, qg_g_ids = np.mgrid[0:sizes['qpoint'], 0:sizes['quotient']].reshape((2, -1))
-
-    # For every point on the plot x-axis, the index of the closest Q + G point
-    plot_kpoint_carts = plot_kpoint_pfracs @ np.linalg.inv(prim_lattice).T
-    plot_kpoint_qg_ids = griddata_periodic(
-        points=qg_carts,
-        values=np.arange(sizes['qpoint'] * sizes['quotient']),
-        xi=plot_kpoint_carts,
-        lattice=np.linalg.inv(prim_lattice).T,
-        periodic_axis_mask=[1,1,0],
-        method='nearest',
-        _supercell=supercell,
-    )
-
-    # For every plot on the plot x-axis, the indices of Q and G for the
-    # nearest (Q + G)
-    return {
-        'Q': qg_q_ids[plot_kpoint_qg_ids],
-        'G': qg_g_ids[plot_kpoint_qg_ids],
-    }
-
-def probs_to_band_plot(
-        q_ev_frequencies,
-        q_ev_z_projections,
-        q_ev_gpoint_probs,
-        path_g_indices,
-        path_q_indices,
-        path_x_coordinates,
-        plot_xticks,
-        plot_xticklabels,
-        plot_color,
-        plot_ylim,
-        plot_zone_crossing_xs,
-        raman_dict,
-        alpha_truncate,
-        alpha_exponent,
-        alpha_max,
-        plot_baseline_path,
-        plot_hide_unfolded,
-        plot_sidebar,
-        verbose=False,
-):
-    import matplotlib.pyplot as plt
-
-    set_plot_color, q_ev_extra = get_plot_color_setter(plot_color, z_pol=q_ev_z_projections, raman_dict=raman_dict)
-
-    sizes = check_arrays(
-        q_ev_frequencies = (q_ev_frequencies, ['qpoint', 'ev'], np.floating),
-        q_ev_z_projections = (q_ev_z_projections, ['qpoint', 'ev'], np.floating),
-        q_ev_gpoint_probs = (q_ev_gpoint_probs, ['qpoint'], object),
-        q_ev_gpoint_probs_row = (q_ev_gpoint_probs[0], ['ev', 'quotient'], np.floating),
-        path_g_indices = (path_g_indices, ['plot-x'], np.integer),
-        path_q_indices = (path_q_indices, ['plot-x'], np.integer),
-        path_x_coordinates = (path_x_coordinates, ['plot-x'], np.floating),
-        plot_xticks = (plot_xticks, ['special_point'], np.floating),
-    )
-    if raman_dict is not None:
-        assert raman_dict['average-3d'].shape == (sizes['qpoint'], sizes['ev'])
-
-    def get_ev_path_probs():
-        # If ev_gpoint_probs were a dense, 3d array, we could just write
-        # ev_gpoint_probs[path_q_indices, :, path_g_indices]... but because
-        # there are sparse matrices in there we must do this.
-        q_g_ev_probs = np.array([
-            list(ev_g_probs.T)
-            for ev_g_probs in q_ev_gpoint_probs
-        ])
-        assert q_g_ev_probs.shape == (sizes['qpoint'], sizes['quotient']), (q_g_ev_probs.shape, (sizes['qpoint'], sizes['quotient']))
-        assert sparse.issparse(q_g_ev_probs[0][0])
-
-        path_ev_probs = sparse.vstack(q_g_ev_probs[path_q_indices, path_g_indices])
-        return np.asarray(path_ev_probs.todense()) # it's no longer N^2 but rather X*N
-
-    path_ev_probs = get_ev_path_probs()
-    path_ev_frequencies = q_ev_frequencies[path_q_indices]
-    path_ev_extra = q_ev_extra[path_q_indices]
-    assert path_ev_probs.shape == (sizes['plot-x'], sizes['ev'])
-    assert path_ev_frequencies.shape == (sizes['plot-x'], sizes['ev'])
-    assert path_ev_extra.shape == (sizes['plot-x'], sizes['ev'])
-
-    if plot_baseline_path is not None:
-        base_X, base_Y = read_baseline_plot(plot_baseline_path)
-    else:
-        base_X, base_Y = [], []
-
-    X, Y, S, Extra = [], [] ,[], []
-    iterator = zip(path_x_coordinates, path_ev_frequencies, path_ev_probs, path_ev_extra)
-    for (x_coord, ev_frequencies, ev_probs, ev_extra) in iterator:
-        # Don't ask matplotlib to draw thousands of points with alpha=0
-        mask = ev_probs != 0
-
-        X.append([x_coord] * mask.sum())
-        Y.append(ev_frequencies[mask])
-        S.append(ev_probs[mask])
-        Extra.append(ev_extra[mask])
-
-    X = np.hstack(X)
-    Y = np.hstack(Y)
-    S = np.hstack(S)
-    Extra = np.hstack(Extra)
-
-    S **= alpha_exponent
-    S *= alpha_max
-
-    mask = S > alpha_truncate
-    X = X[mask]
-    Y = Y[mask]
-    S = S[mask]
-    Extra = Extra[mask]
-
-    if verbose:
-        print(f'Plotting {len(X)} points!')
-
-    C = np.hstack([np.zeros((len(S), 3)), S[:, None]])
-    set_plot_color(C, X=X, Y=Y, Extra=Extra)
-
-    fig = plt.figure(figsize=(7, 8), constrained_layout=True)
-    #fig.set_tight_layout(True)
-
-    if plot_sidebar:
-        gs = fig.add_gridspec(ncols=8, nrows=1)
-        ax = fig.add_subplot(gs[0,:-1])
-        ax_sidebar = fig.add_subplot(gs[0,-1], sharey=ax)
-    else:
-        ax = fig.add_subplot(111)
-
-    if not plot_hide_unfolded:
-        ax.scatter(X, Y, 20, C)
-    if plot_baseline_path is not None:
-        base_X /= np.max(base_X)
-        base_X *= np.max(X)
-        ax.scatter(base_X, base_Y, 5, 'k')
-
-    for x in plot_xticks:
-        ax.axvline(x, color='k')
-
-    for x in plot_zone_crossing_xs:
-        ax.axvline(x, color='k', ls=':')
-
-    ax.set_xlim(X.min(), X.max())
-    ax.set_xticks(plot_xticks)
-    ax.set_xticklabels(plot_xticklabels, fontsize=20)
-    ax.set_ylabel('Frequency (cm$^{-1}$)', fontsize=20)
-    for tick in ax.yaxis.get_major_ticks():
-        tick.label.set_fontsize(16)
-
-    if plot_ylim is not None:
-        ymin, ymax = (float(x.strip()) for x in plot_ylim.split(':'))
-        ax.set_ylim(ymin, ymax)
-
-    if plot_sidebar:
-        ax_sidebar.set_xlim(-1, 1)
-        ax_sidebar.hlines(Y, -1, 1, color=C)
-        ax_sidebar.set_xticks([0])
-        ax_sidebar.set_xticklabels([r'$\mathrm{\Gamma}$'], fontsize=20)
-        plt.setp(ax_sidebar.get_yticklabels(), visible=False)
-
-    return fig, ax
-
-def get_plot_color_setter(plot_color, z_pol, raman_dict):
-    from matplotlib import colors, cm
-
-    # Switch based on plot_color so we can validate it before doing anything expensive.
-    extra = np.zeros_like(z_pol)
-
-    if plot_color == 'zpol':
-        # colorize Z projection
-        extra = z_pol
-        def set_plot_color(C, *, Extra, **_kw):
-            cmap = colors.LinearSegmentedColormap.from_list('', [[0, 0, 1], [0, 0.5, 0]])
-            C[:, :3] = cmap(Extra)[:, :3]
-
-    elif plot_color == 'sign':
-        def set_plot_color(C, *, Y, **_kw):
-            C[:,:3] = colors.to_rgb('y')
-            C[:,:3] = np.where((Y < -1e-3)[:, None], colors.to_rgb('g'), C[:,:3])
-            C[:,:3] = np.where((Y > +1e-3)[:, None], colors.to_rgb('r'), C[:,:3])
-
-    elif plot_color.startswith('uniform:'):
-        fixed_color = colors.to_rgb(plot_color[len('uniform:'):].strip())
-        def set_plot_color(C, **_kw):
-            # use given color
-            C[:, :3] = fixed_color
-
-    elif plot_color.startswith('raman:'):
-        raman_dict_key = plot_color[len('raman:'):]
-        if raman_dict_key not in ['average-3d', 'backscatter']:
-            die('Invalid raman polarization mode: {raman_dict_key}')
-        extra = raman_dict[raman_dict_key]
-
-        def set_plot_color(C, *, Extra, **_kw):
-            Extra = np.log(np.maximum(Extra.max() * 1e-7, Extra))
-            Extra -= Extra.min()
-            Extra /= Extra.max()
-
-            cmap = cm.get_cmap('cool_r')
-            C[:, :3] = cmap(Extra)[:, :3]
-
-    else:
-        die(f'invalid --plot-color: {repr(plot_color)}')
-        raise RuntimeError('unreachable')
-
-    return set_plot_color, extra
-
-def get_parallelogram_zone_crossings(
-    supercell,
-    highsym_pfracs,
-    plot_xticks,
-):
-    check_arrays(
-        highsym_pfracs = (highsym_pfracs, ['special_point', 3], np.floating),
-        plot_xticks = (plot_xticks, ['special_point'], np.floating),
-    )
-
-    highsym_sfracs = highsym_pfracs @ supercell.matrix.T
-
-    out = []
-    for ((pred_x, pred_sfrac), (succ_x, succ_sfrac)) in window2(zip(plot_xticks, highsym_sfracs)):
-        # Skip discontiguous regions in kpath (denoted by the same x coord appearing twice in a row)
-        if pred_x == succ_x:
-            continue
-
-        # consider one family of plane boundaries at a time
-        for k in range(3):
-            # find integer values (plane indices) of the fractional coordinate on this line
-            min_coord, max_coord = sorted([pred_sfrac[k], succ_sfrac[k]])
-            crossed_ints = np.arange(np.floor(min_coord), np.ceil(max_coord))
-            if not crossed_ints.size:
-                continue # no boundaries crossed; avoid potential division by zero
-
-            # Solve the linear equation between this fractional coordinate and the plot x axis
-            # to find the x values of those planes
-            m = (succ_x - pred_x) / (succ_sfrac[k] - pred_sfrac[k])
-            out.extend(pred_x + m * (crossed_ints - pred_sfrac[k]))
-
-    return np.array(sorted(out))
-
-def read_baseline_plot(path):
-    X, Y = [], []
-    d = dwim.from_path(path)
-    d = d['phonon']
-    for qpoint in d:
-        X.extend([qpoint['distance']] * len(qpoint['band']))
-        Y.extend(band['frequency'] * THZ_TO_WAVENUMBER for band in qpoint['band'])
-    return X, Y
-
-def reduce_carts(carts, lattice):
-    fracs = carts @ np.linalg.inv(lattice)
-    fracs %= 1.0
-    fracs %= 1.0 # for values like -1e-20
-    return fracs @ lattice
-
-class Supercell:
-    def __init__(self, matrix):
-        """
-        :param matrix: Shape ``(3, 3)``, integer.
-        Integer matrix satisfying
-        ``matrix @ prim_lattice_matrix == super_lattice_matrix``
-        where the lattice matrices are understood to store a lattice primitive
-        translation in each row.
-        """
-        if isinstance(matrix, Supercell):
-            self.matrix = matrix.matrix
-            self.repeats = matrix.repeats
-            self.t_repeats = matrix.t_repeats
-        else:
-            matrix = np.array(matrix, dtype=int)
-            assert matrix.shape == (3, 3)
-            self.matrix = matrix
-            self.repeats = find_repeats(matrix)
-            self.t_repeats = find_repeats(matrix.T)
-
-    def translation_pfracs(self):
-        """
-        :return: Shape ``(quotient, 3)``, integral.
-
-        Fractional coordinates of quotient-space translations,
-        in units of the primitive cell lattice basis vectors.
-        """
-        return cartesian_product(*(np.arange(n) for n in self.repeats)).astype(float)
-
-    def gpoint_sfracs(self):
-        """
-        :return: Shape ``(quotient, 3)``, integral.
-
-        Fractional coordinates of quotient-space gpoints,
-        in units of the supercell reciprocal lattice basis vectors.
-        """
-        return cartesian_product(*(np.arange(n) for n in self.t_repeats)).astype(float)
-
-    def recip(self):
-        """
-        Get a supercell that describes the reciprocal primitive lattice in terms
-        of the reciprocal supercell lattice.
-        """
-        return Supercell(self.matrix.T)
-
-def collect_translation_deperms(
-        superstructure: Structure,
-        supercell: Supercell,
-        axis_mask = np.array([True, True, True]),
-        tol: float = DEFAULT_TOL,
-        progress = None,
-):
-    """
-    :param superstructure:
-    :param supercell:
-
-    :param axis_mask: Shape ``(3,)``, boolean.
-    Permutation finding can be troublesome if the primitive cell translational
-    symmetry is very strongly broken along some axis (e.g. formation of ripples
-    in a sheet of graphene).  This can be used to filter those axes out of these
-    permutation searches.
-
-    :param tol: ``float``.
-    Cartesian distance within which sites must overlap to be considered
-    equivalent.
-
-    :param progress: Progress callback.
-    Called as ``progress(num_done, num_total)``.
-    :return:
-    """
-    super_lattice = superstructure.lattice.matrix
-    prim_lattice = np.linalg.inv(supercell.matrix) @ super_lattice
-
-    # The quotient group of primitive lattice translations modulo the supercell
-    translation_carts = supercell.translation_pfracs() @ prim_lattice
-
-    # debug_quotient_points(translation_carts[:, :2], super_lattice[:2,:2])
-
-    # Allen's method requires the supercell to approximately resemble the
-    # primitive cell, so that translations of the eigenvector can be emulated
-    # by permuting its data.
-    return list(map_with_progress(
-        translation_carts, progress,
-        lambda translation_cart: get_translation_deperm(
-            structure=superstructure,
-            translation_cart=translation_cart,
-            axis_mask=axis_mask,
-            tol=tol,
-        ),
-    ))
+#---------------------------------------------------------------
+# Computation
 
 def unfold_all(
         superstructure: Structure,
-        supercell: Supercell,
+        supercell: 'Supercell',
         eigenvectors,
         kpoint_sfrac,
         translation_deperms,
@@ -1423,6 +1038,52 @@ def unfold_one(
     np.testing.assert_allclose(gpoint_probs.sum(), np.linalg.norm(eigenvector)**2, atol=1e-7)
     return gpoint_probs
 
+def collect_translation_deperms(
+        superstructure: Structure,
+        supercell: 'Supercell',
+        axis_mask = np.array([True, True, True]),
+        tol: float = DEFAULT_TOL,
+        progress = None,
+):
+    """
+    :param superstructure:
+    :param supercell:
+
+    :param axis_mask: Shape ``(3,)``, boolean.
+    Permutation finding can be troublesome if the primitive cell translational
+    symmetry is very strongly broken along some axis (e.g. formation of ripples
+    in a sheet of graphene).  This can be used to filter those axes out of these
+    permutation searches.
+
+    :param tol: ``float``.
+    Cartesian distance within which sites must overlap to be considered
+    equivalent.
+
+    :param progress: Progress callback.
+    Called as ``progress(num_done, num_total)``.
+    :return:
+    """
+    super_lattice = superstructure.lattice.matrix
+    prim_lattice = np.linalg.inv(supercell.matrix) @ super_lattice
+
+    # The quotient group of primitive lattice translations modulo the supercell
+    translation_carts = supercell.translation_pfracs() @ prim_lattice
+
+    # debug_quotient_points(translation_carts[:, :2], super_lattice[:2,:2])
+
+    # Allen's method requires the supercell to approximately resemble the
+    # primitive cell, so that translations of the eigenvector can be emulated
+    # by permuting its data.
+    return list(map_with_progress(
+        translation_carts, progress,
+        lambda translation_cart: get_translation_deperm(
+            structure=superstructure,
+            translation_cart=translation_cart,
+            axis_mask=axis_mask,
+            tol=tol,
+        ),
+    ))
+
 def get_translation_deperm(
         structure: Structure,
         translation_cart,
@@ -1513,32 +1174,69 @@ def get_translation_phases(
     # dot each atom's R with the kpoint to produce its phase correction
     return np.exp(2j * np.pi * image_carts @ kpoint_cart)
 
-def find_repeats(supercell_matrix):
-    """
-    Get the number of distinct translations along each lattice primitive
-    translation. (it's the diagonal of the row-based HNF of the matrix)
+# Here we encounter a big problem:
+#
+#     The points at which we want to draw bands are not necessarily
+#     images of the qpoint at which we computed eigenvectors.
+#
+# Our solution is not very rigorous. For each point on the plot's x-axis, we
+# will simply produce the projected probabilities onto the nearest image of
+# the supercell qpoint.
+#
+# The idea is that for large supercells, every point in the primitive BZ
+# is close to an image of the supercell qpoint point. (though this scheme
+# may fail to produce certain physical effects that are specifically enabled
+# by the symmetry of a high-symmetry point when that point is not an image
+# of the qpoint)
+#
+# With the addition of --multi-kpoint-file, the density of the points we
+# are sampling from can be even further increased.
+def resample_qg_indices(
+        super_lattice,
+        supercell,
+        qpoint_sfrac,
+        plot_kpoint_pfracs,
+):
+    gpoint_sfracs = supercell.gpoint_sfracs()
 
-    :param supercell_matrix: Shape ``(3, 3)``, integer.
-    Integer matrix satisfying
-    ``matrix @ prim_lattice_matrix == super_lattice_matrix``
-    where the lattice matrices are understood to store a lattice primitive
-    translation in each row.
+    sizes = check_arrays(
+        super_lattice = (super_lattice, [3, 3], np.floating),
+        gpoint_sfracs = (gpoint_sfracs, ['quotient', 3], np.floating),
+        qpoint_sfrac = (qpoint_sfrac, ['qpoint', 3], np.floating),
+        plot_kpoint_pfracs = (plot_kpoint_pfracs, ['plot-x', 3], np.floating),
+    )
 
-    :return:
-    """
-    from abelian import hermite_normal_form
-    from sympy import Matrix
+    prim_lattice = np.linalg.inv(supercell.matrix) @ super_lattice
 
-    expected_volume = abs(round(np.linalg.det(supercell_matrix)))
+    # All of the (Q + G) points at which probabilities were computed.
+    qg_sfracs = np.vstack([
+        supercell.gpoint_sfracs() + sfrac
+        for sfrac in qpoint_sfrac
+    ])
+    qg_carts = qg_sfracs @ np.linalg.inv(super_lattice).T
+    assert qg_carts.shape == (sizes['qpoint'] * sizes['quotient'], 3)
 
-    supercell_matrix = Matrix(supercell_matrix) # to sympy
+    # For each of those (Q + G) points, the index of its Q point and its K point.
+    qg_q_ids, qg_g_ids = np.mgrid[0:sizes['qpoint'], 0:sizes['quotient']].reshape((2, -1))
 
-    # abelian.hermite_normal_form is column-based, so give it the transpose
-    hnf = hermite_normal_form(supercell_matrix.T)[1].T
-    hnf = np.array(hnf).astype(int) # to numpy
+    # For every point on the plot x-axis, the index of the closest Q + G point
+    plot_kpoint_carts = plot_kpoint_pfracs @ np.linalg.inv(prim_lattice).T
+    plot_kpoint_qg_ids = griddata_periodic(
+        points=qg_carts,
+        values=np.arange(sizes['qpoint'] * sizes['quotient']),
+        xi=plot_kpoint_carts,
+        lattice=np.linalg.inv(prim_lattice).T,
+        periodic_axis_mask=[1,1,0],
+        method='nearest',
+        _supercell=supercell,
+    )
 
-    assert round(np.linalg.det(hnf)) == expected_volume
-    return np.diag(hnf)
+    # For every plot on the plot x-axis, the indices of Q and G for the
+    # nearest (Q + G)
+    return {
+        'Q': qg_q_ids[plot_kpoint_qg_ids],
+        'G': qg_g_ids[plot_kpoint_qg_ids],
+    }
 
 def griddata_periodic(
         points,
@@ -1595,15 +1293,317 @@ def griddata_periodic(
 
     return scint.griddata(points, values, xi, **kwargs)
 
-def truncate(array, tol):
-    array = array.copy()
-    if sparse.issparse(array):
-        data = array.data
-        data[np.absolute(data) < tol] = 0.0
-        return array
+#---------------------------------------------------------------
+# Physical utils
+
+class Supercell:
+    def __init__(self, matrix):
+        """
+        :param matrix: Shape ``(3, 3)``, integer.
+        Integer matrix satisfying
+        ``matrix @ prim_lattice_matrix == super_lattice_matrix``
+        where the lattice matrices are understood to store a lattice primitive
+        translation in each row.
+        """
+        if isinstance(matrix, Supercell):
+            self.matrix = matrix.matrix
+            self.repeats = matrix.repeats
+            self.t_repeats = matrix.t_repeats
+        else:
+            matrix = np.array(matrix, dtype=int)
+            assert matrix.shape == (3, 3)
+            self.matrix = matrix
+            self.repeats = find_repeats(matrix)
+            self.t_repeats = find_repeats(matrix.T)
+
+    def translation_pfracs(self):
+        """
+        :return: Shape ``(quotient, 3)``, integral.
+
+        Fractional coordinates of quotient-space translations,
+        in units of the primitive cell lattice basis vectors.
+        """
+        return cartesian_product(*(np.arange(n) for n in self.repeats)).astype(float)
+
+    def gpoint_sfracs(self):
+        """
+        :return: Shape ``(quotient, 3)``, integral.
+
+        Fractional coordinates of quotient-space gpoints,
+        in units of the supercell reciprocal lattice basis vectors.
+        """
+        return cartesian_product(*(np.arange(n) for n in self.t_repeats)).astype(float)
+
+    def recip(self):
+        """
+        Get a supercell that describes the reciprocal primitive lattice in terms
+        of the reciprocal supercell lattice.
+        """
+        return Supercell(self.matrix.T)
+
+def find_repeats(supercell_matrix):
+    """
+    Get the number of distinct translations along each lattice primitive
+    translation. (it's the diagonal of the row-based HNF of the matrix)
+
+    :param supercell_matrix: Shape ``(3, 3)``, integer.
+    Integer matrix satisfying
+    ``matrix @ prim_lattice_matrix == super_lattice_matrix``
+    where the lattice matrices are understood to store a lattice primitive
+    translation in each row.
+
+    :return:
+    """
+    from abelian import hermite_normal_form
+    from sympy import Matrix
+
+    expected_volume = abs(round(np.linalg.det(supercell_matrix)))
+
+    supercell_matrix = Matrix(supercell_matrix) # to sympy
+
+    # abelian.hermite_normal_form is column-based, so give it the transpose
+    hnf = hermite_normal_form(supercell_matrix.T)[1].T
+    hnf = np.array(hnf).astype(int) # to numpy
+
+    assert round(np.linalg.det(hnf)) == expected_volume
+    return np.diag(hnf)
+
+def reduce_carts(carts, lattice):
+    fracs = carts @ np.linalg.inv(lattice)
+    fracs %= 1.0
+    fracs %= 1.0 # for values like -1e-20
+    return fracs @ lattice
+
+#----------------------------------------------------------------
+# Plotting
+
+def probs_to_band_plot(
+        q_ev_frequencies,
+        q_ev_z_projections,
+        q_ev_gpoint_probs,
+        path_g_indices,
+        path_q_indices,
+        path_x_coordinates,
+        plot_xticks,
+        plot_xticklabels,
+        plot_color,
+        plot_ylim,
+        plot_zone_crossing_xs,
+        raman_dict,
+        alpha_truncate,
+        alpha_exponent,
+        alpha_max,
+        plot_baseline_path,
+        plot_hide_unfolded,
+        plot_sidebar,
+        verbose=False,
+):
+    import matplotlib.pyplot as plt
+
+    set_plot_color, q_ev_extra = get_plot_color_setter(plot_color, z_pol=q_ev_z_projections, raman_dict=raman_dict)
+
+    sizes = check_arrays(
+        q_ev_frequencies = (q_ev_frequencies, ['qpoint', 'ev'], np.floating),
+        q_ev_z_projections = (q_ev_z_projections, ['qpoint', 'ev'], np.floating),
+        q_ev_gpoint_probs = (q_ev_gpoint_probs, ['qpoint'], object),
+        q_ev_gpoint_probs_row = (q_ev_gpoint_probs[0], ['ev', 'quotient'], np.floating),
+        path_g_indices = (path_g_indices, ['plot-x'], np.integer),
+        path_q_indices = (path_q_indices, ['plot-x'], np.integer),
+        path_x_coordinates = (path_x_coordinates, ['plot-x'], np.floating),
+        plot_xticks = (plot_xticks, ['special_point'], np.floating),
+    )
+    if raman_dict is not None:
+        assert raman_dict['average-3d'].shape == (sizes['qpoint'], sizes['ev'])
+
+    def get_ev_path_probs():
+        # If ev_gpoint_probs were a dense, 3d array, we could just write
+        # ev_gpoint_probs[path_q_indices, :, path_g_indices]... but because
+        # there are sparse matrices in there we must do this.
+        q_g_ev_probs = np.array([
+            list(ev_g_probs.T)
+            for ev_g_probs in q_ev_gpoint_probs
+        ])
+        assert q_g_ev_probs.shape == (sizes['qpoint'], sizes['quotient']), (q_g_ev_probs.shape, (sizes['qpoint'], sizes['quotient']))
+        assert sparse.issparse(q_g_ev_probs[0][0])
+
+        path_ev_probs = sparse.vstack(q_g_ev_probs[path_q_indices, path_g_indices])
+        return np.asarray(path_ev_probs.todense()) # it's no longer N^2 but rather X*N
+
+    path_ev_probs = get_ev_path_probs()
+    path_ev_frequencies = q_ev_frequencies[path_q_indices]
+    path_ev_extra = q_ev_extra[path_q_indices]
+    assert path_ev_probs.shape == (sizes['plot-x'], sizes['ev'])
+    assert path_ev_frequencies.shape == (sizes['plot-x'], sizes['ev'])
+    assert path_ev_extra.shape == (sizes['plot-x'], sizes['ev'])
+
+    if plot_baseline_path is not None:
+        base_X, base_Y = read_baseline_plot(plot_baseline_path)
     else:
-        array[np.absolute(array) < tol] = 0.0
-        return array
+        base_X, base_Y = [], []
+
+    X, Y, S, Extra = [], [] ,[], []
+    iterator = zip(path_x_coordinates, path_ev_frequencies, path_ev_probs, path_ev_extra)
+    for (x_coord, ev_frequencies, ev_probs, ev_extra) in iterator:
+        # Don't ask matplotlib to draw thousands of points with alpha=0
+        mask = ev_probs != 0
+
+        X.append([x_coord] * mask.sum())
+        Y.append(ev_frequencies[mask])
+        S.append(ev_probs[mask])
+        Extra.append(ev_extra[mask])
+
+    X = np.hstack(X)
+    Y = np.hstack(Y)
+    S = np.hstack(S)
+    Extra = np.hstack(Extra)
+
+    S **= alpha_exponent
+    S *= alpha_max
+
+    mask = S > alpha_truncate
+    X = X[mask]
+    Y = Y[mask]
+    S = S[mask]
+    Extra = Extra[mask]
+
+    if verbose:
+        print(f'Plotting {len(X)} points!')
+
+    C = np.hstack([np.zeros((len(S), 3)), S[:, None]])
+    set_plot_color(C, X=X, Y=Y, Extra=Extra)
+
+    fig = plt.figure(figsize=(7, 8), constrained_layout=True)
+    #fig.set_tight_layout(True)
+
+    if plot_sidebar:
+        gs = fig.add_gridspec(ncols=8, nrows=1)
+        ax = fig.add_subplot(gs[0,:-1])
+        ax_sidebar = fig.add_subplot(gs[0,-1], sharey=ax)
+    else:
+        ax = fig.add_subplot(111)
+
+    if not plot_hide_unfolded:
+        ax.scatter(X, Y, 20, C)
+    if plot_baseline_path is not None:
+        base_X /= np.max(base_X)
+        base_X *= np.max(X)
+        ax.scatter(base_X, base_Y, 5, 'k')
+
+    for x in plot_xticks:
+        ax.axvline(x, color='k')
+
+    for x in plot_zone_crossing_xs:
+        ax.axvline(x, color='k', ls=':')
+
+    ax.set_xlim(X.min(), X.max())
+    ax.set_xticks(plot_xticks)
+    ax.set_xticklabels(plot_xticklabels, fontsize=20)
+    ax.set_ylabel('Frequency (cm$^{-1}$)', fontsize=20)
+    for tick in ax.yaxis.get_major_ticks():
+        tick.label.set_fontsize(16)
+
+    if plot_ylim is not None:
+        ymin, ymax = (float(x.strip()) for x in plot_ylim.split(':'))
+        ax.set_ylim(ymin, ymax)
+
+    if plot_sidebar:
+        ax_sidebar.set_xlim(-1, 1)
+        ax_sidebar.hlines(Y, -1, 1, color=C)
+        ax_sidebar.set_xticks([0])
+        ax_sidebar.set_xticklabels([r'$\mathrm{\Gamma}$'], fontsize=20)
+        plt.setp(ax_sidebar.get_yticklabels(), visible=False)
+
+    return fig, ax
+
+def get_plot_color_setter(plot_color, z_pol, raman_dict):
+    from matplotlib import colors, cm
+
+    # Switch based on plot_color so we can validate it before doing anything expensive.
+    extra = np.zeros_like(z_pol)
+
+    if plot_color == 'zpol':
+        # colorize Z projection
+        extra = z_pol
+        def set_plot_color(C, *, Extra, **_kw):
+            cmap = colors.LinearSegmentedColormap.from_list('', [[0, 0, 1], [0, 0.5, 0]])
+            C[:, :3] = cmap(Extra)[:, :3]
+
+    elif plot_color == 'sign':
+        def set_plot_color(C, *, Y, **_kw):
+            C[:,:3] = colors.to_rgb('y')
+            C[:,:3] = np.where((Y < -1e-3)[:, None], colors.to_rgb('g'), C[:,:3])
+            C[:,:3] = np.where((Y > +1e-3)[:, None], colors.to_rgb('r'), C[:,:3])
+
+    elif plot_color.startswith('uniform:'):
+        fixed_color = colors.to_rgb(plot_color[len('uniform:'):].strip())
+        def set_plot_color(C, **_kw):
+            # use given color
+            C[:, :3] = fixed_color
+
+    elif plot_color.startswith('raman:'):
+        raman_dict_key = plot_color[len('raman:'):]
+        if raman_dict_key not in ['average-3d', 'backscatter']:
+            die('Invalid raman polarization mode: {raman_dict_key}')
+        extra = raman_dict[raman_dict_key]
+
+        def set_plot_color(C, *, Extra, **_kw):
+            Extra = np.log(np.maximum(Extra.max() * 1e-7, Extra))
+            Extra -= Extra.min()
+            Extra /= Extra.max()
+
+            cmap = cm.get_cmap('cool_r')
+            C[:, :3] = cmap(Extra)[:, :3]
+
+    else:
+        die(f'invalid --plot-color: {repr(plot_color)}')
+        raise RuntimeError('unreachable')
+
+    return set_plot_color, extra
+
+def get_parallelogram_zone_crossings(
+        supercell,
+        highsym_pfracs,
+        plot_xticks,
+):
+    check_arrays(
+        highsym_pfracs = (highsym_pfracs, ['special_point', 3], np.floating),
+        plot_xticks = (plot_xticks, ['special_point'], np.floating),
+    )
+
+    highsym_sfracs = highsym_pfracs @ supercell.matrix.T
+
+    out = []
+    for ((pred_x, pred_sfrac), (succ_x, succ_sfrac)) in window2(zip(plot_xticks, highsym_sfracs)):
+        # Skip discontiguous regions in kpath (denoted by the same x coord appearing twice in a row)
+        if pred_x == succ_x:
+            continue
+
+        # consider one family of plane boundaries at a time
+        for k in range(3):
+            # find integer values (plane indices) of the fractional coordinate on this line
+            min_coord, max_coord = sorted([pred_sfrac[k], succ_sfrac[k]])
+            crossed_ints = np.arange(np.floor(min_coord), np.ceil(max_coord))
+            if not crossed_ints.size:
+                continue # no boundaries crossed; avoid potential division by zero
+
+            # Solve the linear equation between this fractional coordinate and the plot x axis
+            # to find the x values of those planes
+            m = (succ_x - pred_x) / (succ_sfrac[k] - pred_sfrac[k])
+            out.extend(pred_x + m * (crossed_ints - pred_sfrac[k]))
+
+    return np.array(sorted(out))
+
+def read_baseline_plot(path):
+    X, Y = [], []
+    d = dwim.from_path(path)
+    d = d['phonon']
+    for qpoint in d:
+        X.extend([qpoint['distance']] * len(qpoint['band']))
+        Y.extend(band['frequency'] * THZ_TO_WAVENUMBER for band in qpoint['band'])
+    return X, Y
+
+#---------------------------------------------------------------
+# debugging
 
 def debug_bin_magnitudes(array):
     from collections import Counter
@@ -1617,38 +1617,6 @@ def debug_bin_magnitudes(array):
     counter[-999] = zero_count
     print("Magnitude summary:")
     print(sorted(counter.items()))
-
-def product(iter):
-    from functools import reduce
-    return reduce((lambda a, b: a * b), iter)
-
-#---------------------------------------------------------------
-# CLI types
-
-def parse_kpoint(s):
-    def parse_number(word):
-        try:
-            if '/' in word:
-                numer, denom = (int(x.strip()) for x in word.split('/'))
-                return numer / denom
-            else:
-                return float(word.strip())
-        except ValueError:
-            raise ValueError(f'{repr(word)} is not an integer, float, or rational number')
-
-    if '[' in s:
-        warn('JSON input for --kpoint is deprecated; use a whitespace separated list of numbers.')
-        lst = [1.0 * x for x in json.loads(s)]
-    else:
-        lst = [parse_number(word) for word in s.split()]
-
-    if len(lst) != 3:
-        raise ValueError('--kpoint must be of dimension 3')
-
-    return lst
-
-#---------------------------------------------------------------
-# debugging
 
 def debug_quotient_points(points2, lattice2):
     import matplotlib.pyplot as plt
@@ -1809,13 +1777,30 @@ def check_arrays(**kw):
 
     return {dim:tup[0] for (dim, tup) in previous_values.items()}
 
-def window2(xs):
-    prev = next(xs)
-    for x in xs:
-        yield (prev, x)
-        prev = x
-
 #---------------------------------------------------------------
+# CLI behavior
+
+def parse_kpoint(s):
+    def parse_number(word):
+        try:
+            if '/' in word:
+                numer, denom = (int(x.strip()) for x in word.split('/'))
+                return numer / denom
+            else:
+                return float(word.strip())
+        except ValueError:
+            raise ValueError(f'{repr(word)} is not an integer, float, or rational number')
+
+    if '[' in s:
+        warn('JSON input for --kpoint is deprecated; use a whitespace separated list of numbers.')
+        lst = [1.0 * x for x in json.loads(s)]
+    else:
+        lst = [parse_number(word) for word in s.split()]
+
+    if len(lst) != 3:
+        raise ValueError('--kpoint must be of dimension 3')
+
+    return lst
 
 def check_optional_input(path):
     if path is not None and not os.path.exists(path):
@@ -1853,6 +1838,26 @@ def check_optional_output_ext(argument, path, only=None, forbid=None):
 
 #---------------------------------------------------------------
 # utils
+
+def window2(xs):
+    prev = next(xs)
+    for x in xs:
+        yield (prev, x)
+        prev = x
+
+def product(iter):
+    from functools import reduce
+    return reduce((lambda a, b: a * b), iter)
+
+def truncate(array, tol):
+    array = array.copy()
+    if sparse.issparse(array):
+        data = array.data
+        data[np.absolute(data) < tol] = 0.0
+        return array
+    else:
+        array[np.absolute(array) < tol] = 0.0
+        return array
 
 def map_with_progress(
         xs: tp.Iterator[A],
@@ -1899,6 +1904,8 @@ def dict_zip(*dicts):
             raise KeyError(f"Mismatched keysets in fold_dicts: {sorted(keyset)}, {sorted(set(d))}")
 
     return { key: [d[key] for d in dicts] for key in keyset }
+
+#---------------------------------------------------------------
 
 def warn(*args, **kw):
     print('unfold:', *args, **kw, file=sys.stderr)
