@@ -743,13 +743,18 @@ class TaskBandPlot(Task):
 
         parser.add_argument(
             '--plot-color', type=str, default='zpol', metavar='SCHEME', help=
-            'How the plot points are colored. Choices: [zpol, sign, uniform:COLOR, raman:POL] '
+            'How the plot points are colored. Choices: [zpol, uniform:COLOR, raman:POL] '
             '(e.g. --plot-color uniform:blue). POL is either "average-3d" or "backscatter".'
         )
 
         parser.add_argument(
             '--plot-sidebar', action='store_true', help=
             'Show a sidebar with the frequencies all on the same point.'
+        )
+
+        parser.add_argument(
+            '--plot-colorbar', action='store_true', help=
+            'Show a colorbar.'
         )
 
         parser.add_argument(
@@ -803,6 +808,7 @@ class TaskBandPlot(Task):
             plot_color=args.plot_color,
             plot_ylim=args.plot_ylim,
             plot_sidebar=args.plot_sidebar,
+            plot_colorbar=args.plot_colorbar,
             plot_hide_unfolded=args.plot_hide_unfolded,
             verbose=args.verbose,
         )
@@ -1377,6 +1383,17 @@ def reduce_carts(carts, lattice):
 #----------------------------------------------------------------
 # Plotting
 
+def cfg_matplotlib():
+    import matplotlib
+    matplotlib.rcParams.update({
+        'text.latex.preamble': [r"""
+\usepackage{gensymb}
+\usepackage{amsmath}
+"""],
+        'text.usetex': True,
+        'font.family': 'serif',
+    })
+
 def probs_to_band_plot(
         q_ev_frequencies,
         q_ev_z_projections,
@@ -1396,11 +1413,12 @@ def probs_to_band_plot(
         plot_baseline_path,
         plot_hide_unfolded,
         plot_sidebar,
+        plot_colorbar,
         verbose=False,
 ):
     import matplotlib.pyplot as plt
 
-    set_plot_color, q_ev_extra = get_plot_color_setter(plot_color, z_pol=q_ev_z_projections, raman_dict=raman_dict)
+    cfg_matplotlib()
 
     sizes = check_arrays(
         q_ev_frequencies = (q_ev_frequencies, ['qpoint', 'ev'], np.floating),
@@ -1414,6 +1432,13 @@ def probs_to_band_plot(
     )
     if raman_dict is not None:
         assert raman_dict['average-3d'].shape == (sizes['qpoint'], sizes['ev'])
+
+    # Switch based on plot_color so we can validate it before doing anything expensive.
+    color_info = get_plot_color_info(plot_color, z_pol=q_ev_z_projections, raman_dict=raman_dict)
+
+    if plot_colorbar and color_info.cbar_info() is None:
+        die("--plot-colorbar doesn't make sense for the given --plot-color mode")
+        raise RuntimeError('unreachable')
 
     def get_ev_path_probs():
         # If ev_gpoint_probs were a dense, 3d array, we could just write
@@ -1431,46 +1456,33 @@ def probs_to_band_plot(
 
     path_ev_probs = get_ev_path_probs()
     path_ev_frequencies = q_ev_frequencies[path_q_indices]
-    path_ev_extra = q_ev_extra[path_q_indices]
+    path_ev_color_data = color_info.q_ev_data()[path_q_indices]
     assert path_ev_probs.shape == (sizes['plot-x'], sizes['ev'])
     assert path_ev_frequencies.shape == (sizes['plot-x'], sizes['ev'])
-    assert path_ev_extra.shape == (sizes['plot-x'], sizes['ev'])
 
     if plot_baseline_path is not None:
         base_X, base_Y = read_baseline_plot(plot_baseline_path)
     else:
         base_X, base_Y = [], []
 
-    X, Y, S, Extra = [], [] ,[], []
-    iterator = zip(path_x_coordinates, path_ev_frequencies, path_ev_probs, path_ev_extra)
-    for (x_coord, ev_frequencies, ev_probs, ev_extra) in iterator:
-        # Don't ask matplotlib to draw thousands of points with alpha=0
-        mask = ev_probs != 0
+    path_ev_alpha = path_ev_probs.copy()
+    path_ev_alpha **= alpha_exponent
+    path_ev_alpha *= alpha_max
+    path_ev_mask = path_ev_alpha > alpha_truncate
 
-        X.append([x_coord] * mask.sum())
-        Y.append(ev_frequencies[mask])
-        S.append(ev_probs[mask])
-        Extra.append(ev_extra[mask])
+    X = []
+    for (x_coord, ev_mask) in zip(path_x_coordinates, path_ev_mask):
+        X.extend([x_coord] * ev_mask.sum())
 
-    X = np.hstack(X)
-    Y = np.hstack(Y)
-    S = np.hstack(S)
-    Extra = np.hstack(Extra)
-
-    S **= alpha_exponent
-    S *= alpha_max
-
-    mask = S > alpha_truncate
-    X = X[mask]
-    Y = Y[mask]
-    S = S[mask]
-    Extra = Extra[mask]
+    X = np.array(X)
+    Y = path_ev_frequencies[path_ev_mask]
+    Alpha = path_ev_alpha[path_ev_mask]
+    ColorData = path_ev_color_data[path_ev_mask]
 
     if verbose:
         print(f'Plotting {len(X)} points!')
 
-    C = np.hstack([np.zeros((len(S), 3)), S[:, None]])
-    set_plot_color(C, X=X, Y=Y, Extra=Extra)
+    C = np.hstack([color_info.data_to_rgb(ColorData), Alpha[:, None]])
 
     fig = plt.figure(figsize=(7, 8), constrained_layout=True)
     #fig.set_tight_layout(True)
@@ -1513,52 +1525,113 @@ def probs_to_band_plot(
         ax_sidebar.set_xticklabels([r'$\mathrm{\Gamma}$'], fontsize=20)
         plt.setp(ax_sidebar.get_yticklabels(), visible=False)
 
+    if plot_colorbar:
+        from matplotlib import cm
+
+        # (note: we already made sure this is not None at the beginning of the function)
+        cmap, norm, cbar_label = color_info.cbar_info()
+
+        # Because we modify alpha independently of the color, there's no way
+        # for scatter to use a colormap (so we didn't even try). Rather, we made
+        # a norm object, which we can use in an empty mappable to give colorbar
+        # something to work with.
+        sm = cm.ScalarMappable(cmap=cmap, norm=norm)
+        sm.set_array([])
+        cbar = plt.colorbar(sm, ax=ax, aspect=50)
+        cbar.ax.tick_params(labelsize='x-large')
+        cbar.set_label(cbar_label, size='xx-large')
+
     return fig, ax
 
-def get_plot_color_setter(plot_color, z_pol, raman_dict):
+class ColorInfo:
+    def cbar_info(self):
+        """ Get ``(cmap, norm, cbar_label)`` for a colorbar, or ``None``. """
+        return None
+
+    def q_ev_data(self):
+        """
+        Get data for colorizing which will be at qpoint and eigenvector.
+
+        The output has shape ``(nquotient, nev, ...)``, where the remaining
+        dimensions may vary between different instances of ``ColorInfo``.
+        """
+        raise NotImplementedError
+
+    def data_to_rgb(self, Data):
+        """
+        Get the rgb values for a color array.
+
+        :param Data: Shape ``(ndata, ...)`` array of subarrays taken from
+        ``self.q_ev_data()`` at visible data points.
+        :return: Shape ``(ndata, 3)`` array. May point into ``Data``.
+        """
+        raise NotImplementedError
+
+class RgbColorInfo(ColorInfo):
+    def __init__(self, q_ev_rgb):
+        self.__q_ev_rgb = q_ev_rgb
+
+    def q_ev_data(self): return self.__q_ev_rgb
+    def data_to_rgb(self, Data): return Data
+
+class CmapColorInfo(ColorInfo):
+    def __init__(self, data, cmap, norm, cbar_label):
+        self.__q_ev_data = data
+        self.__cmap = cmap
+        self.__norm = norm
+        self.__cbar_label = cbar_label
+
+    def cbar_info(self): return self.__cmap, self.__norm, self.__cbar_label
+    def q_ev_data(self): return self.__q_ev_data
+    def data_to_rgb(self, Data): return self.__cmap(self.__norm(Data))[:, :3]
+
+def get_plot_color_info(plot_color_string, z_pol, raman_dict) -> ColorInfo:
     from matplotlib import colors, cm
 
-    # Switch based on plot_color so we can validate it before doing anything expensive.
-    extra = np.zeros_like(z_pol)
+    if ':' in plot_color_string:
+        mode, _arg = plot_color_string.split(':', 2)
+    else:
+        mode, _arg = plot_color_string, None
 
-    if plot_color == 'zpol':
-        # colorize Z projection
-        extra = z_pol
-        def set_plot_color(C, *, Extra, **_kw):
-            cmap = colors.LinearSegmentedColormap.from_list('', [[0, 0, 1], [0, 0.5, 0]])
-            C[:, :3] = cmap(Extra)[:, :3]
+    def expect_no_arg():
+        if _arg is not None:
+            die(f'--plot-color={mode} takes no argument')
 
-    elif plot_color == 'sign':
-        def set_plot_color(C, *, Y, **_kw):
-            C[:,:3] = colors.to_rgb('y')
-            C[:,:3] = np.where((Y < -1e-3)[:, None], colors.to_rgb('g'), C[:,:3])
-            C[:,:3] = np.where((Y > +1e-3)[:, None], colors.to_rgb('r'), C[:,:3])
+    def expect_arg():
+        if _arg is None:
+            die(f'--plot-color={mode} requires an argument')
+        return _arg
 
-    elif plot_color.startswith('uniform:'):
-        fixed_color = colors.to_rgb(plot_color[len('uniform:'):].strip())
-        def set_plot_color(C, **_kw):
-            # use given color
-            C[:, :3] = fixed_color
+    if mode == 'zpol':
+        expect_no_arg()
+        cmap = colors.LinearSegmentedColormap.from_list('', [[0, 0, 1], [0, 0.5, 0]])
+        norm = colors.Normalize(vmin=0, vmax=1)
+        label = 'z-polarization'
+        return CmapColorInfo(z_pol, cmap, norm, label)
 
-    elif plot_color.startswith('raman:'):
-        raman_dict_key = plot_color[len('raman:'):]
+    elif mode == 'uniform':
+        fixed_color = colors.to_rgb(expect_arg().strip())
+        color = np.zeros(z_pol.shape() + (3,))
+        color[...] = fixed_color
+        return RgbColorInfo(color)
+
+    elif mode == 'raman':
+        raman_dict_key = expect_arg()
         if raman_dict_key not in ['average-3d', 'backscatter']:
             die('Invalid raman polarization mode: {raman_dict_key}')
-        extra = raman_dict[raman_dict_key]
 
-        def set_plot_color(C, *, Extra, **_kw):
-            Extra = np.log(np.maximum(Extra.max() * 1e-7, Extra))
-            Extra -= Extra.min()
-            Extra /= Extra.max()
+        data = raman_dict[raman_dict_key]
+        data /= data.max()
+        data = np.log10(np.maximum(data, 1e-7))
+        label = r'$\mathrm{log}_{10}\left(\text{Raman intensity / max}\right)$'
 
-            cmap = cm.get_cmap('cool_r')
-            C[:, :3] = cmap(Extra)[:, :3]
+        cmap = cm.get_cmap('cool_r')
+        norm = colors.Normalize(vmin=data.min(), vmax=data.max())
+        return CmapColorInfo(data, cmap, norm, label)
 
     else:
-        die(f'invalid --plot-color: {repr(plot_color)}')
+        die(f'invalid --plot-color mode: {repr(mode)}')
         raise RuntimeError('unreachable')
-
-    return set_plot_color, extra
 
 def get_parallelogram_zone_crossings(
         supercell,
