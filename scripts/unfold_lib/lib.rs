@@ -156,7 +156,10 @@ fn unfold_one(
             // SBZ kpoint dot r for every r
             let phases: Vec<_> = {
                 translation_sfracs.iter()
-                    .map(|t| exp_i2pi(-V3::dot(&(kpoint_sfrac + g), t)))
+                    // FIXME: '- g' doesn't seem right here, but it's what produces the correct
+                    // behavior. There may be another sign error somewhere that this cancels out
+                    // with?
+                    .map(|t| exp_i2pi(-V3::dot(&(kpoint_sfrac - g), t)))
                     .collect()
             };
             let prob = zip_eq!(&inner_prods, phases).map(|(a, b)| a * b).sum::<Complex64>() / num_quotient as f64;

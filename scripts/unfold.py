@@ -1028,7 +1028,10 @@ def unfold_one(
     gpoint_probs = []
     for g in gpoint_sfracs:
         # SBZ kpoint dot r for every r
-        k_dot_rs = (kpoint_sfrac + g) @ translation_sfracs.T
+        #
+        # FIXME: '- g' doesn't seem right here, but it's what produces the correct behavior.
+        #        There may be another sign error somewhere that this cancels out with?
+        k_dot_rs = (kpoint_sfrac - g) @ translation_sfracs.T
         phases = np.exp(-2j * np.pi * k_dot_rs)
 
         prob = sum(inner_prods * phases) / sizes['quotient']
