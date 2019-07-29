@@ -12,8 +12,6 @@ from pymatgen import Structure
 
 import unfold_lib
 
-THZ_TO_WAVENUMBER = 33.3564095198152
-
 try:
     import rsp2
 except ImportError:
@@ -24,6 +22,24 @@ except ImportError:
     sys.exit(1)
 
 from rsp2.io import eigensols, structure_dir, dwim
+
+# =========================================================
+# NAMING CONVENTIONS:
+#
+# - The point in the supercell BZ describing the wavevector of
+#   the computed eigenvectors is called Q, or the `qpoint`.
+#   (Allen calls this K)
+# - The members of the quotient space of the supercell reciprocal lattice
+#   over the primitive reciprocal lattice are called G, or `gpoints`.
+#   (Allen calls these G)
+# - Allen assigns probabilities to each k == K + G.
+#   We don't have a name for these; we simply assign probabilities to each G.
+# - Points at which we are plotting are called `kpoints`.
+#   (often `plot_kpoints` for clarity)
+#
+# =========================================================
+
+THZ_TO_WAVENUMBER = 33.3564095198152
 
 DEFAULT_TOL = 1e-2
 
@@ -60,7 +76,7 @@ def main():
 
     structure = register(TaskStructure())
 
-    kpoint_sfrac = register(TaskKpointSfrac())
+    qpoint_sfrac = register(TaskQpointSfrac())
 
     dynmat = register(TaskDynmat())
 
@@ -68,7 +84,7 @@ def main():
 
     translation_deperms = register(TaskDeperms(structure=structure))
 
-    ev_gpoint_probs = register(TaskGProbs(structure=structure, kpoint_sfrac=kpoint_sfrac, eigensols=eigensols, translation_deperms=translation_deperms))
+    ev_gpoint_probs = register(TaskGProbs(structure=structure, qpoint_sfrac=qpoint_sfrac, eigensols=eigensols, translation_deperms=translation_deperms))
 
     band_path = register(TaskBandPath(structure=structure))
 
@@ -76,7 +92,7 @@ def main():
 
     raman_json = register(TaskRamanJson())
 
-    multi_qpoint_data = register(TaskMultiQpointData(mode_data=mode_data, kpoint_sfrac=kpoint_sfrac, ev_gpoint_probs=ev_gpoint_probs))
+    multi_qpoint_data = register(TaskMultiQpointData(mode_data=mode_data, qpoint_sfrac=qpoint_sfrac, ev_gpoint_probs=ev_gpoint_probs))
 
     band_qg_indices = register(TaskBandQGIndices(structure=structure, multi_qpoint_data=multi_qpoint_data, band_path=band_path))
 
@@ -154,22 +170,22 @@ class Task:
         """ A task performed after """
         pass
 
-class TaskKpointSfrac(Task):
+class TaskQpointSfrac(Task):
     def add_parser_opts(self, parser):
         parser.add_argument(
-            '--kpoint', type=type(self).parse, help=
+            '--qpoint', type=type(self).parse, help=
             'Q-point in fractional coordinates of the superstructure reciprocal '
             'cell, as a whitespace-separated list of 3 integers, floats, or '
             'rational numbers.',
         )
 
     def _compute(self, args):
-        return list(args.kpoint)
+        return list(args.qpoint)
 
     @classmethod
     def parse(cls, s):
-        """ Can be used by other tasks to replicate the behavior of --kpoint. """
-        return parse_kpoint(s)
+        """ Can be used by other tasks to replicate the behavior of --qpoint. """
+        return parse_qpoint(s)
 
 class TaskRamanJson(Task):
     def add_parser_opts(self, parser):
@@ -424,13 +440,13 @@ class TaskGProbs(Task):
     def __init__(
             self,
             structure: TaskStructure,
-            kpoint_sfrac: TaskKpointSfrac,
+            qpoint_sfrac: TaskQpointSfrac,
             eigensols: TaskEigensols,
             translation_deperms: TaskDeperms,
     ):
         super().__init__()
         self.structure = structure
-        self.kpoint_sfrac = kpoint_sfrac
+        self.qpoint_sfrac = qpoint_sfrac
         self.eigensols = eigensols
         self.translation_deperms = translation_deperms
 
@@ -490,7 +506,7 @@ class TaskGProbs(Task):
                 superstructure=self.structure.require(args)['projected_structure'],
                 supercell=self.structure.require(args)['supercell'],
                 eigenvectors=self.eigensols.require(args)['ev_projected_eigenvectors'],
-                kpoint_sfrac=self.kpoint_sfrac.require(args),
+                qpoint_sfrac=self.qpoint_sfrac.require(args),
                 translation_deperms=self.translation_deperms.require(args),
                 implementation=args.probs_impl,
                 progress_prefix=progress_prefix,
@@ -532,10 +548,19 @@ class TaskBandPath(Task):
 
     def add_parser_opts(self, parser):
         parser.add_argument(
-            '--plot-kpath', help=
+            '--plot-path', dest='plot_kpath_str', help=
             "A kpath in the format accepted by ASE's parse_path_string, "
             "naming points in the monolayer BZ.  If not specified, no band "
             "plot is generated."
+        )
+
+        # I'm thinking of adding back the --bands file, in which case this
+        # argument name makes more sense. (I removed it because it is super
+        # quick to generate; I might want it back because it could be much
+        # smaller than the input it is generated from!)
+        parser.add_argument(
+            '--band-path', help=
+            "Alias for --plot-path."
         )
 
     def _compute(self, args):
@@ -546,17 +571,17 @@ class TaskBandPath(Task):
 
         prim_lattice = np.linalg.inv(supercell.matrix) @ super_lattice
 
-        if args.plot_kpath is None:
-            die('--plot-kpath is required')
+        if args.plot_kpath_str is None:
+            die('--plot-path is required')
 
         # NOTE: The kpoints returned by get_special_points (and by proxy, this
         #       function) do adapt to the user's specific choice of primitive cell.
         #       (at least, for reasonable cells; I haven't tested it with a highly
         #       skewed cell). Respect!
-        plot_kpoint_pfracs, plot_x_coordinates, plot_xticks = bandpath(args.plot_kpath, prim_lattice, 300)
-        highsym_pfracs = bandpath(args.plot_kpath, prim_lattice, 1)[0]
+        plot_kpoint_pfracs, plot_x_coordinates, plot_xticks = bandpath(args.plot_kpath_str, prim_lattice, 300)
+        highsym_pfracs = bandpath(args.plot_kpath_str, prim_lattice, 1)[0]
 
-        point_names = parse_path_string(args.plot_kpath)
+        point_names = parse_path_string(args.plot_kpath_str)
         if len(point_names) > 1:
             die('This script currently does not support plots along discontinuous paths.')
         point_names, = point_names
@@ -575,21 +600,21 @@ class TaskMultiQpointData(Task):
     def __init__(
             self,
             mode_data: TaskEigenmodeData,
-            kpoint_sfrac: TaskKpointSfrac,
+            qpoint_sfrac: TaskQpointSfrac,
             ev_gpoint_probs: TaskGProbs,
     ):
         super().__init__()
         self.mode_data = mode_data
-        self.kpoint_sfrac = kpoint_sfrac
+        self.qpoint_sfrac = qpoint_sfrac
         self.ev_gpoint_probs = ev_gpoint_probs
 
     def add_parser_opts(self, parser):
         parser.add_argument(
             '--multi-qpoint-file', help=
-            "Multi-kpoint manifest file.  This allows using data from multiple "
-            "kpoints to be included on a single plot. If this is supplied, many "
-            "arguments for dealing with a single kpoint (e.g. --dynmat, --kpoint) "
-            f"will be ignored.\n\n{MULTI_KPOINT_FILE_HELP_STR}"
+            "Multi-qpoint manifest file.  This allows using data from multiple "
+            "qpoints to be included on a single plot. If this is supplied, many "
+            "arguments for dealing with a single qpoint (e.g. --dynmat, --qpoint) "
+            f"will be ignored.\n\n{MULTI_QPOINT_FILE_HELP_STR}"
         )
 
     def check_upfront(self, args):
@@ -600,7 +625,7 @@ class TaskMultiQpointData(Task):
             return type(self).read_file(args.multi_qpoint_file, args)
         else:
             return type(self).__process_dicts({
-                "qpoint-sfrac": self.kpoint_sfrac.require(args),
+                "qpoint-sfrac": self.qpoint_sfrac.require(args),
                 "mode-data": self.mode_data.require(args),
                 "probs": self.ev_gpoint_probs.require(args),
             })
@@ -618,14 +643,14 @@ class TaskMultiQpointData(Task):
         unrecognized_keys = set()
         for item in d:
             dicts.append({
-                "qpoint-sfrac": TaskKpointSfrac.parse(item.pop('kpoint')),
+                "qpoint-sfrac": TaskQpointSfrac.parse(item.pop('qpoint')),
                 "mode-data": TaskEigenmodeData.read_file(rel_path(item.pop('mode-data'))),
                 "probs": TaskGProbs.read_file(rel_path(item.pop('probs')), args),
             })
             unrecognized_keys.update(item)
 
         if unrecognized_keys:
-            warn(f"Unrecognized keys in multi-kpoint manifest: {repr(sorted(unrecognized_keys))}")
+            warn(f"Unrecognized keys in multi-qpoint manifest: {repr(sorted(unrecognized_keys))}")
 
         return cls.__process_dicts(*dicts)
 
@@ -636,11 +661,11 @@ class TaskMultiQpointData(Task):
         dict_of_lists['num-qpoints'] = len(dict_of_lists['qpoint-sfrac'])
         return dict_of_lists
 
-MULTI_KPOINT_FILE_KEYS = ["kpoint", "probs", "mode-data"]
+MULTI_QPOINT_FILE_KEYS = ["qpoint", "probs", "mode-data"]
 
-MULTI_KPOINT_FILE_HELP_STR = f"""
-The multi-kpoint manifest is a sequence (encoded in JSON or YAML) whose elements
-are mappings with the keys: {repr(MULTI_KPOINT_FILE_KEYS)}. Each of these keys
+MULTI_QPOINT_FILE_HELP_STR = f"""
+The multi-qpoint manifest is a sequence (encoded in JSON or YAML) whose elements
+are mappings with the keys: {repr(MULTI_QPOINT_FILE_KEYS)}. Each of these keys
 maps to a string exactly like the corresponding CLI argument.  This means that
 in order to use this option, you will first need to generate files at each
 Q-point in individual runs using --write-probs and --write-mode-data.
@@ -831,7 +856,7 @@ def unfold_all(
         superstructure: Structure,
         supercell: 'Supercell',
         eigenvectors,
-        kpoint_sfrac,
+        qpoint_sfrac,
         translation_deperms,
         implementation,
         progress_prefix = None,
@@ -851,9 +876,14 @@ def unfold_all(
     equivalent to ``carts`` under superlattice translational symmetry, where
     ``carts`` is the supercell carts.
 
-    :param kpoint_sfrac: Shape ``(3,)``, real.
+    :param qpoint_sfrac: Shape ``(3,)``, real.
     The K point in the SC reciprocal cell at which the eigenvector was computed,
     in fractional coords.
+
+    :param implementation: ``"rust"`` or ``"python"``
+
+    :param progress_prefix: String used to prefix progress reports.
+    ``None`` disables progress reporting.
 
     :return: Shape ``(num_evecs, quotient)``
     For each vector in ``eigenvectors``, its projected probabilities
@@ -875,7 +905,7 @@ def unfold_all(
     # debug_quotient_points((gpoint_sfracs @ np.linalg.inv(super_lattice).T)[:, :2], np.linalg.inv(prim_lattice).T[:2,:2])
 
     super_lattice_recip = superstructure.lattice.inv_matrix.T
-    kpoint_cart = kpoint_sfrac @ super_lattice_recip
+    qpoint_cart = qpoint_sfrac @ super_lattice_recip
     super_carts = superstructure.cart_coords
 
     # The method is defined on a Bloch function with wavevector q.  The
@@ -889,7 +919,7 @@ def unfold_all(
     #
     # These are the phase factors we require.
     # (we follow the sign convention of Allen, rather than of Phonopy)
-    site_phases = np.exp(-2j * np.pi * np.dot(super_carts, kpoint_cart))
+    site_phases = np.exp(-2j * np.pi * np.dot(super_carts, qpoint_cart))
 
     # We also require correction phase factors to accompany the permutation
     # representation of our translation operators, to handle when sites are
@@ -897,7 +927,7 @@ def unfold_all(
     # See the comment above get_translation_phases for more details.
     translation_phases = np.vstack([
         get_translation_phases(
-            kpoint_cart=kpoint_cart,
+            qpoint_cart=qpoint_cart,
             super_carts=super_carts,
             translation_cart=translation_cart,
             translation_deperm=translation_deperm,
@@ -917,7 +947,7 @@ def unfold_all(
         translation_deperms=translation_deperms,
         translation_phases=translation_phases,
         gpoint_sfracs=gpoint_sfracs,
-        kpoint_sfrac=kpoint_sfrac,
+        qpoint_sfrac=qpoint_sfrac,
         eigenvectors=eigenvectors,
         progress_prefix=progress_prefix,
     )
@@ -928,7 +958,7 @@ def unfold_all__python(
         translation_deperms,
         translation_phases,
         gpoint_sfracs,
-        kpoint_sfrac,
+        qpoint_sfrac,
         eigenvectors,
         progress_prefix,
 ):
@@ -945,7 +975,7 @@ def unfold_all__python(
             translation_deperms=translation_deperms,
             translation_phases=translation_phases,
             gpoint_sfracs=gpoint_sfracs,
-            kpoint_sfrac=kpoint_sfrac,
+            qpoint_sfrac=qpoint_sfrac,
             eigenvector=eigenvector.reshape((-1, 3)),
         )
     )))
@@ -958,7 +988,7 @@ def unfold_one(
         translation_deperms,
         translation_phases,
         gpoint_sfracs,
-        kpoint_sfrac,
+        qpoint_sfrac,
         eigenvector,
 ):
     """
@@ -989,29 +1019,29 @@ def unfold_one(
 
     (SC reciprocal lattice modulo primitive BZ)
 
-    :param kpoint_sfrac: Shape ``(3,)``, real.
-    The K point in the SC reciprocal cell at which the eigenvector was computed.
+    :param qpoint_sfrac: Shape ``(3,)``, real.
+    The Q point in the SC reciprocal cell at which the eigenvector was computed.
 
     :param eigenvector: Shape ``(sc_sites, 3)``, complex.
     A normal mode of the supercell. (arbitrary norm)
 
     :return: Shape ``(quotient,)``, real.
-    Probabilities of `eigenvector` projected onto each kpoint
-    ``kpoint + qpoints[i]``.
+    Probabilities of `eigenvector` projected onto each point
+    ``qpoint + gpoints[i]``.
     """
 
     site_phases = np.array(site_phases)
     translation_sfracs = np.array(translation_sfracs)
     translation_deperms = np.array(translation_deperms)
     gpoint_sfracs = np.array(gpoint_sfracs)
-    kpoint_sfrac = np.array(kpoint_sfrac)
+    qpoint_sfrac = np.array(qpoint_sfrac)
     eigenvector = np.array(eigenvector)
     sizes = check_arrays(
         site_phases = (site_phases, ['sc_sites'], np.complexfloating),
         translation_sfracs = (translation_sfracs, ['quotient', 3], np.floating),
         translation_deperms = (translation_deperms, ['quotient', 'sc_sites'], np.integer),
         gpoint_sfracs = (gpoint_sfracs, ['quotient', 3], np.floating),
-        kpoint_sfrac = (kpoint_sfrac, [3], np.floating),
+        qpoint_sfrac = (qpoint_sfrac, [3], np.floating),
         eigenvector = (eigenvector, ['sc_sites', 3], [np.floating, np.complexfloating]),
     )
     # print(repr(eigenvector))
@@ -1027,11 +1057,11 @@ def unfold_one(
 
     gpoint_probs = []
     for g in gpoint_sfracs:
-        # SBZ kpoint dot r for every r
+        # SBZ qpoint dot r for every r
         #
         # FIXME: '- g' doesn't seem right here, but it's what produces the correct behavior.
         #        There may be another sign error somewhere that this cancels out with?
-        k_dot_rs = (kpoint_sfrac - g) @ translation_sfracs.T
+        k_dot_rs = (qpoint_sfrac - g) @ translation_sfracs.T
         phases = np.exp(-2j * np.pi * k_dot_rs)
 
         prob = sum(inner_prods * phases) / sizes['quotient']
@@ -1123,7 +1153,7 @@ def get_translation_deperm(
 
 # When we apply the translation operators, some atoms will map to images under
 # the supercell that are different from the ones we have eigenvector data for.
-# For kpoints away from supercell gamma, those images should have different
+# For qpoints away from supercell gamma, those images should have different
 # phases in their eigenvector components.
 #
 # Picture that the supercell looks like this:
@@ -1170,7 +1200,7 @@ def get_translation_deperm(
 #                    (R) R  R
 #
 def get_translation_phases(
-        kpoint_cart,
+        qpoint_cart,
         super_carts,
         translation_cart,
         translation_deperm,
@@ -1180,8 +1210,8 @@ def get_translation_phases(
     # translate, permute, and subtract to get superlattice points
     image_carts = (super_carts + translation_cart)[inverse_coperm] - super_carts
 
-    # dot each atom's R with the kpoint to produce its phase correction
-    return np.exp(2j * np.pi * image_carts @ kpoint_cart)
+    # dot each atom's R with Q to produce its phase correction
+    return np.exp(2j * np.pi * image_carts @ qpoint_cart)
 
 # Here we encounter a big problem:
 #
@@ -1198,7 +1228,7 @@ def get_translation_phases(
 # by the symmetry of a high-symmetry point when that point is not an image
 # of the qpoint)
 #
-# With the addition of --multi-kpoint-file, the density of the points we
+# With the addition of --multi-qpoint-file, the density of the points we
 # are sampling from can be even further increased.
 def resample_qg_indices(
         super_lattice,
@@ -1856,7 +1886,7 @@ def check_arrays(**kw):
 #---------------------------------------------------------------
 # CLI behavior
 
-def parse_kpoint(s):
+def parse_qpoint(s):
     def parse_number(word):
         try:
             if '/' in word:
@@ -1868,13 +1898,13 @@ def parse_kpoint(s):
             raise ValueError(f'{repr(word)} is not an integer, float, or rational number')
 
     if '[' in s:
-        warn('JSON input for --kpoint is deprecated; use a whitespace separated list of numbers.')
+        warn('JSON input for --qpoint is deprecated; use a whitespace separated list of numbers.')
         lst = [1.0 * x for x in json.loads(s)]
     else:
         lst = [parse_number(word) for word in s.split()]
 
     if len(lst) != 3:
-        raise ValueError('--kpoint must be of dimension 3')
+        raise ValueError('--qpoint must be of dimension 3')
 
     return lst
 

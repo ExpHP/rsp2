@@ -40,7 +40,7 @@ def build():
     def _unfold_all(
             site_phases,
             gpoint_sfracs,
-            kpoint_sfrac,
+            qpoint_sfrac,
             eigenvectors,
             translation_sfracs,
             translation_deperms,
@@ -58,7 +58,7 @@ def build():
             # array, check_shape, [ffi_pointer_type, py_type (if different)]
             (site_phases, (nsite,), [c_double, np.complex128]),
             (gpoint_sfracs, (nquotient, 3), [c_double, None]),
-            (kpoint_sfrac, (3,), [c_double, None]),
+            (qpoint_sfrac, (3,), [c_double, None]),
             (eigenvectors, (nev, nsite, 3), [c_double, np.complex128]),
             (translation_sfracs, (nquotient, 3), [c_double, None]),
             (translation_deperms, (nquotient, nsite), [c_int32, None]),

@@ -19,7 +19,7 @@ pub extern "C" fn rsp2c_unfold_all(
     progress_prefix: *const c_char, // NUL-terminated UTF-8, possibly NULL
     site_phases: *const Complex64, // shape (sites,)
     gpoint_sfracs: *const f64, // shape (quotient, 3)
-    kpoint_sfrac: *const f64, // shape (3,)
+    qpoint_sfrac: *const f64, // shape (3,)
     eigenvectors: *const Complex64, // shape (evecs, sites, 3)
     translation_sfracs: *const f64, // shape (quotient, 3)
     translation_deperms: *const i32, // shape (quotient, sites)
@@ -36,7 +36,7 @@ pub extern "C" fn rsp2c_unfold_all(
         unsafe {
             let site_phases = from_raw_parts(site_phases, num_sites);
             let gpoint_sfracs = from_raw_parts(gpoint_sfracs, num_quotient * 3).nest();
-            let kpoint_sfrac = from_raw_parts(kpoint_sfrac, 3).as_array();
+            let qpoint_sfrac = from_raw_parts(qpoint_sfrac, 3).as_array();
             let eigenvectors = from_raw_parts(eigenvectors, num_evecs * num_sites * 3).nest();
             let translation_sfracs = from_raw_parts(translation_sfracs, num_quotient * 3).nest();
             let translation_deperms = from_raw_parts(translation_deperms, num_quotient * num_sites);
@@ -53,7 +53,7 @@ pub extern "C" fn rsp2c_unfold_all(
                 progress_prefix,
                 site_phases,
                 gpoint_sfracs,
-                kpoint_sfrac,
+                qpoint_sfrac,
                 eigenvectors,
                 translation_sfracs,
                 translation_deperms,
@@ -71,7 +71,7 @@ fn unfold_all(
     progress_prefix: Option<&str>,
     site_phases: &[Complex64],
     gpoint_sfracs: &[V3],
-    kpoint_sfrac: &V3,
+    qpoint_sfrac: &V3,
     eigenvectors: &[V3<Complex64>],
     translation_sfracs: &[V3],
     translation_deperms: &[i32],
@@ -108,7 +108,7 @@ fn unfold_all(
             translation_deperms,
             translation_phases,
             gpoint_sfracs,
-            kpoint_sfrac,
+            qpoint_sfrac,
             eigenvector,
         );
         output.copy_from_slice(&dense_row);
@@ -126,7 +126,7 @@ fn unfold_one(
     translation_deperms: &[Perm],
     translation_phases: &[&[Complex64]],
     gpoint_sfracs: &[V3],
-    kpoint_sfrac: &V3,
+    qpoint_sfrac: &V3,
     eigenvector: &[V3<Complex64>],
 ) -> Vec<f64> {
     let num_quotient = translation_sfracs.len();
@@ -153,13 +153,13 @@ fn unfold_one(
 
     let gpoint_probs: Vec<_> = {
         gpoint_sfracs.par_iter().map(|g| {
-            // SBZ kpoint dot r for every r
+            // SBZ Q dot r for every r
             let phases: Vec<_> = {
                 translation_sfracs.iter()
                     // FIXME: '- g' doesn't seem right here, but it's what produces the correct
                     // behavior. There may be another sign error somewhere that this cancels out
                     // with?
-                    .map(|t| exp_i2pi(-V3::dot(&(kpoint_sfrac - g), t)))
+                    .map(|t| exp_i2pi(-V3::dot(&(qpoint_sfrac - g), t)))
                     .collect()
             };
             let prob = zip_eq!(&inner_prods, phases).map(|(a, b)| a * b).sum::<Complex64>() / num_quotient as f64;
