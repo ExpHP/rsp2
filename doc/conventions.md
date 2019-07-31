@@ -4,9 +4,34 @@ This documentation page exists to clarify the conventions that `rsp2` usually fo
 
 ## Matrices
 
-Matrices are row-major, the formalism is row-centric (with the exception of cartesian space operators), and data-layout is C order.
+- Data-layout is **C order**, *without exception.*  I.e., the first index always has the greatest stride.
+- All matrices are **row-major**, *without exception.*  I.e., if there is a data structure indexed by two indices, we call the first index the "row" and the second index the "column."
+- The formalism is almost entirely **row-centric**. This is to say that, when you see an equation written in comments, the matrices therein are typically composed of row vectors.  Matrix multiplication is almost always between a row vector on the left and a matrix on the right, and a product of matrices is typically read from left to right.
 
-(TODO: It's easy to conflate these terms, but they're really three distinct axes of design.  A while back I wrote up something somewhere that clarified the subtle differences, but can't seem to find it now...)
+These are actually all independent axes of design.  For instance, Fortran is Fortran order, row major, and most Fortran code uses a column-centric formalism.  WebGL code is Fortran order, column major, and column-centric.  When most people write code in C-order languages like C, C++, and Rust, it is typically row-major and column-centric.
+
+Row-centric formalism is uncommon, but RSP2 uses it because it yields many of the benefits of Fortran order without the obvious disadvantages. Also, left-to-right composition of matrices feels natural and is highly amenable to method syntax.
+
+There are a couple of exceptions:
+
+* **Cartesian transformations** are **column-centric**, i.e. composed of three column vectors.  Typically, to operate on a row vector `x` with a rotation `R`, we write `x * R.t()`.
+* When **Bra-Ket notation** is used, the formalism is **column-centric** (i.e. the state vector is typically a ket rather than a bra). Furthermore, after diagonalizing a matrix, one *could* say that the eigenvectors are stored in a column-major layout (as the first index selects an eigenket).  However, comments will describe this as "a matrix where each row is a column eigenvector," because it is simply easier to just always call the first index the "row."
+
+## Reciprocal space and factors of 2π
+
+RSP2 does **not** include factors of 2π in the definition of reciprocal space.  This is often called the crystallographer's convention.  RSP2 uses this convention *not* because it is written by crystallographers (it isn't!), but rather because it's the only convention that makes sense.
+
+Using this convention, the form of an equation involving `k . r` looks exactly the same regardless of whether `k` and `r` are both fractional or both cartesian, making it easier to write bug-free code (whereas in the physicist convention, `k_c . r_c = 2π k_f . r_f`).  Needless to say, the definition of the reciprocal lattice and of miller index plane spacings are also simpler.
+
+In fact, at the time of writing, *every single reference* to `pi` or `PI` in RSP2 is either part of a unit test, or it appears inside a computation of `exp(i 2π * ...)`.
+
+## Phase convention for Q points away from gamma
+
+RSP2 uses the same phase convention as Phonopy for normal mode displacements:
+
+The normal modes of vibration computed at a point Q in reciprocal space contain an `exp(i 2π Q . x)` factor.  This means that, when a normal mode is translated by a lattice point R, this introduces a uniform phase factor of `exp(-i 2π Q . R)` (since it is equivalent to evaluating the original function at `x' = x - R`).
+
+This affects the definition of the dynamical matrix, and thereby its eigenvectors and the normal mode displacements as well.
 
 ## Permutations
 ### Permutations as sequences of indices

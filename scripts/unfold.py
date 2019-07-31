@@ -37,6 +37,18 @@ from rsp2.io import eigensols, structure_dir, dwim
 # - Points at which we are plotting are called `kpoints`.
 #   (often `plot_kpoints` for clarity)
 #
+# SIGN CONVENTIONS:
+#
+# - Like the rest of rsp2, this script follows the sign convention of Phonopy.
+#   The input dynmat and all internal code works under the assumption that the
+#   normal mode displacements are eigenfunctions of lattice point translations
+#   `T(r)` with eigenvalues `exp(-i Q.r)`.  (generally speaking, this means that
+#   the displacements contain an `exp(+i Q.x)` factor for each site)
+#
+# - Notice this differs from Allen's paper, where translation by a lattice
+#   point induces a phase of `exp(+i Q.r)`.  (in other words, each site would
+#   have an `exp(-i Q.x)` factor in the displacements)
+#
 # =========================================================
 
 THZ_TO_WAVENUMBER = 33.3564095198152
@@ -908,7 +920,7 @@ def unfold_all(
     qpoint_cart = qpoint_sfrac @ super_lattice_recip
     super_carts = superstructure.cart_coords
 
-    # The method is defined on a Bloch function with wavevector q.  The
+    # The method is defined on a Bloch function with wavevector Q.  The
     # eigenvector does not satisfy this property; it is periodic under the
     # lattice. Rather, the *displacements* are a Bloch function.
     #
@@ -917,13 +929,14 @@ def unfold_all(
     # Frankenstein creation that has magnitudes of the eigenvector and the
     # phases of the displacement vector.
     #
-    # These are the phase factors we require.
-    # (we follow the sign convention of Allen, rather than of Phonopy)
-    site_phases = np.exp(-2j * np.pi * np.dot(super_carts, qpoint_cart))
+    # These are those phase factors.
+    # (remember we follow the sign convention of Phonopy, not of Allen)
+    site_phases = np.exp(2j * np.pi * np.dot(super_carts, qpoint_cart))
 
     # We also require correction phase factors to accompany the permutation
     # representation of our translation operators, to handle when sites are
     # mapped to different images of the supercell.
+    #
     # See the comment above get_translation_phases for more details.
     translation_phases = np.vstack([
         get_translation_phases(
@@ -1050,19 +1063,21 @@ def unfold_one(
     # of the displacement vector.
     bloch_function = eigenvector * site_phases[:, None]
 
+    # Expectation value of every translation operation.
     inner_prods = np.array([
         np.vdot(bloch_function, t_phases[:, None] * bloch_function[t_deperm])
         for (t_deperm, t_phases) in zip(translation_deperms, translation_phases)
     ])
 
+    # Expectation value of each projector P(Q -> Q + G)
     gpoint_probs = []
     for g in gpoint_sfracs:
-        # SBZ qpoint dot r for every r
-        #
-        # FIXME: '- g' doesn't seem right here, but it's what produces the correct behavior.
-        #        There may be another sign error somewhere that this cancels out with?
-        k_dot_rs = (qpoint_sfrac - g) @ translation_sfracs.T
-        phases = np.exp(-2j * np.pi * k_dot_rs)
+        # PBZ (Q + G) dot r for every r
+        k_dot_rs = (qpoint_sfrac + g) @ translation_sfracs.T
+
+        # Phases from Allen Eq 3.  Due to our differing phase conventions,
+        # we have exp(+i...) rather than exp(-i...).
+        phases = np.exp(2j * np.pi * k_dot_rs)
 
         prob = sum(inner_prods * phases) / sizes['quotient']
 
@@ -1151,36 +1166,40 @@ def get_translation_deperm(
         fracs_translated, fracs_original, lattice, tol,
     )
 
-# When we apply the translation operators, some atoms will map to images under
-# the supercell that are different from the ones we have eigenvector data for.
-# For qpoints away from supercell gamma, those images should have different
-# phases in their eigenvector components.
-#
-# Picture that the supercell looks like this:
-#
 # Legend:
 # - a diagram of integers (labeled "Indices") depicts coordinates, by displaying
 #   the number `i` at the position of the `i`th atom.
-# - a diagram with letters depicts a list of metadata (such as elements or
-#   eigenvector components) by arranging them starting from index 0 in the lower
-#   left, and etc. as if they were to label the original coords.
+# - a diagram with any other label depicts a list of metadata (such as elements
+#   or eigenvector components) by arranging them starting from index 0 in the
+#   lower left, and etc. as if they were to label the original coords.
 # - Parentheses surround the position of the original zeroth atom.
+# - Suppose the qpoint Q of the eigenvector is orthogonal to the x axis.
+#   We let α = exp(i Q.r), where r is the vector from atom 0 to atom 3.
+#   Letters a-i are 3-vectors containing the components of the eigenvector
+#   at each site.
 #
-#                 6  7  8                    g  h  i
-#    Indices:    3  4  5     Eigenvector:   d  e  f
-#              (0) 1  2                   (a) b  c
+#                 6  7  8    Bloch Function:     gα²  hα²  iα²
+#    Indices:    3  4  5     (phonopy phase     dα   eα   fα
+#              (0) 1  2       convention)     (a)   b    c
 #
 # Consider the translation that moves the 0th atom to the location originally at
-# index 3. Applying the deperm to the eigenvector (to "translate" it by this
-# vector) yields:
+# index 3. The *correct* bloch function should be:
 #
-#                       d  e  f
-#      Eigenvector:    a  b  c
-#                    (g) h  i
 #
-# In this example, g, h, and i do not have the correct phases because those
+#       Expected            dα    eα    fα
+#       Bloch Function:    a     b     c
+#                       (gα−¹) hα−¹  iα−¹
+#
+# However, naively applying the deperm to the bloch function (to "translate" it
+# by this vector) instead yields:
+#
+#       Permuted            dα    eα    fα
+#       Bloch Function:    a     b     c
+#                       (gα²)  hα²   iα²
+#
+# As you can see, g, h, and i do not have the correct phases because those
 # atoms mapped to different images. To find the superlattice translation that
-# describes these images, we must look at the coords.  First, translate the
+# describes this discrepancy, we must look at the coords.  First, translate the
 # coords by literally applying the translation.  Then, apply the inverse coperm
 # to make the indices match their original sites.
 #
@@ -1190,15 +1209,17 @@ def get_translation_deperm(
 #    Indices:    0  1  2         Indices:    3  4  5
 #              (x) x  x                    (x) x  x
 #
-# If you subtract the original coordinates from these, you get a list of
-# metadata describing the super-lattice translations for each site in the
-# permuted structure; atoms 3..9 need no correction, while atoms 0..3 require a
-# phase correction by some super-lattice vector R.
+# If you subtract these from the original coordinates, you get a list of
+# super-lattice point translations that map the permuted atoms to their correct
+# images. Atoms 3..9 need no correction, while atoms 0..3 require a phase
+# correction by some super-lattice vector R.
+# The correction to be applied is exp(i Q.R), which in this case is α−³.
 #
-#                       0  0  0
-#    Image vectors:    0  0  0
-#                    (R) R  R
+#                       0  0  0                         1    1    1
+#    Image vectors:    0  0  0    Phase corrections:   1    1    1
+#                    (R) R  R                         α−³  α−³  α−³
 #
+# Those phase corrections are the output of this function.
 def get_translation_phases(
         qpoint_cart,
         super_carts,
@@ -1208,7 +1229,7 @@ def get_translation_phases(
     inverse_coperm = translation_deperm # inverse of inverse
 
     # translate, permute, and subtract to get superlattice points
-    image_carts = (super_carts + translation_cart)[inverse_coperm] - super_carts
+    image_carts = super_carts - (super_carts + translation_cart)[inverse_coperm]
 
     # dot each atom's R with Q to produce its phase correction
     return np.exp(2j * np.pi * image_carts @ qpoint_cart)

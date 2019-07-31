@@ -139,6 +139,7 @@ fn unfold_one(
             .collect()
     };
 
+    // Expectation value of each translation operator.
     let inner_prods: Vec<_> = {
         translation_deperms.par_iter().zip_eq(translation_phases).map(|(perm, &image_phases)| {
             let permuted = bloch_function.to_vec().permuted_by(perm);
@@ -151,15 +152,14 @@ fn unfold_one(
         }).collect()
     };
 
+    // Expectation value of each P(Q -> Q + G) projection operator.
     let gpoint_probs: Vec<_> = {
         gpoint_sfracs.par_iter().map(|g| {
-            // SBZ Q dot r for every r
             let phases: Vec<_> = {
                 translation_sfracs.iter()
-                    // FIXME: '- g' doesn't seem right here, but it's what produces the correct
-                    // behavior. There may be another sign error somewhere that this cancels out
-                    // with?
-                    .map(|t| exp_i2pi(-V3::dot(&(qpoint_sfrac - g), t)))
+                    // Phases from Allen Eq 3.  Due to our differing phase conventions,
+                    // we have exp(+i...) rather than exp(-i...).
+                    .map(|t| exp_i2pi(V3::dot(&(qpoint_sfrac + g), t)))
                     .collect()
             };
             let prob = zip_eq!(&inner_prods, phases).map(|(a, b)| a * b).sum::<Complex64>() / num_quotient as f64;
