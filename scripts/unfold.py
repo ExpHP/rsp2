@@ -795,8 +795,36 @@ class TaskBandPlot(Task):
         )
 
         parser.add_argument(
-            '--plot-ylim', help=
+            '--plot-size', type=parse_figsize, default=(7, 8), help=
+            'Set figure size.'
+        )
+
+        parser.add_argument(
+            '--plot-ylim', type=parse_ylim, default=(None, None), help=
             'Set plot ylim.'
+        )
+
+        parser.add_argument(
+            '--plot-style', metavar='STYLE', action='append', default=[], help=
+            'Apply a matplotlib stylesheet to the entire plot. '
+            'This can be supplied multiple times.'
+        )
+
+        parser.add_argument(
+            '--plot-unfolded-style', metavar='STYLE', action='append', default=[], help=
+            'Apply a matplotlib stylesheet to the scatter plot for the '
+            'unfolded bands. This can be supplied multiple times.'
+        )
+
+        parser.add_argument(
+            '--plot-baseline-style', metavar='STYLE', action='append', default=[], help=
+            'Apply a matplotlib stylesheet to the baseline scatter plot if '
+            'there is one. This can be supplied multiple times.'
+        )
+
+        parser.add_argument(
+            '--plot-title', metavar='TITLE', help=
+            'Title of plot.'
         )
 
         parser.add_argument(
@@ -830,7 +858,7 @@ class TaskBandPlot(Task):
         return probs_to_band_plot(
             q_ev_frequencies=np.array(mode_data['ev_frequencies']),
             q_ev_z_projections=np.array(mode_data['ev_z_projections']),
-            q_ev_gpoint_probs=q_ev_gpoint_probs ,
+            q_ev_gpoint_probs=q_ev_gpoint_probs,
             path_g_indices=self.band_qg_indices.require(args)['G'],
             path_q_indices=self.band_qg_indices.require(args)['Q'],
             path_x_coordinates=self.band_path.require(args)['plot_x_coordinates'],
@@ -843,6 +871,10 @@ class TaskBandPlot(Task):
             plot_zone_crossing_xs=self.zone_crossings.require(args)['xs'],
             plot_baseline_path=args.plot_baseline_file,
             plot_color=args.plot_color,
+            plot_style=args.plot_style,
+            plot_unfolded_style=args.plot_unfolded_style,
+            plot_baseline_style=args.plot_baseline_style,
+            plot_title=args.plot_title,
             plot_ylim=args.plot_ylim,
             plot_sidebar=args.plot_sidebar,
             plot_colorbar=args.plot_colorbar,
@@ -1437,7 +1469,15 @@ def reduce_carts(carts, lattice):
 #----------------------------------------------------------------
 # Plotting
 
+# In order to ensure that some settings can be overridden by user-supplied
+# stylesheets, we implement some of the default settings as style dicts rather
+# than by passing keyword arguments to the API.
+MplStylesheet = tp.Union[str, tp.Dict[str, tp.Any]]
+
 def cfg_matplotlib():
+    # These font options are pretty sensitive and need to be set extremely
+    # early, before we even do anything so much as construct a Normalize,
+    # else there will be visual glitches.
     import matplotlib
     matplotlib.rcParams.update({
         'text.latex.preamble': [r"""
@@ -1448,30 +1488,46 @@ def cfg_matplotlib():
         'font.family': 'serif',
     })
 
+GLOBAL_CONFIG = {
+    'axes.labelsize': 20,
+    'ytick.labelsize': 16,
+    'xtick.labelsize': 16,
+    'figure.figsize': (7, 8),
+    'lines.markersize': 20**0.5,
+}
+
+BASELINE_CONFIG = {
+    'lines.markersize': 5**0.5,
+    'lines.color': 'black',
+}
+
 def probs_to_band_plot(
-        q_ev_frequencies,
-        q_ev_z_projections,
-        q_ev_gpoint_probs,
-        path_g_indices,
-        path_q_indices,
-        path_x_coordinates,
-        plot_xticks,
-        plot_xticklabels,
-        plot_color,
-        plot_ylim,
-        plot_zone_crossing_xs,
-        raman_dict,
-        alpha_truncate,
-        alpha_exponent,
-        alpha_max,
-        plot_baseline_path,
-        plot_hide_unfolded,
-        plot_sidebar,
-        plot_colorbar,
-        verbose=False,
+        q_ev_frequencies: np.ndarray,
+        q_ev_z_projections: np.ndarray,
+        q_ev_gpoint_probs: np.ndarray,
+        path_g_indices: np.ndarray,
+        path_q_indices: np.ndarray,
+        path_x_coordinates: np.ndarray,
+        plot_xticks: np.ndarray,
+        plot_xticklabels: np.ndarray,
+        plot_color: str,
+        plot_ylim: tp.Tuple[tp.Optional[float], tp.Optional[float]],
+        plot_zone_crossing_xs: np.ndarray,
+        raman_dict: tp.Dict[str, np.ndarray],
+        alpha_truncate: float,
+        alpha_exponent: float,
+        alpha_max: float,
+        plot_baseline_path: np.ndarray,
+        plot_hide_unfolded: bool,
+        plot_sidebar: bool,
+        plot_colorbar: bool,
+        plot_style: tp.List[str],
+        plot_unfolded_style: tp.List[str],
+        plot_baseline_style: tp.List[str],
+        plot_title: tp.Optional[str],
+        verbose: bool = False,
 ):
     import matplotlib.pyplot as plt
-
     cfg_matplotlib()
 
     sizes = check_arrays(
@@ -1538,62 +1594,66 @@ def probs_to_band_plot(
 
     C = np.hstack([color_info.data_to_rgb(ColorData), Alpha[:, None]])
 
-    fig = plt.figure(figsize=(7, 8), constrained_layout=True)
-    #fig.set_tight_layout(True)
+    with plt.style.context([GLOBAL_CONFIG] + plot_style):
+        fig = plt.figure(constrained_layout=True)
+        #fig.set_tight_layout(True)
 
-    if plot_sidebar:
-        gs = fig.add_gridspec(ncols=8, nrows=1)
-        ax = fig.add_subplot(gs[0,:-1])
-        ax_sidebar = fig.add_subplot(gs[0,-1], sharey=ax)
-    else:
-        ax = fig.add_subplot(111)
+        if plot_sidebar:
+            gs = fig.add_gridspec(ncols=8, nrows=1)
+            ax = fig.add_subplot(gs[0,:-1])
+            ax_sidebar = fig.add_subplot(gs[0,-1], sharey=ax)
+        else:
+            ax = fig.add_subplot(111)
 
-    if not plot_hide_unfolded:
-        ax.scatter(X, Y, 20, C)
-    if plot_baseline_path is not None:
-        base_X /= np.max(base_X)
-        base_X *= np.max(X)
-        ax.scatter(base_X, base_Y, 5, 'k')
+        if not plot_hide_unfolded:
+            with plt.style.context(plot_unfolded_style):
+                ax.scatter(X, Y, None, C)
+        if plot_baseline_path is not None:
+            with plt.style.context([BASELINE_CONFIG] + plot_baseline_style):
+                base_X /= np.max(base_X)
+                base_X *= np.max(X)
+                ax.scatter(base_X, base_Y)
 
-    for x in plot_xticks:
-        ax.axvline(x, color='k')
+        for x in plot_xticks:
+            ax.axvline(x, color='k')
 
-    for x in plot_zone_crossing_xs:
-        ax.axvline(x, color='k', ls=':')
+        for x in plot_zone_crossing_xs:
+            ax.axvline(x, color='k', ls=':')
 
-    ax.set_xlim(X.min(), X.max())
-    ax.set_xticks(plot_xticks)
-    ax.set_xticklabels(plot_xticklabels, fontsize=20)
-    ax.set_ylabel('Frequency (cm$^{-1}$)', fontsize=20)
-    for tick in ax.yaxis.get_major_ticks():
-        tick.label.set_fontsize(16)
+        ax.set_xlim(X.min(), X.max())
+        ax.set_xticks(plot_xticks)
+        ax.set_xticklabels(plot_xticklabels)
+        ax.set_ylabel('Frequency (cm$^{-1}$)')
 
-    if plot_ylim is not None:
-        ymin, ymax = (float(x.strip()) for x in plot_ylim.split(':'))
-        ax.set_ylim(ymin, ymax)
+        ax.set_ylim(*plot_ylim)
 
-    if plot_sidebar:
-        ax_sidebar.set_xlim(-1, 1)
-        ax_sidebar.hlines(Y, -1, 1, color=C)
-        ax_sidebar.set_xticks([0])
-        ax_sidebar.set_xticklabels([r'$\mathrm{\Gamma}$'], fontsize=20)
-        plt.setp(ax_sidebar.get_yticklabels(), visible=False)
+        if plot_sidebar:
+            ax_sidebar.set_xlim(-1, 1)
+            ax_sidebar.hlines(Y, -1, 1, color=C)
+            ax_sidebar.set_xticks([0])
+            ax_sidebar.set_xticklabels([r'$\mathrm{\Gamma}$'], fontsize=20)
+            plt.setp(ax_sidebar.get_yticklabels(), visible=False)
 
-    if plot_colorbar:
-        from matplotlib import cm
+        if plot_title:
+            ax.set_title(plot_title)
 
-        # (note: we already made sure this is not None at the beginning of the function)
-        cmap, norm, cbar_label = color_info.cbar_info()
+        if plot_colorbar:
+            from matplotlib import cm
 
-        # Because we modify alpha independently of the color, there's no way
-        # for scatter to use a colormap (so we didn't even try). Rather, we made
-        # a norm object, which we can use in an empty mappable to give colorbar
-        # something to work with.
-        sm = cm.ScalarMappable(cmap=cmap, norm=norm)
-        sm.set_array([])
-        cbar = plt.colorbar(sm, ax=ax, aspect=50)
-        cbar.ax.tick_params(labelsize='x-large')
-        cbar.set_label(cbar_label, size='xx-large')
+            # (note: we already made sure this is not None at the beginning of the function)
+            cmap, norm, cbar_label = color_info.cbar_info()
+
+            # Because we modify alpha independently of the color, there's no way
+            # for scatter to use a colormap (so we didn't even try). Rather, we made
+            # a norm object, which we can use in an empty mappable to give colorbar
+            # something to work with.
+            sm = cm.ScalarMappable(cmap=cmap, norm=norm)
+            sm.set_array([])
+            cbar = plt.colorbar(sm, ax=ax, aspect=50)
+            cbar.ax.tick_params(labelsize='x-large')
+            cbar.set_label(cbar_label, size='xx-large')
+
+    # end context manager
 
     return fig, ax
 
@@ -1928,6 +1988,22 @@ def parse_qpoint(s):
         raise ValueError('--qpoint must be of dimension 3')
 
     return lst
+
+def parse_ylim(s):
+    def maybe_float(word):
+        word = word.strip()
+        if word: return float(word)
+        else: return None
+    tup = tuple(map(maybe_float, s.split(':')))
+    if len(tup) != 2:
+        raise ValueError('ylim must be of form MIN:MAX')
+    return tup
+
+def parse_figsize(s):
+    tup = tuple(float(x.strip()) for x in s.split('x'))
+    if len(tup) != 2:
+        raise ValueError('size must be of form WxH')
+    return tup
 
 def check_optional_input(path):
     if path is not None and not os.path.exists(path):
