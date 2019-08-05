@@ -723,6 +723,45 @@ pub fn dynmat_at_q(bin_name: &str, version: VersionInfo) -> ! {
     });
 }
 
+// %% CRATES: binary: rsp2-test-rayon %%
+pub fn test_rayon(bin_name: &str, version: VersionInfo) -> ! {
+    use rayon::prelude::*;
+
+    wrap_main(version, |logfile, _mpi_on_demand| {
+        let (app, de) = CliDeserialize::augment_clap_app({
+            clap::App::new(bin_name)
+                .about("Runs some heavy code in rayon for debugging parallelism.")
+        });
+        let matches = app.get_matches();
+        let () = de.resolve_args(&matches)?;
+
+        logfile.disable();
+
+        let total = {
+            (0..1_000_000_000_000_000_u64).into_par_iter()
+                .map(|_| {
+                    let x = rand::random::<u16>() as u32;
+                    let m = match rand::random::<u16>() as u32 {
+                        0 => 1,
+                        m => m,
+                    };
+
+                    (0..1_000_000)
+                        .scan(1, |prod, _| {
+                            *prod *= x;
+                            *prod %= m;
+                            Some(*prod)
+                        })
+                        .sum::<u32>()
+                })
+                .map(|x| x as u64)
+                .sum::<u64>()
+        };
+
+        panic!("We finished!? (total: {})", total);
+    });
+}
+
 // %% CRATES: binary: rsp2-library-paths %%
 pub fn print_library_paths(bin_name: &str, _version: VersionInfo) -> ! {
     let app = {

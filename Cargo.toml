@@ -72,6 +72,10 @@ path = "src/binary-shims/rsp2-shear-plot.rs"
 name = "rsp2-sparse-analysis"
 path = "src/binary-shims/rsp2-sparse-analysis.rs"
 
+[[bin]]
+name = "rsp2-test-rayon"
+path = "src/binary-shims/rsp2-test-rayon.rs"
+
 
 [dependencies]
 
