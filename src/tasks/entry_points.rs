@@ -739,27 +739,30 @@ pub fn test_rayon(bin_name: &str, version: VersionInfo) -> ! {
 
         let total = {
             (0..1_000_000_000_000_000_u64).into_par_iter()
-                .map(|_| {
-                    let x = rand::random::<u16>() as u32;
-                    let m = match rand::random::<u16>() as u32 {
-                        0 => 1,
-                        m => m,
-                    };
-
-                    (0..1_000_000)
-                        .scan(1, |prod, _| {
-                            *prod *= x;
-                            *prod %= m;
-                            Some(*prod)
-                        })
-                        .sum::<u32>()
-                })
+                .map(|_| expensive_function())
                 .map(|x| x as u64)
                 .sum::<u64>()
         };
 
         panic!("We finished!? (total: {})", total);
     });
+}
+
+#[inline(never)]
+fn expensive_function() -> u32 {
+    let x = rand::random::<u16>() as u32;
+    let m = match rand::random::<u16>() as u32 {
+        0 => 1,
+        m => m,
+    };
+
+    (0..1_000_000)
+        .scan(1, |prod, _| {
+            *prod *= x;
+            *prod %= m;
+            Some(*prod)
+        })
+        .sum::<u32>()
 }
 
 // %% CRATES: binary: rsp2-library-paths %%
