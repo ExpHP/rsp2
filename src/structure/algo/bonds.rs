@@ -334,17 +334,14 @@ impl FracBonds {
 
         let num_atoms = original_coords.num_atoms();
         assert_eq!(num_atoms, sc.num_primitive_atoms());
-
-        let mut from = vec![];
-        let mut to = vec![];
-        let mut image_diff = vec![];
-
         let sc_centermost_latt = sc.lattice_point_from_cell(sc.center_cell());
         let sc_carts = superstructure.to_carts();
         let sc_latts = sc.atom_lattice_points();
         let sc_sites = sc.atom_primitive_atoms();
 
-        // The single optimization added since forever.
+        // Even for large input cells, we will have at minimum a 3x3x3 supercell despite the fact
+        // that only those sites near the borders matter in the other 8 images.  Try wiping those
+        // atoms out that cannot possibly matter.
         let good_mask = {
             mask_faraway_atoms(&original_coords.lattice(), &superstructure, max_range, sc_centermost_latt)
         };
@@ -352,17 +349,48 @@ impl FracBonds {
         let sc_sites = mask_vec(sc_sites, &good_mask);
         let sc_carts = mask_vec(sc_carts, &good_mask);
 
-        // The supercell is large enough that we can disregard its periodicity, and consider
-        // interactions between its centermost cell and any other atom.
+        // Bin them.  This brings the O(n^2) cost down to O(n).
+        //
+        // We don't need incremental binning, so this is actually pretty simple.
+        // These are only used to restrict the choices for the second atom in each interacting pair.
+        let sc_bins = cart_bins(&sc_carts, max_range);
+        let bin_sites = get_lookup_table(&sc_bins);
+
+        // (integer vectors with numbers in {-1, 0, 1})
+        let nearby_bin_diffs: Vec<_> = {
+            iproduct!(&[-1, 0, 1], &[-1, 0, 1], &[-1, 0, 1])
+                .map(|(&dx, &dy, &dz)| V3([dx, dy, dz]))
+                .collect()
+        };
+
         let mut num_visited = 0;
-        for (&latt_from, &site_from, &cart_from) in izip!(&sc_latts, &sc_sites, &sc_carts) {
+        let mut from = vec![];
+        let mut to = vec![];
+        let mut image_diff = vec![];
+        let mut nearby_indices = vec![];
+        for (&latt_from, &site_from, &cart_from, &bin_from) in izip!(&sc_latts, &sc_sites, &sc_carts, &sc_bins) {
+            // The supercell is large enough that we can disregard its periodicity, and consider
+            // interactions between its centermost cell and any other atom.
             if latt_from != sc_centermost_latt {
                 continue;
             }
             num_visited += 1;
             let meta_from = original_meta[site_from];
 
-            for (&latt_to, &site_to, &cart_to) in izip!(&sc_latts, &sc_sites, &sc_carts) {
+            // gather indices from nearby bins
+            nearby_indices.clear();
+            for &bin_diff in &nearby_bin_diffs {
+                if let Some(neighbors) = bin_sites.get(&(bin_from + bin_diff)) {
+                    nearby_indices.extend(neighbors.iter().cloned());
+                }
+            }
+            nearby_indices.sort(); // for data locality
+
+            for &index_to in &nearby_indices {
+                let latt_to = sc_latts[index_to];
+                let site_to = sc_sites[index_to];
+                let cart_to = sc_carts[index_to];
+
                 let meta_to = original_meta[site_to];
                 let range_sq = match meta_range_sq[(meta_from, meta_to)] {
                     None => continue,
@@ -440,6 +468,7 @@ impl FracBonds {
     { self.num_atoms }
 }
 
+
 // Split coords into reduced coordinates, and their original lattice points.
 fn decompose_coords(coords: &Coords) -> (Coords, Vec<V3<i32>>) {
     let mut coords = coords.clone();
@@ -457,6 +486,25 @@ fn decompose_coords(coords: &Coords) -> (Coords, Vec<V3<i32>>) {
     (coords, latts)
 }
 
+/// Produces a mapping of `index -> bin` such that each position can only possibly interact
+/// with those in the 27 bins around them.
+///
+/// Because this is not used for incremental binning, the bins chosen by this may be much smaller
+/// than you might typically expect.
+fn cart_bins(carts: &[V3], interaction_distance: f64) -> Vec<V3<i32>> {
+    // produce cubic bins big enough to guarantee that nothing is missed
+    let fuzzy_distance = interaction_distance * (1.0 + 1e-4);
+    carts.iter().map(|v| v.map(|x| f64::floor(x / fuzzy_distance) as i32)).collect()
+}
+
+/// Get a map of each value to all of its indices.
+fn get_lookup_table<T: Hash + Eq + Clone>(slice: &[T]) -> HashMap<T, Vec<usize>> {
+    let mut map = HashMap::new();
+    for (index, key) in slice.iter().enumerate() {
+        map.entry(key.clone()).or_insert_with(Vec::new).push(index);
+    }
+    map
+}
 //=================================================================
 
 // Construct a supercell large enough to contain all atoms that interact with an atom
@@ -887,6 +935,9 @@ mod tests {
 //==================================================================================================
 
 pub use self::periodic::PeriodicGraph;
+use std::hash::Hash;
+use std::collections::HashMap;
+
 pub mod periodic {
     use super::*;
     use petgraph::prelude::{EdgeRef, DiGraph, NodeIndex};
