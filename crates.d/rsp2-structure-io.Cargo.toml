@@ -18,8 +18,8 @@ path = "lib.rs"
 !!serde-yaml
 !!num-complex
 
-!!rsp2-structure
-!!rsp2-array-types
+!!rsp2-structure { features = ["serde-support"] }
+!!rsp2-array-types { features = ["serde-support"] }
 !!rsp2-soa-ops
 !!rsp2-util-macros
 

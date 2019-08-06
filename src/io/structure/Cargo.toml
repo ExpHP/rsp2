@@ -23,8 +23,8 @@ serde_derive = "1.0.91"
 serde_yaml = "0.7"
 num-complex = "0.2.1"
 
-rsp2-structure = { path = "../../structure" }
-rsp2-array-types = { path = "../../util/array-types" }
+rsp2-structure = { path = "../../structure", features = ["serde-support"] }
+rsp2-array-types = { path = "../../util/array-types", features = ["serde-support"] }
 rsp2-soa-ops = { path = "../../util/soa-ops" }
 rsp2-util-macros = { path = "../../util/macros" }
 
