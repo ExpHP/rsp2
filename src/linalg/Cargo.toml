@@ -20,8 +20,8 @@ rsp2-array-types = { path = "../util/array-types" }
 failure = "0.1.2"
 slice-of-array = "0.2.1"
 #!!frunk
-lapacke = "0.1.4"
-lapack-src = { version = "0.1.4", features = ["openblas"] }
+lapacke = "0.2"
+lapack-src = { version = "0.3", features = ["openblas"] }
 ndarray = "0.11.2"
 rand = "0.3"
 num-traits = "0.2.3"
