@@ -384,7 +384,6 @@ impl FracBonds {
                     nearby_indices.extend(neighbors.iter().cloned());
                 }
             }
-            nearby_indices.sort(); // for data locality
 
             for &index_to in &nearby_indices {
                 let latt_to = sc_latts[index_to];
