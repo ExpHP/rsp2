@@ -62,6 +62,10 @@ impl Perm {
     pub fn argsort<T: Ord>(xs: &[T]) -> Perm
     { Perm { inv: PermVec::argsort(xs).inverted() } }
 
+    /// Compute a `Perm` that, when applied to the input slice, would sort it. (not necessarily stably)
+    pub fn argsort_unstable<T: Ord>(xs: &[T]) -> Perm
+    { Perm { inv: PermVec::argsort_unstable(xs).inverted() } }
+
     /// Construct a perm. Useful for literals in unit tests.
     ///
     /// The representation accepted by this is comparable to indexing with an
@@ -219,6 +223,13 @@ impl PermVec {
     {
         let mut perm: Vec<_> = (0..xs.len()).collect();
         perm.sort_by(|&a, &b| xs[a].cmp(&xs[b]));
+        PermVec(perm)
+    }
+
+    fn argsort_unstable<T: Ord>(xs: &[T]) -> PermVec
+    {
+        let mut perm: Vec<_> = (0..xs.len()).collect();
+        perm.sort_unstable_by(|&a, &b| xs[a].cmp(&xs[b]));
         PermVec(perm)
     }
 

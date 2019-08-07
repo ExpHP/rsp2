@@ -364,11 +364,12 @@ impl FracBonds {
         };
 
         let mut num_visited = 0;
-        let mut from = vec![];
-        let mut to = vec![];
-        let mut image_diff = vec![];
+        let mut bond_from = vec![];
+        let mut bond_to = vec![];
+        let mut bond_image_diff = vec![];
+        let mut bond_sort_keys = vec![];
         let mut nearby_indices = vec![];
-        for (&latt_from, &site_from, &cart_from, &bin_from) in izip!(&sc_latts, &sc_sites, &sc_carts, &sc_bins) {
+        for (index_from, &latt_from, &site_from, &cart_from, &bin_from) in izip!(0.., &sc_latts, &sc_sites, &sc_carts, &sc_bins) {
             // The supercell is large enough that we can disregard its periodicity, and consider
             // interactions between its centermost cell and any other atom.
             if latt_from != sc_centermost_latt {
@@ -405,20 +406,36 @@ impl FracBonds {
                     if (site_from, latt_from) == (site_to, latt_to) {
                         continue;
                     }
-                    from.push(site_from);
-                    to.push(site_to);
+                    bond_from.push(site_from);
+                    bond_to.push(site_to);
 
                     // `latt_to - latt_from` would give us the image diff between the images in our
                     // supercell, but that's computed from the reduced positions. We actually want
                     // the image diffs for the original positions.
                     let adjusted_latt_to = latt_to - original_latts[site_to];
                     let adjusted_latt_from = latt_from - original_latts[site_from];
-                    image_diff.push(adjusted_latt_to - adjusted_latt_from);
+                    bond_image_diff.push(adjusted_latt_to - adjusted_latt_from);
+                    bond_sort_keys.push((index_from, index_to));
                 }
             }
         }
         let num_atoms = original_coords.num_atoms();
         assert_eq!(num_visited, num_atoms, "(BUG) wrong # atoms in center cell?");
+
+        // Give a consistent ordering.
+        //
+        // FIXME: This sort call is surprisingly expensive when there are many bonds (e.g. KC-z
+        //        on a large cell), likely due to cache misses. Unfortunately, without it, there
+        //        is a big butterfly effect in the output that invalidates many tests and just
+        //        generally makes comparing to LAMMPS way more difficult.
+        //
+        //        One might think this could be sped up by instead sorting `nearby_indices` above,
+        //        but that's actually *worse* currently due to the fact that neighbors are gathered
+        //        per atom rather than per bin.
+        let perm = Perm::argsort_unstable(&bond_sort_keys);
+        let from = bond_from.permuted_by(&perm);
+        let to = bond_to.permuted_by(&perm);
+        let image_diff = bond_image_diff.permuted_by(&perm);
 
         Ok(FracBonds { num_atoms, from, to, image_diff })
     }
