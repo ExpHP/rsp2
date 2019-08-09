@@ -252,26 +252,19 @@ impl CartBonds {
 }
 
 impl FracBonds {
-    /// Compute bonds using a really dumb brute force strategy.
-    ///
-    /// This function was originally even called `from_brute_force_very_dumb`, because when
-    /// I wrote it I was almost 100% certain it would have to be replaced with something
-    /// faster eventually.
-    ///
-    /// ...aside from one small optimization of a constant factor of about 8,
-    /// it has survived surprisingly well.
+    /// Compute bonds using a uniform bond length for all types.
     ///
     /// # Numerical rounding, and distances of zero
     ///
     /// Behavior is specified such that distances exactly equal to the interaction range are
     /// guaranteed to be included. I.e. `FracBonds::from_brute_force(coords, 0.0)` will produce
     /// pairs of sites that are superimposed on each other.
-    pub fn from_brute_force(
+    pub fn compute(
         original_coords: &Coords,
         range: f64,
     ) -> Result<Self, Error> {
         let fake_meta = vec![(); original_coords.len()];
-        Self::from_brute_force_with_meta(original_coords, &fake_meta, |(), ()| Some(range))
+        Self::compute_with_meta(original_coords, &fake_meta, |(), ()| Some(range))
     }
 
     /// Compute bonds, using different bond lengths for different types.
@@ -283,7 +276,7 @@ impl FracBonds {
     ///
     /// If two types of atoms do not interact, `meta_range` can return `None` to guarantee that no
     /// bonds between these types are included in the output.
-    pub fn from_brute_force_with_meta<M: Ord>(
+    pub fn compute_with_meta<M: Ord>(
         original_coords: &Coords,
         meta: impl IntoIterator<Item=M>,
         // Range for different atom types. This will affect membership of bonds in the output.
@@ -425,13 +418,14 @@ impl FracBonds {
         // Give a consistent ordering.
         //
         // FIXME: This sort call is surprisingly expensive when there are many bonds (e.g. KC-z
-        //        on a large cell), likely due to cache misses. Unfortunately, without it, there
-        //        is a big butterfly effect in the output that invalidates many tests and just
-        //        generally makes comparing to LAMMPS way more difficult.
+        //        on a large cell). Unfortunately, without it, there is a big butterfly effect in
+        //        the output that invalidates many tests and just generally makes comparing to
+        //        LAMMPS way more difficult.
         //
         //        One might think this could be sped up by instead sorting `nearby_indices` above,
-        //        but that's actually *worse* currently due to the fact that neighbors are gathered
-        //        per atom rather than per bin.
+        //        but that's actually *worse* due to the fact that neighbors are gathered per atom
+        //        rather than per bin. (and iterating per bin would require us to sort at the end,
+        //        anyways)
         let perm = Perm::argsort_unstable(&bond_sort_keys);
         let from = bond_from.permuted_by(&perm);
         let to = bond_to.permuted_by(&perm);
@@ -504,9 +498,6 @@ fn decompose_coords(coords: &Coords) -> (Coords, Vec<V3<i32>>) {
 
 /// Produces a mapping of `index -> bin` such that each position can only possibly interact
 /// with those in the 27 bins around them.
-///
-/// Because this is not used for incremental binning, the bins chosen by this may be much smaller
-/// than you might typically expect.
 fn cart_bins(carts: &[V3], interaction_distance: f64) -> Vec<V3<i32>> {
     // produce cubic bins big enough to guarantee that nothing is missed
     let fuzzy_distance = interaction_distance * (1.0 + 1e-4);
@@ -764,7 +755,7 @@ mod tests {
         );
         let range = f64::sqrt(2.0) * 1.1;
 
-        let bonds = FracBonds::from_brute_force(&coords, range).unwrap();
+        let bonds = FracBonds::compute(&coords, range).unwrap();
         let actual = bonds.into_iter().collect::<BTreeSet<_>>();
         assert_eq!{
             actual,
@@ -795,7 +786,7 @@ mod tests {
         );
         let range = f64::sqrt(2.0) * 1.1;
 
-        let bonds = FracBonds::from_brute_force(&coords, range).unwrap();
+        let bonds = FracBonds::compute(&coords, range).unwrap();
         let actual = bonds.into_iter().collect::<BTreeSet<_>>();
 
         // For frac vector v and lattice L:
@@ -830,7 +821,7 @@ mod tests {
         ]);
         let coords = CoordsKind::Carts(vec![V3::zero()]);
         let coords = Coords::new(lattice, coords);
-        FracBonds::from_brute_force(&coords, 1.2).unwrap();
+        FracBonds::compute(&coords, 1.2).unwrap();
     }
 
     // (crosses at the opposite face from the first test, to test the `abs` in the check)
@@ -844,7 +835,7 @@ mod tests {
         ]);
         let coords = CoordsKind::Carts(vec![V3::zero()]);
         let coords = Coords::new(lattice, coords);
-        FracBonds::from_brute_force(&coords, 1.2).unwrap();
+        FracBonds::compute(&coords, 1.2).unwrap();
     }
 
     #[test]
@@ -862,7 +853,7 @@ mod tests {
         );
         let range = 0.1 * 1.1;
 
-        let bonds = FracBonds::from_brute_force(&coords, range).unwrap();
+        let bonds = FracBonds::compute(&coords, range).unwrap();
         let actual = (&bonds).into_iter().collect::<BTreeSet<_>>();
         assert_eq!{
             actual,
@@ -887,7 +878,7 @@ mod tests {
         );
         let range = 1.01 * 2.0;
 
-        let bonds = FracBonds::from_brute_force(&coords, range).unwrap();
+        let bonds = FracBonds::compute(&coords, range).unwrap();
         let actual = (&bonds).into_iter().collect::<BTreeSet<_>>();
         assert_eq!{
             actual,
@@ -910,7 +901,7 @@ mod tests {
         );
 
         // Zero distance
-        let bonds = FracBonds::from_brute_force(&coords, 0.0).unwrap();
+        let bonds = FracBonds::compute(&coords, 0.0).unwrap();
         let actual = (&bonds).into_iter().collect::<BTreeSet<_>>();
         assert_eq!{
             actual,
@@ -936,7 +927,7 @@ mod tests {
             _ => None,
         };
 
-        let bonds = FracBonds::from_brute_force_with_meta(&coords, meta, get_range).unwrap();
+        let bonds = FracBonds::compute_with_meta(&coords, meta, get_range).unwrap();
         let actual = (&bonds).into_iter().collect::<BTreeSet<_>>();
         assert_eq!{
             actual,

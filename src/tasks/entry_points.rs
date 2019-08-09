@@ -545,7 +545,7 @@ pub fn bond_test(bin_name: &str, version: VersionInfo) -> ! {
         let (coords, _) = crate::cmd::read_optimizable_structure(None, None, filetype, &input)?;
         let coords = coords.construct(); // reckless
 
-        let bonds = rsp2_structure::bonds::FracBonds::from_brute_force(&coords, 1.8)?;
+        let bonds = rsp2_structure::bonds::FracBonds::compute(&coords, 1.8)?;
         match matches.is_present("cart") {
             true => serde_json::to_writer(::std::io::stdout(), &bonds.to_cart_bonds(&coords))?,
             false => serde_json::to_writer(::std::io::stdout(), &bonds)?,

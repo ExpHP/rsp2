@@ -399,7 +399,7 @@ mod rebo {
         }};
         let elements: meta::SiteElements = vec![CARBON; 2].into();
         let masses: meta::SiteMasses = vec![meta::Mass(12.0107); 2].into();
-        let bonds: meta::FracBonds = std::rc::Rc::new(FracBonds::from_brute_force(&coords, 2.0)?);
+        let bonds: meta::FracBonds = std::rc::Rc::new(FracBonds::compute(&coords, 2.0)?);
         let meta = hlist![elements, masses, Some(bonds)];
 
     //    let pot_lmp = PotentialBuilder::from_config_parts(None, None, &cfg::Threading::Serial, &cfg::LammpsUpdateStyle::Safe, &[true; 3], &cfg_lmp).allow_blocking(true);
@@ -452,7 +452,7 @@ mod rebo {
 
         let elements: meta::SiteElements = vec![CARBON; 2].into();
         let masses: meta::SiteMasses = vec![meta::Mass(12.0107); 2].into();
-        let bonds: meta::FracBonds = std::rc::Rc::new(FracBonds::from_brute_force(&coords, 2.0)?);
+        let bonds: meta::FracBonds = std::rc::Rc::new(FracBonds::compute(&coords, 2.0)?);
         println!("{:?}", bonds);
         let meta = hlist![elements, masses, Some(bonds)];
 

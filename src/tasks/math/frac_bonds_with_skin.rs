@@ -146,7 +146,7 @@ where
         coords: &Coords,
         meta: impl Clone + ExactSizeIterator<Item=M>,
     ) -> FailResult<FracBonds> {
-        FracBonds::from_brute_force_with_meta(
+        FracBonds::compute_with_meta(
             coords, meta.clone(),
             |a, b| self.meta_search_range(a, b),
         )

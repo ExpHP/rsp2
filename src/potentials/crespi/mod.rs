@@ -537,7 +537,7 @@ mod input_tests {
         let ref layers: Vec<i32> = serde_json::from_reader(open_xz(layers_path)?)?;
         let Poscar { ref mut coords, ref elements, .. } = Poscar::from_reader(open_xz(in_path)?)?;
 
-        let bonds = FracBonds::from_brute_force_with_meta(
+        let bonds = FracBonds::compute_with_meta(
             coords,
             zip_eq!(elements, layers),
             |(&ea, &la), (&eb, &lb)| match ((ea, eb), i32::abs(la - lb)) {

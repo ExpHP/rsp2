@@ -601,7 +601,7 @@ pub fn find_all_interactions(
 ) -> FailResult<Interactions> {
     let ref types = elements.iter().cloned().map(AtomType::from_element).collect::<FailResult<Vec<_>>>()?;
     let ref graph = {
-        rsp2_structure::bonds::FracBonds::from_brute_force_with_meta(
+        rsp2_structure::bonds::FracBonds::compute_with_meta(
             coords, types.iter().cloned(),
             // FIXME should return None for other elements
             |&a, &b| Some(params.by_type[a][b].cutoff_region.1),

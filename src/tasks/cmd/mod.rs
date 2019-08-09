@@ -148,7 +148,7 @@ impl TrialDir {
 
         let meta = meta.prepend({
             settings.bond_radius.map(|bond_radius| FailOk({
-                Rc::new(FracBonds::from_brute_force(&original_coords, bond_radius)?)
+                Rc::new(FracBonds::compute(&original_coords, bond_radius)?)
             })).fold_ok()?
         });
 
@@ -415,7 +415,7 @@ fn do_compute_dynmat(
         // deriving these from the primitive cell bonds is not worth the trouble
         trace!("Computing bonds in supercell");
         let super_bonds = settings.bond_radius.map(|bond_radius| FailOk({
-            Rc::new(FracBonds::from_brute_force(&super_coords, bond_radius)?)
+            Rc::new(FracBonds::compute(&super_coords, bond_radius)?)
         })).fold_ok()?;
         super_meta = prim_meta.clone().map(hlist![
             f!(),
@@ -1302,7 +1302,7 @@ pub(crate) fn run_single_force_computation(
     let meta = hlist![elements, masses];
     let meta = meta.prepend({
         settings.bond_radius.map(|bond_radius| FailOk({
-            Rc::new(FracBonds::from_brute_force(&coords, bond_radius)?)
+            Rc::new(FracBonds::compute(&coords, bond_radius)?)
         })).fold_ok()?
     });
 
