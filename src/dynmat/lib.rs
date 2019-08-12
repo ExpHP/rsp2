@@ -21,7 +21,7 @@ use rsp2_structure::{Coords};
 use rsp2_structure::supercell::SupercellToken;
 use rsp2_newtype_indices::{Idx, Indexed, index_cast};
 use rsp2_sparse::{RawBee, RawCoo, RawCsr};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use slice_of_array::prelude::*;
 
 pub type FailResult<T> = Result<T, failure::Error>;
@@ -530,80 +530,6 @@ impl<'ctx> Context<'ctx> {
     }
 }
 
-#[allow(unused)]
-impl ForceConstants {
-    /// Produces a dense matrix indexed by `[SuperI, SuperI]` with all entries filled, even those
-    /// that are redundant under translational symmetry.
-    pub fn to_dense_matrix(&self, sc: &SupercellToken) -> Vec<Vec<M33>> {
-        self.to_full_force_constants_with_zeroed_rows(sc)
-            .add_rows_for_other_cells(sc)
-            .to_dense_matrix()
-    }
-
-    /// Produces a dense matrix indexed by `[SuperI, SuperI]` where the rows outside of
-    /// `ForceConstants::DESIGNATED_CELL` are zero.
-    pub fn to_dense_matrix_with_zeroed_rows(&self, sc: &SupercellToken) -> Vec<Vec<M33>> {
-        self.to_full_force_constants_with_zeroed_rows(sc)
-            .to_dense_matrix()
-    }
-
-    /// Convert to a type capable of containing data in arbitrary supercell rows, but do not yet
-    /// actually fill the rows outside `ForceConstants::DESIGNATED_CELL`. (the data will still be
-    /// sparse; this mostly just replaces primitive indices with supercell indices)
-    ///
-    /// Why?  Well, it provides a `Permute` impl, which could be used to construct something closer
-    /// to the output of another tool like phonopy.
-    pub fn to_full_force_constants_with_zeroed_rows(&self, sc: &SupercellToken) -> FullForceConstants {
-        let sc = SupercellWrapper::new(sc);
-        FullForceConstants({
-            self.0.to_coo()
-                .map_row_indices(
-                    sc.raw.num_supercell_atoms(),
-                    |prim| sc.designated_super(prim),
-                )
-        })
-    }
-}
-
-impl FullForceConstants {
-    /// Take FullForceConstants where `row_atom` is always in `DISPLACED_CELL`
-    /// and generate all the other rows.
-    //
-    // NOTE: This is just here for the lulz, in case you need something easier to
-    //       compare against phonopy pre-12.8.  The rows outside of the designated
-    //       cell are merely permuted forms of the designated rows, and do not even
-    //       appear in the formula for the dynamical matrix.
-    pub fn add_rows_for_other_cells(mut self, sc: &SupercellToken) -> FullForceConstants {
-        let sc = SupercellWrapper::new(sc);
-
-        assert!({
-            let cells = sc.atom_cells();
-            self.0.row.iter().all(|&row| cells[row] == DESIGNATED_CELL)
-        });
-
-        let old_len = self.0.row.len();
-        for axis in 0..3 {
-            // get deperm that translates data by one cell along this axis
-            let unit = V3::from_fn(|i| (i == axis) as i32);
-            let deperm = sc.raw.lattice_point_translation_deperm(unit);
-
-            let mut permuted_fcs = self.clone();
-
-            // skip 0 because 'self' already has the data for 0 cell translation
-            for _ in 1..sc.raw.periods()[axis] {
-                permuted_fcs = permuted_fcs.permuted_by(&deperm);
-                self.0 = self.0 + permuted_fcs.0.clone();
-            }
-        }
-        assert_eq!(self.0.row.len(), old_len * sc.raw.num_cells());
-        self
-    }
-
-    pub fn to_dense_matrix(&self) -> Vec<Vec<M33>> {
-        self.0.to_dense()
-    }
-}
-
 impl ForceConstants {
     /// Compute the dynamical matrix at a q-point.
     ///
@@ -730,6 +656,82 @@ impl ForceConstants {
     }
 }
 
+// ------------------------------------------------------
+
+#[allow(unused)]
+impl ForceConstants {
+    /// Produces a dense matrix indexed by `[SuperI, SuperI]` with all entries filled, even those
+    /// that are redundant under translational symmetry.
+    pub fn to_dense_matrix(&self, sc: &SupercellToken) -> Vec<Vec<M33>> {
+        self.to_full_force_constants_with_zeroed_rows(sc)
+            .add_rows_for_other_cells(sc)
+            .to_dense_matrix()
+    }
+
+    /// Produces a dense matrix indexed by `[SuperI, SuperI]` where the rows outside of
+    /// `ForceConstants::DESIGNATED_CELL` are zero.
+    pub fn to_dense_matrix_with_zeroed_rows(&self, sc: &SupercellToken) -> Vec<Vec<M33>> {
+        self.to_full_force_constants_with_zeroed_rows(sc)
+            .to_dense_matrix()
+    }
+
+    /// Convert to a type capable of containing data in arbitrary supercell rows, but do not yet
+    /// actually fill the rows outside `ForceConstants::DESIGNATED_CELL`. (the data will still be
+    /// sparse; this mostly just replaces primitive indices with supercell indices)
+    ///
+    /// Why?  Well, it provides a `Permute` impl, which could be used to construct something closer
+    /// to the output of another tool like phonopy.
+    pub fn to_full_force_constants_with_zeroed_rows(&self, sc: &SupercellToken) -> FullForceConstants {
+        let sc = SupercellWrapper::new(sc);
+        FullForceConstants({
+            self.0.to_coo()
+                .map_row_indices(
+                    sc.raw.num_supercell_atoms(),
+                    |prim| sc.designated_super(prim),
+                )
+        })
+    }
+}
+
+impl FullForceConstants {
+    /// Take FullForceConstants where `row_atom` is always in `DISPLACED_CELL`
+    /// and generate all the other rows.
+    //
+    // NOTE: This is just here for the lulz, in case you need something easier to
+    //       compare against phonopy pre-12.8.  The rows outside of the designated
+    //       cell are merely permuted forms of the designated rows, and do not even
+    //       appear in the formula for the dynamical matrix.
+    pub fn add_rows_for_other_cells(mut self, sc: &SupercellToken) -> FullForceConstants {
+        let sc = SupercellWrapper::new(sc);
+
+        assert!({
+            let cells = sc.atom_cells();
+            self.0.row.iter().all(|&row| cells[row] == DESIGNATED_CELL)
+        });
+
+        let old_len = self.0.row.len();
+        for axis in 0..3 {
+            // get deperm that translates data by one cell along this axis
+            let unit = V3::from_fn(|i| (i == axis) as i32);
+            let deperm = sc.raw.lattice_point_translation_deperm(unit);
+
+            let mut permuted_fcs = self.clone();
+
+            // skip 0 because 'self' already has the data for 0 cell translation
+            for _ in 1..sc.raw.periods()[axis] {
+                permuted_fcs = permuted_fcs.permuted_by(&deperm);
+                self.0 = self.0 + permuted_fcs.0.clone();
+            }
+        }
+        assert_eq!(self.0.row.len(), old_len * sc.raw.num_cells());
+        self
+    }
+
+    pub fn to_dense_matrix(&self) -> Vec<Vec<M33>> {
+        self.0.to_dense()
+    }
+}
+
 // both the rows and columns of ForceConstants are conceptually indexed
 // by the same index type, so the Permute impl permutes both.
 impl Permute for FullForceConstants {
@@ -744,6 +746,160 @@ impl Permute for FullForceConstants {
         FullForceConstants(RawCoo { dim, row, col, val })
     }
 }
+
+// ------------------------------------------------------
+
+impl ForceConstants {
+    /// Imposes translational invariance like Phonopy.
+    ///
+    /// **Warning:** If `level >= 1`, this will cause the force constants to effectively
+    /// become dense.
+    pub fn impose_translational_invariance(&mut self, sc: &SupercellToken, level: u32) {
+        let sc = SupercellWrapper::new(sc);
+        for _ in 0..level {
+            for _ in 0..2 {
+                self.transpose_mut(sc);
+                self.cancel_row_drift(sc);
+            }
+            self.impose_matrix_symmetry(sc);
+        }
+        self.impose_translational_symmetry(sc);
+    }
+
+    // this corresponds to the explicit for loops in py_perm_trans_symmetrize_compact_fc
+    // in _phonopy.c: https://github.com/atztogo/phonopy/blob/4fbd156b705c/c/_phonopy.c#L564-L577
+    //
+    /// Imposes that the sum over each row is zero, by subtracting the mean for each row.
+    ///
+    /// **Warning:** This causes the ForceConstants matrix to effectively become dense!
+    fn cancel_row_drift(&mut self, sc: SupercellWrapper<'_>) {
+        let mut bee = self.0.to_coo().into_bee();
+        for row in bee.map.values_mut() {
+            let mean = row.values().fold(M33::zero(), |acc, m| &acc + m) / sc.raw.num_supercell_atoms() as f64;
+
+            for super_c in sc.super_indices() {
+                *row.entry(super_c).or_insert_with(M33::zero) -= mean;
+            }
+        }
+        self.0 = bee.into_csr();
+    }
+
+    // this corresponds to set_translational_symmetry_compact_fc in _phonopy.c
+    //
+    /// Imposes that the sum over each row is zero, by ignoring the existing values in submatrices
+    /// along the main diagonal and replacing them with values computed from the rest of the row.
+    fn impose_translational_symmetry(&mut self, sc: SupercellWrapper<'_>) {
+        let mut bee = self.0.to_coo().into_bee();
+        for (&prim_r, row) in bee.map.iter_mut() {
+            let super_r = sc.designated_super(prim_r);
+
+            // compute the sum without the diagonal submatrix
+            row.insert(super_r, M33::zero());
+            let sum = row.values().fold(M33::zero(), |acc, m| &acc + m);
+
+            row.insert(super_r, -(sum + sum.t()) / 2.0);
+        }
+        self.0 = bee.into_csr();
+    }
+
+    // this corresponds to set_index_permutation_symmetry_compact_fc(is_transpose=1) in _phonopy.c
+    //
+    /// Transposes the matrix in-place.
+    fn transpose_mut(&mut self, sc: SupercellWrapper<'_>,) {
+        self.visit_with_transpose(sc, |&a, &b| (b.t(), a.t()), |d| d.t())
+    }
+
+    // this corresponds to set_index_permutation_symmetry_compact_fc(is_transpose=0) in _phonopy.c
+    //
+    /// Imposes that `M = M.T` by setting self equal to `(M + M.T) / 2`.
+    fn impose_matrix_symmetry(&mut self, sc: SupercellWrapper<'_>,) {
+        self.visit_with_transpose(
+            sc,
+            |&a, &b| {
+                let average = (a + b.t()) / 2.0;
+                (average, average.t())
+            },
+            |d| (d + d.t()) / 2.0,
+        )
+    }
+
+    // this corresponds to set_index_permutation_symmetry_compact_fc in _phonopy.c
+    //
+    /// Finds each pair `(m1, m2)` of matrices that are supposed to be transposes of each other,
+    /// and calls a function to obtain new values for them. `visit_regular` must have the property
+    /// that flipping the arguments flips the output tuple, down to exact precision.
+    fn visit_with_transpose(
+        &mut self,
+        sc: SupercellWrapper<'_>,
+        mut visit_regular: impl FnMut(&M33, &M33) -> (M33, M33),
+        mut visit_diag: impl FnMut(&M33) -> M33,
+    ) {
+        let mut done: Indexed<PrimI, Vec<BTreeSet<SuperI>>>;
+        done = Indexed::from_elem_n(BTreeSet::new(), sc.raw.num_primitive_atoms());
+
+        let primitive_atoms = sc.atom_primitive_atoms();
+        let lattice_points = sc.atom_lattice_points();
+
+        // Phonopy iterates by column first.  However, due to the symmetry of `visit_regular`,
+        // this has no impact on the output. (it only affects whether some matrices are given as
+        // the first argument or as the second argument to the function)
+        let mut bee = self.0.to_coo().into_bee();
+        for prim_r in sc.primitive_indices() {
+            let super_r = sc.designated_super(prim_r);
+            for super_c in sc.super_indices() {
+                if super_r == super_c {
+                    assert!(!done[prim_r].contains(&super_c));
+
+                    let diag = bee.get_mut(prim_r, super_c);
+                    *diag = visit_diag(diag);
+
+                    done[prim_r].insert(super_c);
+                } else if !done[prim_r].contains(&super_c) {
+                    // Find the indices of the transposed element.
+                    let (prim_r_t, super_c_t) = get_effective_indices(
+                        sc, &primitive_atoms, &lattice_points,
+                        (super_c, super_r),
+                    );
+                    assert!(!done[prim_r_t].contains(&super_c_t));
+
+                    let mat = *bee.get_mut(prim_r, super_c);
+                    let mat_t = *bee.get_mut(prim_r_t, super_c_t);
+                    let (new, new_t) = visit_regular(&mat, &mat_t);
+                    *bee.get_mut(prim_r, super_c) = new;
+                    *bee.get_mut(prim_r_t, super_c_t) = new_t;
+
+                    done[prim_r].insert(super_c);
+                    done[prim_r_t].insert(super_c_t);
+                }
+            }
+        }
+        self.0 = bee.into_csr();
+    }
+}
+
+// Get indices into the stored data for the submatrix that is identical (according to
+// translational symmetry) to the element that *would* be located at the given indices.
+fn get_effective_indices(
+    sc: SupercellWrapper<'_>,
+    primitive_atoms: &Indexed<SuperI, [PrimI]>,
+    lattice_points: &Indexed<SuperI, [V3<i32>]>,
+    (orig_r, orig_c): (SuperI, SuperI),
+) -> (PrimI, SuperI) {
+    // apply a uniform translation to both indices that maps orig_r into DESIGNATED_CELL
+    let correction: V3<i32> = {
+        let desired = sc.designated_lattice_point;
+        let actual = lattice_points[orig_r];
+        desired - actual
+    };
+
+    let final_c = sc.atom_from_lattice_point(
+        primitive_atoms[orig_c],
+        lattice_points[orig_c] + correction,
+    );
+    (primitive_atoms[orig_r], final_c)
+}
+
+// ------------------------------------------------------
 
 impl DynamicalMatrix {
     // max absolute value of M - M.H
@@ -838,7 +994,10 @@ impl DynamicalMatrix {
     }
 }
 
+// ------------------------------------------------------
+
 /// Wraps SupercellToken with methods that use newtype indices
+#[derive(Copy, Clone)]
 struct SupercellWrapper<'a> {
     raw: &'a SupercellToken,
     designated_lattice_point: V3<i32>,
@@ -848,6 +1007,14 @@ impl<'a> SupercellWrapper<'a> {
     fn new(raw: &'a SupercellToken) -> Self {
         let designated_lattice_point = raw.lattice_point_from_cell(DESIGNATED_CELL);
         Self { raw, designated_lattice_point }
+    }
+
+    fn primitive_indices(&self) -> impl Iterator<Item=PrimI> {
+        (0..self.raw.num_primitive_atoms()).map(PrimI)
+    }
+
+    fn super_indices(&self) -> impl Iterator<Item=SuperI> {
+        (0..self.raw.num_supercell_atoms()).map(SuperI)
     }
 
     // (note: lattice_point is wrapped into the supercell)
@@ -871,6 +1038,8 @@ impl<'a> SupercellWrapper<'a> {
         Indexed::from_raw(self.raw.atom_lattice_points())
     }
 }
+
+// ------------------------------------------------------
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]

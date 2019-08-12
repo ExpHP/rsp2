@@ -375,7 +375,8 @@ where
 ///
 /// An alternative to Csr that is better at supporting in-place modification
 /// (and which is highly ergonomical to iterate over), at the cost of
-/// containing many more separate memory allocations.
+/// containing many more separate memory allocations.  Its `get` and `get_mut`
+/// methods provide an easy way to look up arbitrary elements.
 ///
 /// This type is "Raw" because its members are public and its invariants
 /// are not protected. It exists to document the "intent" of some fields
@@ -403,6 +404,26 @@ impl<T, R: Idx, C: Idx> RawBee<T, R, C> {
 }
 
 impl<T, R: Idx, C: Idx> RawBee<T, R, C> {
+    /// Look up an element, possibly cloning it or returning a zero.
+    pub fn get(&mut self, r: R, c: C) -> T
+    where T: Clone + Zero,
+    {
+        match self.map.get(&r) {
+            Some(row) => row.get(&c).map_or_else(T::zero, Clone::clone),
+            None => T::zero(),
+        }
+    }
+
+    /// Look up an element, possibly inserting a zero.
+    pub fn get_mut(&mut self, r: R, c: C) -> &mut T
+    where T: Zero,
+    {
+        self.map.entry(r)
+            .or_insert_with(BTreeMap::new)
+            .entry(c)
+            .or_insert_with(T::zero)
+    }
+
     pub fn into_csr(self) -> RawCsr<T, R, C> {
         if cfg!(debug_assertions) {
             self.validate().unwrap();
