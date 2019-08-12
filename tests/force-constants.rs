@@ -116,7 +116,7 @@ fn check(
         };
         let expected_force_constants: Vec<_> = permute_block(orig_force_constants);
 
-        let raw = force_constants.to_dense_matrix();
+        let raw = force_constants.to_dense_matrix_with_zeroed_rows(&sc);
         assert_eq!(raw.len(), sc.num_supercell_atoms());
         assert_eq!(raw[0].len(), sc.num_supercell_atoms());
         for r in 0..sc.num_supercell_atoms() {

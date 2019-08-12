@@ -503,7 +503,10 @@ fn do_compute_dynmat(
         if let Some(phonopy_info) = &phonopy_info {
             trace!("Creating rsp2-fcs.json file for rsp2_tasks::special::phonopy_force_constants");
             let deperm_to_phonopy = &phonopy_info.coperm_from_phonopy; // inverse of inverse
-            let phonopy_fcs = force_constants.clone().permuted_by(deperm_to_phonopy);
+            let phonopy_fcs = {
+                force_constants.to_full_force_constants_with_zeroed_rows(&sc)
+                    .permuted_by(deperm_to_phonopy)
+            };
             if let Err(e) = Json(phonopy_fcs.to_dense_matrix()).save(debug_files_root.join("rsp2-fcs.json")) {
                 warn!("Error writing force constants debug file: {}", e);
             }

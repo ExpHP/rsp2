@@ -34,9 +34,22 @@ newtype_index!{StarI}  // index of a star of sites equivalent under symmetry
 newtype_index!{OperI}  // index into the space group
 newtype_index!{EqnI}   // row of a table of equations that will be solved by pseudo inverse
 
+/// Capable of representing the complete force constants matrix, including redundant rows that are
+/// related by translation to other rows.  Only really used for debugging and for tests.
+///
+/// Does not *necessarily* contain data at all rows.  That is, some instances of
+/// `FullForceConstants` might only have the the rows in `ForceConstants::DESIGNATED_CELL` filled.
+/// (or perhaps it has some other arbitrary set of indices filled, such as e.g. the indices chosen
+/// to be displaced by another tool such as phonopy)
+#[derive(Debug, Clone)]
+pub struct FullForceConstants(
+    RawCoo<M33, SuperI, SuperI>,
+);
+
+/// Force constants matrix, with only rows for atoms in `ForceConstants::DESIGNATED_CELL` stored.
 #[derive(Debug, Clone)]
 pub struct ForceConstants(
-    RawCoo<M33, SuperI, SuperI>,
+    RawCsr<M33, PrimI, SuperI>,
 );
 
 #[derive(Debug, Clone)]
@@ -44,9 +57,11 @@ pub struct DynamicalMatrix(
     pub RawCsr<Complex33, PrimI, PrimI>,
 );
 
+const DESIGNATED_CELL: [u32; 3] = [0, 0, 0];
+
 impl ForceConstants {
     /// Displaced atoms must always be in this cell.
-    pub const DESIGNATED_CELL: [u32; 3] = [0, 0, 0];
+    pub const DESIGNATED_CELL: [u32; 3] = DESIGNATED_CELL;
 
     /// Compute a partially filled force constants matrix that contains only the rows
     /// that appear in the definition of the dynamical matrix. (those where the displaced
@@ -89,19 +104,17 @@ impl ForceConstants {
         let cart_rots: &Indexed<OperI, [M33]> = Indexed::from_raw_ref(cart_rots);
         let super_deperms: &Indexed<OperI, [Perm]> = Indexed::from_raw_ref(super_deperms);
 
-        let primitive_atoms: Indexed<SuperI, Vec<PrimI>>;
-        let lattice_points:  Indexed<SuperI, Vec<V3<i32>>>;
-        primitive_atoms = Indexed::from_raw(index_cast(sc.atom_primitive_atoms()));
-        lattice_points = Indexed::from_raw(sc.atom_lattice_points());
+        let sc = SupercellWrapper::new(sc);
+
+        let primitive_atoms: Indexed<SuperI, Vec<PrimI>> = sc.atom_primitive_atoms();
+        let lattice_points: Indexed<SuperI, Vec<V3<i32>>> = sc.atom_lattice_points();
         let primitive_atoms = &primitive_atoms[..];
         let lattice_points = &lattice_points[..];
-
-        let designated_lattice_point = sc.lattice_point_from_cell(Self::DESIGNATED_CELL);
 
         let displacements: Indexed<DispI, Vec<(PrimI, V3)>> = {
             super_displacements.iter()
                 .map(|&(super_disp, force)| {
-                    if lattice_points[super_disp] != designated_lattice_point {
+                    if lattice_points[super_disp] != sc.designated_lattice_point {
                         // (NOTE: this requirement could easily be lifted by correcting the indices in
                         //        force sets by applying lattice point translations that move the displaced
                         //        atom to DESIGNATED_CELL.  I have not implemented this because I haven't
@@ -112,7 +125,7 @@ impl ForceConstants {
                                 ForceConstants::DESIGNATED_CELL (= {:?}). (found atom with cell {:?})\
                             ",
                             ForceConstants::DESIGNATED_CELL,
-                            sc.cell_from_lattice_point(lattice_points[super_disp]),
+                            sc.raw.cell_from_lattice_point(lattice_points[super_disp]),
                         )
                     }
                     Ok((primitive_atoms[super_disp], force))
@@ -122,7 +135,7 @@ impl ForceConstants {
         Context {
             displacements: &displacements,
             sc, primitive_atoms, lattice_points, force_sets,
-            cart_rots, super_deperms, designated_lattice_point,
+            cart_rots, super_deperms,
         }.compute_force_constants()
     }
 }
@@ -134,15 +147,11 @@ struct Context<'ctx> {
     force_sets:      &'ctx Indexed<DispI, [BTreeMap<SuperI, V3>]>,
     cart_rots:       &'ctx Indexed<OperI, [M33]>,
     super_deperms:   &'ctx Indexed<OperI, [Perm]>,
-    sc:              &'ctx SupercellToken,
+    sc:              SupercellWrapper<'ctx>,
 
-    // Some data from `sc` wrapped with newtyped indices
+    // Some data from `sc`
     primitive_atoms: &'ctx Indexed<SuperI, [PrimI]>,
     lattice_points:  &'ctx Indexed<SuperI, [V3<i32>]>,
-
-    // We only bother populating the rows of the force constants matrix
-    // that correspond to displaced atoms in a single image of the primitive cell.
-    designated_lattice_point: V3<i32>,
 }
 
 impl<'ctx> Context<'ctx> {
@@ -156,13 +165,9 @@ impl<'ctx> Context<'ctx> {
         let all_rows = self.derive_rows_by_symmetry(&star_data, &prim_data, representative_rows);
 
         let matrix = {
-            let dim = (self.sc.num_supercell_atoms(), self.sc.num_supercell_atoms());
-            let map = {
-                all_rows.into_iter_enumerated()
-                    .map(|(prim, row_map)| (self.designated_super(prim), row_map))
-                    .collect()
-            };
-            RawBee { dim, map }.into_coo()
+            let dim = (self.sc.raw.num_supercell_atoms(), self.sc.raw.num_supercell_atoms());
+            let map = all_rows.into_iter_enumerated().collect();
+            RawBee { dim, map }.into_csr()
         };
         Ok(ForceConstants(matrix))
     }
@@ -220,9 +225,9 @@ impl<'ctx> Context<'ctx> {
 
         // Gather data relating each primitive atom to its site-symmetry representative.
         let prim_data: Indexed<PrimI, Vec<PrimData>> = {
-            let mut data = Indexed::<PrimI, _>::from_elem_n(None, self.sc.num_primitive_atoms());
+            let mut data = Indexed::<PrimI, _>::from_elem_n(None, self.sc.raw.num_primitive_atoms());
             for (star, star_data) in star_data.iter_enumerated() {
-                let representative_atom = self.atom_from_lattice_point(star_data.representative, self.designated_lattice_point);
+                let representative_atom = self.sc.atom_from_lattice_point(star_data.representative, self.sc.designated_lattice_point);
                 for oper in self.oper_indices() {
                     let permuted_atom = self.rotate_atom(oper, representative_atom);
                     let prim = self.primitive_atoms[permuted_atom];
@@ -484,17 +489,17 @@ impl<'ctx> Context<'ctx> {
     // atom.
     fn get_corrected_rotate<'a>(&'a self, oper: OperI, displaced: PrimI) -> (PrimI, impl Fn(SuperI) -> SuperI + 'a)
     {
-        let displaced_super = self.atom_from_lattice_point(displaced, self.designated_lattice_point);
+        let displaced_super = self.sc.designated_super(displaced);
 
         let correction: V3<i32> = {
-            let desired = self.designated_lattice_point;
+            let desired = self.sc.designated_lattice_point;
             let actual = self.lattice_points[self.rotate_atom(oper, displaced_super)];
             desired - actual
         };
 
         let rotate_and_translate = move |atom| {
             let atom = self.rotate_atom(oper, atom);
-            self.atom_from_lattice_point(
+            self.sc.atom_from_lattice_point(
                 self.primitive_atoms[atom],
                 self.lattice_points[atom] + correction,
             )
@@ -516,76 +521,90 @@ impl<'ctx> Context<'ctx> {
         SuperI::new(deperm.permute_index(atom.index()))
     }
 
-    // (note: lattice_point is wrapped into the supercell)
-    fn atom_from_lattice_point(&self, prim: PrimI, lattice_point: V3<i32>) -> SuperI {
-        SuperI::new(self.sc.atom_from_lattice_point(prim.index(), lattice_point))
-    }
-
-    fn designated_super(&self, prim: PrimI) -> SuperI {
-        self.atom_from_lattice_point(prim, self.designated_lattice_point)
-    }
-
     // recovers the primitive index from a supercell index whose lattice point is
     // `designated_lattice_point`. (panics if this does not hold, in which case you
     // may have forgotten to apply a translation or something)
     fn prim_from_designated_super(&self, atom: SuperI) -> PrimI {
-        assert_eq!(self.designated_lattice_point, self.lattice_points[atom]);
+        assert_eq!(self.sc.designated_lattice_point, self.lattice_points[atom]);
         self.primitive_atoms[atom]
     }
 }
 
 #[allow(unused)]
 impl ForceConstants {
-    // Take ForceConstants where row_atom is always in DISPLACED_CELL
-    // and generate all the other rows.
+    /// Produces a dense matrix indexed by `[SuperI, SuperI]` with all entries filled, even those
+    /// that are redundant under translational symmetry.
+    pub fn to_dense_matrix(&self, sc: &SupercellToken) -> Vec<Vec<M33>> {
+        self.to_full_force_constants_with_zeroed_rows(sc)
+            .add_rows_for_other_cells(sc)
+            .to_dense_matrix()
+    }
+
+    /// Produces a dense matrix indexed by `[SuperI, SuperI]` where the rows outside of
+    /// `ForceConstants::DESIGNATED_CELL` are zero.
+    pub fn to_dense_matrix_with_zeroed_rows(&self, sc: &SupercellToken) -> Vec<Vec<M33>> {
+        self.to_full_force_constants_with_zeroed_rows(sc)
+            .to_dense_matrix()
+    }
+
+    /// Convert to a type capable of containing data in arbitrary supercell rows, but do not yet
+    /// actually fill the rows outside `ForceConstants::DESIGNATED_CELL`. (the data will still be
+    /// sparse; this mostly just replaces primitive indices with supercell indices)
+    ///
+    /// Why?  Well, it provides a `Permute` impl, which could be used to construct something closer
+    /// to the output of another tool like phonopy.
+    pub fn to_full_force_constants_with_zeroed_rows(&self, sc: &SupercellToken) -> FullForceConstants {
+        let sc = SupercellWrapper::new(sc);
+        FullForceConstants({
+            self.0.to_coo()
+                .map_row_indices(
+                    sc.raw.num_supercell_atoms(),
+                    |prim| sc.designated_super(prim),
+                )
+        })
+    }
+}
+
+impl FullForceConstants {
+    /// Take FullForceConstants where `row_atom` is always in `DISPLACED_CELL`
+    /// and generate all the other rows.
     //
     // NOTE: This is just here for the lulz, in case you need something easier to
     //       compare against phonopy pre-12.8.  The rows outside of the designated
     //       cell are merely permuted forms of the designated rows, and do not even
     //       appear in the formula for the dynamical matrix.
-    //
-    //       Adding them *could* make cleaning the FCs easier, if we wanted to simulate
-    //       phonopy's FC_SYMMETRY, though I think that *even then* they are still
-    //       unnecessary. Phonopy's `perm_trans_symmetrize_fc` C function does something
-    //       clever (and obscure, and undocumented...) to impose translational invariance
-    //       on both the rows and columns by only using the data within a row.
-    //       (together with the fact that it just symmetrized the matrix)
-    #[allow(unused)]
-    pub fn add_rows_for_other_cells(mut self, sc: &SupercellToken) -> Self {
+    pub fn add_rows_for_other_cells(mut self, sc: &SupercellToken) -> FullForceConstants {
+        let sc = SupercellWrapper::new(sc);
+
         assert!({
             let cells = sc.atom_cells();
-            self.0.row.iter().all(|&SuperI(row)| cells[row] == Self::DESIGNATED_CELL)
+            self.0.row.iter().all(|&row| cells[row] == DESIGNATED_CELL)
         });
 
         let old_len = self.0.row.len();
         for axis in 0..3 {
             // get deperm that translates data by one cell along this axis
             let unit = V3::from_fn(|i| (i == axis) as i32);
-            let deperm = sc.lattice_point_translation_deperm(unit);
+            let deperm = sc.raw.lattice_point_translation_deperm(unit);
 
             let mut permuted_fcs = self.clone();
 
             // skip 0 because 'self' already has the data for 0 cell translation
-            for _ in 1..sc.periods()[axis] {
+            for _ in 1..sc.raw.periods()[axis] {
                 permuted_fcs = permuted_fcs.permuted_by(&deperm);
                 self.0 = self.0 + permuted_fcs.0.clone();
             }
         }
-        assert_eq!(self.0.row.len(), old_len * sc.num_cells());
+        assert_eq!(self.0.row.len(), old_len * sc.raw.num_cells());
         self
     }
 
-    // HACK
-    fn from_dense_matrix(mat: Vec<Vec<M33>>) -> ForceConstants {
-        let RawCoo { dim, row, col, val } = RawCoo::<_, SuperI, SuperI>::from_dense(mat);
-        ForceConstants(RawCoo { dim, row, col, val })
-    }
-
-    // HACK
     pub fn to_dense_matrix(&self) -> Vec<Vec<M33>> {
         self.0.to_dense()
     }
+}
 
+impl ForceConstants {
     /// Compute the dynamical matrix at a q-point.
     ///
     /// The force constants do not need to contain data for rows outside the
@@ -600,11 +619,8 @@ impl ForceConstants {
         assert_eq!(masses.len(), sc.num_primitive_atoms());
         let masses: &Indexed<PrimI, _> = Indexed::from_raw_ref(&masses[..]);
 
-        let sc = sc.clone();
-
+        let sc = SupercellWrapper::new(sc);
         let primitive_atoms = sc.atom_primitive_atoms();
-        let cells = sc.atom_cells();
-        let get_prim = |SuperI(r)| PrimI(primitive_atoms[r.index()]);
 
         // Since rsp2 pays so much attention to image vectors (see FracBond) in places,
         // one might wonder why it is now doing brute-force searches for nearest images.
@@ -622,15 +638,13 @@ impl ForceConstants {
         });
 
         let mut shortest_images_buf = vec![];
-        let iter = zip_eq!(&self.0.row, &self.0.col, &self.0.val)
-            // ignore elements outside the rows of the designated cell, which were added
-            // for no other purpose than to facilitate imposing translational invariance
-            .filter(|&(&SuperI(r), _, _)| cells[r] == Self::DESIGNATED_CELL)
+        let coo = self.0.to_coo();
+        let iter = zip_eq!(&coo.row, &coo.col, &coo.val)
             // each column of the dynamical matrix sums over columns for images in
             // the force constants matrix, with phase factors.
-            .map(|(&super_r, &super_c, &mat)| {
-                let prim_r = get_prim(super_r);
-                let prim_c = get_prim(super_c);
+            .map(|(&prim_r, &super_c, &mat)| {
+                let super_r = sc.designated_super(prim_r);
+                let prim_c = primitive_atoms[super_c];
 
                 // mass-normalizing scale factor
                 let scale = 1.0 / f64::sqrt(masses[prim_r] * masses[prim_c]);
@@ -704,7 +718,7 @@ impl ForceConstants {
         let matrix = {
             let (pos, val): (Vec<_>, Vec<_>) = iter.unzip();
             let (row, col) = pos.into_iter().unzip();
-            let dim = (sc.num_primitive_atoms(), sc.num_primitive_atoms());
+            let dim = (sc.raw.num_primitive_atoms(), sc.raw.num_primitive_atoms());
 
             if val != val {
                 panic!("Dynamical matrix contains NaN!");
@@ -718,16 +732,16 @@ impl ForceConstants {
 
 // both the rows and columns of ForceConstants are conceptually indexed
 // by the same index type, so the Permute impl permutes both.
-impl Permute for ForceConstants {
-    fn permuted_by(self, perm: &Perm) -> ForceConstants {
-        let ForceConstants(RawCoo { dim, mut row, mut col, val }) = self;
+impl Permute for FullForceConstants {
+    fn permuted_by(self, perm: &Perm) -> FullForceConstants {
+        let FullForceConstants(RawCoo { dim, mut row, mut col, val }) = self;
         for SuperI(r) in &mut row {
             *r = perm.permute_index(*r);
         }
         for SuperI(c) in &mut col {
             *c = perm.permute_index(*c);
         }
-        ForceConstants(RawCoo { dim, row, col, val })
+        FullForceConstants(RawCoo { dim, row, col, val })
     }
 }
 
@@ -821,6 +835,40 @@ impl DynamicalMatrix {
         }
 
         Some(out)
+    }
+}
+
+/// Wraps SupercellToken with methods that use newtype indices
+struct SupercellWrapper<'a> {
+    raw: &'a SupercellToken,
+    designated_lattice_point: V3<i32>,
+}
+
+impl<'a> SupercellWrapper<'a> {
+    fn new(raw: &'a SupercellToken) -> Self {
+        let designated_lattice_point = raw.lattice_point_from_cell(DESIGNATED_CELL);
+        Self { raw, designated_lattice_point }
+    }
+
+    // (note: lattice_point is wrapped into the supercell)
+    fn atom_from_lattice_point(&self, prim: PrimI, lattice_point: V3<i32>) -> SuperI {
+        SuperI::new(self.raw.atom_from_lattice_point(prim.index(), lattice_point))
+    }
+
+    fn designated_super(&self, prim: PrimI) -> SuperI {
+        self.atom_from_lattice_point(prim, self.designated_lattice_point)
+    }
+
+    fn atom_cells(&self) -> Indexed<SuperI, Vec<[u32; 3]>> {
+        Indexed::from_raw(self.raw.atom_cells())
+    }
+
+    fn atom_primitive_atoms(&self) -> Indexed<SuperI, Vec<PrimI>> {
+        Indexed::from_raw(index_cast(self.raw.atom_primitive_atoms()))
+    }
+
+    fn atom_lattice_points(&self) -> Indexed<SuperI, Vec<V3<i32>>> {
+        Indexed::from_raw(self.raw.atom_lattice_points())
     }
 }
 

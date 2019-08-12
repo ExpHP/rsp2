@@ -88,6 +88,24 @@ impl<T, R: Idx, C: Idx> RawCoo<T, R, C> {
         RawCoo { dim, val, col, row }
     }
 
+    /// COO provides the unique capability of mapping indices with an arbitrary function.
+    /// Remember, entries with duplicate indices in the output will be implicitly summed.
+    pub fn map_row_indices<F, R2: Idx>(self, new_dim: usize, f: F) -> RawCoo<T, R2, C>
+    where F: FnMut(R) -> R2,
+    {
+        let RawCoo { dim, val, col, row } = self;
+        let row = row.into_iter().map(f).collect();
+        RawCoo { dim: (new_dim, dim.1), val, col, row }
+    }
+
+    pub fn map_column_indices<F, C2: Idx>(self, new_dim: usize, f: F) -> RawCoo<T, R, C2>
+    where F: FnMut(C) -> C2,
+    {
+        let RawCoo { dim, val, col, row } = self;
+        let col = col.into_iter().map(f).collect();
+        RawCoo { dim: (dim.0, new_dim), val, col, row }
+    }
+
     /// Transpose R and C, disregarding T.  (i.e. if T happens to be some kind of matrix
     /// block type like M33, it will not be affected by this operation)
     pub fn into_raw_transpose(self) -> RawCoo<T, C, R> {
