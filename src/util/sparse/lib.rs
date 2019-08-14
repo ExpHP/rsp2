@@ -59,7 +59,7 @@ macro_rules! ensure {
 /// This type is "Raw" because its members are public and its invariants
 /// are not protected. It exists to document the "intent" of some fields
 /// of a struct, and to provide some simple utility methods.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)] // PartialEq and Eq deliberately omitted
 pub struct RawCoo<T, R: Idx = usize, C: Idx = R> {
     pub dim: (usize, usize),
     pub val: Vec<T>,
@@ -284,7 +284,7 @@ where
 /// This type is "Raw" because its members are public and its invariants
 /// are not protected. It exists to document the "intent" of some fields
 /// of a struct, and to provide some simple utility methods.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)] // PartialEq and Eq deliberately omitted
 pub struct RawCsr<T, R: Idx = usize, C: Idx = R> {
     pub dim: (usize, usize),
     pub val: Vec<T>,
@@ -381,7 +381,7 @@ where
 /// This type is "Raw" because its members are public and its invariants
 /// are not protected. It exists to document the "intent" of some fields
 /// of a struct, and to provide some simple utility methods.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct RawBee<T, R: Idx = usize, C: Idx = R> {
     pub dim: (usize, usize),
     pub map: BTreeMap<R, BTreeMap<C, T>>,

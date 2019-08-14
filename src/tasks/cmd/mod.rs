@@ -504,7 +504,7 @@ fn do_compute_dynmat(
             trace!("Creating rsp2-fcs.json file for rsp2_tasks::special::phonopy_force_constants");
             let deperm_to_phonopy = &phonopy_info.coperm_from_phonopy; // inverse of inverse
             let phonopy_fcs = {
-                force_constants.to_full_force_constants_with_zeroed_rows(&sc)
+                force_constants.to_super_force_constants_with_zeroed_rows(&sc)
                     .permuted_by(deperm_to_phonopy)
             };
             if let Err(e) = Json(phonopy_fcs.to_dense_matrix()).save(debug_files_root.join("rsp2-fcs.json")) {

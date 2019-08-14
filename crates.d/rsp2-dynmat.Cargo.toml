@@ -23,5 +23,8 @@ path = "lib.rs"
 !!num-traits
 !!log
 
+[dev-dependencies]
+!!rand
+
 [features]
 !!NIGHTLY-FEATURE-LINE

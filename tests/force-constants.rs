@@ -3,13 +3,14 @@
 
 #[macro_use] extern crate serde_derive;
 
-use ::rsp2_integration_test::filetypes::Primitive;
 
 type FailResult<T> = Result<T, ::failure::Error>;
 
-use ::rsp2_array_types::{M33, V3, Unvee};
-use ::rsp2_structure::{Coords};
-use ::rsp2_soa_ops::{Permute};
+use rsp2_integration_test::filetypes::Primitive;
+use rsp2_dynmat::SuperForceConstants;
+use rsp2_array_types::{M33, V3, Unvee};
+use rsp2_structure::{Coords};
+use rsp2_soa_ops::{Permute};
 
 #[derive(Deserialize)]
 pub struct ForceSets {
@@ -19,6 +20,14 @@ pub struct ForceSets {
     #[serde(rename =     "structure")] orig_super_coords: Coords,
 }
 impl_json!{ (ForceSets)[load] }
+
+#[derive(Deserialize)]
+struct InputForceConstants {
+    #[serde(rename =   "sc-dims")] sc_dims: [u32; 3],
+    #[serde(rename =     "dense")] orig_force_constants: Vec<Vec<M33>>, // [super][super]
+    #[serde(rename = "structure")] orig_super_coords: Coords,
+}
+impl_json!{ (InputForceConstants)[load] }
 
 #[derive(Deserialize)]
 struct OutputForceConstants {
@@ -52,7 +61,10 @@ fn check(
         sc_dims, orig_super_coords, orig_super_force_sets, orig_displacements,
     } = ForceSets::load(super_info)?;
 
-    let orig_force_constants = expected_fc.map(|path| OutputForceConstants::load(path).unwrap().orig_force_constants);
+    let orig_force_constants = expected_fc.map(|path| {
+        let matrix = OutputForceConstants::load(path).unwrap().orig_force_constants;
+        SuperForceConstants::from_dense_matrix(matrix)
+    });
 
     let OutputDynMat {
         expected_dynmat_real,
@@ -63,13 +75,15 @@ fn check(
 
     // permute expected output into correct order for the current supercell convention
     // (this is to be robust to changes in supercell ordering convention)
-    let perm_from_orig = orig_super_coords.perm_to_match(&super_coords, 1e-10)?;
+    let coperm_from_orig = orig_super_coords.perm_to_match(&super_coords, 1e-10)?;
+    let deperm_from_orig = coperm_from_orig.inverted();
+
     let super_force_sets: Vec<_> = {
         orig_super_force_sets
             .into_iter()
             .map(|row| {
                 row.into_iter()
-                    .map(|(atom, v)| (perm_from_orig.permute_index(atom), v))
+                    .map(|(atom, v)| (deperm_from_orig.permute_index(atom), v))
                     .collect()
             })
             .collect()
@@ -78,7 +92,7 @@ fn check(
     let super_displacements: Vec<_> = {
         orig_displacements.into_iter()
             .map(|(orig_atom, v3)| {
-                let atom = perm_from_orig.permute_index(orig_atom);
+                let atom = deperm_from_orig.permute_index(orig_atom);
                 (atom, v3)
             })
             .collect()
@@ -107,24 +121,18 @@ fn check(
     )?;
 
     if let Some(orig_force_constants) = orig_force_constants {
-        // (permute both the rows and cols of a dense matrix from the original supercell
-        // order into the current)
-        let permute_block = |m: Vec<Vec<M33>>| {
-            m.permuted_by(&perm_from_orig)
-                .into_iter().map(|x| x.permuted_by(&perm_from_orig))
-                .collect::<Vec<_>>()
-        };
-        let expected_force_constants: Vec<_> = permute_block(orig_force_constants);
+        let expected_force_constants = orig_force_constants.permuted_by(&deperm_from_orig);
 
-        let raw = force_constants.to_dense_matrix_with_zeroed_rows(&sc);
-        assert_eq!(raw.len(), sc.num_supercell_atoms());
-        assert_eq!(raw[0].len(), sc.num_supercell_atoms());
+        let actual = force_constants.to_super_force_constants_with_zeroed_rows(&sc).to_dense_matrix();
+        let expected = expected_force_constants.to_dense_matrix();
+        assert_eq!(actual.len(), sc.num_supercell_atoms());
+        assert_eq!(actual[0].len(), sc.num_supercell_atoms());
         for r in 0..sc.num_supercell_atoms() {
             for c in 0..sc.num_supercell_atoms() {
                 assert_close!(
                     rel=rel_tol, abs=abs_tol,
-                    raw[r][c].unvee(),
-                    expected_force_constants[r][c].unvee(),
+                    actual[r][c].unvee(),
+                    expected[r][c].unvee(),
                     "{:?}", force_constants,
                 );
             }
@@ -165,6 +173,66 @@ fn check(
             }
         }
     }
+    Ok(())
+}
+
+fn check_translational_invariance(
+    prim_info: &str,
+    initial_fc: &str,
+    expected_fc: &str,
+    level: u32,
+    rel_tol: f64,
+    abs_tol: f64,
+) -> FailResult<()> {
+    let Primitive {
+        cart_ops: _,
+        masses: _,
+        coords: prim_coords,
+    } = Primitive::load(prim_info)?;
+
+    let InputForceConstants {
+        orig_force_constants: orig_input,
+        sc_dims, orig_super_coords,
+    } = InputForceConstants::load(initial_fc)?;
+
+    let OutputForceConstants {
+        orig_force_constants: orig_output,
+    } = OutputForceConstants::load(expected_fc)?;
+
+    let orig_input = SuperForceConstants::from_dense_matrix(orig_input);
+    let orig_output = SuperForceConstants::from_dense_matrix(orig_output);
+
+    let (super_coords, sc) = rsp2_structure::supercell::diagonal(sc_dims).build(&prim_coords);
+
+    // permute expected output into correct order for the current supercell convention
+    // (this is to be robust to differences in supercell ordering convention)
+    let coperm_from_orig = orig_super_coords.perm_to_match(&super_coords, 1e-10)?;
+    let deperm_from_orig = coperm_from_orig.inverted();
+
+    let input = orig_input.permuted_by(&deperm_from_orig);
+    let expected_output = orig_output.permuted_by(&deperm_from_orig);
+
+    let output = {
+        input.drop_non_designated_rows(&sc)
+            .impose_translational_invariance(&sc, level)
+            .to_super_force_constants_with_zeroed_rows(&sc)
+    };
+
+    let actual = output.to_dense_matrix();
+    let expected = expected_output.to_dense_matrix();
+    assert_eq!(actual.len(), sc.num_supercell_atoms());
+    assert_eq!(actual[0].len(), sc.num_supercell_atoms());
+    for r in 0..sc.num_supercell_atoms() {
+        for c in 0..sc.num_supercell_atoms() {
+            assert_close!(
+                rel=rel_tol, abs=abs_tol,
+                actual[r][c].unvee(),
+                expected[r][c].unvee(),
+                "{:?}", actual,
+            );
+        }
+    }
+
     Ok(())
 }
 
@@ -260,6 +328,36 @@ fn blg_force_sets_m() {
         None, // no fc file
         "tests/resources/force-constants/blg-m.dynmat.json",
         V3([0.5, 0.0, 0.0]),
+        1e-10,
+        1e-12,
+    ).unwrap()
+}
+
+#[test]
+fn impose_translational_invariance_0() {
+    check_translational_invariance(
+        "tests/resources/primitive/blg.json",
+        // files crafted by hand by hacking phonopy's `symmetrize_compact_force_constants` to
+        // use random data and to write the initial and final force constants.
+        "tests/resources/force-constants/symmetrize-input.json.xz",
+        "tests/resources/force-constants/symmetrize-output-0.fc.json.xz",
+        // level = 0 is effectively equivalent to a call to `impose_translational_symmetry`,
+        // allowing us to test that function in isolation.
+        0,
+        1e-10,
+        1e-12,
+    ).unwrap()
+}
+
+#[test]
+fn impose_translational_invariance_2() {
+    check_translational_invariance(
+        "tests/resources/primitive/blg.json",
+        // files crafted by hand by hacking phonopy's `symmetrize_compact_force_constants` to
+        // use random data and to write the initial and final force constants.
+        "tests/resources/force-constants/symmetrize-input.json.xz",
+        "tests/resources/force-constants/symmetrize-output-2.fc.json.xz",
+        2, // level
         1e-10,
         1e-12,
     ).unwrap()

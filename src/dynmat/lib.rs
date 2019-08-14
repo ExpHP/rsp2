@@ -38,11 +38,11 @@ newtype_index!{EqnI}   // row of a table of equations that will be solved by pse
 /// related by translation to other rows.  Only really used for debugging and for tests.
 ///
 /// Does not *necessarily* contain data at all rows.  That is, some instances of
-/// `FullForceConstants` might only have the the rows in `ForceConstants::DESIGNATED_CELL` filled.
+/// `SuperForceConstants` might only have the the rows in `ForceConstants::DESIGNATED_CELL` filled.
 /// (or perhaps it has some other arbitrary set of indices filled, such as e.g. the indices chosen
 /// to be displaced by another tool such as phonopy)
 #[derive(Debug, Clone)]
-pub struct FullForceConstants(
+pub struct SuperForceConstants(
     RawCoo<M33, SuperI, SuperI>,
 );
 
@@ -658,32 +658,17 @@ impl ForceConstants {
 
 // ------------------------------------------------------
 
-#[allow(unused)]
 impl ForceConstants {
-    /// Produces a dense matrix indexed by `[SuperI, SuperI]` with all entries filled, even those
-    /// that are redundant under translational symmetry.
-    pub fn to_dense_matrix(&self, sc: &SupercellToken) -> Vec<Vec<M33>> {
-        self.to_full_force_constants_with_zeroed_rows(sc)
-            .add_rows_for_other_cells(sc)
-            .to_dense_matrix()
-    }
-
-    /// Produces a dense matrix indexed by `[SuperI, SuperI]` where the rows outside of
-    /// `ForceConstants::DESIGNATED_CELL` are zero.
-    pub fn to_dense_matrix_with_zeroed_rows(&self, sc: &SupercellToken) -> Vec<Vec<M33>> {
-        self.to_full_force_constants_with_zeroed_rows(sc)
-            .to_dense_matrix()
-    }
-
     /// Convert to a type capable of containing data in arbitrary supercell rows, but do not yet
     /// actually fill the rows outside `ForceConstants::DESIGNATED_CELL`. (the data will still be
     /// sparse; this mostly just replaces primitive indices with supercell indices)
     ///
     /// Why?  Well, it provides a `Permute` impl, which could be used to construct something closer
-    /// to the output of another tool like phonopy.
-    pub fn to_full_force_constants_with_zeroed_rows(&self, sc: &SupercellToken) -> FullForceConstants {
+    /// to the output of another tool like phonopy.  It also provides conversions to and from dense
+    /// matrices, for debugging and testing.
+    pub fn to_super_force_constants_with_zeroed_rows(&self, sc: &SupercellToken) -> SuperForceConstants {
         let sc = SupercellWrapper::new(sc);
-        FullForceConstants({
+        SuperForceConstants({
             self.0.to_coo()
                 .map_row_indices(
                     sc.raw.num_supercell_atoms(),
@@ -691,17 +676,19 @@ impl ForceConstants {
                 )
         })
     }
+
+    pub fn to_super_force_constants_with_all_rows(&self, sc: &SupercellToken) -> SuperForceConstants {
+        self.to_super_force_constants_with_zeroed_rows(sc)
+            .add_rows_for_other_cells(sc)
+    }
 }
 
-impl FullForceConstants {
-    /// Take FullForceConstants where `row_atom` is always in `DISPLACED_CELL`
+impl SuperForceConstants {
+    /// Take `SuperForceConstants` where `row_atom` is always in `DISPLACED_CELL`
     /// and generate all the other rows.
-    //
-    // NOTE: This is just here for the lulz, in case you need something easier to
-    //       compare against phonopy pre-12.8.  The rows outside of the designated
-    //       cell are merely permuted forms of the designated rows, and do not even
-    //       appear in the formula for the dynamical matrix.
-    pub fn add_rows_for_other_cells(mut self, sc: &SupercellToken) -> FullForceConstants {
+    ///
+    /// Useful for unit tests.
+    pub fn add_rows_for_other_cells(mut self, sc: &SupercellToken) -> SuperForceConstants {
         let sc = SupercellWrapper::new(sc);
 
         assert!({
@@ -730,20 +717,56 @@ impl FullForceConstants {
     pub fn to_dense_matrix(&self) -> Vec<Vec<M33>> {
         self.0.to_dense()
     }
+
+    pub fn from_dense_matrix(dense: Vec<Vec<M33>>) -> Self {
+        SuperForceConstants(RawCoo::from_dense(dense))
+    }
+
+    pub fn into_transpose(self) -> Self {
+        SuperForceConstants(self.0.into_raw_transpose().map(|m| m.t()))
+    }
+
+    /// Drops all of the rows outside `DESIGNATED_CELL`, to recover the standard `ForceConstants`
+    /// type on which most methods are implemented.
+    ///
+    /// **Warning:** A `SuperForceConstants` may have a set of nonzero rows that does not coincide
+    /// with the sites in `DESIGNATED_CELL` (e.g. it might use the set of sites displaced by
+    /// Phonopy). This method should not be used in such cases, or else data will be lost!.
+    pub fn drop_non_designated_rows(self, sc: &SupercellToken) -> ForceConstants {
+        let SuperForceConstants(RawCoo { dim: _, row, col, val }) = self;
+
+        let sc = SupercellWrapper::new(sc);
+        let cells = sc.atom_cells();
+        let primitive_atoms = sc.atom_primitive_atoms();
+
+        let (mut out_row, mut out_col, mut out_val) = (vec![], vec![], vec![]);
+        for ((super_r, c), x) in row.into_iter().zip(col).zip(val) {
+            if cells[super_r] == DESIGNATED_CELL {
+                out_row.push(primitive_atoms[super_r]);
+                out_col.push(c);
+                out_val.push(x);
+            }
+        }
+
+        let out_dim = (sc.raw.num_primitive_atoms(), sc.raw.num_supercell_atoms());
+        let coo = RawCoo { dim: out_dim, val: out_val, row: out_row, col: out_col };
+
+        ForceConstants(coo.into_csr())
+    }
 }
 
 // both the rows and columns of ForceConstants are conceptually indexed
 // by the same index type, so the Permute impl permutes both.
-impl Permute for FullForceConstants {
-    fn permuted_by(self, perm: &Perm) -> FullForceConstants {
-        let FullForceConstants(RawCoo { dim, mut row, mut col, val }) = self;
+impl Permute for SuperForceConstants {
+    fn permuted_by(self, perm: &Perm) -> SuperForceConstants {
+        let SuperForceConstants(RawCoo { dim, mut row, mut col, val }) = self;
         for SuperI(r) in &mut row {
             *r = perm.permute_index(*r);
         }
         for SuperI(c) in &mut col {
             *c = perm.permute_index(*c);
         }
-        FullForceConstants(RawCoo { dim, row, col, val })
+        SuperForceConstants(RawCoo { dim, row, col, val })
     }
 }
 
@@ -752,9 +775,8 @@ impl Permute for FullForceConstants {
 impl ForceConstants {
     /// Imposes translational invariance like Phonopy.
     ///
-    /// **Warning:** If `level >= 1`, this will cause the force constants to effectively
-    /// become dense.
-    pub fn impose_translational_invariance(&mut self, sc: &SupercellToken, level: u32) {
+    /// **Warning:** This causes the ForceConstants matrix to effectively become dense!
+    pub fn impose_translational_invariance(mut self, sc: &SupercellToken, level: u32) -> Self {
         let sc = SupercellWrapper::new(sc);
         for _ in 0..level {
             for _ in 0..2 {
@@ -764,6 +786,7 @@ impl ForceConstants {
             self.impose_matrix_symmetry(sc);
         }
         self.impose_translational_symmetry(sc);
+        self
     }
 
     // this corresponds to the explicit for loops in py_perm_trans_symmetrize_compact_fc
@@ -786,8 +809,9 @@ impl ForceConstants {
 
     // this corresponds to set_translational_symmetry_compact_fc in _phonopy.c
     //
-    /// Imposes that the sum over each row is zero, by ignoring the existing values in submatrices
-    /// along the main diagonal and replacing them with values computed from the rest of the row.
+    /// If `self` is a symmetric matrix, this imposes that the sum over each row and column is the
+    /// zero matrix, by ignoring the existing values in the submatrices along the main diagonal and
+    /// replacing them with values computed from the rest of the row and column.
     fn impose_translational_symmetry(&mut self, sc: SupercellWrapper<'_>) {
         let mut bee = self.0.to_coo().into_bee();
         for (&prim_r, row) in bee.map.iter_mut() {
@@ -797,6 +821,8 @@ impl ForceConstants {
             row.insert(super_r, M33::zero());
             let sum = row.values().fold(M33::zero(), |acc, m| &acc + m);
 
+            // (to my understanding, the .t() here represents the sum over columns,
+            //  on the precondition that `self` is symmetric)
             row.insert(super_r, -(sum + sum.t()) / 2.0);
         }
         self.0 = bee.into_csr();
@@ -806,39 +832,48 @@ impl ForceConstants {
     //
     /// Transposes the matrix in-place.
     fn transpose_mut(&mut self, sc: SupercellWrapper<'_>,) {
-        self.visit_with_transpose(sc, |&a, &b| (b.t(), a.t()), |d| d.t())
+        self.visit_with_transpose(sc, |&m, &t| (t, m))
     }
 
     // this corresponds to set_index_permutation_symmetry_compact_fc(is_transpose=0) in _phonopy.c
     //
     /// Imposes that `M = M.T` by setting self equal to `(M + M.T) / 2`.
     fn impose_matrix_symmetry(&mut self, sc: SupercellWrapper<'_>,) {
-        self.visit_with_transpose(
-            sc,
-            |&a, &b| {
-                let average = (a + b.t()) / 2.0;
-                (average, average.t())
-            },
-            |d| (d + d.t()) / 2.0,
-        )
+        self.visit_with_transpose(sc, |&m, &t| {
+            let average = (m + t) / 2.0;
+            (average, average)
+        })
     }
 
     // this corresponds to set_index_permutation_symmetry_compact_fc in _phonopy.c
     //
-    /// Finds each pair `(m1, m2)` of matrices that are supposed to be transposes of each other,
-    /// and calls a function to obtain new values for them. `visit_regular` must have the property
-    /// that flipping the arguments flips the output tuple, down to exact precision.
+    /// Finds each pair `(m, t)` of matrices that are supposed to be transposes of each other,
+    /// and calls a function to obtain new values for them.
+    ///
+    /// The input function must have the following properties:
+    ///
+    /// * If the inputs are reversed, the outputs are reversed.
+    ///   (`visit(t, m) == flip(visit(m, t))`, where `flip((x, y)) = (y, x)`)
+    /// * If both inputs are transposed, the outputs are transposed.
+    /// * It is linear.  This implies `visit(zero, zero) == (zero, zero)`.
+    /// * `visit(m, m.t())` must return matrices that are transposes of each other.
+    ///
+    /// **Warning:** The current implementation causes the ForceConstants matrix to effectively
+    /// become dense! (this can be avoided for this specific function, but I haven't bothered
+    /// fixing it because there are other functions where it can't be avoided...)
     fn visit_with_transpose(
         &mut self,
         sc: SupercellWrapper<'_>,
-        mut visit_regular: impl FnMut(&M33, &M33) -> (M33, M33),
-        mut visit_diag: impl FnMut(&M33) -> M33,
+        mut visit: impl FnMut(&M33, &M33) -> (M33, M33),
     ) {
         let mut done: Indexed<PrimI, Vec<BTreeSet<SuperI>>>;
         done = Indexed::from_elem_n(BTreeSet::new(), sc.raw.num_primitive_atoms());
 
         let primitive_atoms = sc.atom_primitive_atoms();
         let lattice_points = sc.atom_lattice_points();
+
+        // NOTE: If we want to avoid densifying the matrix, we can't just iterate over all prim
+        //       indices and all super indices.
 
         // Phonopy iterates by column first.  However, due to the symmetry of `visit_regular`,
         // this has no impact on the output. (it only affects whether some matrices are given as
@@ -847,14 +882,7 @@ impl ForceConstants {
         for prim_r in sc.primitive_indices() {
             let super_r = sc.designated_super(prim_r);
             for super_c in sc.super_indices() {
-                if super_r == super_c {
-                    assert!(!done[prim_r].contains(&super_c));
-
-                    let diag = bee.get_mut(prim_r, super_c);
-                    *diag = visit_diag(diag);
-
-                    done[prim_r].insert(super_c);
-                } else if !done[prim_r].contains(&super_c) {
+                if !done[prim_r].contains(&super_c) {
                     // Find the indices of the transposed element.
                     let (prim_r_t, super_c_t) = get_effective_indices(
                         sc, &primitive_atoms, &lattice_points,
@@ -862,11 +890,11 @@ impl ForceConstants {
                     );
                     assert!(!done[prim_r_t].contains(&super_c_t));
 
-                    let mat = *bee.get_mut(prim_r, super_c);
-                    let mat_t = *bee.get_mut(prim_r_t, super_c_t);
-                    let (new, new_t) = visit_regular(&mat, &mat_t);
-                    *bee.get_mut(prim_r, super_c) = new;
-                    *bee.get_mut(prim_r_t, super_c_t) = new_t;
+                    let m = *bee.get_mut(prim_r, super_c);
+                    let t = bee.get_mut(prim_r_t, super_c_t).t();
+                    let (new_m, new_t) = visit(&m, &t);
+                    *bee.get_mut(prim_r, super_c) = new_m;
+                    *bee.get_mut(prim_r_t, super_c_t) = new_t.t();
 
                     done[prim_r].insert(super_c);
                     done[prim_r_t].insert(super_c_t);
@@ -1100,5 +1128,83 @@ mod complex_33 {
             self.0 += real;
             self.1 += imag;
         }
+    }
+}
+
+// ------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::Rng;
+    use rsp2_structure::{supercell, Lattice, CoordsKind};
+
+    fn make_fc_test_data() -> (ForceConstants, SupercellToken) {
+        // big enough that permutations of translation don't equal their inverse
+        let sc_dim = [3, 3, 1];
+
+        let prim_coords = Coords::new(Lattice::eye(), CoordsKind::Carts(vec![V3::zero(); 2]));
+        let sc = supercell::diagonal(sc_dim).build(&prim_coords).1;
+
+        // generate random force constants
+        let mut rng = rand::thread_rng();
+        let map = (0..sc.num_primitive_atoms()).map(|prim_r| {
+            let row = (0..sc.num_supercell_atoms()).filter_map(|super_c| {
+                if rng.next_f64() > 0.3 {
+                    Some((SuperI(super_c), M33::from_fn(|_, _| 2.0 * rng.next_f64() - 1.0)))
+                } else {
+                    None
+                }
+            }).collect();
+            (PrimI(prim_r), row)
+        }).collect();
+
+        let dim = (sc.num_primitive_atoms(), sc.num_supercell_atoms());
+        let bee = RawBee { map, dim };
+
+        (ForceConstants(bee.to_csr()), sc)
+    }
+
+    #[test]
+    fn fc_transpose() {
+        let (orig, sc) = make_fc_test_data();
+
+        // take the transpose first (tricky), then add the missing rows
+        let actual = {
+            let mut modified = orig.clone();
+            modified.transpose_mut(SupercellWrapper::new(&sc));
+            modified.to_super_force_constants_with_all_rows(&sc)
+        };
+
+        // add the missing rows, then take the transpose (simple)
+        let expected = {
+            let super_fcs = orig.to_super_force_constants_with_all_rows(&sc);
+            super_fcs.into_transpose()
+        };
+
+        assert_eq!(expected.to_dense_matrix(), actual.to_dense_matrix());
+    }
+
+    #[test]
+    fn fc_impose_matrix_symmetry() {
+        let (orig, sc) = make_fc_test_data();
+
+        // symmetrize first (tricky), then add the missing rows
+        let actual = {
+            let mut modified = orig.clone();
+            modified.impose_matrix_symmetry(SupercellWrapper::new(&sc));
+            modified.to_super_force_constants_with_all_rows(&sc)
+        };
+
+        // add the missing rows, then symmetrize (simple)
+        let expected = {
+            let super_fcs = orig.to_super_force_constants_with_all_rows(&sc);
+            SuperForceConstants({
+                (super_fcs.0.clone() + super_fcs.into_transpose().0)
+                    .map(|m| m / 2.0)
+            })
+        };
+
+        assert_eq!(expected.to_dense_matrix(), actual.to_dense_matrix());
     }
 }

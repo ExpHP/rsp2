@@ -28,6 +28,9 @@ failure = "0.1.2"
 num-traits = "0.2.3"
 log = "0.4"
 
+[dev-dependencies]
+rand = "0.3"
+
 [features]
 nightly = ["beta", "rsp2-array-types/nightly", "rsp2-linalg/nightly", "rsp2-newtype-indices/nightly", "rsp2-soa-ops/nightly", "rsp2-sparse/nightly", "rsp2-structure/nightly", "rsp2-util-macros/nightly"]
 beta = ["rsp2-array-types/beta", "rsp2-linalg/beta", "rsp2-newtype-indices/beta", "rsp2-soa-ops/beta", "rsp2-sparse/beta", "rsp2-structure/beta", "rsp2-util-macros/beta"]

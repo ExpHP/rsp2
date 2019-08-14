@@ -382,6 +382,7 @@ impl SupercellToken {
         prim * stride_prim + dot(&strides, &V3(cell).map(|x| x as usize))
     }
 
+    // !!! This function affects the supercell convention !!! (SUPERCELL-CONV)
     /// Defines which image of the primitive cell each atom in the supercell belongs to.
     ///
     /// Each image of the primitive cell is represented by the integral coordinates of the
@@ -394,6 +395,7 @@ impl SupercellToken {
             .collect()
     }
 
+    // !!! This function affects the supercell convention !!! (SUPERCELL-CONV)
     /// Gives coefficients of the lattice vectors that were added to each atom in the supercell.
     ///
     /// This is like `cell_indices`, but gives the indices as signed integer offsets.
@@ -405,6 +407,7 @@ impl SupercellToken {
             .collect()
     }
 
+    // !!! This function affects the supercell convention !!! (SUPERCELL-CONV)
     /// Defines the primitive site corresponding to each supercell site.
     pub fn atom_primitive_atoms(&self) -> Vec<usize> {
         self.replicate(&(0..self.num_primitive_atoms).collect::<Vec<_>>())
