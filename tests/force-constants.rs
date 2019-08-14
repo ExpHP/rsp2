@@ -6,10 +6,10 @@
 
 type FailResult<T> = Result<T, ::failure::Error>;
 
-use rsp2_integration_test::filetypes::Primitive;
+use rsp2_integration_test::{resource, filetypes::Primitive};
 use rsp2_dynmat::SuperForceConstants;
 use rsp2_array_types::{M33, V3, Unvee};
-use rsp2_structure::{Coords};
+use rsp2_structure::{Coords, supercell::SupercellToken};
 use rsp2_soa_ops::{Permute};
 
 #[derive(Deserialize)]
@@ -42,34 +42,39 @@ struct OutputDynMat {
 }
 impl_json!{ (OutputDynMat)[load] }
 
+#[derive(Copy, Clone)]
+struct Tolerances {
+    relative: f64,
+    absolute: f64,
+}
+
 fn check(
-    prim_info: &str,
-    super_info: &str,
-    expected_fc: Option<&str>,
-    expected_dynmat: &str,
+    prim_info_relpath: &str,
+    super_info_relpath: &str,
+    expected_fc_relpath: Option<&str>,
+    expected_dynmat_relpath: &str,
     qpoint_frac: V3,
-    rel_tol: f64,
-    abs_tol: f64,
+    tol: Tolerances,
 ) -> FailResult<()> {
     let Primitive {
         cart_ops,
         masses: prim_masses,
         coords: prim_coords,
-    } = Primitive::load(prim_info)?;
+    } = Primitive::load(resource(prim_info_relpath))?;
 
     let ForceSets {
         sc_dims, orig_super_coords, orig_super_force_sets, orig_displacements,
-    } = ForceSets::load(super_info)?;
+    } = ForceSets::load(resource(super_info_relpath))?;
 
-    let orig_force_constants = expected_fc.map(|path| {
-        let matrix = OutputForceConstants::load(path).unwrap().orig_force_constants;
+    let orig_expected_fcs = expected_fc_relpath.map(|relpath| {
+        let matrix = OutputForceConstants::load(resource(relpath)).unwrap().orig_force_constants;
         SuperForceConstants::from_dense_matrix(matrix)
     });
 
     let OutputDynMat {
         expected_dynmat_real,
         expected_dynmat_imag,
-    } = OutputDynMat::load(expected_dynmat)?;
+    } = OutputDynMat::load(resource(expected_dynmat_relpath))?;
 
     let (super_coords, sc) = ::rsp2_structure::supercell::diagonal(sc_dims).build(&prim_coords);
 
@@ -120,23 +125,10 @@ fn check(
         &sc,
     )?;
 
-    if let Some(orig_force_constants) = orig_force_constants {
-        let expected_force_constants = orig_force_constants.permuted_by(&deperm_from_orig);
-
-        let actual = force_constants.to_super_force_constants_with_zeroed_rows(&sc).to_dense_matrix();
-        let expected = expected_force_constants.to_dense_matrix();
-        assert_eq!(actual.len(), sc.num_supercell_atoms());
-        assert_eq!(actual[0].len(), sc.num_supercell_atoms());
-        for r in 0..sc.num_supercell_atoms() {
-            for c in 0..sc.num_supercell_atoms() {
-                assert_close!(
-                    rel=rel_tol, abs=abs_tol,
-                    actual[r][c].unvee(),
-                    expected[r][c].unvee(),
-                    "{:?}", force_constants,
-                );
-            }
-        }
+    if let Some(orig_expected_fcs) = orig_expected_fcs {
+        let expected = orig_expected_fcs.permuted_by(&deperm_from_orig);
+        let actual = force_constants.to_super_force_constants_with_zeroed_rows(&sc);
+        assert_fcs_close(&sc, &actual, &expected, tol);
     }
 
     // ----------------------------------
@@ -159,13 +151,13 @@ fn check(
         for r in 0..sc.num_primitive_atoms() {
             for c in 0..sc.num_primitive_atoms() {
                 assert_close!(
-                    rel=rel_tol, abs=abs_tol,
+                    rel=tol.relative, abs=tol.absolute,
                     real[r][c].unvee(),
                     expected_dynmat_real[r][c].unvee(),
                     "{:?}", (real, imag),
                 );
                 assert_close!(
-                    rel=rel_tol, abs=abs_tol,
+                    rel=tol.relative, abs=tol.absolute,
                     imag[r][c].unvee(),
                     expected_dynmat_imag[r][c].unvee(),
                     "{:?}", (real, imag),
@@ -177,27 +169,26 @@ fn check(
 }
 
 fn check_translational_invariance(
-    prim_info: &str,
-    initial_fc: &str,
-    expected_fc: &str,
+    prim_info_relpath: &str,
+    initial_fc_relpath: &str,
+    expected_fc_relpath: &str,
     level: u32,
-    rel_tol: f64,
-    abs_tol: f64,
+    tol: Tolerances,
 ) -> FailResult<()> {
     let Primitive {
         cart_ops: _,
         masses: _,
         coords: prim_coords,
-    } = Primitive::load(prim_info)?;
+    } = Primitive::load(resource(prim_info_relpath))?;
 
     let InputForceConstants {
         orig_force_constants: orig_input,
         sc_dims, orig_super_coords,
-    } = InputForceConstants::load(initial_fc)?;
+    } = InputForceConstants::load(resource(initial_fc_relpath))?;
 
     let OutputForceConstants {
         orig_force_constants: orig_output,
-    } = OutputForceConstants::load(expected_fc)?;
+    } = OutputForceConstants::load(resource(expected_fc_relpath))?;
 
     let orig_input = SuperForceConstants::from_dense_matrix(orig_input);
     let orig_output = SuperForceConstants::from_dense_matrix(orig_output);
@@ -218,37 +209,45 @@ fn check_translational_invariance(
             .to_super_force_constants_with_zeroed_rows(&sc)
     };
 
-    let actual = output.to_dense_matrix();
-    let expected = expected_output.to_dense_matrix();
-    assert_eq!(actual.len(), sc.num_supercell_atoms());
-    assert_eq!(actual[0].len(), sc.num_supercell_atoms());
+    assert_fcs_close(&sc, &output, &expected_output, tol);
+    Ok(())
+}
+
+fn assert_fcs_close(
+    sc: &SupercellToken,
+    left: &SuperForceConstants,
+    right: &SuperForceConstants,
+    tol: Tolerances,
+) {
+    let left = left.to_dense_matrix();
+    let right = right.to_dense_matrix();
+    assert_eq!(left.len(), sc.num_supercell_atoms());
+    assert_eq!(left[0].len(), sc.num_supercell_atoms());
+
+    println!("{:?}", left);
     for r in 0..sc.num_supercell_atoms() {
         for c in 0..sc.num_supercell_atoms() {
             assert_close!(
-                rel=rel_tol, abs=abs_tol,
-                actual[r][c].unvee(),
-                expected[r][c].unvee(),
-                "{:?}", actual,
+                rel=tol.relative, abs=tol.absolute,
+                left[r][c].unvee(),
+                right[r][c].unvee(),
             );
         }
     }
-
-    Ok(())
 }
 
 #[test]
 fn graphene_denseforce_771() {
     check(
         // * Graphene
-        "tests/resources/primitive/graphene.json",
+        "primitive/graphene.json",
         // * Dense force sets
         // * [7, 7, 1] supercell
-        "tests/resources/force-constants/graphene-771-dense.super.json",
-        Some("tests/resources/force-constants/graphene-771.fc.json.xz"),
-        "tests/resources/force-constants/graphene-gamma.dynmat.json",
+        "force-constants/graphene-771-dense.super.json",
+        Some("force-constants/graphene-771.fc.json.xz"),
+        "force-constants/graphene-gamma.dynmat.json",
         V3::zero(),
-        1e-10,
-        1e-12,
+        Tolerances { relative: 1e-10, absolute: 1e-12 },
     ).unwrap()
 }
 
@@ -256,11 +255,11 @@ fn graphene_denseforce_771() {
 fn graphene_denseforce_111() {
     check(
         // * Graphene
-        "tests/resources/primitive/graphene.json",
+        "primitive/graphene.json",
         // * Dense force sets
         // * [1, 1, 1] supercell
-        "tests/resources/force-constants/graphene-111-dense.super.json",
-        Some("tests/resources/force-constants/graphene-111.fc.json"),
+        "force-constants/graphene-111-dense.super.json",
+        Some("force-constants/graphene-111.fc.json"),
         // * same dynmat output as for 771; a supercell should not be necessary
         //   for the dynamical matrix at gamma
         //
@@ -268,10 +267,9 @@ fn graphene_denseforce_111() {
         //   That is not true! If multiple images of an atom move in graphene,
         //   it will affect the bond angle terms.
         //   What's going on here?  How were these force sets obtained?
-        "tests/resources/force-constants/graphene-gamma.dynmat.json",
+        "force-constants/graphene-gamma.dynmat.json",
         V3::zero(),
-        1e-10,
-        1e-12,
+        Tolerances { relative: 1e-10, absolute: 1e-12 },
     ).unwrap()
 }
 
@@ -279,86 +277,94 @@ fn graphene_denseforce_111() {
 fn graphene_sparseforce_771() {
     check(
         // * Graphene
-        "tests/resources/primitive/graphene.json",
+        "primitive/graphene.json",
         // * Sparse force sets (clipped to zero at 1e-12, ~70% sparse)
         // * [7, 7, 1] supercell
-        "tests/resources/force-constants/graphene-771-sparse.super.json",
-        Some("tests/resources/force-constants/graphene-771.fc.json.xz"),
+        "force-constants/graphene-771-sparse.super.json",
+        Some("force-constants/graphene-771.fc.json.xz"),
 
         // I don't have data computed specifically for this, just use
         // the existing data with a more relaxed tolerance
-        "tests/resources/force-constants/graphene-gamma.dynmat.json",
+        "force-constants/graphene-gamma.dynmat.json",
         V3::zero(),
-        1e-6,
-        1e-7,
+        Tolerances { relative: 1e-6, absolute: 1e-7 },
     ).unwrap()
 }
 
 #[test]
 fn blg_force_sets_gamma() {
     check(
-        "tests/resources/primitive/blg.json",
-        "tests/resources/force-constants/blg.super.json",
+        "primitive/blg.json",
+        "force-constants/blg.super.json",
         None, // no fc file
-        "tests/resources/force-constants/blg-gamma.dynmat.json",
+        "force-constants/blg-gamma.dynmat.json",
         V3::zero(),
-        1e-10,
-        1e-12,
+        Tolerances { relative: 1e-10, absolute: 1e-12 },
     ).unwrap()
 }
 
 #[test]
 fn blg_force_sets_k() {
     check(
-        "tests/resources/primitive/blg.json",
-        "tests/resources/force-constants/blg.super.json",
+        "primitive/blg.json",
+        "force-constants/blg.super.json",
         None, // no fc file
-        "tests/resources/force-constants/blg-k.dynmat.json",
+        "force-constants/blg-k.dynmat.json",
         V3([1.0/3.0, 1.0/3.0, 0.0]),
-        1e-10,
-        1e-12,
+        Tolerances { relative: 1e-10, absolute: 1e-12 },
     ).unwrap()
 }
 
 #[test]
 fn blg_force_sets_m() {
     check(
-        "tests/resources/primitive/blg.json",
-        "tests/resources/force-constants/blg.super.json",
+        "primitive/blg.json",
+        "force-constants/blg.super.json",
         None, // no fc file
-        "tests/resources/force-constants/blg-m.dynmat.json",
+        "force-constants/blg-m.dynmat.json",
         V3([0.5, 0.0, 0.0]),
-        1e-10,
-        1e-12,
+        Tolerances { relative: 1e-10, absolute: 1e-12 },
     ).unwrap()
 }
+
+const TRANS_INVARIANCE_TOLS: Tolerances = Tolerances { relative: 1e-10, absolute: 1e-12 };
+const TRANS_INVARIANCE_TOLS_WEAK: Tolerances = Tolerances { relative: 1e-4, absolute: 1e-5 };
 
 #[test]
 fn impose_translational_invariance_0() {
     check_translational_invariance(
-        "tests/resources/primitive/blg.json",
+        "primitive/blg.json",
         // files crafted by hand by hacking phonopy's `symmetrize_compact_force_constants` to
         // use random data and to write the initial and final force constants.
-        "tests/resources/force-constants/symmetrize-input.json.xz",
-        "tests/resources/force-constants/symmetrize-output-0.fc.json.xz",
+        "force-constants/symmetrize-input.json.xz",
+        "force-constants/symmetrize-output-0.fc.json.xz",
         // level = 0 is effectively equivalent to a call to `impose_translational_symmetry`,
         // allowing us to test that function in isolation.
         0,
-        1e-10,
-        1e-12,
+        TRANS_INVARIANCE_TOLS,
     ).unwrap()
 }
 
 #[test]
 fn impose_translational_invariance_2() {
     check_translational_invariance(
-        "tests/resources/primitive/blg.json",
-        // files crafted by hand by hacking phonopy's `symmetrize_compact_force_constants` to
-        // use random data and to write the initial and final force constants.
-        "tests/resources/force-constants/symmetrize-input.json.xz",
-        "tests/resources/force-constants/symmetrize-output-2.fc.json.xz",
+        "primitive/blg.json",
+        "force-constants/symmetrize-input.json.xz",
+        "force-constants/symmetrize-output-2.fc.json.xz",
         2, // level
-        1e-10,
-        1e-12,
+        TRANS_INVARIANCE_TOLS,
+    ).unwrap()
+}
+
+// try matching the level with the wrong output file to verify that the test would fail
+#[test]
+#[should_panic(expected = "not nearly equal")]
+fn impose_translational_invariance_specificity() {
+    check_translational_invariance(
+        "primitive/blg.json",
+        "force-constants/symmetrize-input.json.xz",
+        "force-constants/symmetrize-output-0.fc.json.xz",
+        2, // level
+        TRANS_INVARIANCE_TOLS_WEAK,
     ).unwrap()
 }
