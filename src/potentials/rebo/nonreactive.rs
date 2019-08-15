@@ -1560,8 +1560,8 @@ mod bondorder_pi {
                     } else {
                         // (we could do a single switch on abs(cos_ijk) here but then we'd
                         //  also need to potentially fix the sign of the derivative)
-                        let (pcut, pcut_d_cos) = switch::poly3((T_COS_0, T_COS_1), coses_ijk[sbindex_ik]);
-                        let (mcut, mcut_d_cos) = switch::poly3((-T_COS_0, -T_COS_1), coses_ijk[sbindex_ik]);
+                        let (pcut, pcut_d_cos, _) = switch::poly3((T_COS_0, T_COS_1), coses_ijk[sbindex_ik]);
+                        let (mcut, mcut_d_cos, _) = switch::poly3((-T_COS_0, -T_COS_1), coses_ijk[sbindex_ik]);
 
                         let cut = pcut * mcut;
                         let cut_d_cos = pcut * mcut_d_cos + pcut_d_cos * mcut;
@@ -1745,7 +1745,7 @@ mod ycoord {
             }
             let tcoord_ki = tcoord_k - weight_ik;
 
-            let (alpha, alpha_d_tcoord_ki) = switch::poly5((3.0, 2.0), tcoord_ki);
+            let (alpha, alpha_d_tcoord_ki, _) = switch::poly5((3.0, 2.0), tcoord_ki);
             assert_eq!(alpha.fract(), 0.0);
             assert_eq!(alpha_d_tcoord_ki, 0.0);
             inner_value += weight_ik * alpha;
@@ -2148,7 +2148,7 @@ mod g_spline {
         match type_i {
             AtomType::Carbon => {
                 let switch_interval = (params.G.low_coord, params.G.high_coord);
-                let (alpha, alpha_d_tcoord_ij) = switch::poly5(switch_interval, tcoord_ij);
+                let (alpha, alpha_d_tcoord_ij, _) = switch::poly5(switch_interval, tcoord_ij);
 
                 if alpha == 0.0 && alpha_d_tcoord_ij == 0.0 {
                     use_single_poly!(&params.G.carbon_low_coord)

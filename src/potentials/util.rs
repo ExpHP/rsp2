@@ -41,19 +41,19 @@ pub(crate) fn num_grad_v3(
 /// Switches from 0 to 1 as x goes from `interval.0` to `interval.1`.
 #[inline(always)] // elide direction check hopefully since intervals should be constant
 pub(crate) fn switch(
-    interpolate: impl FnOnce(f64) -> (f64, f64),
+    interpolate: impl FnOnce(f64) -> (f64, f64, f64),
     interval: (f64, f64),
     x: f64,
-) -> (f64, f64) {
+) -> (f64, f64, f64) {
     match IntervalSide::classify(interval, x) {
-        IntervalSide::Left => (0.0, 0.0),
+        IntervalSide::Left => (0.0, 0.0, 0.0),
         IntervalSide::Inside => {
             let width = interval.1 - interval.0;
             let alpha = (x - interval.0) / width;
-            let (value, d_alpha) = interpolate(alpha);
-            (value, d_alpha / width)
+            let (value, d_alpha, dd_alpha_alpha) = interpolate(alpha);
+            (value, d_alpha / width, dd_alpha_alpha / (width * width))
         },
-        IntervalSide::Right => (1.0, 0.0),
+        IntervalSide::Right => (1.0, 0.0, 0.0),
     }
 }
 
@@ -112,12 +112,17 @@ fn switch_endpoint() {
 
 pub(crate) mod switch {
     #[allow(dead_code)]
-    pub(crate) fn poly3(interval: (f64, f64), x: f64) -> (f64, f64) {
+    pub(crate) fn poly3(interval: (f64, f64), x: f64) -> (f64, f64, f64) {
         super::switch(raw_poly3, interval, x)
     }
 
-    pub(crate) fn poly5(interval: (f64, f64), x: f64) -> (f64, f64) {
+    pub(crate) fn poly5(interval: (f64, f64), x: f64) -> (f64, f64, f64) {
         super::switch(raw_poly5, interval, x)
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn poly7(interval: (f64, f64), x: f64) -> (f64, f64, f64) {
+        super::switch(raw_poly7, interval, x)
     }
 
     // Solution to:  y[0] = 0;  y'[0] = 0
@@ -127,10 +132,11 @@ pub(crate) mod switch {
     // be very large errors in numerical derivatives computed by central difference
     // methods around `x=0` or `x=1`; a 5-point stencil will report a derivative
     // of about `step` at these points rather than `0`.
-    pub(crate) fn raw_poly3(x: f64) -> (f64, f64) {
+    pub(crate) fn raw_poly3(x: f64) -> (f64, f64, f64) {
         let value = x*(3.0*x - 2.0*x*x);
         let d_x = 6.0*x*(1.0 - x);
-        (value, d_x)
+        let dd_x_x = 6.0*(1.0 - 2.0*x);
+        (value, d_x, dd_x_x)
     }
 
     // Solution to:  y[0] = 0;  y'[0] = y''[0] = 0;
@@ -140,11 +146,28 @@ pub(crate) mod switch {
     // be moderately large errors in numerical derivatives computed by central
     // difference methods around `x=0` or `x=1`; a 5-point stencil will report a
     // derivative of about `10 * step**3` at these points rather than `0`.
-    pub(crate) fn raw_poly5(x: f64) -> (f64, f64) {
+    pub(crate) fn raw_poly5(x: f64) -> (f64, f64, f64) {
         let value = (x*x*x)*(10.0 + x*(-15.0 + x*6.0));
-        let d_x = (30.0*x*x)*(1.0 + x*(-2.0 + x));
-        (value, d_x)
+        let d_x = 30.0*(x*x)*(1.0 + x*(-2.0 + x));
+        let dd_x_x = 60.0*x*(x - 1.0)*(2.0*x - 1.0);
+        (value, d_x, dd_x_x)
     }
+
+    // Solution to:  y[0] = 0;  y'[0] = y''[0] = y'''[0] =0;
+    //               y[1] = 1;  y'[1] = y''[1] = y'''[1] =0;
+    //
+    // If you use this as an interpolation function for `switch`, then there will
+    // be moderately large errors in numerical derivatives computed by central
+    // difference methods around `x=0` or `x=1`. (TODO: of what magnitude?)
+    pub(crate) fn raw_poly7(x: f64) -> (f64, f64, f64) {
+        let value = (x*x*x*x)*(35.0 - 84.0*x + 70.0*(x*x) - 20.0*(x*x*x));
+        let d_x = -140.0*(x*x*x)*pow3(x - 1.0);
+        let dd_x_x = -420.0*(x*x)*pow2(x - 1.0)*(2.0*x - 1.0);
+        (value, d_x, dd_x_x)
+    }
+
+    #[inline(always)] fn pow2(x: f64) -> f64 { x * x }
+    #[inline(always)] fn pow3(x: f64) -> f64 { x * x * x }
 
     #[test]
     fn switch_num_deriv() {
@@ -158,17 +181,17 @@ pub(crate) mod switch {
             let interval = (-1.0, 2.0);
             let x = uniform(0.0, 1.0);
 
-            let (_, d_x) = switch::poly3(interval, x);
-            assert_close!(
-                rel=1e-10, abs=1e-10, d_x,
-                numerical::slope(1e-3, None, x, |x| switch::poly3(interval, x).0),
-            );
-
-            let (_, d_x) = switch::poly5(interval, x);
-            assert_close!(
-                rel=1e-10, abs=1e-10, d_x,
-                numerical::slope(1e-3, None, x, |x| switch::poly5(interval, x).0),
-            );
+            for f in &[switch::poly3, switch::poly5, switch::poly7] {
+                let (_, d_x, dd_x_x) = f(interval, x);
+                assert_close!(
+                    rel=1e-10, abs=1e-10, d_x,
+                    numerical::slope(1e-3, None, x, |x| f(interval, x).0),
+                );
+                assert_close!(
+                    rel=1e-10, abs=1e-10, dd_x_x,
+                    numerical::slope(1e-3, None, x, |x| f(interval, x).1),
+                );
+            }
         }
     }
 }
