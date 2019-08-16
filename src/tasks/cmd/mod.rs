@@ -499,10 +499,10 @@ fn do_compute_dynmat(
         &sc,
     )?;
 
-    match settings.phonons.translational_sum_rule {
+    match settings.phonons.sum_rule {
         None => {},
 
-        Some(cfg::PhononTranslationalSumRule::LikePhonopy { level })  => {
+        Some(cfg::PhononSumRule::LikePhonopy { level })  => {
             trace!("Imposing translational acoustic sum rule");
             warn!("\
                 Using the implementation based on phonopy's. This effectively causes the force \

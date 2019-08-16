@@ -906,11 +906,11 @@ pub struct Phonons {
     #[serde(default = "phonons__eigensolver")]
     pub eigensolver: PhononEigensolver,
 
-    /// Method of imposing translational invariance on the force constants.
+    /// Method of imposing an acoustic sum rule on the force constants.
     ///
-    /// If not provided, translational invariance is not imposed.
+    /// If not provided, no sum rule is imposed.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub translational_sum_rule: Option<PhononTranslationalSumRule>,
+    pub sum_rule: Option<PhononSumRule>,
 
     /// Supercell used for force constants.
     ///
@@ -951,20 +951,21 @@ fn phonons__disp_finder() -> PhononDispFinder {
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
-pub enum PhononTranslationalSumRule {
-    /// An implementation that is identical to phonopy's `--fc-symmetry`.
+pub enum PhononSumRule {
+    /// Imposes the translational sum rule using an implementation that is identical to phonopy's
+    /// `--fc-symmetry`.
     ///
     /// **Warning:** This implementation effectively causes the force constants to become dense,
     /// because it subtracts a uniform submatrix from each row. Most of the rsp2 code base is
     /// ill-equipped to deal with this.  It will likely be slow, will eat an even more absurd
     /// amount of memory than usual, and will generate spurious warnings in places.
     /// *You have been warned!*
-    LikePhonopy {
-        #[serde(default = "phonon_translational_sum_rule__like_phonopy__level")]
+    TranslationalLikePhonopy {
+        #[serde(default = "phonon_sum_rule__translational_like_phonopy__level")]
         level: u32,
     },
 }
-fn phonon_translational_sum_rule__like_phonopy__level() -> u32 { 2 }
+fn phonon_sum_rule__translational_like_phonopy__level() -> u32 { 2 }
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
