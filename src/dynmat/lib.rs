@@ -793,6 +793,7 @@ impl ForceConstants {
     // in _phonopy.c: https://github.com/atztogo/phonopy/blob/4fbd156b705c/c/_phonopy.c#L564-L577
     //
     /// Imposes that the sum over each row is the zero matrix, by subtracting the mean for each row.
+    /// (i.e. setting the 0th fourier component to zero)
     ///
     /// **Warning:** This causes the ForceConstants matrix to effectively become dense!
     fn cancel_row_averages(&mut self, sc: SupercellWrapper<'_>) {

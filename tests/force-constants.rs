@@ -327,6 +327,36 @@ fn blg_force_sets_m() {
     ).unwrap()
 }
 
+//------------------------------------------------------------
+// Translational invariance tests
+
+// TO CREATE THE INPUT FILES:
+//
+// Create `POSCAR` from `resources/primitive/blg.json`, then run phonopy with a 3x3x1 unit cell
+// and give it some arbitrary `FORCE_SETS`. (e.g. run rsp2 on `SPOSCAR` with
+// `RUST_LOG=rsp2_tasks::special::phonopy_force_sets=trace` and `disp-finder: {phonopy: {}}`).
+// The values in the `FORCE_SETS` will be ignored, but they must have the correct atom numbers and
+// sizes for phonopy's displacements.
+//
+// Then check out this commit of phonopy:
+// https://github.com/exphp-forks/phonopy/tree/debug-symmetrize
+//
+// and do the following:
+//
+// $ phonopy --fc-symmetry --dim '3 3 1' # generates the json files
+// $ python3
+// >>> from pymatgen.io.vasp import Poscar
+// >>> structure = Poscar.from_file('SPOSCAR').structure
+// >>> dense=np.array(json.load(open('output-2-rsp2.json')))
+// >>> json.dump({ 'dense': dense.tolist() }, open('symmetrize-output-2.fc.json', 'w'))
+// >>> dense=np.array(json.load(open('output-0-rsp2.json')))
+// >>> json.dump({ 'dense': dense.tolist() }, open('symmetrize-output-0.fc.json', 'w'))
+// >>> dense=np.array(json.load(open('input-rsp2.json')))
+// >>> json.dump({
+// ... 'dense': dense.tolist(), "sc-dims": [3, 3, 1],
+// ... "structure": {"lattice": structure.lattice.matrix.tolist(),
+// ... "carts": structure.cart_coords.tolist()}}, open('symmetrize-input.json', 'w'))
+
 const TRANS_INVARIANCE_TOLS: Tolerances = Tolerances { relative: 1e-10, absolute: 1e-12 };
 const TRANS_INVARIANCE_TOLS_WEAK: Tolerances = Tolerances { relative: 1e-4, absolute: 1e-5 };
 
@@ -334,8 +364,6 @@ const TRANS_INVARIANCE_TOLS_WEAK: Tolerances = Tolerances { relative: 1e-4, abso
 fn impose_translational_invariance_0() {
     check_translational_invariance(
         "primitive/blg.json",
-        // files crafted by hand by hacking phonopy's `symmetrize_compact_force_constants` to
-        // use random data and to write the initial and final force constants.
         "force-constants/symmetrize-input.json.xz",
         "force-constants/symmetrize-output-0.fc.json.xz",
         // level = 0 is effectively equivalent to a call to `impose_translational_symmetry`,
