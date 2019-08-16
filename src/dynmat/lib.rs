@@ -781,7 +781,7 @@ impl ForceConstants {
         for _ in 0..level {
             for _ in 0..2 {
                 self.transpose_mut(sc);
-                self.cancel_row_drift(sc);
+                self.cancel_row_averages(sc);
             }
             self.impose_matrix_symmetry(sc);
         }
@@ -792,10 +792,10 @@ impl ForceConstants {
     // this corresponds to the explicit for loops in py_perm_trans_symmetrize_compact_fc
     // in _phonopy.c: https://github.com/atztogo/phonopy/blob/4fbd156b705c/c/_phonopy.c#L564-L577
     //
-    /// Imposes that the sum over each row is zero, by subtracting the mean for each row.
+    /// Imposes that the sum over each row is the zero matrix, by subtracting the mean for each row.
     ///
     /// **Warning:** This causes the ForceConstants matrix to effectively become dense!
-    fn cancel_row_drift(&mut self, sc: SupercellWrapper<'_>) {
+    fn cancel_row_averages(&mut self, sc: SupercellWrapper<'_>) {
         let mut bee = self.0.to_coo().into_bee();
         for row in bee.map.values_mut() {
             let mean = row.values().fold(M33::zero(), |acc, m| &acc + m) / sc.raw.num_supercell_atoms() as f64;
@@ -872,10 +872,7 @@ impl ForceConstants {
         let primitive_atoms = sc.atom_primitive_atoms();
         let lattice_points = sc.atom_lattice_points();
 
-        // NOTE: If we want to avoid densifying the matrix, we can't just iterate over all prim
-        //       indices and all super indices.
-
-        // Phonopy iterates by column first.  However, due to the symmetry of `visit_regular`,
+        // Phonopy iterates by column first.  However, due to the symmetry of `visit`,
         // this has no impact on the output. (it only affects whether some matrices are given as
         // the first argument or as the second argument to the function)
         let mut bee = self.0.to_coo().into_bee();
@@ -890,6 +887,8 @@ impl ForceConstants {
                     );
                     assert!(!done[prim_r_t].contains(&super_c_t));
 
+                    // NOTE: These get_muts are what cause this function to make the matrix dense,
+                    //       since they are done to all indices.
                     let m = *bee.get_mut(prim_r, super_c);
                     let t = bee.get_mut(prim_r_t, super_c_t).t();
                     let (new_m, new_t) = visit(&m, &t);

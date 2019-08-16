@@ -892,7 +892,11 @@ pub enum EigenvectorChase {
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub struct Phonons {
-    /// If a value of 0 is used, symmetry will not be sought.
+    /// Cartesian distance threshold for determining if two sites are equivalent under
+    /// a symmetry operator.
+    ///
+    /// If a value of 0 is used, symmetry will not be sought.  This is necessary sometimes
+    /// to work around limitations that prevent rsp2 from working on non-primitive cells.
     pub symmetry_tolerance: f64,
     pub displacement_distance: f64,
 
@@ -901,6 +905,12 @@ pub struct Phonons {
 
     #[serde(default = "phonons__eigensolver")]
     pub eigensolver: PhononEigensolver,
+
+    /// Method of imposing translational invariance on the force constants.
+    ///
+    /// If not provided, translational invariance is not imposed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub translational_sum_rule: Option<PhononTranslationalSumRule>,
 
     /// Supercell used for force constants.
     ///
@@ -937,6 +947,24 @@ fn phonons__disp_finder() -> PhononDispFinder {
         directions: phonon_disp_finder__rsp2__directions()
     }
 }
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum PhononTranslationalSumRule {
+    /// An implementation that is identical to phonopy's `--fc-symmetry`.
+    ///
+    /// **Warning:** This implementation effectively causes the force constants to become dense,
+    /// because it subtracts a uniform submatrix from each row. Most of the rsp2 code base is
+    /// ill-equipped to deal with this.  It will likely be slow, will eat an even more absurd
+    /// amount of memory than usual, and will generate spurious warnings in places.
+    /// *You have been warned!*
+    LikePhonopy {
+        #[serde(default = "phonon_translational_sum_rule__like_phonopy__level")]
+        level: u32,
+    },
+}
+fn phonon_translational_sum_rule__like_phonopy__level() -> u32 { 2 }
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]

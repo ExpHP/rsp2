@@ -491,13 +491,26 @@ fn do_compute_dynmat(
     }
 
     trace!("Computing sparse force constants");
-    let force_constants = ForceConstants::compute_required_rows(
+    let mut force_constants = ForceConstants::compute_required_rows(
         &super_displacements,
         &force_sets,
         &cart_rots,
         &super_deperms,
         &sc,
     )?;
+
+    match settings.phonons.translational_sum_rule {
+        None => {},
+
+        Some(cfg::PhononTranslationalSumRule::LikePhonopy { level })  => {
+            trace!("Imposing translational acoustic sum rule");
+            warn!("\
+                Using the implementation based on phonopy's. This effectively causes the force \
+                constants to become dense. Other parts of rsp2 may generate spurious warnings!\
+            ");
+            force_constants = force_constants.impose_translational_invariance(&sc, level);
+        }
+    }
 
     if log_enabled!(target: "rsp2_tasks::special::phonopy_force_constants", log::Level::Trace) {
         if let Some(phonopy_info) = &phonopy_info {
