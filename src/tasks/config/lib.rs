@@ -895,11 +895,34 @@ pub struct Phonons {
     /// Cartesian distance threshold for determining if two sites are equivalent under
     /// a symmetry operator.
     ///
+    /// A value for this is **required** in most use cases. (the exception is when
+    /// `analytic-hessian: true`)
+    ///
     /// If a value of 0 is used, symmetry will not be sought.  This is necessary sometimes
     /// to work around limitations that prevent rsp2 from working on non-primitive cells.
-    pub symmetry_tolerance: f64,
-    pub displacement_distance: f64,
+    pub symmetry_tolerance: Nullable<f64>,
 
+    /// How far atoms are displaced when numerically computing the force constants.
+    ///
+    /// A value for this is **required** in most use cases. (the exception is when
+    /// `analytic-hessian: true`)
+    pub displacement_distance: Nullable<f64>,
+
+    /// Use an analytically-computed hessian for the force constants.
+    ///
+    /// If true, `symmetry_tolerance`, and `displacement_distance` are allowed to be null.
+    /// Currently, symmetry will not be imposed in any form when this is true.
+    ///
+    /// The vast majority of potentials do NOT support this.  (in fact, no complete potential
+    /// currently supports this; only the rust implementation of KCZ's interlayer potential,
+    /// without the contributions from REBO)
+    #[serde(default = "phonons__analytic_hessian")]
+    pub analytic_hessian: bool,
+
+    /// How displacements are generated.
+    ///
+    /// A value for this is **required** in most use cases. (the exception is when
+    /// `analytic-hessian: true`)
     #[serde(default = "phonons__disp_finder")]
     pub disp_finder: PhononDispFinder,
 
@@ -939,6 +962,7 @@ pub struct Phonons {
     /// undesirable impact on the bond angle terms.
     pub supercell: SupercellSpec,
 }
+fn phonons__analytic_hessian() -> bool { false }
 fn phonons__eigensolver() -> PhononEigensolver {
     PhononEigensolver::Dense {}
 }
@@ -1323,6 +1347,8 @@ impl Settings {
         fix_version(&mut self.version)?;
         fix_deprecated_eigensolver(&mut self.phonons.eigensolver);
 
+        check_phonons(&self.phonons, &self.potential)?;
+
         Ok(ValidatedSettings(self))
     }
 }
@@ -1464,6 +1490,29 @@ fn fill_lammps_from_deprecated(
         update_style.0.get_or_insert(value);
     }
     update_style.0.get_or_insert_with(Default::default);
+}
+
+fn check_phonons(phonons: &Phonons, potential: &ValidatedPotential) -> Result<(), Error> {
+    let ValidatedPotential(Potential(kinds)) = potential;
+
+    if phonons.analytic_hessian {
+        for kind in kinds {
+            match kind {
+                PotentialKind::KolmogorovCrespiZNew(_) => {},
+                _ => bail!{"The chosen potential does not support analytic-hessian mode."},
+            }
+        }
+    } else {
+        // numerical hessian
+        if phonons.symmetry_tolerance.is_none() {
+            bail!("phonons.symmetry-tolerance is required.");
+        }
+        if phonons.displacement_distance.is_none() {
+            bail!("phonons.displacement-distance is required.");
+        }
+    }
+
+    Ok(())
 }
 
 // --------------------------------------------------------

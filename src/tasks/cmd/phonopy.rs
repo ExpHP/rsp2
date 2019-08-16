@@ -454,14 +454,16 @@ pub fn phonopy_displacements(
     // supercell coordinates in rsp2's ordering convention, as created by `sc`
     our_super_coords: &Coords,
 ) -> FailResult<PhonopyDisplacements> {
+    let displacement_distance = settings.displacement_distance.expect("(bug) missing displacement-distance should have been caught earlier");
+    let symmetry_tolerance = settings.symmetry_tolerance.expect("(bug) missing symmetry-tolerance should have been caught earlier");
     let dir = {
         let mut builder = {
             builder::Builder::new()
                 // HACK: Give phonopy a slightly smaller symprec to ensure that, in case
                 // rsp2 and phonopy find different spacegroups, phonopy should find the
                 // smaller one.
-                .symmetry_tolerance(settings.symmetry_tolerance * 0.99)
-                .conf("DISPLACEMENT_DISTANCE", format!("{:e}", settings.displacement_distance))
+                .symmetry_tolerance(symmetry_tolerance * 0.99)
+                .conf("DISPLACEMENT_DISTANCE", format!("{:e}", displacement_distance))
                 .supercell_dim(settings.supercell.dim_for_unitcell(prim_coords.lattice()))
         };
         if let cfg::PhononDispFinder::Phonopy { diag } = settings.disp_finder {

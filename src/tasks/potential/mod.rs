@@ -17,7 +17,7 @@ use crate::hlist_aliases::*;
 use crate::meta;
 use rsp2_structure::{Coords};
 use rsp2_tasks_config as cfg;
-use rsp2_array_types::{V3, Unvee};
+use rsp2_array_types::{V3, M33, Unvee};
 use rsp2_minimize::cg;
 use slice_of_array::prelude::*;
 use std::collections::BTreeMap;
@@ -106,14 +106,25 @@ pub trait PotentialBuilder<Meta = CommonMeta>
 
     /// Create a DiffFn that computes individual forces per pair interaction.
     ///
-    /// Not all potentials support this; the default implementation simply returns `Ok(None)`.
-    /// An implementation is required if one wants to optimize lattice params during relaxation.
+    /// Not all potentials support this, those that don't return `Ok(None)`.
+    /// Support is required if one wants to optimize lattice params during relaxation.
     ///
     /// The structure given to this is used to supply the lattice and metadata, and possibly
     /// even the set of bonds (e.g. in the case of nonreactive REBO).
     fn initialize_bond_diff_fn(&self, _init_coords: &Coords, _meta: Meta) -> FailResult<Option<Box<dyn BondDiffFn<Meta>>>>
     where Meta: Clone + 'static
     ;
+
+    /// Create a DDiffFn that computes individual hessians per pair interaction.
+    ///
+    /// Not all potentials support this; the default implementation simply returns `Ok(None)`.
+    /// An implementation is required if one wants to compute the force constants analytically.
+    ///
+    /// The structure given to this is used to supply the lattice and metadata, and possibly
+    /// even the set of bonds (e.g. in the case of nonreactive REBO).
+    fn initialize_bond_ddiff_fn(&self, _init_coords: &Coords, _meta: Meta) -> FailResult<Option<Box<dyn BondDDiffFn<Meta>>>>
+    where Meta: Clone + 'static
+    { Ok(None) }
 
     /// Convenience method to get a function suitable for `rsp2_minimize`.
     ///
@@ -297,6 +308,9 @@ where Meta: Clone + 'static,
     fn initialize_bond_diff_fn(&self, init_coords: &Coords, meta: Meta) -> FailResult<Option<Box<dyn BondDiffFn<Meta>>>>
     { (**self).initialize_bond_diff_fn(init_coords, meta) }
 
+    fn initialize_bond_ddiff_fn(&self, init_coords: &Coords, meta: Meta) -> FailResult<Option<Box<dyn BondDDiffFn<Meta>>>>
+    { (**self).initialize_bond_ddiff_fn(init_coords, meta) }
+
     fn one_off(&self) -> OneOff<'_, Meta>
     { (**self).one_off() }
 
@@ -409,6 +423,35 @@ pub trait BondDiffFn<Meta> {
 // necessary for combinators like sum
 impl<'d, Meta> BondDiffFn<Meta> for Box<dyn BondDiffFn<Meta> + 'd> {
     fn compute(&mut self, coords: &Coords, meta: Meta) -> FailResult<(f64, Vec<BondGrad>)>
+    { (**self).compute(coords, meta) }
+
+    fn check(&mut self, coords: &Coords, meta: Meta) -> FailResult<()>
+    { (**self).check(coords, meta) }
+}
+
+//-------------------------------------
+
+/// A `BondDiffFn` that can produce Hessians.
+pub trait BondDDiffFn<Meta> {
+    /// A `compute` function that also produces the Hessians of terms.
+    ///
+    /// The value at `hessian[r][c]` is the derivative of the value with respect to
+    /// the `r`th element of `coords[minus_site]` and the `c`th element of `coords[plus_site]`.
+    ///
+    /// Effectively:
+    /// ```txt
+    /// force_constants[minus_site][plus_site] == hessian;
+    /// force_constants[plus_site][minus_site] == hessian.t();
+    /// ```
+    fn compute(&mut self, coords: &Coords, meta: Meta) -> FailResult<(f64, Vec<(BondGrad, M33)>)>;
+
+    fn check(&mut self, _: &Coords, _: Meta) -> FailResult<()>
+    { Ok(()) }
+}
+
+// necessary for combinators like sum
+impl<'d, Meta> BondDDiffFn<Meta> for Box<dyn BondDDiffFn<Meta> + 'd> {
+    fn compute(&mut self, coords: &Coords, meta: Meta) -> FailResult<(f64, Vec<(BondGrad, M33)>)>
     { (**self).compute(coords, meta) }
 
     fn check(&mut self, coords: &Coords, meta: Meta) -> FailResult<()>

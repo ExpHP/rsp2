@@ -14,7 +14,7 @@
 
 //! PotentialBuilder implementations for potentials implemented within rsp2.
 
-use super::{DynCloneDetail, PotentialBuilder, DiffFn, DispFn, CommonMeta, BondDiffFn, BondGrad};
+use super::{DynCloneDetail, PotentialBuilder, DiffFn, DispFn, CommonMeta, BondDiffFn, BondDDiffFn, BondGrad};
 use super::helper::{self, DiffFnFromBondDiffFn, disp_fn_helper::{self, DispFnHelper}};
 use crate::FailResult;
 use crate::math::frac_bonds_with_skin::FracBondsWithSkin;
@@ -23,7 +23,7 @@ use crate::meta::{self, prelude::*};
 
 use rsp2_structure::{Coords, layer::Layers, Element, bonds::{FracBond, FracBonds}};
 use rsp2_tasks_config as cfg;
-use rsp2_array_types::{V3};
+use rsp2_array_types::{V3, M33};
 use rsp2_potentials::crespi as crespi_imp;
 use rsp2_potentials::rebo::nonreactive as rebo_imp;
 
@@ -141,6 +141,21 @@ mod kc_z {
         }
     }
 
+    impl BondDDiffFn<CommonMeta> for Diff {
+        fn compute(&mut self, coords: &Coords, meta: CommonMeta) -> FailResult<(f64, Vec<(BondGrad, M33)>)> {
+            let elements: meta::SiteElements = meta.pick();
+
+            let meta_for_bonds = zip_eq!(elements.iter().cloned(), self.layers.iter().cloned());
+            let frac_bonds = self.bonds.compute(coords, meta_for_bonds)?;
+
+            compute_with_hessian_using_frac_bonds(
+                self.parallel, &self.params,
+                coords, meta,
+                frac_bonds.into_iter().collect(),
+            )
+        }
+    }
+
     impl Diff {
         /// Get all FracBonds for a structure, using cached data if its still valid.
         fn compute_frac_bonds(&mut self, coords: &Coords, meta: CommonMeta) -> FailResult<&FracBonds> {
@@ -186,6 +201,48 @@ mod kc_z {
         };
         let value = part_values.iter().sum();
         Ok((value, bond_grads))
+    }
+
+    /// FIXME: code duplication
+    fn compute_with_hessian_using_frac_bonds(
+        parallel: bool,
+        params: &crespi_imp::Params,
+        coords: &Coords,
+        meta: CommonMeta,
+        frac_bonds: Vec<FracBond>, // to be monomorphic
+    ) -> FailResult<(f64, Vec<(BondGrad, M33)>)> {
+        let (part_values, extras): (Vec<f64>, Vec<_>) = {
+            let elements: meta::SiteElements = meta.pick();
+            let cart_coords = coords.with_carts(coords.to_carts());
+
+            // HACK: collect to vec so that it implements IntoParallelIterator
+            let frac_bonds = frac_bonds.into_iter().filter(|bond| bond.is_canonical()).collect::<Vec<_>>();
+            // HACK: collect from Rc<[_]> to Vec to impl Send
+            let elements = elements.iter().cloned().collect::<Vec<_>>();
+
+            CondIterator::new(frac_bonds, parallel)
+                .map(|bond| {
+                    debug_assert!(bond.is_canonical());
+                    debug_assert_eq!(elements[bond.from], Element::CARBON);
+                    debug_assert_eq!(elements[bond.to], Element::CARBON);
+                    let cart_vector = bond.cart_vector_using_cache(&cart_coords).unwrap();
+                    let (part_value, part_grad, part_dd_r_r) = params.compute_z_with_hessian(cart_vector);
+
+                    // v_dd_xminus_xplus = v_dd_r_r * xminus_d_r * xplus_d_r
+                    //                   = v_dd_r_r * (-1) * 1
+                    let part_hessian = -part_dd_r_r;
+
+                    let bond_grad = BondGrad {
+                        plus_site: bond.to,
+                        minus_site: bond.from,
+                        grad: part_grad,
+                        cart_vector,
+                    };
+                    (part_value, (bond_grad, part_hessian))
+                }).unzip()
+        };
+        let value = part_values.iter().sum();
+        Ok((value, extras))
     }
 
     /// KCZ has an optimized `DispFn` made possible by its simple definition.

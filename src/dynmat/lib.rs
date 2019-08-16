@@ -49,7 +49,7 @@ pub struct SuperForceConstants(
 /// Force constants matrix, with only rows for atoms in `ForceConstants::DESIGNATED_CELL` stored.
 #[derive(Debug, Clone)]
 pub struct ForceConstants(
-    RawCsr<M33, PrimI, SuperI>,
+    pub RawCsr<M33, PrimI, SuperI>,
 );
 
 #[derive(Debug, Clone)]

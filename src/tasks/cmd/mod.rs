@@ -307,6 +307,15 @@ fn do_compute_dynmat(
     >,
 ) -> FailResult<DynamicalMatrix>
 {
+    if settings.phonons.analytic_hessian {
+        return do_compute_dynmat_with_hessian(
+            settings, pot, qpoint_pfrac, prim_coords, prim_meta,
+        );
+    }
+
+    let displacement_distance = settings.phonons.displacement_distance.expect("missing displacement-distance should have been caught sooner");
+    let symprec = settings.phonons.symmetry_tolerance.expect("missing symmetry-tolerance should have been caught sooner");
+
     // Here exists a great deal of logic for dealing with supercells.
     // Ideally it would be factored out somehow to be less in your face,
     // so that this function doesn't have so many responsibilities.
@@ -320,7 +329,6 @@ fn do_compute_dynmat(
         rsp2_structure::supercell::diagonal(sc_dim).build(prim_coords)
     };
 
-    let symprec = settings.phonons.symmetry_tolerance;
     let cart_ops = if symprec == 0.0 {
         trace!("Not computing symmetry (symmetry-tolerance = 0)");
         info!(" Spacegroup: P1 (1)");
@@ -385,7 +393,7 @@ fn do_compute_dynmat(
                 }),
                 &prim_stars,
                 &prim_coords,
-                settings.phonons.displacement_distance,
+                displacement_distance,
             );
 
             prim_displacements
@@ -402,31 +410,10 @@ fn do_compute_dynmat(
             .collect()
     };
 
-    // Generate supercell metadata by repeating the unit cell metadata.
-    let (super_meta, super_deperms);
-    {
-        // macro to generate a closure, because generic closures don't exist
-        macro_rules! f {
-            () => { |x: Rc<[_]>| -> Rc<[_]> {
-                sc.replicate(&x[..]).into()
-            }};
-        }
+    let super_meta = replicate_meta_for_force_constants(settings, &super_coords, &sc, prim_meta.sift())?;
 
-        // deriving these from the primitive cell bonds is not worth the trouble
-        trace!("Computing bonds in supercell");
-        let super_bonds = settings.bond_radius.map(|bond_radius| FailOk({
-            Rc::new(FracBonds::compute(&super_coords, bond_radius)?)
-        })).fold_ok()?;
-        super_meta = prim_meta.clone().map(hlist![
-            f!(),
-            f!(),
-            |opt: Option<_>| opt.map(f!()),
-            |_: Option<meta::FracBonds>| { super_bonds },
-        ]);
-
-        trace!("Computing deperms in supercell");
-        super_deperms = do_compute_deperms(&settings.phonons, &super_coords, &cart_ops)?;
-    };
+    trace!("Computing deperms in supercell");
+    let super_deperms = do_compute_deperms(&settings.phonons, &super_coords, &cart_ops)?;
 
     trace!("num spacegroup ops: {}", cart_ops.len());
     trace!("num displacements:  {}", super_displacements.len());
@@ -491,26 +478,14 @@ fn do_compute_dynmat(
     }
 
     trace!("Computing sparse force constants");
-    let mut force_constants = ForceConstants::compute_required_rows(
+    let force_constants = ForceConstants::compute_required_rows(
         &super_displacements,
         &force_sets,
         &cart_rots,
         &super_deperms,
         &sc,
     )?;
-
-    match settings.phonons.sum_rule {
-        None => {},
-
-        Some(cfg::PhononSumRule::LikePhonopy { level })  => {
-            trace!("Imposing translational acoustic sum rule");
-            warn!("\
-                Using the implementation based on phonopy's. This effectively causes the force \
-                constants to become dense. Other parts of rsp2 may generate spurious warnings!\
-            ");
-            force_constants = force_constants.impose_translational_invariance(&sc, level);
-        }
-    }
+    let force_constants = impose_sum_rule(settings, &sc, force_constants);
 
     if log_enabled!(target: "rsp2_tasks::special::phonopy_force_constants", log::Level::Trace) {
         if let Some(phonopy_info) = &phonopy_info {
@@ -561,6 +536,101 @@ fn do_compute_dynmat(
     Ok(dynmat)
 }
 
+// Vastly simpler than do_compute_dynmat
+fn do_compute_dynmat_with_hessian(
+    settings: &Settings,
+    pot: &dyn PotentialBuilder,
+    qpoint_pfrac: V3,
+    prim_coords: &Coords,
+    prim_meta: HList4<
+        meta::SiteElements,
+        meta::SiteMasses,
+        Option<meta::SiteLayers>,
+        Option<meta::FracBonds>,
+    >,
+) -> FailResult<DynamicalMatrix>
+{
+    trace!("Constructing supercell");
+    let (ref super_coords, ref sc) = {
+        let sc_dim = settings.phonons.supercell.dim_for_unitcell(prim_coords.lattice());
+        rsp2_structure::supercell::diagonal(sc_dim).build(prim_coords)
+    };
+
+    let super_meta = replicate_meta_for_force_constants(settings, &super_coords, &sc, prim_meta.sift())?;
+
+    let force_constants = do_force_constants_using_hessian(pot, &super_coords, super_meta.sift(), &sc)?;
+    let force_constants = impose_sum_rule(settings, &sc, force_constants);
+
+    trace!("Computing sparse dynamical matrix");
+    let dynmat = {
+        let qpoint_cart = qpoint_pfrac * &prim_coords.lattice().reciprocal();
+        let masses: meta::SiteMasses = prim_meta.pick();
+        let masses = masses.iter().map(|&meta::Mass(m)| m).collect::<Vec<_>>();
+        force_constants
+            .dynmat_at_cart_q(&super_coords, qpoint_cart, &sc, &masses)
+            .hermitianize()
+    };
+    trace!("Done computing dynamical matrix");
+
+    Ok(dynmat)
+}
+
+fn replicate_meta_for_force_constants(
+    settings: &Settings,
+    super_coords: &Coords,
+    sc: &SupercellToken,
+    prim_meta: HList4<
+        meta::SiteElements,
+        meta::SiteMasses,
+        Option<meta::SiteLayers>,
+        Option<meta::FracBonds>,
+    >,
+) -> FailResult<HList4<
+    meta::SiteElements,
+    meta::SiteMasses,
+    Option<meta::SiteLayers>,
+    Option<meta::FracBonds>,
+>> {
+    // macro to generate a closure, because generic closures don't exist
+    macro_rules! f {
+        () => { |x: Rc<[_]>| -> Rc<[_]> {
+            sc.replicate(&x[..]).into()
+        }};
+    }
+
+    // deriving these from the primitive cell bonds is not worth the trouble
+    trace!("Computing bonds in supercell");
+    let super_bonds = settings.bond_radius.map(|bond_radius| FailOk({
+        Rc::new(FracBonds::compute(&super_coords, bond_radius)?)
+    })).fold_ok()?;
+
+    Ok(prim_meta.clone().map(hlist![
+        f!(),
+        f!(),
+        |opt: Option<_>| opt.map(f!()),
+        |_: Option<meta::FracBonds>| { super_bonds },
+    ]))
+}
+
+fn impose_sum_rule(
+    settings: &Settings,
+    sc: &SupercellToken,
+    force_constants: ForceConstants,
+) -> ForceConstants {
+    match settings.phonons.sum_rule {
+        None => force_constants,
+
+        Some(cfg::PhononSumRule::TranslationalLikePhonopy { level })  => {
+            trace!("Imposing translational acoustic sum rule");
+            warn!("\
+                Using the implementation based on phonopy's. This effectively causes the force \
+                constants to become dense. Other parts of rsp2 may generate spurious warnings!\
+            ");
+            force_constants.impose_translational_invariance(&sc, level)
+        }
+    }
+}
+
 fn do_compute_deperms(
     phonon_settings: &cfg::Phonons,
     coords: &Coords,
@@ -574,7 +644,7 @@ fn do_compute_deperms(
         // the wrong atoms
         //
         // the case of symmetry_tolerance = 0 is explicitly supported by the method
-        phonon_settings.symmetry_tolerance * 3.0,
+        phonon_settings.symmetry_tolerance.expect("(BUG!) should have been caught earlier") * 3.0,
     )
 }
 
@@ -672,6 +742,8 @@ impl TrialDir {
 
 use rsp2_soa_ops::{Perm, Permute};
 use rsp2_structure::CartOp;
+use rsp2_structure::supercell::SupercellToken;
+
 // FIXME incorrect for nontrivial supercells. Should use primitive stars and translate
 //       the displaced atom to the correct image after rotation. (this would be easiest to
 //       do using the functionality in the ForceConstants code)
@@ -935,6 +1007,44 @@ fn do_force_sets_at_disps_for_sparse(
     eprintln!();
     trace!("Done computing forces at displacements");
     force_sets
+})}
+
+fn do_force_constants_using_hessian(
+    pot: &dyn PotentialBuilder,
+    coords: &Coords,
+    meta: CommonMeta,
+    sc: &SupercellToken,
+) -> FailResult<ForceConstants>
+{Ok({
+    trace!("Computing analytic hessian");
+
+    let mut ddiff_fn = match pot.initialize_bond_ddiff_fn(&coords, meta.sift())? {
+        Some(ddiff_fn) => ddiff_fn,
+        None => bail!("\
+            The chosen potential does not implement an analytic Hessian!
+        "),
+    };
+
+    let (_, items) = ddiff_fn.compute(coords, meta)?;
+
+    let primitive_atoms = sc.atom_primitive_atoms();
+    let cells = sc.atom_cells();
+
+    let (mut val, mut row, mut col) = (vec![], vec![], vec![]);
+    for (bond_grad, hessian) in items {
+        let super_from = bond_grad.minus_site;
+        if cells[super_from] != ForceConstants::DESIGNATED_CELL {
+            continue;
+        }
+        let super_to = bond_grad.plus_site;
+        let prim_from = primitive_atoms[super_from];
+        row.push(rsp2_dynmat::PrimI(prim_from));
+        col.push(rsp2_dynmat::SuperI(super_to));
+        val.push(hessian);
+    }
+
+    let dim = (sc.num_primitive_atoms(), sc.num_supercell_atoms());
+    ForceConstants(rsp2_sparse::RawCoo { dim, row, col, val }.to_csr())
 })}
 
 //=================================================================

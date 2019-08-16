@@ -14,10 +14,10 @@
 
 //! Combinators and other helper implementations of PotentialBuilder and friends.
 
-use super::{DynCloneDetail, PotentialBuilder, DiffFn, DispFn, BondDiffFn, BondGrad};
+use super::{DynCloneDetail, PotentialBuilder, DiffFn, DispFn, BondDiffFn, BondDDiffFn, BondGrad};
 use crate::FailResult;
 use rsp2_structure::{Coords, CoordsKind, Lattice};
-use rsp2_array_types::{V3};
+use rsp2_array_types::{V3, M33};
 use std::collections::BTreeMap;
 
 /// A sum of two PotentialBuilders or DiffFns.
@@ -54,6 +54,19 @@ where
             None => return Ok(None),
         };
         Ok(Some(Box::new(Sum(a_diff_fn, b_diff_fn))))
+    }
+
+    fn initialize_bond_ddiff_fn(&self, coords: &Coords, meta: M) -> FailResult<Option<Box<dyn BondDDiffFn<M>>>>
+    {
+        let a_ddiff_fn = match self.0.initialize_bond_ddiff_fn(coords, meta.clone())? {
+            Some(x) => x,
+            None => return Ok(None),
+        };
+        let b_ddiff_fn = match self.1.initialize_bond_ddiff_fn(coords, meta.clone())? {
+            Some(x) => x,
+            None => return Ok(None),
+        };
+        Ok(Some(Box::new(Sum(a_ddiff_fn, b_ddiff_fn))))
     }
 
     fn initialize_disp_fn(&self, coords: &Coords, meta: M) -> FailResult<Box<dyn DispFn>>
@@ -107,6 +120,28 @@ where
     B: BondDiffFn<M>,
 {
     fn compute(&mut self, coords: &Coords, meta: M) -> FailResult<(f64, Vec<BondGrad>)> {
+        let (a_value, a_grad) = self.0.compute(coords, meta.clone())?;
+        let (b_value, b_grad) = self.1.compute(coords, meta.clone())?;
+        let value = a_value + b_value;
+        let mut grad = a_grad;
+        grad.extend(b_grad);
+        Ok((value, grad))
+    }
+
+    fn check(&mut self, coords: &Coords, meta: M) -> FailResult<()> {
+        self.0.check(coords, meta.clone())?;
+        self.1.check(coords, meta.clone())?;
+        Ok(())
+    }
+}
+
+impl<M, A, B> BondDDiffFn<M> for Sum<A, B>
+where
+    M: Clone,
+    A: BondDDiffFn<M>,
+    B: BondDDiffFn<M>,
+{
+    fn compute(&mut self, coords: &Coords, meta: M) -> FailResult<(f64, Vec<(BondGrad, M33)>)> {
         let (a_value, a_grad) = self.0.compute(coords, meta.clone())?;
         let (b_value, b_grad) = self.1.compute(coords, meta.clone())?;
         let value = a_value + b_value;
