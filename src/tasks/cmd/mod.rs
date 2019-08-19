@@ -1018,11 +1018,9 @@ fn do_force_constants_using_hessian(
 {Ok({
     trace!("Computing analytic hessian");
 
-    let mut ddiff_fn = match pot.initialize_bond_ddiff_fn(&coords, meta.sift())? {
+    let mut ddiff_fn = match pot.initialize_pairwise_ddiff_fn(&coords, meta.sift())? {
         Some(ddiff_fn) => ddiff_fn,
-        None => bail!("\
-            The chosen potential does not implement an analytic Hessian!
-        "),
+        None => bail!("The chosen potential does not implement an analytic Hessian!"),
     };
 
     let (_, items) = ddiff_fn.compute(coords, meta)?;
@@ -1033,14 +1031,27 @@ fn do_force_constants_using_hessian(
     let (mut val, mut row, mut col) = (vec![], vec![], vec![]);
     for (bond_grad, hessian) in items {
         let super_from = bond_grad.minus_site;
-        if cells[super_from] != ForceConstants::DESIGNATED_CELL {
-            continue;
-        }
         let super_to = bond_grad.plus_site;
         let prim_from = primitive_atoms[super_from];
-        row.push(rsp2_dynmat::PrimI(prim_from));
-        col.push(rsp2_dynmat::SuperI(super_to));
-        val.push(hessian);
+        let prim_to = primitive_atoms[super_to];
+        if cells[super_from] == ForceConstants::DESIGNATED_CELL {
+            row.push(rsp2_dynmat::PrimI(prim_from));
+            col.push(rsp2_dynmat::SuperI(super_from));
+            val.push(hessian);
+
+            row.push(rsp2_dynmat::PrimI(prim_from));
+            col.push(rsp2_dynmat::SuperI(super_to));
+            val.push(-hessian);
+        }
+        if cells[super_to] == ForceConstants::DESIGNATED_CELL {
+            row.push(rsp2_dynmat::PrimI(prim_to));
+            col.push(rsp2_dynmat::SuperI(super_to));
+            val.push(hessian);
+
+            row.push(rsp2_dynmat::PrimI(prim_to));
+            col.push(rsp2_dynmat::SuperI(super_from));
+            val.push(-hessian);
+        }
     }
 
     let dim = (sc.num_primitive_atoms(), sc.num_supercell_atoms());

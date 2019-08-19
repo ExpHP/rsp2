@@ -14,7 +14,7 @@
 
 //! PotentialBuilder implementations for potentials implemented within rsp2.
 
-use super::{DynCloneDetail, PotentialBuilder, DiffFn, DispFn, CommonMeta, BondDiffFn, BondDDiffFn, BondGrad};
+use super::{DynCloneDetail, PotentialBuilder, DiffFn, DispFn, CommonMeta, BondDiffFn, PairwiseDDiffFn, BondGrad};
 use super::helper::{self, DiffFnFromBondDiffFn, disp_fn_helper::{self, DispFnHelper}};
 use crate::FailResult;
 use crate::math::frac_bonds_with_skin::FracBondsWithSkin;
@@ -56,6 +56,9 @@ mod kc_z {
         }
 
         fn initialize_bond_diff_fn(&self, coords: &Coords, meta: CommonMeta) -> FailResult<Option<Box<dyn BondDiffFn<CommonMeta>>>>
+        { Ok(Some(Box::new(self._initialize_bond_diff_fn(coords, meta)?) as Box<_>)) }
+
+        fn initialize_pairwise_ddiff_fn(&self, coords: &Coords, meta: CommonMeta) -> FailResult<Option<Box<dyn PairwiseDDiffFn<CommonMeta>>>>
         { Ok(Some(Box::new(self._initialize_bond_diff_fn(coords, meta)?) as Box<_>)) }
 
         fn initialize_disp_fn(&self, coords: &Coords, meta: CommonMeta) -> FailResult<Box<dyn DispFn>>
@@ -141,7 +144,7 @@ mod kc_z {
         }
     }
 
-    impl BondDDiffFn<CommonMeta> for Diff {
+    impl PairwiseDDiffFn<CommonMeta> for Diff {
         fn compute(&mut self, coords: &Coords, meta: CommonMeta) -> FailResult<(f64, Vec<(BondGrad, M33)>)> {
             let elements: meta::SiteElements = meta.pick();
 
@@ -226,11 +229,7 @@ mod kc_z {
                     debug_assert_eq!(elements[bond.from], Element::CARBON);
                     debug_assert_eq!(elements[bond.to], Element::CARBON);
                     let cart_vector = bond.cart_vector_using_cache(&cart_coords).unwrap();
-                    let (part_value, part_grad, part_dd_r_r) = params.compute_z_with_hessian(cart_vector);
-
-                    // v_dd_xminus_xplus = v_dd_r_r * xminus_d_r * xplus_d_r
-                    //                   = v_dd_r_r * (-1) * 1
-                    let part_hessian = -part_dd_r_r;
+                    let (part_value, part_grad, part_hessian) = params.compute_z_with_hessian(cart_vector);
 
                     let bond_grad = BondGrad {
                         plus_site: bond.to,

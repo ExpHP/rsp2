@@ -14,7 +14,7 @@
 
 //! Combinators and other helper implementations of PotentialBuilder and friends.
 
-use super::{DynCloneDetail, PotentialBuilder, DiffFn, DispFn, BondDiffFn, BondDDiffFn, BondGrad};
+use super::{DynCloneDetail, PotentialBuilder, DiffFn, DispFn, BondDiffFn, PairwiseDDiffFn, BondGrad};
 use crate::FailResult;
 use rsp2_structure::{Coords, CoordsKind, Lattice};
 use rsp2_array_types::{V3, M33};
@@ -56,13 +56,13 @@ where
         Ok(Some(Box::new(Sum(a_diff_fn, b_diff_fn))))
     }
 
-    fn initialize_bond_ddiff_fn(&self, coords: &Coords, meta: M) -> FailResult<Option<Box<dyn BondDDiffFn<M>>>>
+    fn initialize_pairwise_ddiff_fn(&self, coords: &Coords, meta: M) -> FailResult<Option<Box<dyn PairwiseDDiffFn<M>>>>
     {
-        let a_ddiff_fn = match self.0.initialize_bond_ddiff_fn(coords, meta.clone())? {
+        let a_ddiff_fn = match self.0.initialize_pairwise_ddiff_fn(coords, meta.clone())? {
             Some(x) => x,
             None => return Ok(None),
         };
-        let b_ddiff_fn = match self.1.initialize_bond_ddiff_fn(coords, meta.clone())? {
+        let b_ddiff_fn = match self.1.initialize_pairwise_ddiff_fn(coords, meta.clone())? {
             Some(x) => x,
             None => return Ok(None),
         };
@@ -135,11 +135,11 @@ where
     }
 }
 
-impl<M, A, B> BondDDiffFn<M> for Sum<A, B>
+impl<M, A, B> PairwiseDDiffFn<M> for Sum<A, B>
 where
     M: Clone,
-    A: BondDDiffFn<M>,
-    B: BondDDiffFn<M>,
+    A: PairwiseDDiffFn<M>,
+    B: PairwiseDDiffFn<M>,
 {
     fn compute(&mut self, coords: &Coords, meta: M) -> FailResult<(f64, Vec<(BondGrad, M33)>)> {
         let (a_value, a_grad) = self.0.compute(coords, meta.clone())?;

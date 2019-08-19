@@ -122,7 +122,7 @@ pub trait PotentialBuilder<Meta = CommonMeta>
     ///
     /// The structure given to this is used to supply the lattice and metadata, and possibly
     /// even the set of bonds (e.g. in the case of nonreactive REBO).
-    fn initialize_bond_ddiff_fn(&self, _init_coords: &Coords, _meta: Meta) -> FailResult<Option<Box<dyn BondDDiffFn<Meta>>>>
+    fn initialize_pairwise_ddiff_fn(&self, _init_coords: &Coords, _meta: Meta) -> FailResult<Option<Box<dyn PairwiseDDiffFn<Meta>>>>
     where Meta: Clone + 'static
     { Ok(None) }
 
@@ -308,8 +308,8 @@ where Meta: Clone + 'static,
     fn initialize_bond_diff_fn(&self, init_coords: &Coords, meta: Meta) -> FailResult<Option<Box<dyn BondDiffFn<Meta>>>>
     { (**self).initialize_bond_diff_fn(init_coords, meta) }
 
-    fn initialize_bond_ddiff_fn(&self, init_coords: &Coords, meta: Meta) -> FailResult<Option<Box<dyn BondDDiffFn<Meta>>>>
-    { (**self).initialize_bond_ddiff_fn(init_coords, meta) }
+    fn initialize_pairwise_ddiff_fn(&self, init_coords: &Coords, meta: Meta) -> FailResult<Option<Box<dyn PairwiseDDiffFn<Meta>>>>
+    { (**self).initialize_pairwise_ddiff_fn(init_coords, meta) }
 
     fn one_off(&self) -> OneOff<'_, Meta>
     { (**self).one_off() }
@@ -431,17 +431,19 @@ impl<'d, Meta> BondDiffFn<Meta> for Box<dyn BondDiffFn<Meta> + 'd> {
 
 //-------------------------------------
 
-/// A `BondDiffFn` that can produce Hessians.
-pub trait BondDDiffFn<Meta> {
+/// A `BondDiffFn` for a potential of the form `Sum_ij(V(x_i - x_j))` that can produce Hessians.
+pub trait PairwiseDDiffFn<Meta> {
     /// A `compute` function that also produces the Hessians of terms.
     ///
-    /// The value at `hessian[r][c]` is the derivative of the value with respect to
-    /// the `r`th element of `coords[minus_site]` and the `c`th element of `coords[plus_site]`.
+    /// The hessian returned is the hessian of this term with respect to the delta vector
+    /// `x_i - x_j`. This matrix is symmetric.
     ///
     /// Effectively:
     /// ```txt
-    /// force_constants[minus_site][plus_site] == hessian;
-    /// force_constants[plus_site][minus_site] == hessian.t();
+    /// force_constants[minus_site][minus_site] += hessian;
+    /// force_constants[plus_site][plus_site] += hessian;
+    /// force_constants[minus_site][plus_site] += -hessian;
+    /// force_constants[plus_site][minus_site] += -hessian;
     /// ```
     fn compute(&mut self, coords: &Coords, meta: Meta) -> FailResult<(f64, Vec<(BondGrad, M33)>)>;
 
@@ -450,7 +452,7 @@ pub trait BondDDiffFn<Meta> {
 }
 
 // necessary for combinators like sum
-impl<'d, Meta> BondDDiffFn<Meta> for Box<dyn BondDDiffFn<Meta> + 'd> {
+impl<'d, Meta> PairwiseDDiffFn<Meta> for Box<dyn PairwiseDDiffFn<Meta> + 'd> {
     fn compute(&mut self, coords: &Coords, meta: Meta) -> FailResult<(f64, Vec<(BondGrad, M33)>)>
     { (**self).compute(coords, meta) }
 
