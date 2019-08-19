@@ -641,7 +641,7 @@ impl<P: Potential> Lammps<P>
         ])?;
 
         if let Some(_) = molecule_ids {
-            lmp.commands(&["fix RSP2_HasMolIds all property/atom mol"])?;
+            lmp.commands(&["fix RSP2_HasMolIds all property/atom mol ghost yes"])?;
         }
 
         // (mostly) garbage initial lattice
