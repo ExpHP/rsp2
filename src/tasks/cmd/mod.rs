@@ -127,7 +127,7 @@ impl TrialDir {
     {Ok({
         let pot = PotentialBuilder::from_root_config(Some(&self), on_demand, &settings)?;
 
-        let (optimizable_coords, meta) = {
+        let (optimizable_coords, mut meta) = {
             read_optimizable_structure(
                 settings.layer_search.as_ref(),
                 settings.masses.as_ref(),
@@ -137,7 +137,6 @@ impl TrialDir {
 
         let original_coords = {
             // (can't reliably get bonds until the lattice parameter is correct)
-            let meta = meta.clone().prepend(None::<meta::FracBonds>);
             crate::cmd::param_optimization::optimize_layer_parameters(
                 &settings.scale_ranges,
                 &pot,
@@ -146,11 +145,14 @@ impl TrialDir {
             )?.construct()
         };
 
-        let meta = meta.prepend({
-            settings.bond_radius.map(|bond_radius| FailOk({
+        // Compute the bonds only if they were not part of the input.
+        trace!{"Computing intralayer bonds..."}
+        let bonds: &mut Option<meta::FracBonds> = meta.get_mut();
+        if bonds.is_none() {
+            *bonds = settings.bond_radius.map(|bond_radius| FailOk({
                 Rc::new(FracBonds::compute(&original_coords, bond_radius)?)
             })).fold_ok()?
-        });
+        }
 
         self.write_stored_structure(
             &self.structure_path(EvLoopStructureKind::Initial),
@@ -1660,12 +1662,13 @@ pub(crate) fn read_optimizable_structure(
     // FIXME train wreck output
     // TODO could contain bonds read from .structure
     ScalableCoords,
-    HList4<
+    HList5<
         meta::SiteElements,
         meta::SiteMasses,
         Option<meta::SiteLayers>,
         Option<meta::LayerScMatrices>,
-    >
+        Option<meta::FracBonds>,
+    >,
 )> {
     use crate::meta::Layer;
 
@@ -1676,6 +1679,7 @@ pub(crate) fn read_optimizable_structure(
     let out_masses: meta::SiteMasses;
     let out_layers: Option<meta::SiteLayers>;
     let out_sc_mats: Option<meta::LayerScMatrices>;
+    let out_bonds: Option<meta::FracBonds>;
     match file_format {
         StructureFileType::Xyz => {
             use rsp2_structure_io::Xyz;
@@ -1700,6 +1704,7 @@ pub(crate) fn read_optimizable_structure(
                 out_layers = None;
                 out_sc_mats = None;
             }
+            out_bonds = None;
         },
         StructureFileType::Poscar => {
             use rsp2_structure_io::Poscar;
@@ -1721,6 +1726,7 @@ pub(crate) fn read_optimizable_structure(
                 out_layers = None;
                 out_sc_mats = None;
             }
+            out_bonds = None;
         },
         StructureFileType::LayersYaml => {
             use rsp2_structure_io::layers_yaml::load;
@@ -1740,6 +1746,7 @@ pub(crate) fn read_optimizable_structure(
             out_elements = vec![CARBON; layer_builder.num_atoms()].into();
             out_masses = masses_by_config(mass_cfg, out_elements.clone())?;
             out_coords = ScalableCoords::KnownLayers { layer_builder };
+            out_bonds = None; // Determine bonds AFTER parameter optimization.
 
             if let Some(_) = layer_cfg {
                 trace!("{} is in layers.yaml format, so layer-search config is ignored", input.nice())
@@ -1747,13 +1754,14 @@ pub(crate) fn read_optimizable_structure(
         },
         StructureFileType::StoredStructure => {
             let StoredStructure {
-                coords, elements, layers, masses, layer_sc_matrices, ..
+                coords, elements, layers, masses, layer_sc_matrices, frac_bonds, ..
             } = Load::load(input.as_path())?;
 
             out_elements = elements;
             out_layers = layers;
             out_masses = masses;
             out_sc_mats = layer_sc_matrices;
+            out_bonds = frac_bonds;
 
             // (FIXME: just having the layer indices metadata isn't good enough; we need
             //         to be able to get contiguous layers, e.g. using rsp2_structure::Layers.
@@ -1770,7 +1778,7 @@ pub(crate) fn read_optimizable_structure(
             }
         },
     }
-    Ok((out_coords, hlist![out_elements, out_masses, out_layers, out_sc_mats]))
+    Ok((out_coords, hlist![out_elements, out_masses, out_layers, out_sc_mats, out_bonds]))
 }
 
 pub(crate) fn perform_layer_search(
