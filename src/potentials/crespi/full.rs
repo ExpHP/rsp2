@@ -9,8 +9,6 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-#![allow(non_snake_case)]
-
 //! Implementation of the full Kolmogorov Crespi potential.
 
 use crate::util::switch;
@@ -394,12 +392,12 @@ mod input_tests {
         let mut value = 0.0;
         let mut grad = vec![V3::zero(); coords.len()];
 
-        let cart_coords = coords.with_carts(coords.to_carts());
+        let carts = coords.to_carts();
         for frac_bond in &bonds {
             if !frac_bond.is_canonical() {
                 continue;
             }
-            let rij = frac_bond.cart_vector_using_cache(&cart_coords).unwrap();
+            let rij = frac_bond.cart_vector_using_carts(coords.lattice(), &carts);
             let (bond_value, bond_d_rij) = params.compute_z(rij);
             value += bond_value;
             grad[frac_bond.from] -= bond_d_rij;

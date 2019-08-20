@@ -769,7 +769,7 @@ mod kc_full {
                 None => panic!("\
                     Attempted to compute kolmogorov/crespi/full before generating a bond graph. \
                     (probably due to an attempt to optimize parameters; either provide a bond \
-                    graph or don't do that)
+                    graph or don't do that)\
                 "),
             }
         }

@@ -394,6 +394,9 @@ impl<'d, Meta> DiffFn<Meta> for Box<dyn DiffFn<Meta> + 'd> {
 /// Represents a single pair interaction in the potential.
 pub struct BondGrad {
     /// The bond vector `carts[plus_site] - carts[minus_site] + unspecified_lattice_point`.
+    ///
+    /// This may be used by minimization schemes to enable automatic optimization of lattice
+    /// parameters.
     pub cart_vector: V3,
     /// The gradient of a summand in the potential with respect to that vector.
     pub grad: V3,
@@ -414,6 +417,11 @@ pub struct BondGrad {
 /// Not all potentials are capable of producing one of these.
 /// (those implemented by external codes typically only expose total forces).
 pub trait BondDiffFn<Meta> {
+    /// Compute potential and pairwise forces.
+    ///
+    /// No guarantees are made about the ordering of the items.  Also, the output vector may contain
+    /// multiple items for the same pair of sites (even between the same images of sites!); these
+    /// are implicitly summed.
     fn compute(&mut self, coords: &Coords, meta: Meta) -> FailResult<(f64, Vec<BondGrad>)>;
 
     fn check(&mut self, _: &Coords, _: Meta) -> FailResult<()>
@@ -596,13 +604,13 @@ impl dyn PotentialBuilder {
         config: &cfg::PotentialKind,
     ) -> FailResult<Box<dyn PotentialBuilder>> {
         match config {
-            cfg::PotentialKind::OldReboNew(_) |
-            cfg::PotentialKind::OldLammpsRebo(_) |
-            cfg::PotentialKind::OldLammpsAirebo(_) |
-            cfg::PotentialKind::OldLammpsKolmogorovCrespiZ { .. } |
-            cfg::PotentialKind::OldLammpsKolmogorovCrespiFull { .. } => {
-                panic!("(BUG!) deprecated potential should have been replaced during validation: {:?}", config);
-            },
+            | cfg::PotentialKind::OldReboNew(_)
+            | cfg::PotentialKind::OldLammpsRebo(_)
+            | cfg::PotentialKind::OldLammpsAirebo(_)
+            | cfg::PotentialKind::OldLammpsKolmogorovCrespiZ { .. }
+            | cfg::PotentialKind::OldLammpsKolmogorovCrespiFull { .. }
+            | cfg::PotentialKind::OldKolmogorovCrespiZ(_)
+            => panic!("(BUG!) deprecated potential should have been replaced during validation: {:?}", config),
 
             cfg::PotentialKind::Lammps(cfg) => match cfg {
                 cfg::LammpsPotentialKind::Rebo(cfg) => {
@@ -626,10 +634,10 @@ impl dyn PotentialBuilder {
                     Ok(Box::new(pot))
                 },
             },
-            cfg::PotentialKind::KolmogorovCrespiZNew(cfg) => {
+            cfg::PotentialKind::KolmogorovCrespi(cfg) => {
                 let cfg = cfg.clone();
                 let parallel = threading == &cfg::Threading::Rayon;
-                Ok(Box::new(self::homestyle::KolmogorovCrespiZ { cfg, parallel }))
+                Ok(Box::new(self::homestyle::KolmogorovCrespi { cfg, parallel }))
             },
             cfg::PotentialKind::ReboNonreactive(cfg) => {
                 let cfg = cfg.clone();

@@ -9,8 +9,6 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-#![allow(non_snake_case)]
-
 use crate::util::switch;
 use rsp2_array_types::{V3, M33};
 
@@ -181,3 +179,6 @@ impl Params {
         }
     }
 }
+
+// Helps downstream code compute the "local normal" as defined in the Kolmogorov/Crespi paper.
+pub use crate::util::geometry::unit_cross;

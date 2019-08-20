@@ -163,24 +163,11 @@ impl FracBond {
         } else { None }
     }
 
-    // NOTE: when working with types like PeriodicGraph, FracBonds::to_cart_bonds is not
-    //       available. There was no convenient place to put a method for getting all of the cart
-    //       vectors from a format like that, so this is a method for getting a single vector.
-    //
-    //       I went for an unambiguous signature over ergonomics or efficiency; hopefully, the
-    //       branch can be elided at use sites.
-    //
-    // FIXME: If I ever actually do add separate types for Fracs and Carts, this should simply
-    //        be of type (&Carts) -> V3.
-    //
-    /// Get the Cartesian vector, if the `coords` have cached Cartesian coordinates.
-    #[inline] // hoping for optimizations that elide the branch
-    pub fn cart_vector_using_cache(&self, coords: &Coords) -> Option<V3> {
+    #[inline]
+    pub fn cart_vector_using_carts(&self, lattice: &Lattice, carts: &[V3]) -> V3 {
         let FracBond { from, to, image_diff } = *self;
-        coords.as_carts_cached().map(|carts| {
-            let cart_image_diff = image_diff.map(|x| x as f64) * coords.lattice();
-            carts[to] - carts[from] + cart_image_diff
-        })
+        let cart_image_diff = image_diff.map(|x| x as f64) * lattice;
+        carts[to] - carts[from] + cart_image_diff
     }
 }
 
@@ -443,9 +430,10 @@ impl FracBonds {
         // (NOTE: we'd also get ruined by reordering of coordinates or mapping into
         //        the unit cell; but those are too difficult to test)
         assert_eq!(num_atoms, coords.num_atoms(), "number of atoms has changed!");
-        let coords = coords.with_carts(coords.to_carts());
+        let lattice = coords.lattice();
+        let carts = coords.to_carts();
         let cart_vector = {
-            self.into_iter().map(|v| v.cart_vector_using_cache(&coords).unwrap()).collect()
+            self.into_iter().map(|v| v.cart_vector_using_carts(lattice, &carts)).collect()
         };
         CartBonds { num_atoms, from, to, cart_vector }
     }

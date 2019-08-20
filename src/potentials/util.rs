@@ -195,3 +195,88 @@ pub(crate) mod switch {
         }
     }
 }
+
+//-------------------------------------------------------------------------------------------
+
+pub mod geometry {
+    use rsp2_array_types::{V3, M33, M3};
+
+    //-----------------------------------------------------------------------------
+    // Vector differentials
+    //
+    // The convention used for the output derivative (Jacobian) is to define
+    // the Jacobian of f(x) as
+    //
+    //           [f1_d_x]   [∇x(f1)^T]   [∂f1/∂x1  ∂f1/∂x2  ∂f1/∂x3]
+    //   f_J_x = [f2_d_x] = [∇x(f2)^T] = [∂f2/∂x1  ∂f2/∂x2  ∂f2/∂x3]
+    //           [f3_d_x]   [∇x(f3)^T]   [∂f3/∂x1  ∂f3/∂x2  ∂f3/∂x3]
+    //
+    // i.e. each row is the gradient of an element of the output.
+    //
+    // It is named using `_J_` instead of `_d_` to remind that their multiplication
+    // might not be commutative. (all pairs of things named with `_d_` have either
+    // a commutative `Mul` impl or no `Mul` impl)
+    //
+    // This form is chosen because it composes naturally from left to right
+    // (the manner preferred in RSP2's largely row-based formalism).
+    // Observe the following identities:
+    //
+    // 1. Let f, g : ℝ³ → ℝ³, and consider f(g(x)).
+    //    The following is true:  f_J_x = f_J_g * g_J_x
+    //
+    // 2. Let f : ℝ³ → ℝ, g : ℝ³ → ℝ³, and consider f(g(x)).
+    //    The following is true:  f_d_x = f_d_g * g_J_x
+    //    (here, the `_d_`s are partial derivatives)
+    //
+    // 3. Let f : ℝ³ → ℝ³, g : ℝ → ℝ³, and consider f(g(x)).
+    //    The following is true:  f_d_x = f_J_g * g_d_x
+    //    (here, the `_d_`s are gradients)
+
+    /// Differential of `unit(a ⨯ b)`.
+    ///
+    /// Format of the output derivative (a Jacobian) is declared above.
+    pub fn unit_cross(a: V3, b: V3) -> (V3, (M33, M33)) {
+        let (cross, (cross_J_a, cross_J_b)) = cross(a, b);
+        let (unit, unit_J_cross) = unit(cross);
+        let unit_J_a = unit_J_cross * cross_J_a;
+        let unit_J_b = unit_J_cross * cross_J_b;
+        (unit, (unit_J_a, unit_J_b))
+    }
+
+    /// Differential of the function that produces a unit vector.
+    ///
+    /// Format of the output derivative (a Jacobian) is declared above.
+    pub fn unit(vec: V3) -> (V3, M33) {
+        // (expression for gradient optimized by hand on paper)
+        let norm = vec.norm();
+        let unit = vec / norm;
+        let outer_product = M3(unit.map(|x| x * unit).0);
+        let grad = norm.recip() * (M33::eye() - outer_product);
+        (unit, grad)
+    }
+
+    /// Differential of the function that computes a vector's norm.
+    pub fn norm(vec: V3) -> (f64, V3) {
+        let norm = vec.norm();
+        (norm, vec / norm)
+    }
+
+    /// Differential of the cross-product.
+    ///
+    /// Format of the output derivative (a Jacobian) is declared above.
+    pub fn cross(a: V3, b: V3) -> (V3, (M33, M33)) {
+        let value = a.cross(&b);
+        let J_a = M3([
+            // partial derivatives of value
+            V3([1.0, 0.0, 0.0]).cross(&b),
+            V3([0.0, 1.0, 0.0]).cross(&b),
+            V3([0.0, 0.0, 1.0]).cross(&b),
+        ]).t(); // transpose so rows are now gradients
+        let J_b = M3([
+            a.cross(&V3([1.0, 0.0, 0.0])),
+            a.cross(&V3([0.0, 1.0, 0.0])),
+            a.cross(&V3([0.0, 0.0, 1.0])),
+        ]).t();
+        (value, (J_a, J_b))
+    }
+}

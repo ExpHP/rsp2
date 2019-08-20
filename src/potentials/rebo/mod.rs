@@ -9,7 +9,5 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-#![allow(non_snake_case)]
-
 pub mod nonreactive;
 pub(crate) mod splines;

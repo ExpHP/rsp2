@@ -9,8 +9,6 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-#![allow(non_snake_case)]
-
 //! Implementation of the z-oriented Kolmogorov Crespi potential,
 //! with computation of the Hessian.
 

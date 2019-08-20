@@ -9,6 +9,8 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
+#![allow(non_snake_case)]
+
 #[macro_use] extern crate rsp2_util_macros;
 #[macro_use] extern crate rsp2_assert_close;
 #[macro_use] extern crate rsp2_newtype_indices;

@@ -540,12 +540,8 @@ impl Default for CgFlavor {
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub struct LayerSearch {
-    /// Axis along which to search for layers, expressed as the integer coordinates
-    /// of a lattice point found in that direction from the origin.
-    ///
-    /// (...`rsp2` technically only currently supports `[1, 0, 0]`, `[0, 1, 0]`,
-    /// and `[0, 0, 1]`, but implementing support for arbitrary integer vectors
-    /// is *possible* if somebody needs it...)
+    /// Miller index of the family of planes.  Must have `gcd == 1`.
+    #[serde(alias = "miller")]
     pub normal: [i32; 3],
 
     /// The cutoff distance that decides whether two atoms belong to the same layer;
@@ -658,33 +654,34 @@ impl<'de> de::Deserialize<'de> for Potential {
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum PotentialKind {
-    /// Deprecated.  LAMMPS `rebo`.
+    // Deprecated names.  If you use these, a warning will be printed telling you the new proper
+    // thing to write in your config.
     #[serde(rename = "rebo")] OldLammpsRebo(LammpsPotentialRebo),
-    /// Deprecated.  LAMMPS `airebo`.
     #[serde(rename = "airebo")] OldLammpsAirebo(LammpsPotentialAirebo),
-    /// Deprecated.  LAMMPS `rebo + kolmogorov/crespi/z`.
     #[serde(rename = "kc-z")] OldLammpsKolmogorovCrespiZ(LammpsPotentialKolmogorovCrespiZ),
-    /// Deprecated.  LAMMPS `rebo + kolmogorov/crespi/full`.
     #[serde(rename = "kc-full")] OldLammpsKolmogorovCrespiFull(LammpsPotentialKolmogorovCrespiFull),
+    #[serde(rename = "kc-z-new")] OldKolmogorovCrespiZ(OldPotentialKolmogorovCrespiZ),
+    #[serde(rename = "rebo-new")] OldReboNew(PotentialReboNonreactive),
 
-    // TODO: Rename to kc-z once the old kc-z is gone.
-    /// Reimplementation of LAMMPS' `kolmogorov/crespi/z`.
+    /// Reimplementation of LAMMPS' `kolmogorov/crespi/z` and/or `kolmogorov/crespi/full`.
     ///
-    /// Typically summed together with `rebo-nonreactive`.
+    /// This potential only contains an interlayer term, and is typically summed together with
+    /// `rebo-nonreactive`.
     ///
     /// This is implemented directly in rsp2 and supports lattice parameter optimization.
     /// It can also be optionally given a smooth cutoff with C(1) continuity.
-    #[serde(rename = "kc-z-new")] KolmogorovCrespiZNew(PotentialKolmogorovCrespiZNew),
+    ///
+    /// Even though arbitrary normals are supported, the implementation is still only fit for
+    /// materials that are layered along the z-axis. This is because the implementation is
+    /// historically based off of `kolmogorov/crespi/z`, and thus is designed to suppress
+    /// interactions between non-adjacent layers. (e.g. between layers 1 and 3 in a trilayer).
+    #[serde(rename = "kc-layered")] KolmogorovCrespi(PotentialKolmogorovCrespi),
 
     /// REBO, without fractional bond orders.
     ///
     /// This is implemented directly in rsp2 and supports lattice parameter optimization.
     /// It also supports a variety of parameters.
     #[serde(rename = "rebo-nonreactive")] ReboNonreactive(PotentialReboNonreactive),
-
-    // TODO: remove
-    /// Deprecated; renamed to `rebo-nonreactive`.
-    #[serde(rename = "rebo-new")] OldReboNew(PotentialReboNonreactive),
 
     /// Use potentials implemented in Lammps.  Only a few specific potentials are supported.
     ///
@@ -797,7 +794,27 @@ fn potential__lammps_kolmogorov_crespi_full__rebo__skip(&x: &bool) -> bool { x =
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
-pub struct PotentialKolmogorovCrespiZNew {
+pub struct OldPotentialKolmogorovCrespiZ {
+    #[serde(rename = "cutoff")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cutoff_begin: OrDefault<f64>,
+
+    #[serde(rename = "cutoff-length")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cutoff_transition_dist: OrDefault<f64>,
+
+    #[serde(default = "potential_kolmogorov_crespi_new__skin_depth")]
+    pub skin_depth: f64,
+
+    #[serde(default = "potential_kolmogorov_crespi_new__skin_check_frequency")]
+    #[serde(skip_serializing_if = "potential_kolmogorov_crespi_new__skin_check_frequency__skip")]
+    pub skin_check_frequency: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub struct PotentialKolmogorovCrespi {
     // NOTE: defaults are not here because they are defined in rsp2_tasks,
     //       which depends on this crate
     /// Cutoff radius. (Angstrom)
@@ -821,7 +838,7 @@ pub struct PotentialKolmogorovCrespiZNew {
     ///
     /// This should be larger than the phonon displacement distance, or else phonon forces
     /// may be incorrect.
-    #[serde(default = "potential_kolmogorov_crespi_z_new__skin_depth")]
+    #[serde(default = "potential_kolmogorov_crespi_new__skin_depth")]
     pub skin_depth: f64,
 
     // FIXME: hack
@@ -836,13 +853,36 @@ pub struct PotentialKolmogorovCrespiZNew {
     ///
     /// Because various parts of the code may call the potential any arbitrary number of times,
     /// the frequency here does not necessarily correspond to anything meaningful.
-    #[serde(default = "potential_kolmogorov_crespi_z_new__skin_check_frequency")]
-    #[serde(skip_serializing_if = "potential_kolmogorov_crespi_z_new__skin_check_frequency__skip")]
+    #[serde(default = "potential_kolmogorov_crespi_new__skin_check_frequency")]
+    #[serde(skip_serializing_if = "potential_kolmogorov_crespi_new__skin_check_frequency__skip")]
     pub skin_check_frequency: u64,
+
+    #[serde(default = "potential_kolmogorov_crespi_new__normals")]
+    pub normals: KolmogorovCrespiNormals,
 }
-fn potential_kolmogorov_crespi_z_new__skin_depth() -> f64 { 1.0 }
-fn potential_kolmogorov_crespi_z_new__skin_check_frequency() -> u64 { 1 }
-fn potential_kolmogorov_crespi_z_new__skin_check_frequency__skip(&x: &u64) -> bool { x == 1 }
+fn potential_kolmogorov_crespi_new__skin_depth() -> f64 { 1.0 }
+fn potential_kolmogorov_crespi_new__skin_check_frequency() -> u64 { 1 }
+fn potential_kolmogorov_crespi_new__skin_check_frequency__skip(&x: &u64) -> bool { x == 1 }
+fn potential_kolmogorov_crespi_new__normals() -> KolmogorovCrespiNormals { KolmogorovCrespiNormals::Local {} }
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum KolmogorovCrespiNormals {
+    /// Assume all normals are z-oriented.
+    Z { },
+
+    /// Use the "local normals" defined by Kolmogorov and Crespi.
+    ///
+    /// These are the normals to the unique plane containing the three neighbors around each atom.
+    /// If any sites do not have three neighbors, this will fail.
+    ///
+    /// Kolmogorov and Crespi report that, for nanotubes, the normals generated by this method tend
+    /// to tilt towards the center of one of the hexagonal faces, making this definition suboptimal.
+    Local { },
+
+    // semilocal is not implemented
+}
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
@@ -1397,7 +1437,24 @@ impl Potential {
                     PotentialKind::ReboNonreactive(inner)
                 },
 
-                pot => pot,
+                PotentialKind::OldKolmogorovCrespiZ(inner) => {
+                    found_deprecated = true;
+
+                    let OldPotentialKolmogorovCrespiZ {
+                        cutoff_begin, cutoff_transition_dist, skin_depth, skin_check_frequency,
+                    } = inner;
+                    PotentialKind::KolmogorovCrespi(PotentialKolmogorovCrespi {
+                        cutoff_begin, cutoff_transition_dist, skin_depth, skin_check_frequency,
+                        normals: KolmogorovCrespiNormals::Z {},
+                    })
+                },
+
+                pot@PotentialKind::ReboNonreactive(..) |
+                pot@PotentialKind::KolmogorovCrespi(..) |
+                pot@PotentialKind::DftbPlus(..) |
+                pot@PotentialKind::Lammps(..) |
+                pot@PotentialKind::TestZero |
+                pot@PotentialKind::TestChainify => pot,
             }).collect()
         };
 
@@ -1422,7 +1479,7 @@ impl Potential {
             bail!("The `lammps` potential may only be listed at most once!");
         }
 
-        if matches!([PotentialKind::KolmogorovCrespiZNew(_)], out.as_slice()) {
+        if matches!([PotentialKind::KolmogorovCrespi(_)], out.as_slice()) {
             warn!("\
                 You are using the Kolmogorov/Crespi potential alone, with no intralayer term. \
                 This is a bit unusual; did you mean to add a REBO term? (e.g. `nonreactive-rebo`)\
@@ -1498,7 +1555,7 @@ fn check_phonons(phonons: &Phonons, potential: &ValidatedPotential) -> Result<()
     if phonons.analytic_hessian {
         for kind in kinds {
             match kind {
-                PotentialKind::KolmogorovCrespiZNew(_) => {},
+                PotentialKind::OldKolmogorovCrespiZ(_) => {},
                 _ => bail!{"The chosen potential does not support analytic-hessian mode."},
             }
         }

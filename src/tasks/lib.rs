@@ -19,6 +19,7 @@
 // Basically, everything in this crate is purely ad-hoc.
 
 #![deny(unused_must_use)]
+#![allow(non_snake_case)]
 #![recursion_limit="128"]
 
 #[macro_use] extern crate rsp2_newtype_indices;

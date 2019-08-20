@@ -9,7 +9,6 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-#![allow(non_snake_case)]
 #![allow(non_shorthand_field_patterns)]
 #![allow(unused_imports)] // FIXME REMOVE
 #![allow(dead_code)] // FIXME REMOVE
@@ -44,7 +43,7 @@
 use super::splines::{self, TricubicGrid, BicubicGrid};
 use crate::FailResult;
 #[cfg(test)] use crate::util::uniform;
-use crate::util::{try_num_grad_v3, num_grad_v3, switch};
+use crate::util::{try_num_grad_v3, num_grad_v3, switch, geometry};
 
 use rayon_cond::CondIterator;
 use rsp2_structure::{Element, Coords};
@@ -112,7 +111,7 @@ enum Debug { Auto, Never }
 //    this is obvious from context and it's hard to use them incorrectly.
 //
 //    An exception is made for the case where `foo` and `bar` are BOTH vectors;
-//    search this file for the word "Jacobian".
+//    search the source code of this crate for the word "Jacobian".
 //
 //    Generally speaking, `foo_d_bar * bar_d_baz = foo_d_baz`, assuming the
 //    multiplication operation is supported by those types.
@@ -452,7 +451,7 @@ mod interactions {
             let mut bond_image_diff = IndexVec::<BondI, V3<i32>>::with_capacity(bond_graph.edge_count());
             let site_type = IndexVec::<SiteI, _>::from_raw(types.to_vec());
 
-            let cart_cache = coords.with_carts(coords.to_carts());
+            let carts = coords.to_carts();
 
             // Make a pass to get all the bond divs right.
             for node in bond_graph.node_indices() {
@@ -460,7 +459,7 @@ mod interactions {
 
                 for frac_bond_ij in bond_graph.frac_bonds_from(site_i.index()) {
                     let site_j = SiteI(frac_bond_ij.to);
-                    let cart_vector = frac_bond_ij.cart_vector_using_cache(&cart_cache).unwrap();
+                    let cart_vector = frac_bond_ij.cart_vector_using_carts(coords.lattice(), &carts);
 
                     if let IsInteracting(false) = check_distance(
                         params, cart_vector.norm(), (site_type[site_i], site_type[site_j]),
@@ -770,7 +769,7 @@ fn _compute_rebo_bonds(
                 let type_j = interactions.site_type(site_j);
                 let delta = bond_deltas[bond];
 
-                let (length, length_d_delta) = norm(delta);
+                let (length, length_d_delta) = geometry::norm(delta);
                 let EasyParts {
                     weight, VA, VA_d_length, VR, VR_d_length,
                 } = easy_parts::Input {
@@ -1118,7 +1117,7 @@ mod site_sigma_pi_term {
             bond_target_types.push(target_type);
             type_present[target_type] = true;
 
-            let (length, length_d_delta) = norm(delta);
+            let (length, length_d_delta) = geometry::norm(delta);
             bond_lengths.push(length);
             bond_lengths_d_delta.push(length_d_delta);
         }
@@ -1885,8 +1884,8 @@ mod dihedral_sine_sq {
         // ∂cos/∂b2i = − (∂e2/∂b2i) ∙ e1
 
         // NOTE: analytically, e1_J_b1 = e2_J_b2 so there is a bit of unnecessary computation here
-        let (e1, (e1_J_a, e1_J_b1)) = unit_cross(a, b1);
-        let (e2, (e2_J_a, e2_J_b2)) = unit_cross(a, b2);
+        let (e1, (e1_J_a, e1_J_b1)) = geometry::unit_cross(a, b1);
+        let (e2, (e2_J_a, e2_J_b2)) = geometry::unit_cross(a, b2);
 
         // computes one of the dot product terms like `(∂e1/∂ai) ∙ e2` seen above.
         // It does this over all `i`, producing a gradient.
@@ -2515,85 +2514,6 @@ mod t_spline {
 
         value
     }
-}
-
-//-----------------------------------------------------------------------------
-// Vector differentials
-//
-// The convention used for the output derivative (Jacobian) is to define
-// the Jacobian of f(x) as
-//
-//           [f1_d_x]   [∇x(f1)^T]   [∂f1/∂x1  ∂f1/∂x2  ∂f1/∂x3]
-//   f_J_x = [f2_d_x] = [∇x(f2)^T] = [∂f2/∂x1  ∂f2/∂x2  ∂f2/∂x3]
-//           [f3_d_x]   [∇x(f3)^T]   [∂f3/∂x1  ∂f3/∂x2  ∂f3/∂x3]
-//
-// i.e. each row is the gradient of an element of the output.
-//
-// It is named using `_J_` instead of `_d_` to remind that their multiplication
-// might not be commutative. (all pairs of things named with `_d_` have either
-// a commutative `Mul` impl or no `Mul` impl)
-//
-// This form is chosen because it composes naturally from left to right
-// (the manner preferred in RSP2's largely row-based formalism).
-// Observe the following identities:
-//
-// 1. Let f, g : ℝ³ → ℝ³, and consider f(g(x)).
-//    The following is true:  f_J_x = f_J_g * g_J_x
-//
-// 2. Let f : ℝ³ → ℝ, g : ℝ³ → ℝ³, and consider f(g(x)).
-//    The following is true:  f_d_x = f_d_g * g_J_x
-//    (here, the `_d_`s are partial derivatives)
-//
-// 3. Let f : ℝ³ → ℝ³, g : ℝ → ℝ³, and consider f(g(x)).
-//    The following is true:  f_d_x = f_J_g * g_d_x
-//    (here, the `_d_`s are gradients)
-
-/// Differential of `unit(a ⨯ b)`.
-///
-/// Format of the output derivative (a Jacobian) is declared above.
-fn unit_cross(a: V3, b: V3) -> (V3, (M33, M33)) {
-    let (cross, (cross_J_a, cross_J_b)) = cross(a, b);
-    let (unit, unit_J_cross) = unit(cross);
-    let unit_J_a = unit_J_cross * cross_J_a;
-    let unit_J_b = unit_J_cross * cross_J_b;
-    (unit, (unit_J_a, unit_J_b))
-}
-
-/// Differential of the function that produces a unit vector.
-///
-/// Format of the output derivative (a Jacobian) is declared above.
-fn unit(vec: V3) -> (V3, M33) {
-    // (expression for gradient optimized by hand on paper)
-    let norm = vec.norm();
-    let unit = vec / norm;
-    let outer_product = M3(unit.map(|x| x * unit).0);
-    let grad = norm.recip() * (M33::eye() - outer_product);
-    (unit, grad)
-}
-
-/// Differential of the function that computes a vector's norm.
-fn norm(vec: V3) -> (f64, V3) {
-    let norm = vec.norm();
-    (norm, vec / norm)
-}
-
-/// Differential of the cross-product.
-///
-/// Format of the output derivative (a Jacobian) is declared above.
-fn cross(a: V3, b: V3) -> (V3, (M33, M33)) {
-    let value = a.cross(&b);
-    let J_a = M3([
-        // partial derivatives of value
-        V3([1.0, 0.0, 0.0]).cross(&b),
-        V3([0.0, 1.0, 0.0]).cross(&b),
-        V3([0.0, 0.0, 1.0]).cross(&b),
-    ]).t(); // transpose so rows are now gradients
-    let J_b = M3([
-        a.cross(&V3([1.0, 0.0, 0.0])),
-        a.cross(&V3([0.0, 1.0, 0.0])),
-        a.cross(&V3([0.0, 0.0, 1.0])),
-    ]).t();
-    (value, (J_a, J_b))
 }
 
 //-----------------------------------------------------------------------------

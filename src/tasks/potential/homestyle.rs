@@ -29,23 +29,30 @@ use rsp2_potentials::rebo::nonreactive as rebo_imp;
 
 use rayon_cond::CondIterator;
 use std::collections::BTreeMap;
+use std::sync::Mutex;
 
-pub use kc_z::Builder as KolmogorovCrespiZ;
-mod kc_z {
+pub use kc::Builder as KolmogorovCrespi;
+mod kc {
     use super::*;
+    use rsp2_structure::bonds::PeriodicGraph;
 
-    /// Rust implementation of Kolmogorov-Crespi Z.
+    /// Rust implementation of Kolmogorov-Crespi, for layers along the Z axis.
     ///
-    /// **NOTE:** This has the limitation that the set of pairs within interaction range
-    /// must not change after the construction of the DiffFn. The elements also must not change.
+    /// **NOTE:** This has the following limitations on how the structure must not change:
+    ///
+    /// * The set of pairs within interaction range must not change after the construction of
+    ///   the DiffFn. (TODO: Is this still true? We have that FracBondsWithSkin thing. Was
+    ///   there some other reason for this limitation?)
+    /// * The intralayer bond graph must not change.
+    /// * The elements must not change.
     #[derive(Debug, Clone)]
     pub struct Builder {
-        pub(in crate::potential) cfg: cfg::PotentialKolmogorovCrespiZNew,
+        pub(in crate::potential) cfg: cfg::PotentialKolmogorovCrespi,
         pub(in crate::potential) parallel: bool,
     }
 
     // FIXME the whole layer deal is such a mess
-    impl PotentialBuilder<CommonMeta> for KolmogorovCrespiZ {
+    impl PotentialBuilder<CommonMeta> for KolmogorovCrespi {
         fn initialize_diff_fn(&self, coords: &Coords, meta: CommonMeta) -> FailResult<Box<dyn DiffFn<CommonMeta>>>
         { Ok(Box::new(DiffFnFromBondDiffFn::new(self.initialize_bond_diff_fn(coords, meta)?.unwrap()))) }
 
@@ -68,8 +75,9 @@ mod kc_z {
     impl Builder {
         fn _initialize_bond_diff_fn(&self, coords: &Coords, meta: CommonMeta) -> FailResult<Diff>
         {
-            let cfg::PotentialKolmogorovCrespiZNew {
+            let cfg::PotentialKolmogorovCrespi {
                 cutoff_begin, cutoff_transition_dist, skin_depth, skin_check_frequency,
+                ref normals,
             } = self.cfg;
             let parallel = self.parallel;
 
@@ -109,24 +117,50 @@ mod kc_z {
             );
             bonds.set_check_frequency(skin_check_frequency);
 
-            Ok(Diff { params, bonds, layers, parallel })
+            let normal_info = match normals {
+                cfg::KolmogorovCrespiNormals::Z {} => NormalInfo::Z,
+                cfg::KolmogorovCrespiNormals::Local {} => {
+                    let intralayer_bonds: Option<meta::FracBonds> = meta.pick();
+                    let intralayer_graph = match intralayer_bonds {
+                        None => bail!{"\
+                            Attempted to compute full KC before generating a bond graph. \
+                            (probably due to an attempt to optimize parameters; either provide a \
+                            bond graph or use Z normals)\
+                        "},
+                        Some(intralayer_bonds) => intralayer_bonds.to_periodic_graph(),
+                    };
+
+                    NormalInfo::Local { intralayer_graph }
+                },
+            };
+
+            Ok(Diff { params, interaction_pairs: bonds, layers, parallel, normal_info })
         }
     }
 
     impl_dyn_clone_detail!{
-        impl[] DynCloneDetail<CommonMeta> for KolmogorovCrespiZ { ... }
+        impl[] DynCloneDetail<CommonMeta> for KolmogorovCrespi { ... }
     }
 
     type BondMeta = (Element, usize);
-    /// The object responsible for performing computations and maintaining the bond graph.
+    /// The object responsible for performing computations and maintaining the list of interactions.
     struct Diff {
         params: crespi_imp::Params,
         layers: Vec<usize>,
-        bonds: FracBondsWithSkin<
+        interaction_pairs: FracBondsWithSkin<
             BondMeta,
             dyn Fn(&BondMeta, &BondMeta) -> Option<f64>,
         >,
         parallel: bool,
+        normal_info: NormalInfo,
+    }
+
+    // Information needed to compute normals
+    enum NormalInfo {
+        Z,
+        Local {
+            intralayer_graph: PeriodicGraph,
+        },
     }
 
     impl BondDiffFn<CommonMeta> for Diff {
@@ -134,11 +168,11 @@ mod kc_z {
             let elements: meta::SiteElements = meta.pick();
 
             let meta_for_bonds = zip_eq!(elements.iter().cloned(), self.layers.iter().cloned());
-            let frac_bonds = self.bonds.compute(coords, meta_for_bonds)?;
+            let frac_bonds = self.interaction_pairs.compute(coords, meta_for_bonds)?;
 
             compute_using_frac_bonds(
                 self.parallel, &self.params,
-                coords, meta,
+                coords, meta, &self.normal_info,
                 frac_bonds.into_iter().collect(),
             )
         }
@@ -149,11 +183,11 @@ mod kc_z {
             let elements: meta::SiteElements = meta.pick();
 
             let meta_for_bonds = zip_eq!(elements.iter().cloned(), self.layers.iter().cloned());
-            let frac_bonds = self.bonds.compute(coords, meta_for_bonds)?;
+            let frac_bonds = self.interaction_pairs.compute(coords, meta_for_bonds)?;
 
             compute_with_hessian_using_frac_bonds(
                 self.parallel, &self.params,
-                coords, meta,
+                coords, meta, &self.normal_info,
                 frac_bonds.into_iter().collect(),
             )
         }
@@ -164,44 +198,98 @@ mod kc_z {
         fn compute_frac_bonds(&mut self, coords: &Coords, meta: CommonMeta) -> FailResult<&FracBonds> {
             let elements: meta::SiteElements = meta.pick();
             let meta_for_bonds = zip_eq!(elements.iter().cloned(), self.layers.iter().cloned());
-            self.bonds.compute(coords, meta_for_bonds)
+            self.interaction_pairs.compute(coords, meta_for_bonds)
         }
     }
 
     /// Compute terms for all of the provided FracBonds, possibly in parallel.
+    ///
+    /// For z normals, one term is produced per interlayer pair interaction.  For other normals,
+    /// additional terms are produced for intralayer interactions. (each intralayer bond will appear
+    /// multiple times, with the endpoint atoms listed in arbitrary order)
     fn compute_using_frac_bonds(
         parallel: bool,
         params: &crespi_imp::Params,
         coords: &Coords,
         meta: CommonMeta,
-        frac_bonds: Vec<FracBond>, // to be monomorphic
+        normal_info: &NormalInfo,
+        interaction_pairs: Vec<FracBond>, // to be monomorphic
     ) -> FailResult<(f64, Vec<BondGrad>)> {
-        let (part_values, bond_grads): (Vec<f64>, Vec<_>) = {
-            let elements: meta::SiteElements = meta.pick();
-            let cart_coords = coords.with_carts(coords.to_carts());
+        let elements: meta::SiteElements = meta.pick();
+        let lattice = coords.lattice();
+        let carts = coords.to_carts();
 
-            // HACK: collect to vec so that it implements IntoParallelIterator
-            let frac_bonds = frac_bonds.into_iter().filter(|bond| bond.is_canonical()).collect::<Vec<_>>();
-            // HACK: collect from Rc<[_]> to Vec to impl Send
-            let elements = elements.iter().cloned().collect::<Vec<_>>();
+        // HACK: collect to vec so that it implements IntoParallelIterator
+        let interaction_pairs = interaction_pairs.into_iter().filter(|bond| bond.is_canonical()).collect::<Vec<_>>();
+        // HACK: collect from Rc<[_]> to Vec to impl Send
+        let elements = elements.iter().cloned().collect::<Vec<_>>();
 
-            CondIterator::new(frac_bonds, parallel)
-                .map(|bond| {
-                    debug_assert!(bond.is_canonical());
-                    debug_assert_eq!(elements[bond.from], Element::CARBON);
-                    debug_assert_eq!(elements[bond.to], Element::CARBON);
-                    let cart_vector = bond.cart_vector_using_cache(&cart_coords).unwrap();
-                    let (part_value, part_grad) = params.compute_z(cart_vector);
+        let (part_values, bond_grads) = match normal_info {
+            NormalInfo::Z { } => {
+                CondIterator::new(interaction_pairs, parallel)
+                    .map(|bond| {
+                        debug_assert!(bond.is_canonical());
+                        debug_assert_eq!(elements[bond.from], Element::CARBON);
+                        debug_assert_eq!(elements[bond.to], Element::CARBON);
+                        let cart_vector = bond.cart_vector_using_carts(lattice, &carts);
+                        let (part_value, part_grad) = params.compute_z(cart_vector);
 
-                    let bond_grad = BondGrad {
-                        plus_site: bond.to,
-                        minus_site: bond.from,
-                        grad: part_grad,
-                        cart_vector,
-                    };
-                    (part_value, bond_grad)
-                }).unzip()
-        };
+                        let bond_grad = BondGrad {
+                            plus_site: bond.to,
+                            minus_site: bond.from,
+                            grad: part_grad,
+                            cart_vector,
+                        };
+                        (part_value, bond_grad)
+                    }).unzip()
+            },
+
+            NormalInfo::Local { intralayer_graph } => {
+                let normals = LocalNormals::compute(&intralayer_graph, coords)?;
+                let normal_grads = Mutex::new(vec![V3::zero(); coords.len()]);
+
+                let (part_values, mut bond_grads): (Vec<_>, Vec<_>) = {
+                    CondIterator::new(interaction_pairs, parallel)
+                        .map(|bond| {
+                            debug_assert!(bond.is_canonical());
+                            debug_assert_eq!(elements[bond.from], Element::CARBON);
+                            debug_assert_eq!(elements[bond.to], Element::CARBON);
+                            let cart_vector = bond.cart_vector_using_carts(lattice, &carts);
+                            let ni = normals.lookup(bond.from);
+                            let nj = normals.lookup(bond.to);
+
+                            let crespi_imp::Output {
+                                value, grad_rij, grad_ni, grad_nj,
+                            } = params.compute(cart_vector, ni, nj);
+
+                            {
+                                let mut normal_grads = normal_grads.lock().expect("(BUG) poisoned?");
+                                normal_grads[bond.from] += grad_ni;
+                                normal_grads[bond.to] += grad_nj;
+                            }
+
+                            let bond_grad = BondGrad {
+                                plus_site: bond.to,
+                                minus_site: bond.from,
+                                grad: grad_rij,
+                                cart_vector,
+                            };
+                            (value, bond_grad)
+                        }).unzip()
+                };
+
+                let normal_grads = normal_grads.into_inner()?;
+
+                bond_grads.reserve(2 * coords.len());
+                for site in 0..coords.len() {
+                    let [term_1, term_2] = normals.get_bond_grad_terms(site, normal_grads[site]);
+                    bond_grads.push(term_1);
+                    bond_grads.push(term_2);
+                }
+
+                (part_values, bond_grads)
+            }, // NormalInfo::Local => { ... }
+        }; // let (part_values, bond_grads) = match normal_info { ... }
         let value = part_values.iter().sum();
         Ok((value, bond_grads))
     }
@@ -212,33 +300,43 @@ mod kc_z {
         params: &crespi_imp::Params,
         coords: &Coords,
         meta: CommonMeta,
+        normal_info: &NormalInfo,
         frac_bonds: Vec<FracBond>, // to be monomorphic
     ) -> FailResult<(f64, Vec<(BondGrad, M33)>)> {
         let (part_values, extras): (Vec<f64>, Vec<_>) = {
             let elements: meta::SiteElements = meta.pick();
-            let cart_coords = coords.with_carts(coords.to_carts());
+            let lattice = coords.lattice();
+            let carts = coords.to_carts();
 
             // HACK: collect to vec so that it implements IntoParallelIterator
             let frac_bonds = frac_bonds.into_iter().filter(|bond| bond.is_canonical()).collect::<Vec<_>>();
             // HACK: collect from Rc<[_]> to Vec to impl Send
             let elements = elements.iter().cloned().collect::<Vec<_>>();
 
-            CondIterator::new(frac_bonds, parallel)
-                .map(|bond| {
-                    debug_assert!(bond.is_canonical());
-                    debug_assert_eq!(elements[bond.from], Element::CARBON);
-                    debug_assert_eq!(elements[bond.to], Element::CARBON);
-                    let cart_vector = bond.cart_vector_using_cache(&cart_coords).unwrap();
-                    let (part_value, part_grad, part_hessian) = params.compute_z_with_hessian(cart_vector);
+            match normal_info {
+                NormalInfo::Z => {
+                    CondIterator::new(frac_bonds, parallel)
+                        .map(|bond| {
+                            debug_assert!(bond.is_canonical());
+                            debug_assert_eq!(elements[bond.from], Element::CARBON);
+                            debug_assert_eq!(elements[bond.to], Element::CARBON);
+                            let cart_vector = bond.cart_vector_using_carts(lattice, &carts);
+                            let (part_value, part_grad, part_hessian) = params.compute_z_with_hessian(cart_vector);
 
-                    let bond_grad = BondGrad {
-                        plus_site: bond.to,
-                        minus_site: bond.from,
-                        grad: part_grad,
-                        cart_vector,
-                    };
-                    (part_value, (bond_grad, part_hessian))
-                }).unzip()
+                            let bond_grad = BondGrad {
+                                plus_site: bond.to,
+                                minus_site: bond.from,
+                                grad: part_grad,
+                                cart_vector,
+                            };
+                            (part_value, (bond_grad, part_hessian))
+                        }).unzip()
+                },
+
+                NormalInfo::Local { .. } => {
+                    unimplemented!("analytic hessian with general normal vectors for Kolmogorov Crespi is not supported!");
+                },
+            }
         };
         let value = part_values.iter().sum();
         Ok((value, extras))
@@ -256,7 +354,7 @@ mod kc_z {
     /// potential is a function of exactly one bond vector. This could not be done for REBO, which
     /// contains terms that depend on two vectors (the bond-angle terms) or more (the dihedral
     /// angle terms).
-    struct MyDispFnOther {
+    struct ZDispFnOther {
         // For each site, all of the FracBonds in the equilibrium structure where
         // the site appears as either the `to` or the `from` site.
         //
@@ -268,6 +366,16 @@ mod kc_z {
     impl Builder {
         fn _initialize_disp_fn(&self, coords: &Coords, meta: CommonMeta) -> FailResult<impl DispFn>
         {Ok({
+            match self.cfg.normals {
+                cfg::KolmogorovCrespiNormals::Z {} => Box::new(self.optimized_disp_fn_for_z(coords, meta)?),
+                cfg::KolmogorovCrespiNormals::Local {} => self._default_initialize_disp_fn(coords, meta)?,
+            }
+        })}
+
+        fn optimized_disp_fn_for_z(&self, coords: &Coords, meta: CommonMeta) -> FailResult<impl DispFn>
+        {Ok({
+            trace!("Using optimized DispFn for KCZ");
+
             let mut diff = self._initialize_bond_diff_fn(coords, meta.clone())?;
 
             let canonical_bonds_by_site = {
@@ -287,7 +395,7 @@ mod kc_z {
                 }
                 canonical_bonds_by_site
             };
-            let other = MyDispFnOther { canonical_bonds_by_site };
+            let other = ZDispFnOther { canonical_bonds_by_site };
 
             DispFnHelper::new(coords, meta)
                 .with_other(other)
@@ -295,12 +403,15 @@ mod kc_z {
         })}
     }
 
-    impl disp_fn_helper::Callback<CommonMeta, MyDispFnOther> for Diff {
+    impl disp_fn_helper::Callback<CommonMeta, ZDispFnOther> for Diff {
         fn compute_sparse_grad_delta(
             &mut self,
-            context: disp_fn_helper::Context<'_, CommonMeta, MyDispFnOther>,
+            context: disp_fn_helper::Context<'_, CommonMeta, ZDispFnOther>,
             disp: (usize, V3),
         ) -> FailResult<BTreeMap<usize, V3>> {
+            // FIXME: This needs better documentation; I am confused how it works.
+            // Why is it not necessary to subtract the corresponding bond grads at equilibrium?
+
             let filtered_bonds = context.other.canonical_bonds_by_site[disp.0].to_vec();
 
             let mut coords = context.equilibrium_coords.clone();
@@ -308,7 +419,7 @@ mod kc_z {
 
             let (_, bond_grad) = compute_using_frac_bonds(
                 self.parallel, &self.params,
-                &coords, context.meta,
+                &coords, context.meta, &self.normal_info,
                 filtered_bonds,
             )?;
 
@@ -316,10 +427,103 @@ mod kc_z {
         }
     }
 
+    use local_normals::LocalNormals;
+    mod local_normals {
+        use super::*;
+
+        pub struct LocalNormals {
+            data: Vec<LocalNormalData>,
+        }
+
+        struct LocalNormalData {
+            normal: V3,
+            // virtual bonds...
+            bond_12: FracBond, // ...from the first neighbor to the second neighbor
+            bond_13: FracBond, // ...from the first neighbor to the third neighbor
+            // ...in cartesian form...
+            r12: V3,
+            r13: V3,
+            // ...and derivatives with respect to those bonds
+            normal_J_r12: M33,
+            normal_J_r13: M33,
+            // (note: there is no need to consider the virtual bond between the second and third
+            //        neighbors, and in fact, doing so would double-count some forces once we convert
+            //        back from per-bond forces to per-site forces)
+        }
+
+        impl LocalNormals {
+            pub fn compute(
+                intralayer_graph: &PeriodicGraph,
+                coords: &Coords,
+            ) -> FailResult<Self> {
+                assert_eq!(coords.len(), intralayer_graph.node_count());
+                let lattice = coords.lattice();
+                let carts = coords.to_carts();
+
+                let data = {
+                    (0..coords.len()).map(|site| {
+                        let mut edges = intralayer_graph.frac_bonds_from(site);
+                        match (edges.next(), edges.next(), edges.next(), edges.next()) {
+                            (Some(b01), Some(b02), Some(b03), None) => {
+                                let bond_12 = b01.flip().join(b02).expect("(BUG) bond mismatch?");
+                                let bond_13 = b01.flip().join(b03).expect("(BUG) bond mismatch?");
+
+                                let r12 = bond_12.cart_vector_using_carts(lattice, &carts);
+                                let r13 = bond_13.cart_vector_using_carts(lattice, &carts);
+
+                                let (normal, (normal_J_r12, normal_J_r13)) = crespi_imp::unit_cross(r12, r13);
+
+                                Ok(LocalNormalData {
+                                    normal, bond_12, bond_13, normal_J_r12, normal_J_r13, r12, r13,
+                                })
+                            },
+                            _ => bail!{
+                                "\
+                                    'kc.normals: local' requires all sites to have three neighbors; \
+                                    a site was found with {}.\
+                                ", intralayer_graph.frac_bonds_from(site).count(),
+                            },
+                        }
+                    }).collect::<FailResult<_>>()?
+                };
+
+                Ok(LocalNormals { data })
+            }
+
+            pub fn lookup(&self, index: usize) -> V3 {
+                self.data[index].normal
+            }
+
+            pub fn get_bond_grad_terms(
+                &self,
+                site: usize,
+                value_d_normal: V3,
+            ) -> [BondGrad; 2] {
+                let LocalNormalData {
+                    normal: _, bond_12, bond_13, normal_J_r12, normal_J_r13, r12, r13,
+                } = self.data[site];
+
+                let grad_12 = BondGrad {
+                    minus_site: bond_12.from,
+                    plus_site: bond_12.to,
+                    grad: value_d_normal * normal_J_r12,
+                    cart_vector: r12,
+                };
+                let grad_13 = BondGrad {
+                    minus_site: bond_13.from,
+                    plus_site: bond_13.to,
+                    grad: value_d_normal * normal_J_r13,
+                    cart_vector: r13,
+                };
+                [grad_12, grad_13]
+            }
+        }
+    }
+
     // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     // FIXME: copy-pasta from KCZ in lammps.rs
     // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    impl KolmogorovCrespiZ {
+    impl KolmogorovCrespi {
         fn find_layers(&self, coords: &Coords, meta: &CommonMeta) -> Layers
         {
             use rsp2_structure::layer;
