@@ -753,24 +753,29 @@ mod kc_full {
     impl KolmogorovCrespiFull {
         // NOTE: This ends up getting called stupidly often, but I don't think
         //       it is expensive enough to be a real cause for concern.
-        fn find_molecules(&self, _: &Coords, meta: &CommonMeta) -> Vec<usize>
+        fn find_molecules(&self, coords: &Coords, meta: &CommonMeta) -> Vec<usize>
         {
             let bonds: Option<meta::FracBonds> = meta.pick();
-            match bonds {
-                Some(bonds) => {
-                    bonds.to_periodic_graph().connected_components_by_site()
-                        .into_iter().map(|x| x.into_arbitrary_integer())
-                        .collect()
+            let bonds = match bonds {
+                Some(bonds) => bonds,
+                None => {
+                    let elements: meta::SiteElements = meta.pick();
+                    std::rc::Rc::new(rsp2_structure::bonds::FracBonds::compute_with_meta(
+                        coords,
+                        elements.iter().cloned(),
+                        |&a, &b| match (a, b) {
+                            (consts::CARBON, consts::CARBON) => Some(2.01),
+                            (consts::CARBON, consts::HYDROGEN) |
+                            (consts::HYDROGEN, consts::CARBON) => Some(1.51),
+                            (consts::HYDROGEN, consts::HYDROGEN) => Some(1.21),
+                            _ => None,
+                        },
+                    ).expect("couldn't get bonds"))
                 },
-
-                // FIXME: This does not let us optimize parameters
-                //        before generating the bond graph when using this potential.
-                None => panic!("\
-                    Attempted to compute kolmogorov/crespi/full before generating a bond graph. \
-                    (probably due to an attempt to optimize parameters; either provide a bond \
-                    graph or don't do that)\
-                "),
-            }
+            };
+            bonds.to_periodic_graph().connected_components_by_site()
+                .into_iter().map(|x| x.into_arbitrary_integer())
+                .collect()
         }
     }
 

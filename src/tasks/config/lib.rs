@@ -216,7 +216,12 @@ pub struct Settings {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub layer_search: Nullable<LayerSearch>,
 
+    // FIXME: I'm beginning to think there shouldn't be a global bond graph.
+    //        Potentials should manage their own bond graphs.
+    //
     /// `None` disables bond graph.
+    ///
+    /// Sometimes this is ignored if a bond graph needs to be generated on the spot.
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bond_radius: Nullable<f64>,

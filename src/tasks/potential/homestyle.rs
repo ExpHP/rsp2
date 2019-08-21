@@ -123,14 +123,25 @@ mod kc {
                 cfg::KolmogorovCrespiNormals::Z {} => NormalInfo::Z,
                 cfg::KolmogorovCrespiNormals::Local {} => {
                     let intralayer_bonds: Option<meta::FracBonds> = meta.pick();
-                    let intralayer_graph = match intralayer_bonds {
-                        None => bail!{"\
-                            Attempted to compute full KC before generating a bond graph. \
-                            (probably due to an attempt to optimize parameters; either provide a \
-                            bond graph or use Z normals)\
-                        "},
-                        Some(intralayer_bonds) => intralayer_bonds.to_periodic_graph(),
+                    let intralayer_bonds = match intralayer_bonds {
+                        Some(bonds) => bonds,
+                        None => {
+                            // FIXME: copypasta
+                            let elements: meta::SiteElements = meta.pick();
+                            std::rc::Rc::new(rsp2_structure::bonds::FracBonds::compute_with_meta(
+                                coords,
+                                elements.iter().cloned(),
+                                |&a, &b| match (a, b) {
+                                    (Element::CARBON, Element::CARBON) => Some(2.01),
+                                    (Element::CARBON, Element::HYDROGEN) |
+                                    (Element::HYDROGEN, Element::CARBON) => Some(1.51),
+                                    (Element::HYDROGEN, Element::HYDROGEN) => Some(1.21),
+                                    _ => None,
+                                },
+                            ).expect("couldn't get bonds"))
+                        },
                     };
+                    let intralayer_graph = intralayer_bonds.to_periodic_graph();
 
                     NormalInfo::Local { intralayer_graph }
                 },
