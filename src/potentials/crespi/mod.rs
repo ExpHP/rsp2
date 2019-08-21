@@ -75,13 +75,14 @@ impl Params {
     /// Registry-dependent interlayer potential for graphitic systems.
     /// Physical Review B 71, 235415 (2005)
     pub fn original() -> Params {
+        let meV = 1e-3;
         Params {
             delta: 0.578, // Angstroms
             lambda: 3.629, // Angstroms
-            A: 10.238e-3, // eV
+            A: 10.238 * meV, // eV
             z0: 3.34, // Angstroms
-            C: 3.030e-3, // eV
-            C2N: [15.71e-3, 12.29e-3, 4.933e-3], // eV
+            C: 3.030 * meV, // eV
+            C2N: [15.71 * meV, 12.29 * meV, 4.933 * meV], // eV
             cutoff_begin: 11.0,
             cutoff_transition_dist: Some(2.0),
         }
@@ -95,13 +96,14 @@ impl Params {
     /// # Citation
     /// Wengen Ouyang, Davide Mandelli, Michael Urbakh, Oded Hod, arXiv:1806.09555 (2018).
     pub fn ouyang() -> Params {
+        let meV = 1e-3;
         Params {
             delta: 0.7718101, // Angstroms
             lambda: 3.143921, // Angstroms
-            A: 12.660270, // eV
+            A: 12.660270 * meV,
             z0: 3.328819, // Angstroms
-            C: 6.678908e-4, // eV
-            C2N: [21.847167, 12.060173, 4.711099], // eV
+            C: 6.678908e-4 * meV,
+            C2N: [21.847167 * meV, 12.060173 * meV, 4.711099 * meV],
             cutoff_begin: 11.0,
             cutoff_transition_dist: Some(2.0),
         }
