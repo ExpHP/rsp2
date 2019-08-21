@@ -392,6 +392,7 @@ impl<'d, Meta> DiffFn<Meta> for Box<dyn DiffFn<Meta> + 'd> {
 //-------------------------------------
 
 /// Represents a single pair interaction in the potential.
+#[derive(Debug, Copy, Clone)]
 pub struct BondGrad {
     /// The bond vector `carts[plus_site] - carts[minus_site] + unspecified_lattice_point`.
     ///

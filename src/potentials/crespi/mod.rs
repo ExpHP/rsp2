@@ -64,12 +64,17 @@ pub struct Params {
     pub cutoff_transition_dist: Option<f64>,
 }
 
-impl Default for Params {
+impl Params {
     /// Constants used for calculation of the Kolmogorov-Crespi potential.
     ///
-    /// These match the values used by default by the implementation of kolmogorov/crespi/z in
+    /// These match the values used by default by the implementation of `kolmogorov/crespi/z` in
     /// Lammps, which is scaled to Lammps' rebo's bond length.
-    fn default() -> Params {
+    ///
+    /// # Citation
+    /// A.N. Kolmogorov & V. H. Crespi,
+    /// Registry-dependent interlayer potential for graphitic systems.
+    /// Physical Review B 71, 235415 (2005)
+    pub fn original() -> Params {
         Params {
             delta: 0.578, // Angstroms
             lambda: 3.629, // Angstroms
@@ -77,6 +82,26 @@ impl Default for Params {
             z0: 3.34, // Angstroms
             C: 3.030e-3, // eV
             C2N: [15.71e-3, 12.29e-3, 4.933e-3], // eV
+            cutoff_begin: 11.0,
+            cutoff_transition_dist: Some(2.0),
+        }
+    }
+
+    /// Constants used for calculation of the Kolmogorov-Crespi potential.
+    ///
+    /// These match the values used by default by the implementation of `kolmogorov/crespi/z` in
+    /// Lammps, which is scaled to Lammps' rebo's bond length.
+    ///
+    /// # Citation
+    /// Wengen Ouyang, Davide Mandelli, Michael Urbakh, Oded Hod, arXiv:1806.09555 (2018).
+    pub fn ouyang() -> Params {
+        Params {
+            delta: 0.7718101, // Angstroms
+            lambda: 3.143921, // Angstroms
+            A: 12.660270, // eV
+            z0: 3.328819, // Angstroms
+            C: 6.678908e-4, // eV
+            C2N: [21.847167, 12.060173, 4.711099], // eV
             cutoff_begin: 11.0,
             cutoff_transition_dist: Some(2.0),
         }

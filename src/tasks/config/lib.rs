@@ -784,12 +784,51 @@ pub struct LammpsPotentialKolmogorovCrespiFull {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cutoff: OrDefault<f64>,
 
-    /// Enable taper function.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub taper: OrDefault<bool>,
+    /// Parameterization.
+    #[serde(default = "potential__lammps_kolmogorov_crespi_full__params")]
+    pub params: LammpsKolmogorovCrespiParams,
+}
+fn potential__lammps_kolmogorov_crespi_full__params() -> LammpsKolmogorovCrespiParams {
+    LammpsKolmogorovCrespiParams::Ouyang { taper: false }
 }
 fn potential__lammps_kolmogorov_crespi_full__rebo() -> bool { true }
 fn potential__lammps_kolmogorov_crespi_full__rebo__skip(&x: &bool) -> bool { x == true }
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum LammpsKolmogorovCrespiParams {
+    /// Uses the file `CC.KC-full` and sets `taper = 0`.
+    ///
+    /// # Citation
+    /// A.N. Kolmogorov & V. H. Crespi,
+    /// Registry-dependent interlayer potential for graphitic systems.
+    /// Physical Review B 71, 235415 (2005)
+    Original,
+
+    /// Uses the file `CH.KC` or `CH_taper.KC`, and sets the `taper` flag accordingly.
+    ///
+    /// # Citation
+    /// Wengen Ouyang, Davide Mandelli, Michael Urbakh, Oded Hod, arXiv:1806.09555 (2018).
+    Ouyang { taper: bool },
+}
+
+impl LammpsKolmogorovCrespiParams {
+    pub fn taper(&self) -> bool {
+        match *self {
+            LammpsKolmogorovCrespiParams::Original => false,
+            LammpsKolmogorovCrespiParams::Ouyang { taper } => taper,
+        }
+    }
+
+    pub fn filename(&self) -> &str {
+        match *self {
+            LammpsKolmogorovCrespiParams::Original => "CC.KC-full",
+            LammpsKolmogorovCrespiParams::Ouyang { taper: false } => "CH.KC",
+            LammpsKolmogorovCrespiParams::Ouyang { taper: true } => "CH_taper.KC",
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
@@ -824,6 +863,8 @@ pub struct PotentialKolmogorovCrespi {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cutoff_begin: OrDefault<f64>,
 
+    pub params: KolmogorovCrespiParams,
+
     /// Thickness of the "smooth cutoff" shell. (Angstrom)
     ///
     /// NOTE: If a value of 0.0 is used, the value is offset to maintain C0 continuity.
@@ -857,13 +898,11 @@ pub struct PotentialKolmogorovCrespi {
     #[serde(skip_serializing_if = "potential_kolmogorov_crespi_new__skin_check_frequency__skip")]
     pub skin_check_frequency: u64,
 
-    #[serde(default = "potential_kolmogorov_crespi_new__normals")]
     pub normals: KolmogorovCrespiNormals,
 }
 fn potential_kolmogorov_crespi_new__skin_depth() -> f64 { 1.0 }
 fn potential_kolmogorov_crespi_new__skin_check_frequency() -> u64 { 1 }
 fn potential_kolmogorov_crespi_new__skin_check_frequency__skip(&x: &u64) -> bool { x == 1 }
-fn potential_kolmogorov_crespi_new__normals() -> KolmogorovCrespiNormals { KolmogorovCrespiNormals::Local {} }
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
@@ -882,6 +921,25 @@ pub enum KolmogorovCrespiNormals {
     Local { },
 
     // semilocal is not implemented
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum KolmogorovCrespiParams {
+    /// Parameters lifted from LAMMPS' `CC.KC-full`.
+    ///
+    /// # Citation
+    /// A.N. Kolmogorov & V. H. Crespi,
+    /// Registry-dependent interlayer potential for graphitic systems.
+    /// Physical Review B 71, 235415 (2005)
+    Original,
+
+    /// Parameters lifted from LAMMPS' `CH.KC`.
+    ///
+    /// # Citation
+    /// Wengen Ouyang, Davide Mandelli, Michael Urbakh, Oded Hod, arXiv:1806.09555 (2018).
+    Ouyang,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1446,6 +1504,7 @@ impl Potential {
                     PotentialKind::KolmogorovCrespi(PotentialKolmogorovCrespi {
                         cutoff_begin, cutoff_transition_dist, skin_depth, skin_check_frequency,
                         normals: KolmogorovCrespiNormals::Z {},
+                        params: KolmogorovCrespiParams::Original,
                     })
                 },
 

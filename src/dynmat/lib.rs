@@ -610,6 +610,7 @@ impl ForceConstants {
                     warn_once!("\
                         Multiple shortest images found for a vector in the force constants! \
                         This could mean that your supercell is not large enough.\n\
+                        (or, the force sets have somehow become dense!)\n\
                         Lattice: {:?}\n\
                         Vectors: {:?}\n\
                           Force: {:?}\n\

@@ -43,7 +43,6 @@ use rsp2_lammps_wrap::INSTANCE_LOCK;
 const DEFAULT_KC_Z_CUTOFF: f64 = 14.0; // (Angstrom?)
 const DEFAULT_KC_Z_MAX_LAYER_SEP: f64 = 4.5; // Angstrom
 const DEFAULT_KC_FULL_CUTOFF: f64 = 14.0; // (Angstrom?)
-const DEFAULT_KC_FULL_TAPER: bool = true;
 
 const DEFAULT_AIREBO_LJ_SIGMA:    f64 = 3.0; // (cutoff, x3.4 A)
 const DEFAULT_AIREBO_LJ_ENABLED:      bool = true;
@@ -731,22 +730,22 @@ mod kc_full {
     use super::*;
 
     /// Uses `pair_style kolmogorov/crespi/full`.
-    #[derive(Debug, Clone, Default)]
+    #[derive(Debug, Clone)]
     pub struct KolmogorovCrespiFull {
         rebo: bool,
-        taper: bool,
         cutoff_end: f64,
+        params: cfg::LammpsKolmogorovCrespiParams,
     }
 
     impl<'a> From<&'a cfg::LammpsPotentialKolmogorovCrespiFull> for KolmogorovCrespiFull {
         fn from(cfg: &'a cfg::LammpsPotentialKolmogorovCrespiFull) -> Self {
             let cfg::LammpsPotentialKolmogorovCrespiFull {
-                rebo, taper, cutoff,
+                rebo, cutoff, ref params,
             } = *cfg;
             KolmogorovCrespiFull {
                 rebo,
+                params: params.clone(),
                 cutoff_end: cutoff.unwrap_or(DEFAULT_KC_FULL_CUTOFF),
-                taper: taper.unwrap_or(DEFAULT_KC_FULL_TAPER),
             }
         }
     }
@@ -793,18 +792,26 @@ mod kc_full {
         {
             let elements: meta::SiteElements = meta.pick();
             elements.iter().map(|elem| match elem.symbol() {
-                "H" => AtomType::new(1),
-                "C" => AtomType::new(2),
+                "C" => AtomType::new(1),
+                "H" => AtomType::new(2),
                 sym => panic!("Unexpected element in Airebo: {}", sym),
             }).collect()
         }
 
         fn init_info(&self, _: &Coords, meta: &CommonMeta) -> InitInfo
         {
-            let masses = vec![
-                only_unique_mass(meta, consts::HYDROGEN),
-                only_unique_mass(meta, consts::CARBON),
-            ];
+            let mut masses = vec![only_unique_mass(meta, consts::CARBON)];
+            let mut symbols = vec!["C"];
+
+            // Only add an atom type for hydrogen if there is any.
+            // Otherwise, LAMMPS will fail to load CC.KC-full, complaining that it
+            // is missing an entry.
+
+            let elements: meta::SiteElements = meta.pick();
+            if elements.iter().any(|&e| e == consts::HYDROGEN) {
+                masses.push(only_unique_mass(meta, consts::HYDROGEN));
+                symbols.push("H");
+            }
 
             let mut overlay = Overlay::new();
             if self.rebo {
@@ -813,7 +820,7 @@ mod kc_full {
                     pair_coeffs: vec![{
                         PairCoeff::new(.., ..)
                             .arg("CH.airebo")
-                            .args(&vec!["H", "C"])
+                            .args(&symbols)
                     }],
                 });
             }
@@ -822,15 +829,12 @@ mod kc_full {
                 pair_style: {
                     PairStyle::named("kolmogorov/crespi/full")
                         .arg(self.cutoff_end)
-                        .arg(boole(self.taper))
+                        .arg(boole(self.params.taper()))
                 },
                 pair_coeffs: vec![{
                     PairCoeff::new(.., ..)
-                        .arg(match self.taper {
-                            true => "CH.KC",
-                            false => "CH_taper.KC",
-                        })
-                        .args(&vec!["H", "C"])
+                        .arg(self.params.filename())
+                        .args(&symbols)
                 }],
             });
 

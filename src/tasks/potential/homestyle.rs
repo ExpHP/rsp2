@@ -29,7 +29,6 @@ use rsp2_potentials::rebo::nonreactive as rebo_imp;
 
 use rayon_cond::CondIterator;
 use std::collections::BTreeMap;
-use std::sync::Mutex;
 
 pub use kc::Builder as KolmogorovCrespi;
 mod kc {
@@ -77,11 +76,14 @@ mod kc {
         {
             let cfg::PotentialKolmogorovCrespi {
                 cutoff_begin, cutoff_transition_dist, skin_depth, skin_check_frequency,
-                ref normals,
+                ref normals, ref params,
             } = self.cfg;
             let parallel = self.parallel;
 
-            let mut params = crespi_imp::Params::default();
+            let mut params = match params {
+                cfg::KolmogorovCrespiParams::Original => crespi_imp::Params::original(),
+                cfg::KolmogorovCrespiParams::Ouyang => crespi_imp::Params::ouyang(),
+            };
             if let Some(cutoff_begin) = cutoff_begin {
                 params.cutoff_begin = cutoff_begin;
             }
@@ -246,9 +248,8 @@ mod kc {
 
             NormalInfo::Local { intralayer_graph } => {
                 let normals = LocalNormals::compute(&intralayer_graph, coords)?;
-                let normal_grads = Mutex::new(vec![V3::zero(); coords.len()]);
 
-                let (part_values, mut bond_grads): (Vec<_>, Vec<_>) = {
+                let (part_values, grad_items): (Vec<_>, Vec<_>) = {
                     CondIterator::new(interaction_pairs, parallel)
                         .map(|bond| {
                             debug_assert!(bond.is_canonical());
@@ -262,27 +263,26 @@ mod kc {
                                 value, grad_rij, grad_ni, grad_nj,
                             } = params.compute(cart_vector, ni, nj);
 
-                            {
-                                let mut normal_grads = normal_grads.lock().expect("(BUG) poisoned?");
-                                normal_grads[bond.from] += grad_ni;
-                                normal_grads[bond.to] += grad_nj;
-                            }
-
                             let bond_grad = BondGrad {
                                 plus_site: bond.to,
                                 minus_site: bond.from,
                                 grad: grad_rij,
                                 cart_vector,
                             };
-                            (value, bond_grad)
+                            (value, (bond_grad, grad_ni, grad_nj))
                         }).unzip()
                 };
 
-                let normal_grads = normal_grads.into_inner()?;
+                let mut bond_grads = Vec::with_capacity(grad_items.len() + 2 * coords.len());
+                let mut normal_grads = vec![V3::zero(); coords.len()];
+                for (bond_grad, grad_ni, grad_nj) in grad_items {
+                    bond_grads.push(bond_grad);
+                    normal_grads[bond_grad.minus_site] += grad_ni;
+                    normal_grads[bond_grad.plus_site] += grad_nj;
+                }
 
-                bond_grads.reserve(2 * coords.len());
-                for site in 0..coords.len() {
-                    let [term_1, term_2] = normals.get_bond_grad_terms(site, normal_grads[site]);
+                for (site, d_normal) in normal_grads.into_iter().enumerate() {
+                    let [term_1, term_2] = normals.get_bond_grad_terms(site, d_normal);
                     bond_grads.push(term_1);
                     bond_grads.push(term_2);
                 }
