@@ -4,6 +4,8 @@ use ::rsp2_integration_test::{CliTest, filetypes, resource, cli_test, Result};
 //
 // The workflow to update the test outputs is a bit rough:
 //
+//    * Check out this hacked version of phonopy (preferrably in a venv):
+//        https://github.com/exphp-forks/phonopy/tree/write-dm
 //    * phonopy -d --dim "13 13 1" --amplitude 1e-2
 //    * Make band.conf:
 //          EIGENVECTORS = .TRUE.
@@ -12,10 +14,8 @@ use ::rsp2_integration_test::{CliTest, filetypes, resource, cli_test, Result};
 //          BAND_POINTS = 1
 //    * Phonopy's FORCE_SETS are written to low precision, so get one at high precision by
 //      setting `RUST_LOG=rsp2_tasks::special::phonopy_force_sets=trace` while running this test.
-//    * Hack phonopy.phonon.band_structure.BandStructure._solve_dm_on_path to write each
-//      dm to .npz files.  This must be done using scipy.sparse.save_npz on a BSR matrix
-//      created with blocksize=(3,3).
 //    * phonopy band.conf
+//    * Assuming you got the hacked version above, `dynmat-${n}.npz` files will have been written.
 
 #[ignore] // This test is expensive; use `cargo test -- --ignored` to run it!
 #[test]
@@ -23,15 +23,15 @@ fn dynmat_at_q() -> Result<()> {
     let env = cli_test::Environment::init();
 
     for &(ref expected_outfile, kpoint) in &[
-        (resource("dynmat-at-q/dynmat-gamma.npz"), "0 0 0"),
-        (resource("dynmat-at-q/dynmat-k.npz"), "1/3 1/3 0"),
-        (resource("dynmat-at-q/dynmat-m.npz"), "0.5 0 0"),
-        (resource("dynmat-at-q/dynmat-m-neg.npz"), "-0.5 0 0"),
+        (resource("dynmat-at-q/001-0-a-gamma.dynmat.npz"), "0 0 0"),
+        (resource("dynmat-at-q/001-0-a-k.dynmat.npz"), "1/3 1/3 0"),
+        (resource("dynmat-at-q/001-0-a-m.dynmat.npz"), "0.5 0 0"),
+        (resource("dynmat-at-q/001-0-a-m-neg.dynmat.npz"), "-0.5 0 0"),
     ] {
         println!("Testing kpoint {}", kpoint);
         CliTest::cargo_binary(&env, "rsp2-dynmat-at-q")
             .arg("-c").arg(resource("dynmat-at-q/settings.yaml"))
-            .arg(resource("dynmat-at-q/input.structure"))
+            .arg(resource("dynmat-at-q/001-0-a.structure"))
             .arg("--qpoint").arg(kpoint)
             .arg("-o").arg("dynmat.npz")
             .check_file::<filetypes::Dynmat>(

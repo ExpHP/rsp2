@@ -1,11 +1,10 @@
 ---
-version: 1
 potential:
   - kc-layered:
       params: original
       normals:
-        z: {}
-  - rebo-nonreactive.params: lammps
+        local: {}
+  - rebo-new.params: lammps
 ev-loop:
   min-positive-iter: 1
   max-iter: 3
