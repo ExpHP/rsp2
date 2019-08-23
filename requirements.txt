@@ -5,4 +5,5 @@ spglib==1.10.4.11
 pymatgen==2019.2.4
 ruamel.yaml==0.15.61
 pytoml==0.1.20
+phonopy==1.13.0.64
 
