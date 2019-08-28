@@ -162,7 +162,7 @@ mod numerical_tests {
 
     #[test]
     fn crespi() {
-        let ref params = Params::default();
+        let ref params = Params::original();
 
         for _ in 0..NTRIAL {
             let rij = params.random_r();
@@ -203,7 +203,7 @@ mod numerical_tests {
     #[test]
     fn attractive_part() {
         // super::attractive_part(dist_sq: f64, r: V3)
-        let ref params = Params::default();
+        let ref params = Params::original();
 
         for _ in 0..NTRIAL {
             let rij = params.random_r();
@@ -219,7 +219,7 @@ mod numerical_tests {
     #[test]
     fn rho_squared() {
         // rho_squared(dist_sq: f64, r: V3, n: V3) -> (f64, V3, V3)
-        let ref params = Params::default();
+        let ref params = Params::original();
         for _ in 0..NTRIAL {
             let r = params.random_r();
             let n = V3::random_unit();
@@ -238,7 +238,7 @@ mod numerical_tests {
 
     #[test]
     fn crespi_fp() {
-        let ref params = Params::default();
+        let ref params = Params::original();
         for _ in 0..NTRIAL {
             let rij = params.random_r();
             let rhosq = V3::dot(&rij, &V3::random_unit());
@@ -253,7 +253,7 @@ mod numerical_tests {
 
     #[test]
     fn crespi_f() {
-        let ref params = Params::default();
+        let ref params = Params::original();
         for _ in 0..NTRIAL {
             let r = params.random_r();
             let n = V3::random_unit();
@@ -279,7 +279,7 @@ mod numerical_tests {
 
     #[test]
     fn repulsive_part() {
-        let ref params = Params::default();
+        let ref params = Params::original();
 
         for _ in 0..NTRIAL {
             let rij = params.random_r();
@@ -368,7 +368,7 @@ mod input_tests {
     }
 
     fn single(name: &str) -> FailResult<()> {
-        let ref mut params = Params::default();
+        let ref mut params = Params::original();
         params.cutoff_transition_dist = None; // Lammps has no smooth cutoff
         params.cutoff_begin = 14.0;
 

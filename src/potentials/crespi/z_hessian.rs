@@ -255,7 +255,7 @@ mod numerical_tests {
 
     #[test]
     fn crespi() {
-        let ref params = Params::default();
+        let ref params = Params::original();
 
         for _ in 0..NTRIAL {
             // For the numerically computed hessian to be accurate, we need a 7th degree
@@ -278,7 +278,7 @@ mod numerical_tests {
 
     #[test]
     fn attractive_part() {
-        let ref params = Params::default();
+        let ref params = Params::original();
 
         for _ in 0..NTRIAL {
             check_numerical_derivatives_33!{
@@ -290,7 +290,7 @@ mod numerical_tests {
 
     #[test]
     fn rho_squared() {
-        let ref params = Params::default();
+        let ref params = Params::original();
 
         for _ in 0..NTRIAL {
             check_numerical_derivatives_33!{
@@ -302,7 +302,7 @@ mod numerical_tests {
 
     #[test]
     fn crespi_fp() {
-        let ref params = Params::default();
+        let ref params = Params::original();
 
         for _ in 0..NTRIAL {
             let rij = params.random_r();
@@ -322,7 +322,7 @@ mod numerical_tests {
 
     #[test]
     fn crespi_f() {
-        let ref params = Params::default();
+        let ref params = Params::original();
 
         for _ in 0..NTRIAL {
             check_numerical_derivatives_33!{
@@ -334,7 +334,7 @@ mod numerical_tests {
 
     #[test]
     fn unscaled_repulsive_part() {
-        let ref params = Params::default();
+        let ref params = Params::original();
 
         for _ in 0..NTRIAL {
             check_numerical_derivatives_33!{
@@ -346,7 +346,7 @@ mod numerical_tests {
 
     #[test]
     fn scaled_repulsive_part() {
-        let ref params = Params::default();
+        let ref params = Params::original();
 
         for _ in 0..NTRIAL {
             check_numerical_derivatives_33!{
