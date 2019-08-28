@@ -20,7 +20,7 @@ path = "lib.rs"
 rsp2-tasks-config = { path = "config" }
 
 rsp2-lammps-wrap = { path = "../io/lammps" }
-lammps-sys = { version = "0.5.2", features = ["package-manybody", "package-user-misc", "package-user-omp"] }
+lammps-sys = { version = "0.6.0", features = ["package-manybody", "package-user-misc", "package-user-omp"] }
 
 rsp2-minimize = { path = "../minimize" }
 rsp2-structure = { path = "../structure", features = ["serde-support"] }
