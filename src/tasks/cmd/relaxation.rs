@@ -542,7 +542,7 @@ impl SnapshotFn {
             Some(period) => period,
         };
 
-        if (state.iterations - 1) % period as u64 == 0 {
+        if state.iterations > 0 && (state.iterations - 1) % period as u64 == 0 {
             if let Err(e) = fsx::rm_rf(&self.path) {
                 warn_once!("failed to delete old snapshot at {}: {}", self.path.nice(), e);
             }
