@@ -23,6 +23,14 @@ const FNAME_STRUCTURE: &'static str = "POSCAR";
 const FNAME_META: &'static str = "meta.json";
 const FNAME_FRAC_BONDS: &'static str = "frac-bonds.json";
 
+pub type Meta = HList5<
+    meta::SiteElements,
+    meta::SiteMasses,
+    Option<meta::SiteLayers>,
+    Option<meta::LayerScMatrices>,
+    Option<meta::FracBonds>,
+>;
+
 /// "Filetype" for a structure that uses a directory.
 ///
 /// Encodes as much information as possible, including things derived from config.
@@ -38,13 +46,14 @@ pub struct StoredStructure {
 }
 
 impl StoredStructure {
-    pub fn meta(&self) -> HList5<
-        meta::SiteElements,
-        meta::SiteMasses,
-        Option<meta::SiteLayers>,
-        Option<meta::LayerScMatrices>,
-        Option<meta::FracBonds>,
-    > { hlist![
+    pub fn from_parts(title: impl Into<String>, coords: Coords, meta: Meta) -> Self {
+        let hlist_pat![elements, masses, layers, layer_sc_matrices, frac_bonds] = meta;
+        let title = title.into();
+        StoredStructure {
+            title, coords, elements, layers, masses, layer_sc_matrices, frac_bonds,
+        }
+    }
+    pub fn meta(&self) -> Meta { hlist![
         self.elements.clone(), self.masses.clone(), self.layers.clone(),
         self.layer_sc_matrices.clone(), self.frac_bonds.clone(),
     ]}
@@ -54,7 +63,7 @@ impl StoredStructure {
 }
 
 #[derive(Serialize, Deserialize)]
-struct Meta {
+struct MetaJson {
     pub layers: Option<meta::SiteLayers>,
     pub masses: meta::SiteMasses,
     pub layer_sc_matrices: Option<meta::LayerScMatrices>,
@@ -73,7 +82,7 @@ impl Save for StoredStructure {
         let masses = masses.clone();
         let layer_sc_matrices = layer_sc_matrices.clone();
 
-        Json(Meta { layers, masses, layer_sc_matrices }).save(dir.join(FNAME_META))?;
+        Json(MetaJson { layers, masses, layer_sc_matrices }).save(dir.join(FNAME_META))?;
 
         if let Some(frac_bonds) = frac_bonds {
             Json(frac_bonds).save(dir.join(FNAME_FRAC_BONDS))?;
@@ -92,7 +101,7 @@ impl Load for StoredStructure {
 
         let Poscar { comment: title, coords, elements } = Load::load(dir.join(FNAME_STRUCTURE))?;
         let Json(meta) = Load::load(dir.join(FNAME_META))?;
-        let Meta { layers, masses, layer_sc_matrices } = meta;
+        let MetaJson { layers, masses, layer_sc_matrices } = meta;
         let frac_bonds = if dir.join(FNAME_FRAC_BONDS).exists() {
             let Json(bonds) = Load::load(dir.join(FNAME_FRAC_BONDS))?;
             Some(bonds)

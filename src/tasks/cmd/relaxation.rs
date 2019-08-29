@@ -17,7 +17,8 @@ use crate::potential::{PotentialBuilder, DiffFn, BondDiffFn, DynCgDiffFn, Common
 use crate::meta::{self, prelude::*};
 use crate::hlist_aliases::*;
 use crate::math::basis::{GammaBasis3, EvDirection};
-use crate::traits::Save;
+use crate::traits::{Save, AsPath};
+use crate::util::ext_traits::PathNiceExt;
 
 use super::trial::TrialDir;
 use super::GammaSystemAnalysis;
@@ -32,8 +33,10 @@ use rsp2_slice_math::{v, V, vdot};
 use rsp2_array_types::{V3};
 use rsp2_structure::{Coords};
 use rsp2_minimize::{cg};
+use rsp2_fs_util as fsx;
 
 use std::rc::Rc;
+use crate::filetypes::stored_structure;
 
 impl TrialDir {
     /// NOTE: This writes to fixed filepaths in the trial directory
@@ -123,8 +126,9 @@ impl TrialDir {
         trace!("============================");
         trace!("Begin relaxation # {}", iteration);
 
+        let snapshot_fn = SnapshotFn::new(self.snapshot_structure_path(), meta.sift(), &settings.snapshot);
         let coords = do_cg_relax_with_param_optimization_if_supported(
-            pot, &settings.cg, settings.parameters.as_ref(), coords, meta.sift(),
+            pot, &settings.cg, snapshot_fn, settings.parameters.as_ref(), coords, meta.sift(),
         )?;
 
         trace!("============================");
@@ -319,20 +323,32 @@ fn cg_builder_from_config(
 fn do_cg_relax(
     pot: &dyn PotentialBuilder,
     cg_settings: &cfg::Cg,
+    snapshot_fn: SnapshotFn,
     // NOTE: takes ownership of coords because it is likely an accident to reuse them
     coords: Coords,
     meta: CommonMeta,
 ) -> FailResult<Coords>
 {Ok({
     let mut flat_diff_fn = pot.parallel(true).initialize_cg_diff_fn(&coords, meta.sift())?;
+    let unflatten_coords = {
+        let coords = coords.clone();
+        move |flat: &[f64]| coords.with_carts(flat.nest().to_vec())
+    };
+
     let relaxed_flat = {
         let (mut cg, stop_condition) = cg_builder_from_config(cg_settings);
         cg.stop_condition(stop_condition.to_function())
             .basic_output_fn(log_cg_output)
+            .output_fn({
+                let unflatten_coords = unflatten_coords.clone();
+                move |state: cg::AlgorithmState<'_>| {
+                    snapshot_fn.maybe_save_snapshot(&state, unflatten_coords(state.position))
+                }
+            })
             .run(coords.to_carts().flat(), &mut *flat_diff_fn)
             .unwrap().position
     };
-    coords.with_carts(relaxed_flat.nest().to_vec())
+    unflatten_coords(&relaxed_flat)
 })}
 
 fn log_cg_output(args: std::fmt::Arguments<'_>) { trace!("{}", args) }
@@ -342,6 +358,7 @@ fn log_cg_output(args: std::fmt::Arguments<'_>) { trace!("{}", args) }
 fn do_cg_relax_with_param_optimization_if_supported(
     pot: &dyn PotentialBuilder,
     cg_settings: &cfg::Cg,
+    snapshot_fn: SnapshotFn,
     parameters: Option<&cfg::Parameters>,
     // NOTE: takes ownership of coords because it is likely an accident to reuse them
     coords: Coords,
@@ -349,7 +366,7 @@ fn do_cg_relax_with_param_optimization_if_supported(
 ) -> FailResult<Coords>
 {
     if let Some(parameters) = parameters {
-        if let Some(x) = do_cg_relax_with_param_optimization(pot, cg_settings, parameters, &coords, meta.sift())? {
+        if let Some(x) = do_cg_relax_with_param_optimization(pot, cg_settings, snapshot_fn.clone(), parameters, &coords, meta.sift())? {
             return Ok(x);
         } else {
             trace!("Not relaxing with parameters because the potential does not support it.");
@@ -357,13 +374,14 @@ fn do_cg_relax_with_param_optimization_if_supported(
     } else {
         trace!("Not relaxing with parameters because 'parameters' was not supplied.");
     }
-    do_cg_relax(pot, cg_settings, coords, meta)
+    do_cg_relax(pot, cg_settings, snapshot_fn, coords, meta)
 }
 
 /// Returns Ok(None) if the potential does not support this method.
 fn do_cg_relax_with_param_optimization(
     pot: &dyn PotentialBuilder,
     cg_settings: &cfg::Cg,
+    snapshot_fn: SnapshotFn,
     parameters: &cfg::Parameters,
     coords: &Coords,
     meta: CommonMeta,
@@ -375,15 +393,21 @@ fn do_cg_relax_with_param_optimization(
     };
 
     // Object that encapsulates the coordinate conversion logic for param optimization
-    let helper = Rc::new(RelaxationOptimizationHelper::new(parameters, coords.lattice()));
+    let param_helper = Rc::new(RelaxationOptimizationHelper::new(parameters, coords.lattice()));
 
     let (mut cg, stop_condition_cereal) = cg_builder_from_config(cg_settings);
 
     // Make the stop condition and output representative of the cartesian forces.
-    cg.output_fn(get_param_opt_output_fn(helper.clone(), log_cg_output));
+    cg.output_fn(get_param_opt_output_fn(param_helper.clone(), log_cg_output));
+    cg.output_fn({
+        let param_helper = param_helper.clone();
+        move |state: cg::AlgorithmState<'_>| {
+            snapshot_fn.maybe_save_snapshot(&state, param_helper.unflatten_coords(state.position))
+        }
+    });
     cg.stop_condition({
-        let helper = helper.clone();
-        let mut imp = stop_condition_cereal.to_function();
+        let param_helper = param_helper.clone();
+        let mut stop_condition_imp = stop_condition_cereal.to_function();
         move |state: cg::AlgorithmState<'_>| {
             // HACK: to avoid code duplication, use the stop conditions built into rsp2_minimize,
             //       but feed them modified data.  I know that the stop condition won't look at
@@ -393,8 +417,7 @@ fn do_cg_relax_with_param_optimization(
                 ..
             } = state;
 
-            //
-            let (d_carts, d_params) = helper.unflatten_grad(position, gradient);
+            let (d_carts, d_params) = param_helper.unflatten_grad(position, gradient);
             let mut gradient = d_carts.flat().to_vec();
             // FIXME HACK: include the parameter forces in the list, scaled to an intrinsic
             //             quantity, so that they are checked by a "max-grad" constraint.
@@ -403,7 +426,7 @@ fn do_cg_relax_with_param_optimization(
             gradient.extend(d_params.into_iter().map(|x| x / d_carts.len() as f64));
 
             let gradient = &gradient[..];
-            imp(cg::AlgorithmState {
+            stop_condition_imp(cg::AlgorithmState {
                 iterations, value, position, gradient, direction, alpha,
                 // HACK: To make matters even worse, we can't just replace the `gradient` field
                 //       of state due to lifetime issues. We must construct a new one, and there
@@ -418,7 +441,7 @@ fn do_cg_relax_with_param_optimization(
     trace!("Incorporating parameter optimization into relaxation");
     let relaxed_flat = {
          cg.run(
-            &helper.flatten_coords(&coords),
+            &param_helper.flatten_coords(&coords),
             {
                 struct Adapter {
                     helper: Rc<RelaxationOptimizationHelper>,
@@ -444,12 +467,12 @@ fn do_cg_relax_with_param_optimization(
                     }
                 }
 
-                let helper = helper.clone();
+                let helper = param_helper.clone();
                 Adapter { helper, bond_diff_fn, meta }
             },
         ).unwrap().position
     };
-    Some(helper.unflatten_coords(&relaxed_flat[..]))
+    Some(param_helper.unflatten_coords(&relaxed_flat[..]))
 })}
 
 pub fn get_param_opt_output_fn(
@@ -488,6 +511,53 @@ pub fn get_param_opt_output_fn(
         ));
     }
 }
+
+// because `impl Clone + FnMut(&cg::AlgorithmState<'_>, Box<dyn FnOnce() -> &Coords>) + 'static`
+// is a mouthful.
+#[derive(Debug, Clone)]
+struct SnapshotFn {
+    path: std::path::PathBuf,
+    settings: cfg::Snapshot,
+    meta: stored_structure::Meta,
+}
+
+impl SnapshotFn {
+    fn new(
+        path: impl AsPath,
+        meta: stored_structure::Meta,
+        settings: &cfg::Snapshot,
+    ) -> Self {
+        let path = path.as_path().to_owned();
+        let settings = settings.clone();
+        Self { path, settings, meta }
+    }
+
+    fn maybe_save_snapshot(
+        &self,
+        state: &cg::AlgorithmState<'_>,
+        coords: Coords,
+    ) {
+        let period = match self.settings.every {
+            None | Some(0) => return,
+            Some(period) => period,
+        };
+
+        if (state.iterations - 1) % period as u64 == 0 {
+            if let Err(e) = fsx::rm_rf(&self.path) {
+                warn_once!("failed to delete old snapshot at {}: {}", self.path.nice(), e);
+            }
+
+            let title = format!("Snapshot after {} CG iterations", state.iterations);
+            let structure = stored_structure::StoredStructure::from_parts(
+                title, coords, self.meta.clone(),
+            );
+            if let Err(e) = structure.save(&self.path) {
+                warn_once!("failed to write snapshot at {}: {}", self.path.nice(), e);
+            }
+        }
+    }
+}
+
 
 //------------------
 

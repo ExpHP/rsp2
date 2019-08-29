@@ -1901,6 +1901,9 @@ impl TrialDir {
         })
     }
 
+    pub fn snapshot_structure_path(&self) -> PathBuf
+    { self.join("snapshot.structure") }
+
     pub fn eigensols_path(&self, iteration: Iteration) -> PathBuf
     { self.join(format!("ev-loop-modes-{:02}.json", iteration)) }
 

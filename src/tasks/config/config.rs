@@ -141,6 +141,10 @@ pub struct Settings {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub animate: Option<Animate>,
 
+    /// See the type for documentation.
+    #[serde(default)]
+    pub snapshot: Snapshot,
+
     #[serde(default)]
     #[serde(flatten)]
     pub _deprecated_lammps_settings: DeprecatedLammpsSettings,
@@ -1243,6 +1247,20 @@ pub struct Masses(pub HashMap<String, f64>);
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case")]
+pub struct Snapshot {
+    /// Record `snapshot.structure` every `n` conjugate gradient steps.
+    ///
+    /// `0` or `null` disables snapshots.
+    #[serde(default = "snapshot__every")]
+    pub every: Nullable<u32>,
+}
+fn snapshot__every() -> Nullable<u32> { Some(5) }
+
+// --------------------------------------------------------
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case")]
 pub struct Lammps {
     #[serde(default = "Filled::default")]
     pub processor_axis_mask: Filled<[bool; 3]>,
@@ -1314,6 +1332,10 @@ impl Default for Lammps {
     fn default() -> Self { from_empty_mapping().unwrap() }
 }
 
+impl Default for Snapshot {
+    fn default() -> Self { from_empty_mapping().unwrap() }
+}
+
 #[test]
 fn test_defaults()
 {
@@ -1325,6 +1347,7 @@ fn test_defaults()
     let _ = EvLoop::default();
     let _ = AcousticSearch::default();
     let _ = Lammps::default();
+    let _ = Snapshot::default();
 }
 
 fn from_empty_mapping<T: for<'de> serde::Deserialize<'de>>() -> serde_yaml::Result<T> {
