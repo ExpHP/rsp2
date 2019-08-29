@@ -1972,82 +1972,11 @@ mod dihedral_sine_sq {
     }
 }
 
-use self::bond_cosine::{BondCosine};
-mod bond_cosine {
-    //! Diff function for the cos(θ) between bonds.
-    use super::*;
-
-    pub(super) type Output = BondCosine;
-    pub(super) struct Input {
-        pub delta_ij: V3,
-        pub delta_ik: V3,
-    }
-
-    pub(super) struct BondCosine {
-        pub value: f64,
-        pub d_delta_ij: V3,
-        pub d_delta_ik: V3,
-    }
-
-    impl Input {
-        pub(super) fn compute(self) -> Output { compute(self) }
-    }
-
-    // free function for smaller indent
-    fn compute(input: Input) -> Output {
-        let Input { delta_ij, delta_ik } = input;
-        let unit_ij = delta_ij.unit();
-        let unit_ik = delta_ik.unit();
-
-        // worked out by hand
-        let value = V3::dot(&unit_ij, &unit_ik);
-        let d_delta_ij = (unit_ik - unit_ij * value) / delta_ij.norm();
-        let d_delta_ik = (unit_ij - unit_ik * value) / delta_ik.norm();
-        Output { value, d_delta_ij, d_delta_ik }
-    }
-
-    #[test]
-    fn value() {
-        let x1 = V3([1.0, 0.0, 0.0]);
-        let x2 = V3([2.0, 0.0, 0.0]);
-        let y1 = V3([0.0, 1.0, 0.0]);
-        let y3 = V3([0.0, 3.0, 0.0]);
-        let xy1 = V3([1.0, 1.0, 0.0]);
-        let value = |delta_ij, delta_ik| Input { delta_ij, delta_ik }.compute().value;
-        assert_close!(abs=1e-8, value(x1, y1), 0.0);
-        assert_close!(abs=1e-8, value(x1, x1), 1.0);
-        assert_close!(abs=1e-8, value(x1, x2), 1.0);
-        assert_close!(abs=1e-8, value(x1, -x2), -1.0);
-        assert_close!(abs=1e-8, value(x2, -y3), 0.0);
-        assert_close!(abs=1e-8, value(x2, xy1), f64::sqrt(2.0).recip());
-    }
-
-    #[test]
-    fn derivatives() {
-        for _ in 0..10 {
-            let delta_ij = V3::from_fn(|_| uniform(-10.0, 10.0));
-            let delta_ik = V3::from_fn(|_| uniform(-10.0, 10.0));
-
-            let Output {
-                value: _,
-                d_delta_ij: output_d_delta_ij,
-                d_delta_ik: output_d_delta_ik,
-            } = Input { delta_ij, delta_ik }.compute();
-
-            let numerical_d_delta_ij = num_grad_v3(1e-4, delta_ij, |delta_ij| Input { delta_ij, delta_ik }.compute().value);
-            let numerical_d_delta_ik = num_grad_v3(1e-4, delta_ik, |delta_ik| Input { delta_ij, delta_ik }.compute().value);
-
-            assert_close!(abs=1e-8, output_d_delta_ij.0, numerical_d_delta_ij.0);
-            assert_close!(abs=1e-8, output_d_delta_ik.0, numerical_d_delta_ik.0);
-        }
-    }
-}
-
 use self::bond_cosines::{BondCosines};
 mod bond_cosines {
     //! For a given bond, get all cosines with other bonds at the originating site.
     //!
-    //! This is mostly a trivial wrapper around `BondCosine`, but the output SiteBondVecs will
+    //! This is mostly a trivial wrapper around `cosine_similarity`, but the output SiteBondVecs will
     //! contain NaNs in the location that correspond to the current bond (as a bond has no cosine
     //! with itself).
     use super::*;
@@ -2085,12 +2014,7 @@ mod bond_cosines {
                 coses_ijk_d_delta_ij.push(V3::from_fn(|_| NAN));
                 coses_ijk_d_delta_ik.push(V3::from_fn(|_| NAN));
             } else {
-                let out = bond_cosine::Input { delta_ij, delta_ik }.compute();
-                let BondCosine {
-                    value: cos,
-                    d_delta_ij: cos_d_delta_ij,
-                    d_delta_ik: cos_d_delta_ik,
-                } = out;
+                let (cos, (cos_d_delta_ij, cos_d_delta_ik)) = geometry::cosine_similarity(delta_ij, delta_ik);
                 coses_ijk.push(cos);
                 coses_ijk_d_delta_ij.push(cos_d_delta_ij);
                 coses_ijk_d_delta_ik.push(cos_d_delta_ik);

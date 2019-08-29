@@ -279,4 +279,57 @@ pub mod geometry {
         ]).t();
         (value, (J_a, J_b))
     }
+
+    /// Cosine of the angle between two vectors.
+    ///
+    /// This is a value in the range `[-1, 1]` that is equal to `1` for vectors pointing
+    /// in the same direction, and `-1` for vectors pointing in opposite directions.
+    pub fn cosine_similarity(a: V3, b: V3) -> (f64, (V3, V3)) {
+        let unit_a = a.unit();
+        let unit_b = b.unit();
+
+        // worked out by hand
+        let value = V3::dot(&unit_a, &unit_b);
+        let d_a = (unit_b - unit_a * value) / a.norm();
+        let d_b = (unit_a - unit_b * value) / b.norm();
+        (value, (d_a, d_b))
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use crate::util::{uniform, num_grad_v3};
+
+        #[test]
+        fn similarity_value() {
+            let x1 = V3([1.0, 0.0, 0.0]);
+            let x2 = V3([2.0, 0.0, 0.0]);
+            let y1 = V3([0.0, 1.0, 0.0]);
+            let y3 = V3([0.0, 3.0, 0.0]);
+            let xy1 = V3([1.0, 1.0, 0.0]);
+            let value = |a, b| cosine_similarity(a, b).0;
+            assert_close!(abs=1e-8, value(x1, y1), 0.0);
+            assert_close!(abs=1e-8, value(x1, x1), 1.0);
+            assert_close!(abs=1e-8, value(x1, x2), 1.0);
+            assert_close!(abs=1e-8, value(x1, -x2), -1.0);
+            assert_close!(abs=1e-8, value(x2, -y3), 0.0);
+            assert_close!(abs=1e-8, value(x2, xy1), f64::sqrt(2.0).recip());
+        }
+
+        #[test]
+        fn similarity_derivatives() {
+            for _ in 0..10 {
+                let a = V3::from_fn(|_| uniform(-10.0, 10.0));
+                let b = V3::from_fn(|_| uniform(-10.0, 10.0));
+
+                let (_, (output_d_a, output_d_b)) = cosine_similarity(a, b);
+
+                let numerical_d_a = num_grad_v3(1e-4, a, |a| cosine_similarity(a, b).0);
+                let numerical_d_b = num_grad_v3(1e-4, b, |b| cosine_similarity(a, b).0);
+
+                assert_close!(abs=1e-8, output_d_a.0, numerical_d_a.0);
+                assert_close!(abs=1e-8, output_d_b.0, numerical_d_b.0);
+            }
+        }
+    }
 }
