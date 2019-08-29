@@ -463,27 +463,32 @@ mod airebo {
                 only_unique_mass(meta, consts::HYDROGEN),
                 only_unique_mass(meta, consts::CARBON),
             ];
-            let pair_style = match *self {
+            let (file, pair_style);
+            match *self {
                 Airebo::Airebo { lj_sigma, lj_enabled, torsion_enabled, omp } => {
                     let style = match omp {
                         true => "airebo/omp",
                         false => "airebo"
                     };
-                    PairStyle::named(style)
+
+                    file = "CH.airebo";
+                    pair_style = PairStyle::named(style)
                         .arg(lj_sigma)
                         .arg(boole(lj_enabled))
-                        .arg(boole(torsion_enabled))
+                        .arg(boole(torsion_enabled));
                 },
                 Airebo::Rebo { omp } => {
                     let style = match omp {
                         true => "rebo/omp",
                         false => "rebo"
                     };
-                    PairStyle::named(style)
+
+                    file = "CH.rebo";
+                    pair_style = PairStyle::named(style);
                 },
             };
             let pair_coeffs = vec![
-                PairCoeff::new(.., ..).args(&["CH.airebo", "H", "C"]),
+                PairCoeff::new(.., ..).args(&[file, "H", "C"]),
             ];
             InitInfo { masses, pair_style, pair_coeffs }
         }
@@ -623,7 +628,7 @@ mod kc_z {
                     pair_style: PairStyle::named("rebo"),
                     pair_coeffs: vec![{
                         PairCoeff::new(.., ..)
-                            .arg("CH.airebo")
+                            .arg("CH.rebo")
                             .args(&vec!["C"; layers.len()])
                     }],
                 });
@@ -724,7 +729,6 @@ mod kc_z {
     }
 }
 
-
 pub use self::kc_full::KolmogorovCrespiFull;
 mod kc_full {
     use super::*;
@@ -824,7 +828,7 @@ mod kc_full {
                     pair_style: PairStyle::named("rebo"),
                     pair_coeffs: vec![{
                         PairCoeff::new(.., ..)
-                            .arg("CH.airebo")
+                            .arg("CH.rebo")
                             .args(&symbols)
                     }],
                 });
