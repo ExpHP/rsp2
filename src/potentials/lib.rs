@@ -25,6 +25,8 @@ pub mod crespi;
 pub mod rebo;
 pub(crate) mod util;
 
+pub mod interactions;
+
 pub type FailResult<T> = Result<T, failure::Error>;
 #[allow(bad_style)]
 pub fn FailOk<T>(x: T) -> FailResult<T> { Ok(x) }

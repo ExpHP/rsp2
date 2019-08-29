@@ -621,7 +621,7 @@ mod rebo {
                 }
 
                 fn check(&mut self, coords: &Coords, _: CommonMeta) -> FailResult<()> {
-                    self.interactions.check_distances(&self.params, coords, self.parallel)
+                    self.interactions.check_distances(coords, self.parallel)
                 }
             }
 
