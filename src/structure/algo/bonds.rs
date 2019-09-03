@@ -487,8 +487,11 @@ fn decompose_coords(coords: &Coords) -> (Coords, Vec<V3<i32>>) {
 /// Produces a mapping of `index -> bin` such that each position can only possibly interact
 /// with those in the 27 bins around them.
 fn cart_bins(carts: &[V3], interaction_distance: f64) -> Vec<V3<i32>> {
-    // produce cubic bins big enough to guarantee that nothing is missed
-    let fuzzy_distance = interaction_distance * (1.0 + 1e-4);
+    // produce cubic bins big enough to guarantee that nothing is missed.
+    //
+    // The max(1, ...) ensures that small or zero interaction distances don't result in
+    // bin indices that overflow integers.
+    let fuzzy_distance = f64::max(1.0, interaction_distance * (1.0 + 1e-4));
     carts.iter().map(|v| v.map(|x| f64::floor(x / fuzzy_distance) as i32)).collect()
 }
 
