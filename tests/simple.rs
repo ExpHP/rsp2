@@ -42,7 +42,7 @@ const WEAK_RAMAN_TOL: filetypes::RamanJsonTolerances = filetypes::RamanJsonToler
         max_acoustic: 0.01,
         rel_tol: 1e-4,
     },
-    intensity_nonzero_thresh: 1e-19,
+    intensity_nonzero_thresh: 1e-12,
     intensity_nonzero_rel_tol: 1e-4,
 };
 
