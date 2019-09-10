@@ -45,6 +45,7 @@ def build():
             translation_sfracs,
             translation_deperms,
             translation_phases,
+            gamma_only,
             progress_prefix,
     ):
         from ctypes import c_double, c_int32
@@ -83,6 +84,7 @@ def build():
             ctypes.c_int64(nquotient),
             ctypes.c_int64(nsite),
             ctypes.c_int64(nev),
+            ctypes.c_uint8(gamma_only),
             progress_prefix,
             *pointers,
         )

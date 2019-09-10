@@ -484,9 +484,20 @@ class TaskGProbs(Task):
             'Path to .npz file previously written through --write-probs.',
         )
 
+        parser.add_argument(
+            '--probs-gamma-only', action='store_true', help=
+            'Only compute the probability at gamma.  The probs file will report '
+            'zero probability for all other projections.  Ignored when reading '
+            'a probs file, and forbidden when computing things that require all '
+            'probabilities. (e.g. plotting)',
+        )
+
     def check_upfront(self, args):
         check_optional_input(args.probs)
         check_optional_output_ext('--write-probs', args.write_probs, forbid='.npy')
+
+        if args.probs_gamma_only and self.qpoint_sfrac.require(args) != [0, 0, 0]:
+            raise RuntimeError('--probs-gamma-only requires --qpoint "0 0 0"')
 
         if args.probs_impl in ['rust', 'auto']:
             try:
@@ -520,13 +531,24 @@ class TaskGProbs(Task):
                 eigenvectors=self.eigensols.require(args)['ev_projected_eigenvectors'],
                 qpoint_sfrac=self.qpoint_sfrac.require(args),
                 translation_deperms=self.translation_deperms.require(args),
+                gamma_only=args.probs_gamma_only,
                 implementation=args.probs_impl,
                 progress_prefix=progress_prefix,
             )
-            return type(self).__postprocess(ev_gpoint_probs, args)
+            ev_gpoint_probs = type(self).__postprocess(ev_gpoint_probs, args)
+
+            if args.probs_gamma_only:
+                return { 'raw': ev_gpoint_probs }
+            else:
+                return { 'raw': ev_gpoint_probs, 'full': ev_gpoint_probs }
+
+    def require_full(self, args):
+        if args.probs_gamma_only:
+            die('--probs-gamma-only is incompatible with some of the requested actions')
+        return self.require(args)['full']
 
     def _do_action(self, args):
-        ev_gpoint_probs = self.require(args)
+        ev_gpoint_probs = self.require(args)['raw']
         if args.write_probs:
             dwim.to_path(args.write_probs, ev_gpoint_probs)
 
@@ -639,7 +661,7 @@ class TaskMultiQpointData(Task):
             return type(self).__process_dicts({
                 "qpoint-sfrac": self.qpoint_sfrac.require(args),
                 "mode-data": self.mode_data.require(args),
-                "probs": self.ev_gpoint_probs.require(args),
+                "probs": self.ev_gpoint_probs.require_full(args),
             })
 
     @classmethod
@@ -902,6 +924,7 @@ def unfold_all(
         eigenvectors,
         qpoint_sfrac,
         translation_deperms,
+        gamma_only: bool,
         implementation,
         progress_prefix = None,
 ):
@@ -925,6 +948,10 @@ def unfold_all(
     in fractional coords.
 
     :param implementation: ``"rust"`` or ``"python"``
+
+    :param gamma_only: When `True`, only the values at gamma will be computed,
+    and the rest of the output will be zero. For safety, this function will
+    validate that the first `qpoint_sfrac` is `[0, 0, 0]`.
 
     :param progress_prefix: String used to prefix progress reports.
     ``None`` disables progress reporting.
@@ -994,6 +1021,7 @@ def unfold_all(
         gpoint_sfracs=gpoint_sfracs,
         qpoint_sfrac=qpoint_sfrac,
         eigenvectors=eigenvectors,
+        gamma_only=gamma_only,
         progress_prefix=progress_prefix,
     )
 
@@ -1005,6 +1033,7 @@ def unfold_all__python(
         gpoint_sfracs,
         qpoint_sfrac,
         eigenvectors,
+        gamma_only,
         progress_prefix,
 ):
     progress = None
@@ -1022,6 +1051,7 @@ def unfold_all__python(
             gpoint_sfracs=gpoint_sfracs,
             qpoint_sfrac=qpoint_sfrac,
             eigenvector=eigenvector.reshape((-1, 3)),
+            gamma_only=gamma_only,
         )
     )))
 
@@ -1035,6 +1065,7 @@ def unfold_one(
         gpoint_sfracs,
         qpoint_sfrac,
         eigenvector,
+        gamma_only,
 ):
     """
     :param site_phases: Shape ``(quotient,)``, complex.
@@ -1070,6 +1101,10 @@ def unfold_one(
     :param eigenvector: Shape ``(sc_sites, 3)``, complex.
     A normal mode of the supercell. (arbitrary norm)
 
+    :param gamma_only: boolean.
+    A switch that causes the output to only contain the gamma probability.
+    (all other elements will be zero)
+
     :return: Shape ``(quotient,)``, real.
     Probabilities of `eigenvector` projected onto each point
     ``qpoint + gpoints[i]``.
@@ -1102,8 +1137,7 @@ def unfold_one(
     ])
 
     # Expectation value of each projector P(Q -> Q + G)
-    gpoint_probs = []
-    for g in gpoint_sfracs:
+    def compute_for_g(g):
         # PBZ (Q + G) dot r for every r
         k_dot_rs = (qpoint_sfrac + g) @ translation_sfracs.T
 
@@ -1116,12 +1150,19 @@ def unfold_one(
         # analytically, these are all real, positive numbers
         assert abs(prob.imag) < 1e-7
         assert -1e-7 < prob.real
-        gpoint_probs.append(max(prob.real, 0.0))
-    gpoint_probs = np.array(gpoint_probs)
+        return max(prob.real, 0.0)
+
+    if gamma_only:
+        assert (gpoint_sfracs[0] == [0, 0, 0]).all()
+        gpoint_probs = np.zeros(shape=(len(gpoint_sfracs),))
+        gpoint_probs[0] = compute_for_g(gpoint_sfracs[0])
+    else:
+        gpoint_probs = np.array([compute_for_g(g) for g in gpoint_sfracs])
 
     # Recall that the eigenvector is not normalized because it could be the zero
     # vector (due to projection onto a layer).
-    np.testing.assert_allclose(gpoint_probs.sum(), np.linalg.norm(eigenvector)**2, atol=1e-7)
+    if not gamma_only:
+        np.testing.assert_allclose(gpoint_probs.sum(), np.linalg.norm(eigenvector)**2, atol=1e-7)
     return gpoint_probs
 
 def collect_translation_deperms(

@@ -16,6 +16,7 @@ pub extern "C" fn rsp2c_unfold_all(
     num_quotient: i64,
     num_sites: i64,
     num_evecs: i64,
+    gamma_only: u8,
     progress_prefix: *const c_char, // NUL-terminated UTF-8, possibly NULL
     site_phases: *const Complex64, // shape (sites,)
     gpoint_sfracs: *const f64, // shape (quotient, 3)
@@ -42,6 +43,7 @@ pub extern "C" fn rsp2c_unfold_all(
             let translation_deperms = from_raw_parts(translation_deperms, num_quotient * num_sites);
             let translation_phases = from_raw_parts(translation_phases, num_quotient * num_sites);
             let output = from_raw_parts_mut(output, num_evecs * num_quotient);
+            let gamma_only = gamma_only != 0;
 
             let progress_prefix = if progress_prefix.is_null() {
                 None
@@ -58,6 +60,7 @@ pub extern "C" fn rsp2c_unfold_all(
                 translation_sfracs,
                 translation_deperms,
                 translation_phases,
+                gamma_only,
                 output,
             );
         }
@@ -76,6 +79,7 @@ fn unfold_all(
     translation_sfracs: &[V3],
     translation_deperms: &[i32],
     translation_phases: &[Complex64],
+    gamma_only: bool,
     output: &mut [f64],
 ) {
     let num_sites = site_phases.len();
@@ -110,6 +114,7 @@ fn unfold_all(
             gpoint_sfracs,
             qpoint_sfrac,
             eigenvector,
+            gamma_only,
         );
         output.copy_from_slice(&dense_row);
     }
@@ -128,6 +133,7 @@ fn unfold_one(
     gpoint_sfracs: &[V3],
     qpoint_sfrac: &V3,
     eigenvector: &[V3<Complex64>],
+    gamma_only: bool,
 ) -> Vec<f64> {
     let num_quotient = translation_sfracs.len();
 
@@ -153,32 +159,41 @@ fn unfold_one(
     };
 
     // Expectation value of each P(Q -> Q + G) projection operator.
-    let gpoint_probs: Vec<_> = {
-        gpoint_sfracs.par_iter().map(|g| {
-            let phases: Vec<_> = {
-                translation_sfracs.iter()
-                    // Phases from Allen Eq 3.  Due to our differing phase conventions,
-                    // we have exp(+i...) rather than exp(-i...).
-                    .map(|t| exp_i2pi(V3::dot(&(qpoint_sfrac + g), t)))
-                    .collect()
-            };
-            let prob = zip_eq!(&inner_prods, phases).map(|(a, b)| a * b).sum::<Complex64>() / num_quotient as f64;
+    let compute_at_g = |g: &V3| {
+        let phases: Vec<_> = {
+            translation_sfracs.iter()
+                // Phases from Allen Eq 3.  Due to our differing phase conventions,
+                // we have exp(+i...) rather than exp(-i...).
+                .map(|t| exp_i2pi(V3::dot(&(qpoint_sfrac + g), t)))
+                .collect()
+        };
+        let prob = zip_eq!(&inner_prods, phases).map(|(a, b)| a * b).sum::<Complex64>() / num_quotient as f64;
 
-            // analytically, these are all real, positive numbers
-            //
-            // numerically, however, cancellation may cause issues
-            assert!(f64::abs(prob.im) < 1e-7);
-            assert!(-1e-7 < prob.re);
+        // analytically, these are all real, positive numbers
+        //
+        // numerically, however, cancellation may cause issues
+        assert!(f64::abs(prob.im) < 1e-7);
+        assert!(-1e-7 < prob.re);
 
-            f64::max(prob.re, 0.0)
-        }).collect()
+        f64::max(prob.re, 0.0)
     };
 
-    assert_close!(
-        abs=1e-7,
-        gpoint_probs.iter().sum::<f64>(),
-        inner_prod_ev(eigenvector, eigenvector).norm(),
-    );
+    let gpoint_probs: Vec<_> = if gamma_only {
+        assert_eq!(gpoint_sfracs[0], V3::zero());
+        let mut gpoint_probs = vec![0.0; gpoint_sfracs.len()];
+        gpoint_probs[0] = compute_at_g(&gpoint_sfracs[0]);
+        gpoint_probs
+    } else {
+        gpoint_sfracs.par_iter().map(compute_at_g).collect()
+    };
+
+    if !gamma_only {
+        assert_close!(
+            abs=1e-7,
+            gpoint_probs.iter().sum::<f64>(),
+            inner_prod_ev(eigenvector, eigenvector).norm(),
+        );
+    }
     gpoint_probs
 }
 
