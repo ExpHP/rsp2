@@ -70,6 +70,14 @@ pub mod one_dee {
         pub fn x() -> Polynomial { Polynomial::x_n(1) }
 
         pub fn coeffs(&self) -> &[f64] { &self.0 }
+
+        #[cfg(test)]
+        pub(crate) fn random(order: u32, max_val: f64) -> Polynomial {
+            Polynomial({
+                std::iter::repeat_with(|| crate::util::random::uniform(-max_val, max_val))
+                    .take(order as usize + 1).collect()
+            })
+        }
     }
 
     impl Differentiable1d for Polynomial {
