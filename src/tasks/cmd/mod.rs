@@ -1450,6 +1450,68 @@ pub(crate) fn run_single_force_computation(
     pot.one_off().compute_force(&coords, meta.sift())?
 })}
 
+//=================================================================
+
+pub(crate) fn run_layer_mode_frequencies(
+    on_demand: Option<LammpsOnDemand>,
+    settings: &Settings,
+    structure: StoredStructure,
+    step: f64,
+) -> FailResult<()>
+{Ok({
+    use rsp2_minimize::numerical;
+    use crate::util::{only_unique_value, OnlyUniqueResult};
+
+    let meta = structure.meta();
+    let original_coords = structure.coords;
+
+    let shift_layer_0 = |axis: usize, amount: f64| FailOk({
+        let layers: meta::SiteLayers = match meta.pick() {
+            Some(layers) => layers,
+            None => bail!("structure must have layers"),
+        };
+
+        let mut carts = original_coords.to_carts();
+        for (cart, layer) in zip_eq!(&mut carts, &layers[..]) {
+            if layer == &meta::Layer(0) {
+                cart[axis] += amount;
+            }
+        }
+
+        original_coords.with_carts(carts)
+    });
+
+    // this is what they do in 10.1016/j.physleta.2019.05.025
+    let masses: meta::SiteMasses = meta.pick();
+    let reduced_mass = match only_unique_value(masses.iter()) {
+        OnlyUniqueResult::Ok(meta::Mass(x)) => 0.5 * x,
+        OnlyUniqueResult::Conflict(_, _) => panic!("all atoms must have equal mass"),
+        OnlyUniqueResult::NoValues => unreachable!(),
+    };
+
+    let pot = PotentialBuilder::from_root_config(None, on_demand, &settings)?;
+    let mut diff_fn = pot.initialize_diff_fn(&original_coords, meta.sift())?;
+
+    warn!("Don't quote these values, only compare them!  (I'm not sure about the prefactor...)");
+    serde_json::to_writer(std::io::stdout(), &V3::try_from_fn(|axis| FailOk({
+        let diff_2 = numerical::try_diff_2(
+            step,
+            Some(numerical::DerivativeKind::Stencil(5)),
+            0.0,
+            |distance| {
+                let coords = shift_layer_0(axis, distance)?;
+                diff_fn.compute_value(&coords, meta.sift())
+            },
+        )?;
+
+        // FIXME really not sure about the prefactor
+        let sqrt_eigenvalue_to_thz = 15.6333043006705; // = sqrt(eV/amu)/angstrom/(2*pi)/THz
+        let thz_to_wavenumber = 33.3564095198152; // = THz / (c / cm)
+        let wavenumber = f64::sqrt(diff_2.abs() / reduced_mass) / (2.0 * std::f64::consts::PI) * sqrt_eigenvalue_to_thz * thz_to_wavenumber;
+        diff_2.signum() * wavenumber
+    }))?)?;
+    println!();
+})}
 
 //=================================================================
 

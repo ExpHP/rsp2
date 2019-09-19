@@ -49,6 +49,10 @@ name = "rsp2-dynmat-at-q"
 path = "src/binary-shims/rsp2-dynmat-at-q.rs"
 
 [[bin]]
+name = "rsp2-layer-mode-freqs"
+path = "src/binary-shims/rsp2-layer-mode-freqs.rs"
+
+[[bin]]
 name = "rsp2-library-paths"
 path = "src/binary-shims/rsp2-library-paths.rs"
 

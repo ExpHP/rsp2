@@ -723,6 +723,31 @@ pub fn dynmat_at_q(bin_name: &str, version: VersionInfo) -> ! {
     });
 }
 
+// %% CRATES: binary: rsp2-layer-mode-freqs %%
+pub fn layer_mode_frequencies(bin_name: &str, version: VersionInfo) -> ! {
+    wrap_main(version, |logfile, mpi_on_demand| {
+        let (app, de) = CliDeserialize::augment_clap_app({
+            clap::App::new(bin_name)
+                .about("Computes the dynamical matrix at a qpoint.")
+                .args(&[
+                    arg!( input=STRUCTURE "Input structure, in rsp2 structure directory format."),
+                    arg!( step [--step]=STEP "Finite difference step-size (angstrom)"),
+                ])
+        });
+        let matches = app.get_matches();
+        let (ConfigArgs(config), AppendLog(append_log)) = de.resolve_args(&matches)?;
+        append_log.start(logfile)?;
+
+        let ValidatedSettings(settings) = config.deserialize()?;
+
+        let step = matches.value_of("step").unwrap_or("1e-4").parse()?;
+        let structure = StoredStructure::load(matches.expect_value_of("input"))?;
+
+        crate::cmd::run_layer_mode_frequencies(mpi_on_demand, &settings, structure, step)?;
+        Ok(())
+    });
+}
+
 // %% CRATES: binary: rsp2-test-rayon %%
 pub fn test_rayon(bin_name: &str, version: VersionInfo) -> ! {
     use rayon::prelude::*;
