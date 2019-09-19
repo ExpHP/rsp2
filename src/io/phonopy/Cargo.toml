@@ -23,8 +23,8 @@ serde_yaml = "0.7"
 serde_json = "1"
 byte-tools = "0.2.0"
 
-rsp2-structure = { path = "../../structure" }
-rsp2-array-types = { path = "../../util/array-types" }
+rsp2-structure = { path = "../../structure", features = ["serde-support"] }
+rsp2-array-types = { path = "../../util/array-types", features = ["serde-support"] }
 
 rsp2-kets = { tag = "v0.4.0", git = "https://github.com/ExpHP/rsp2-kets", features = ["serde"] }
 
