@@ -36,6 +36,7 @@ use rsp2_structure_io::Poscar;
 use rsp2_array_types::{V3, Unvee};
 
 use failure::Backtrace;
+#[allow(unused)] // rustc bug
 use itertools::Itertools;
 
 //--------------------------------------------------------
