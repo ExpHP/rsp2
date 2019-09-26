@@ -1228,10 +1228,22 @@ pub struct EvLoop {
     /// Default is false because there can be unanticipated rotational modes.
     #[serde(default = "ev_loop__fail")]
     pub fail: bool,
+
+    // FIXME: the 'phonon' config section should be optional when this is true.
+    //        Well, at least, for the main rsp2 binary.
+    /// Can be set to `false` to disable all things related to eigenvectors.
+    ///
+    /// Only relaxation will be performed; no dynamical matrices will be computed, and therefore
+    /// no analysis of eigenvectors will be performed.
+    #[serde(default = "ev_loop__enable")]
+    #[serde(skip_serializing_if = "ev_loop__enable__skip")]
+    pub enable: bool,
 }
 fn ev_loop__min_positive_iter() -> u32 { 3 }
 fn ev_loop__max_iter() -> u32 { 15 }
 fn ev_loop__fail() -> bool { true }
+fn ev_loop__enable() -> bool { true }
+fn ev_loop__enable__skip(&x: &bool) -> bool { x == ev_loop__enable() }
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]

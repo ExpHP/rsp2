@@ -161,7 +161,7 @@ impl TrialDir {
         )?;
 
         let (coords, ev_analysis) = {
-            let (coords, ev_analysis, final_iteration) = {
+            let (coords, stuff) = {
                 self.do_main_ev_loop(
                     settings, &*pot, original_coords, meta.sift(),
                     stop_after_dynmat,
@@ -170,12 +170,15 @@ impl TrialDir {
 
             // HACK: Put last gamma dynmat at a predictable path.
             rm_rf(self.join("gamma-dynmat.json"))?;
-            hard_link(
-                self.gamma_dynmat_path(final_iteration),
-                self.final_gamma_dynmat_path(),
-            )?;
-
-            (coords, ev_analysis)
+            if let Some((ev_analysis, final_iteration)) = stuff {
+                hard_link(
+                    self.gamma_dynmat_path(final_iteration),
+                    self.final_gamma_dynmat_path(),
+                )?;
+                (coords, Some(ev_analysis))
+            } else {
+                (coords, None)
+            }
         };
 
         self.write_stored_structure(
@@ -184,10 +187,12 @@ impl TrialDir {
             &coords, meta.sift(),
         )?;
 
-        write_eigen_info_for_machines(&ev_analysis, self.create_file("eigenvalues.final")?)?;
+        if let Some(ev_analysis) = ev_analysis {
+            write_eigen_info_for_machines(&ev_analysis, self.create_file("eigenvalues.final")?)?;
 
-        write_ev_analysis_output_files(&self, &ev_analysis)?;
-        self.write_summary_file(settings, &*pot, &ev_analysis)?;
+            write_ev_analysis_output_files(&self, &ev_analysis)?;
+            self.write_summary_file(settings, &*pot, &ev_analysis)?;
+        }
     })}
 }
 
@@ -1608,7 +1613,7 @@ impl TrialDir {
         let next_iteration = Iteration(prev_iteration.0 + 1);
         if let DidEvChasing(true) = did_ev_chasing {
             coords = self.do_ev_loop_stuff_before_dynmat(
-                settings, &pot, meta.sift(), next_iteration, coords,
+                settings, &pot, meta.sift(), Some(next_iteration), coords,
             )?;
         }
 

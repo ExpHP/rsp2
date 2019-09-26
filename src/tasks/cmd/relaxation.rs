@@ -54,8 +54,16 @@ impl TrialDir {
             Option<meta::FracBonds>,
         >,
         stop_after_dynmat: bool, // HACK
-    ) -> FailResult<(Coords, GammaSystemAnalysis, Iteration)>
+    ) -> FailResult<(Coords, Option<(GammaSystemAnalysis, Iteration)>)>
     {
+        if !settings.ev_loop.enable {
+            let iteration = None;
+            let coords = self.do_ev_loop_stuff_before_dynmat(
+                &settings, pot, meta.sift(), iteration, original_coords,
+            )?;
+            return Ok((coords, None));
+        }
+
         let mut from_coords = original_coords;
         let mut loop_state = EvLoopFsm::new(&settings.ev_loop);
         loop {
@@ -65,7 +73,7 @@ impl TrialDir {
             let iteration = loop_state.iteration;
 
             let coords = self.do_ev_loop_stuff_before_dynmat(
-                &settings, pot, meta.sift(), iteration, coords,
+                &settings, pot, meta.sift(), Some(iteration), coords,
             )?;
 
             let qpoint = V3::zero();
@@ -98,7 +106,7 @@ impl TrialDir {
                     continue;
                 },
                 EvLoopStatus::Done => {
-                    return Ok((coords, ev_analysis, iteration));
+                    return Ok((coords, Some((ev_analysis, iteration))));
                 },
                 EvLoopStatus::ItsBadGuys(msg) => {
                     bail!("{}", msg);
@@ -119,12 +127,15 @@ impl TrialDir {
             Option<meta::LayerScMatrices>,
             Option<meta::FracBonds>,
         >,
-        iteration: Iteration,
+        iteration: Option<Iteration>, // None when ev-loop is disabled
         coords: Coords,
     ) -> FailResult<Coords>
     {Ok({
         trace!("============================");
-        trace!("Begin relaxation # {}", iteration);
+        match iteration {
+            Some(iteration) => trace!("Begin relaxation # {}", iteration),
+            None => trace!("Begin relaxation"),
+        }
 
         let snapshot_fn = SnapshotFn::new(self.snapshot_structure_path(), meta.sift(), &settings.snapshot);
         let coords = do_cg_relax_with_param_optimization_if_supported(
@@ -133,12 +144,14 @@ impl TrialDir {
 
         trace!("============================");
 
-        let subdir = self.structure_path(EvLoopStructureKind::PreEvChase(iteration));
-        self.write_stored_structure(
-            &subdir,
-            &format!("Structure after CG round {}", iteration),
-            &coords, meta.sift(),
-        )?;
+        if let Some(iteration) = iteration {
+            let subdir = self.structure_path(EvLoopStructureKind::PreEvChase(iteration));
+            self.write_stored_structure(
+                &subdir,
+                &format!("Structure after CG round {}", iteration),
+                &coords, meta.sift(),
+            )?;
+        }
         coords
     })}
 
