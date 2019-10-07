@@ -1462,24 +1462,38 @@ pub(crate) fn run_layer_mode_frequencies(
     settings: &Settings,
     structure: StoredStructure,
     step: f64,
+    lattice_vector: Option<usize>,
 ) -> FailResult<()>
 {Ok({
     use rsp2_minimize::numerical;
     use crate::util::{only_unique_value, OnlyUniqueResult};
 
+    if let Some(lattice_vector) = lattice_vector {
+        assert!(lattice_vector < 3, "--lattice-vector must be 0, 1, or 2");
+    }
+
     let meta = structure.meta();
     let original_coords = structure.coords;
 
-    let shift_layer_0 = |axis: usize, amount: f64| FailOk({
+    let shift_layer_0 = |axis: usize, amount: f64, is_lattice_vector: bool| FailOk({
         let layers: meta::SiteLayers = match meta.pick() {
             Some(layers) => layers,
             None => bail!("structure must have layers"),
         };
 
+        let displacement = match is_lattice_vector {
+            true => original_coords.lattice().vectors()[axis].unit() * amount,
+            false => {
+                let mut displacement = V3::zero();
+                displacement[axis] = amount;
+                displacement
+            },
+        };
+
         let mut carts = original_coords.to_carts();
         for (cart, layer) in zip_eq!(&mut carts, &layers[..]) {
             if layer == &meta::Layer(0) {
-                cart[axis] += amount;
+                *cart += displacement;
             }
         }
 
@@ -1498,24 +1512,48 @@ pub(crate) fn run_layer_mode_frequencies(
     let mut diff_fn = pot.initialize_diff_fn(&original_coords, meta.sift())?;
 
     warn!("Don't quote these values, only compare them!  (I'm not sure about the prefactor...)");
-    serde_json::to_writer(std::io::stdout(), &V3::try_from_fn(|axis| FailOk({
-        let diff_2 = numerical::try_diff_2(
-            step,
-            Some(numerical::DerivativeKind::Stencil(5)),
-            0.0,
-            |distance| {
-                let coords = shift_layer_0(axis, distance)?;
-                diff_fn.compute_value(&coords, meta.sift())
-            },
-        )?;
-
+    let diff_2_to_wavenumber = |diff_2: f64| {
         // FIXME really not sure about the prefactor
         let sqrt_eigenvalue_to_thz = 15.6333043006705; // = sqrt(eV/amu)/angstrom/(2*pi)/THz
         let thz_to_wavenumber = 33.3564095198152; // = THz / (c / cm)
         let wavenumber = f64::sqrt(diff_2.abs() / reduced_mass) / (2.0 * std::f64::consts::PI) * sqrt_eigenvalue_to_thz * thz_to_wavenumber;
         diff_2.signum() * wavenumber
-    }))?)?;
-    println!();
+    };
+    match lattice_vector {
+        None => {
+            let is_lattice_vector = false;
+            let wavenumbers = V3::try_from_fn(|axis| FailOk({
+                let diff_2 = numerical::try_diff_2(
+                    step,
+                    Some(numerical::DerivativeKind::Stencil(5)),
+                    0.0,
+                    |distance| {
+                        let coords = shift_layer_0(axis, distance, is_lattice_vector)?;
+                        diff_fn.compute_value(&coords, meta.sift())
+                    },
+                )?;
+                diff_2_to_wavenumber(diff_2)
+            }))?;
+            serde_json::to_writer(std::io::stdout(), &wavenumbers)?;
+            println!();
+        },
+
+        Some(axis) => {
+            let is_lattice_vector = true;
+            let diff_2 = numerical::try_diff_2(
+                step,
+                Some(numerical::DerivativeKind::Stencil(5)),
+                0.0,
+                |distance| {
+                    let coords = shift_layer_0(axis, distance, is_lattice_vector)?;
+                    diff_fn.compute_value(&coords, meta.sift())
+                },
+            )?;
+            let wavenumber = diff_2_to_wavenumber(diff_2);
+            serde_json::to_writer(std::io::stdout(), &wavenumber)?;
+            println!();
+        },
+    }
 })}
 
 //=================================================================

@@ -732,6 +732,7 @@ pub fn layer_mode_frequencies(bin_name: &str, version: VersionInfo) -> ! {
                 .args(&[
                     arg!( input=STRUCTURE "Input structure, in rsp2 structure directory format."),
                     arg!( step [--step]=STEP "Finite difference step-size (angstrom)"),
+                    arg!( lattice_vec [--lattice-vector]=INDEX "do it along a lattice vector (indexed from zero) instead of the cartesian axes, and output a single float")
                 ])
         });
         let matches = app.get_matches();
@@ -742,8 +743,12 @@ pub fn layer_mode_frequencies(bin_name: &str, version: VersionInfo) -> ! {
 
         let step = matches.value_of("step").unwrap_or("1e-4").parse()?;
         let structure = StoredStructure::load(matches.expect_value_of("input"))?;
+        let lattice_vector = match matches.value_of("lattice_vec") {
+            Some(str) => Some(str.parse()?),
+            None => None,
+        };
 
-        crate::cmd::run_layer_mode_frequencies(mpi_on_demand, &settings, structure, step)?;
+        crate::cmd::run_layer_mode_frequencies(mpi_on_demand, &settings, structure, step, lattice_vector)?;
         Ok(())
     });
 }
