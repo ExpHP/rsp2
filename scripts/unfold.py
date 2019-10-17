@@ -817,6 +817,11 @@ class TaskBandPlot(Task):
         )
 
         parser.add_argument(
+            '--plot-using-size', action='store_true', help=
+            'Use marker size instead of alpha to represent probability.'
+        )
+
+        parser.add_argument(
             '--plot-size', type=parse_figsize, default=(7, 8), help=
             'Set figure size.'
         )
@@ -901,6 +906,7 @@ class TaskBandPlot(Task):
             plot_sidebar=args.plot_sidebar,
             plot_colorbar=args.plot_colorbar,
             plot_hide_unfolded=args.plot_hide_unfolded,
+            plot_using_size=args.plot_using_size,
             verbose=args.verbose,
         )
 
@@ -1566,6 +1572,7 @@ def probs_to_band_plot(
         plot_unfolded_style: tp.List[str],
         plot_baseline_style: tp.List[str],
         plot_title: tp.Optional[str],
+        plot_using_size: bool,
         verbose: bool = False,
 ):
     import matplotlib.pyplot as plt
@@ -1628,6 +1635,13 @@ def probs_to_band_plot(
     X = np.array(X)
     Y = path_ev_frequencies[path_ev_mask]
     Alpha = path_ev_alpha[path_ev_mask]
+
+    if plot_using_size:
+        Size = Alpha * 20 * 2  # x2 because max alpha is 0.5
+        Alpha = np.ones_like(Alpha)
+    else:
+        Size = np.ones_like(Alpha) * 20
+
     ColorData = path_ev_color_data[path_ev_mask]
 
     if verbose:
@@ -1648,7 +1662,7 @@ def probs_to_band_plot(
 
         if not plot_hide_unfolded:
             with plt.style.context(plot_unfolded_style):
-                ax.scatter(X, Y, None, C)
+                ax.scatter(X, Y, Size, C)
         if plot_baseline_path is not None:
             with plt.style.context([BASELINE_CONFIG] + plot_baseline_style):
                 base_X /= np.max(base_X)
