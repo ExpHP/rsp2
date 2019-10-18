@@ -878,6 +878,10 @@ class TaskBandPlot(Task):
         return args.show or bool(args.write_plot)
 
     def _compute(self, args):
+        # this has to be done before we construct any MPL-related objects
+        # (like e.g. a Norm)
+        cfg_matplotlib()
+
         multi_qpoint_data = self.multi_qpoint_data.require(args)
 
         raman_dict = None
@@ -896,33 +900,53 @@ class TaskBandPlot(Task):
         if args.plot_sidebar and len(multi_qpoint_data) > 1:
             warn("--plot-sidebar doesn't make sense with multiple kpoints")
 
-        return probs_to_band_plot(
+        if args.plot_baseline_file is not None:
+            base_X, base_Y = read_baseline_plot(args.plot_baseline_file)
+            baseline_data = { 'X': base_X, 'Y': base_Y }
+        else:
+            baseline_data = { 'X': [], 'Y': [] }
+
+        q_ev_z_projections = np.array(mode_data['ev_z_projections'])
+
+        # Switch based on plot_color so we can validate it before doing anything expensive.
+        color_info = get_plot_color_info(args.plot_color, z_pol=q_ev_z_projections, raman_dict=raman_dict)
+
+        if args.plot_colorbar and color_info.cbar_info() is None:
+            die("--plot-colorbar doesn't make sense for the given --plot-color mode")
+            raise RuntimeError('unreachable')
+
+        scatter_data = compute_band_plot_scatter_data(
             q_ev_frequencies=np.array(mode_data['ev_frequencies']),
-            q_ev_z_projections=np.array(mode_data['ev_z_projections']),
             q_ev_gpoint_probs=q_ev_gpoint_probs,
             path_g_indices=self.band_qg_indices.require(args)['G'],
             path_q_indices=self.band_qg_indices.require(args)['Q'],
             path_x_coordinates=self.band_path.require(args)['plot_x_coordinates'],
-            plot_xticks=self.band_path.require(args)['plot_xticks'],
-            plot_xticklabels=self.band_path.require(args)['plot_xticklabels'],
+            color_info=color_info,
             alpha_exponent=args.plot_exponent,
             alpha_max=args.plot_max_alpha,
             alpha_truncate=args.plot_truncate,
-            raman_dict=raman_dict,
-            plot_zone_crossing_xs=self.zone_crossings.require(args)['xs'],
-            plot_baseline_path=args.plot_baseline_file,
-            plot_color=args.plot_color,
-            plot_style=args.plot_style,
-            plot_unfolded_style=args.plot_unfolded_style,
-            plot_baseline_style=args.plot_baseline_style,
-            plot_title=args.plot_title,
-            plot_ylim=args.plot_ylim,
-            plot_sidebar=args.plot_sidebar,
-            plot_colorbar=args.plot_colorbar,
-            plot_hide_unfolded=args.plot_hide_unfolded,
             plot_using_size=args.plot_using_size,
             plot_coalesce_method=args.plot_coalesce,
             plot_coalesce_threshold=args.plot_coalesce_threshold,
+            verbose=args.verbose,
+        )
+
+        return generate_band_plot(
+            scatter_data=scatter_data,
+            baseline_data=baseline_data,
+            color_info=color_info,
+            plot_style=args.plot_style,
+            plot_unfolded_style=args.plot_unfolded_style,
+            plot_baseline_style=args.plot_baseline_style,
+            plot_xticks=self.band_path.require(args)['plot_xticks'],
+            plot_xticklabels=self.band_path.require(args)['plot_xticklabels'],
+            plot_ylim=args.plot_ylim,
+            plot_zone_crossing_xs=self.zone_crossings.require(args)['xs'],
+            plot_baseline_path=args.plot_baseline_file,
+            plot_title=args.plot_title,
+            plot_sidebar=args.plot_sidebar,
+            plot_colorbar=args.plot_colorbar,
+            plot_hide_unfolded=args.plot_hide_unfolded,
             verbose=args.verbose,
         )
 
@@ -1564,63 +1588,35 @@ BASELINE_CONFIG = {
     'lines.color': 'black',
 }
 
-def probs_to_band_plot(
+def compute_band_plot_scatter_data(
         q_ev_frequencies: np.ndarray,
-        q_ev_z_projections: np.ndarray,
         q_ev_gpoint_probs: np.ndarray,
         path_g_indices: np.ndarray,
         path_q_indices: np.ndarray,
         path_x_coordinates: np.ndarray,
-        plot_xticks: np.ndarray,
-        plot_xticklabels: np.ndarray,
-        plot_color: str,
-        plot_ylim: tp.Tuple[tp.Optional[float], tp.Optional[float]],
-        plot_zone_crossing_xs: np.ndarray,
-        raman_dict: tp.Dict[str, np.ndarray],
+        color_info: "ColorInfo",
         alpha_truncate: float,
         alpha_exponent: float,
         alpha_max: float,
-        plot_baseline_path: np.ndarray,
-        plot_hide_unfolded: bool,
-        plot_sidebar: bool,
-        plot_colorbar: bool,
-        plot_style: tp.List[str],
-        plot_unfolded_style: tp.List[str],
-        plot_baseline_style: tp.List[str],
-        plot_title: tp.Optional[str],
         plot_using_size: bool,
         plot_coalesce_method: tp.Optional[str],
         plot_coalesce_threshold: float,
         verbose: bool = False,
 ):
-    import matplotlib.pyplot as plt
-    cfg_matplotlib()
-
     sizes = check_arrays(
         q_ev_frequencies = (q_ev_frequencies, ['qpoint', 'ev'], np.floating),
-        q_ev_z_projections = (q_ev_z_projections, ['qpoint', 'ev'], np.floating),
         q_ev_gpoint_probs = (q_ev_gpoint_probs, ['qpoint'], object),
         q_ev_gpoint_probs_row = (q_ev_gpoint_probs[0], ['ev', 'quotient'], np.floating),
         path_g_indices = (path_g_indices, ['plot-x'], np.integer),
         path_q_indices = (path_q_indices, ['plot-x'], np.integer),
         path_x_coordinates = (path_x_coordinates, ['plot-x'], np.floating),
-        plot_xticks = (plot_xticks, ['special_point'], np.floating),
     )
-    if raman_dict is not None:
-        assert raman_dict['average-3d'].shape == (sizes['qpoint'], sizes['ev'])
 
     # HACK:
     # This is used to fix the norms of probabilities.
     # A value of 0.5 assumes that all modes have 0.5 amplitude in each layer.
     # Technically can be untrue for the case where the layers completely decouple.
     maximum_probability = 0.5
-
-    # Switch based on plot_color so we can validate it before doing anything expensive.
-    color_info = get_plot_color_info(plot_color, z_pol=q_ev_z_projections, raman_dict=raman_dict)
-
-    if plot_colorbar and color_info.cbar_info() is None:
-        die("--plot-colorbar doesn't make sense for the given --plot-color mode")
-        raise RuntimeError('unreachable')
 
     q_ev_color_data = color_info.q_ev_data()
 
@@ -1682,11 +1678,6 @@ def probs_to_band_plot(
     assert path_ev_probs.shape == (sizes['plot-x'], sizes['ev'])
     assert path_ev_frequencies.shape == (sizes['plot-x'], sizes['ev'])
 
-    if plot_baseline_path is not None:
-        base_X, base_Y = read_baseline_plot(plot_baseline_path)
-    else:
-        base_X, base_Y = [], []
-
     path_ev_alpha = path_ev_probs.copy()
     path_ev_alpha /= maximum_probability
     path_ev_alpha **= alpha_exponent
@@ -1718,19 +1709,46 @@ def probs_to_band_plot(
 
     C = np.hstack([color_info.data_to_rgb(ColorData), Alpha[:, None]])
 
-    # FIXME we reaaaally probably should split this function in two here
+    return { 'X': X, 'Y': Y, 'C': C, 'Size': Size }
+
+def generate_band_plot(
+        scatter_data,
+        baseline_data,
+        color_info,
+        plot_style,
+        plot_unfolded_style,
+        plot_baseline_style,
+        plot_xticks,
+        plot_xticklabels,
+        plot_ylim,
+        plot_zone_crossing_xs,
+        plot_baseline_path,
+        plot_title,
+        plot_sidebar,
+        plot_colorbar,
+        plot_hide_unfolded,
+        verbose,
+):
+    import matplotlib.pyplot as plt
+
+    X = scatter_data['X']
+    Y = scatter_data['Y']
+    C = scatter_data['C']
+    Size = scatter_data['Size']
+    base_X = baseline_data['X']
+    base_Y = baseline_data['Y']
 
     if verbose:
         print(f'Plotting {len(X)} points!')
 
     with plt.style.context([GLOBAL_CONFIG] + plot_style):
         fig = plt.figure(constrained_layout=True)
-        #fig.set_tight_layout(True)
+        # fig.set_tight_layout(True)
 
         if plot_sidebar:
             gs = fig.add_gridspec(ncols=8, nrows=1)
-            ax = fig.add_subplot(gs[0,:-1])
-            ax_sidebar = fig.add_subplot(gs[0,-1], sharey=ax)
+            ax = fig.add_subplot(gs[0, :-1])
+            ax_sidebar = fig.add_subplot(gs[0, -1], sharey=ax)
         else:
             ax = fig.add_subplot(111)
 
