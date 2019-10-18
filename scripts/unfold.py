@@ -9,6 +9,7 @@ from scipy import interpolate as scint
 from scipy import sparse
 import argparse
 from pymatgen import Structure
+import numba
 
 import unfold_lib
 
@@ -855,6 +856,19 @@ class TaskBandPlot(Task):
         )
 
         parser.add_argument(
+            '--plot-coalesce', choices=['none', 'max', 'sum'], default='none',
+            metavar='MODE', help=
+            'Coalesce modes of similar eigenvalue into one. '
+            'The argument decides how to treat the probabilities.'
+        )
+
+        parser.add_argument(
+            '--plot-coalesce-threshold', type=float, default=0.1,
+            metavar='THRESHOLD', help=
+            'Threshold used by --plot-coalesce. (cm^-1)'
+        )
+
+        parser.add_argument(
             '--plot-hide-unfolded', action='store_true', help=
             "Don't actually show the unfolded probs. (intended for use with --plot-baseline-file, "
             "so that you can show only the baseline)"
@@ -907,6 +921,8 @@ class TaskBandPlot(Task):
             plot_colorbar=args.plot_colorbar,
             plot_hide_unfolded=args.plot_hide_unfolded,
             plot_using_size=args.plot_using_size,
+            plot_coalesce_method=args.plot_coalesce,
+            plot_coalesce_threshold=args.plot_coalesce_threshold,
             verbose=args.verbose,
         )
 
@@ -1573,6 +1589,8 @@ def probs_to_band_plot(
         plot_baseline_style: tp.List[str],
         plot_title: tp.Optional[str],
         plot_using_size: bool,
+        plot_coalesce_method: tp.Optional[str],
+        plot_coalesce_threshold: float,
         verbose: bool = False,
 ):
     import matplotlib.pyplot as plt
@@ -1591,6 +1609,12 @@ def probs_to_band_plot(
     if raman_dict is not None:
         assert raman_dict['average-3d'].shape == (sizes['qpoint'], sizes['ev'])
 
+    # HACK:
+    # This is used to fix the norms of probabilities.
+    # A value of 0.5 assumes that all modes have 0.5 amplitude in each layer.
+    # Technically can be untrue for the case where the layers completely decouple.
+    maximum_probability = 0.5
+
     # Switch based on plot_color so we can validate it before doing anything expensive.
     color_info = get_plot_color_info(plot_color, z_pol=q_ev_z_projections, raman_dict=raman_dict)
 
@@ -1598,21 +1622,61 @@ def probs_to_band_plot(
         die("--plot-colorbar doesn't make sense for the given --plot-color mode")
         raise RuntimeError('unreachable')
 
-    def get_ev_path_probs():
-        # If ev_gpoint_probs were a dense, 3d array, we could just write
-        # ev_gpoint_probs[path_q_indices, :, path_g_indices]... but because
-        # there are sparse matrices in there we must do this.
+    q_ev_color_data = color_info.q_ev_data()
+
+    # At this point, it's just easier to work with ev_gpoint_probs if it is a
+    # dense 2d array of sparse row vectors.
+    q_g_ev_probs = np.array([
+        list(ev_g_probs.T)
+        for ev_g_probs in q_ev_gpoint_probs
+    ])
+    # this thing looks like a 2d array...
+    assert q_g_ev_probs.shape == (sizes['qpoint'], sizes['quotient']), (q_g_ev_probs.shape, (sizes['qpoint'], sizes['quotient']))
+    # but its elements are sparse row vectors
+    assert sparse.issparse(q_g_ev_probs[0][0])
+    assert q_g_ev_probs[0][0].shape[0] == 1
+
+    # coalesce eigenmodes with too-similar frequencies
+    #
+    # FIXME: doing this now has the disadvantage that we may see points that are
+    #        spuriously of an unusual color (where low probability modes of one
+    #        color cross high probability modes of another color).
+    #
+    #        Ideally the point color should be a weighted mean that accounts
+    #        for probability, but then we would have to do it per G point, or
+    #        per plot X point.
+    if plot_coalesce_method != 'none':
+        if verbose:
+            print('Coalescing similar frequencies...')
+
+        q_splits = [
+            list(get_coalescing_splits(ev_frequencies, plot_coalesce_threshold))
+            for ev_frequencies in q_ev_frequencies
+        ]
+
+        for q_index in range(sizes['qpoint']):
+            coalesce_inplace(q_splits[q_index], q_ev_frequencies[q_index], "mean", fill=np.nan)
+            if q_ev_color_data.ndim == 2:
+                coalesce_inplace(q_splits[q_index], q_ev_color_data[q_index], "max", fill=0)
+            elif q_ev_color_data.ndim == 3:
+                coalesce_inplace(q_splits[q_index], q_ev_color_data[q_index], "first", fill=0)
+            else:
+                assert False, "illegal q_ev_color_data dim"
+
         q_g_ev_probs = np.array([
-            list(ev_g_probs.T)
-            for ev_g_probs in q_ev_gpoint_probs
+            [
+                coalesce_sparse_row_vec(splits, ev_probs, plot_coalesce_method)
+                for ev_probs in g_ev_probs
+            ] for (splits, g_ev_probs) in zip(q_splits, q_g_ev_probs)
         ])
-        assert q_g_ev_probs.shape == (sizes['qpoint'], sizes['quotient']), (q_g_ev_probs.shape, (sizes['qpoint'], sizes['quotient']))
-        assert sparse.issparse(q_g_ev_probs[0][0])
 
-        path_ev_probs = sparse.vstack(q_g_ev_probs[path_q_indices, path_g_indices])
-        return np.asarray(path_ev_probs.todense()) # it's no longer N^2 but rather X*N
+    if verbose:
+        print('Postprocessing...')
 
-    path_ev_probs = get_ev_path_probs()
+    # select the right data at each plot x point
+    path_ev_probs = sparse.vstack(q_g_ev_probs[path_q_indices, path_g_indices])
+    path_ev_probs = np.asarray(path_ev_probs.todense()) # it's no longer N^2 but rather X*N
+
     path_ev_frequencies = q_ev_frequencies[path_q_indices]
     path_ev_color_data = color_info.q_ev_data()[path_q_indices]
     assert path_ev_probs.shape == (sizes['plot-x'], sizes['ev'])
@@ -1624,10 +1688,17 @@ def probs_to_band_plot(
         base_X, base_Y = [], []
 
     path_ev_alpha = path_ev_probs.copy()
+    path_ev_alpha /= maximum_probability
     path_ev_alpha **= alpha_exponent
     path_ev_alpha *= alpha_max
-    path_ev_mask = path_ev_alpha > alpha_truncate
 
+    # reduce the number of scatter plot points sent to matplotlib
+    path_ev_mask = np.logical_and(
+        path_ev_alpha > alpha_truncate, # remove probs too small to be visible
+        np.isfinite(path_ev_frequencies), # remove holes left behind by coalesce
+    )
+
+    # make flat arrays for the scatter plot
     X = []
     for (x_coord, ev_mask) in zip(path_x_coordinates, path_ev_mask):
         X.extend([x_coord] * ev_mask.sum())
@@ -1635,19 +1706,22 @@ def probs_to_band_plot(
     X = np.array(X)
     Y = path_ev_frequencies[path_ev_mask]
     Alpha = path_ev_alpha[path_ev_mask]
+    Alpha = np.minimum(Alpha, 1)
 
     if plot_using_size:
-        Size = Alpha * 20 * 2  # x2 because max alpha is 0.5
+        Size = Alpha * 20
         Alpha = np.ones_like(Alpha)
     else:
         Size = np.ones_like(Alpha) * 20
 
     ColorData = path_ev_color_data[path_ev_mask]
 
+    C = np.hstack([color_info.data_to_rgb(ColorData), Alpha[:, None]])
+
+    # FIXME we reaaaally probably should split this function in two here
+
     if verbose:
         print(f'Plotting {len(X)} points!')
-
-    C = np.hstack([color_info.data_to_rgb(ColorData), Alpha[:, None]])
 
     with plt.style.context([GLOBAL_CONFIG] + plot_style):
         fig = plt.figure(constrained_layout=True)
@@ -1843,6 +1917,126 @@ def read_baseline_plot(path):
         X.extend([qpoint['distance']] * len(qpoint['band']))
         Y.extend(band['frequency'] * THZ_TO_WAVENUMBER for band in qpoint['band'])
     return X, Y
+
+def get_coalescing_splits(data, threshold):
+    """ Compute split indices for the ``coalesce`` function from a 1D array of
+    sorted data.
+
+    The output is a set of indices that partitions the data into segments
+    such that each segment contains at least one value, and contains a range of
+    values no wider than the threshold. (beyond these properties, the precise
+    selection of groupings is left unspecified)
+    """
+    yield 0
+    data = iter(data)
+    start_value = next(data)
+    for index, x in enumerate(data, start=1):
+        if start_value + threshold < x:
+            yield index
+            start_value = x
+    yield index + 1 # length of data
+
+NO_FILL = object()
+def coalesce(splits, data, mode, fill=NO_FILL):
+    """ Partitions ``data`` at the indices defined in ``splits``, and then
+    reduces each partition along that axis using some function specified by
+    ``mode``.
+
+    ``mode`` is a string which can be ``"mean"``, ``"sum"``, ``"max"``,
+    or ``"first"``.
+    (arbitrary ufuncs are not supported due to limitations of numba)
+
+    To help avoid creating situations where jagged arrays are needed,
+    the output is the same shape as the input. The output of the ufunc is
+    written to the first item in each partition; the rest are optionally
+    filled with a constant. """
+    return coalesce_inplace(splits, data.copy(), mode, fill=fill)
+
+def coalesce_inplace(splits, data, mode, fill=NO_FILL):
+    """ Variant of coalesce that reuses ``data`` for the output buffer. """
+    splits = np.array(splits, copy=False)
+
+    if mode == "sum": __coalesce_inplace_sum(splits, data)
+    elif mode == "mean": __coalesce_inplace_mean(splits, data)
+    elif mode == "max": __coalesce_inplace_max(splits, data)
+    elif mode == "first": pass # the first value of each group is already there!
+    else: raise ValueError(f'Unknown reduction mode: {mode}')
+
+    __coalesce_fill(splits, data, fill=fill)
+
+    return data
+
+def coalesce_inplace_weighted_mean(splits, data, weights, fill=NO_FILL):
+    """ Variant of ``coalesce_inplace`` that performs a weighted mean. """
+    __coalesce_inplace_weighted_mean(splits, data, weights, fill)
+    __coalesce_fill(splits, data, fill=fill)
+
+    return data
+
+def __coalesce_fill(splits, data, fill=NO_FILL):
+    if fill is not NO_FILL:
+        inv_mask = np.ones((splits[-1],), dtype=bool)
+        inv_mask[splits[:-1]] = False
+        data[inv_mask] = fill
+
+@numba.jit(nopython=True)
+def __coalesce_inplace_mean(splits, data):
+    for start, end in zip(splits[:-1], splits[1:]):
+        data[start] = data[start:end].mean()
+
+@numba.jit(nopython=True)
+def __coalesce_inplace_sum(splits, data):
+    for start, end in zip(splits[:-1], splits[1:]):
+        data[start] = data[start:end].sum()
+
+@numba.jit(nopython=True)
+def __coalesce_inplace_max(splits, data):
+    for start, end in zip(splits[:-1], splits[1:]):
+        data[start] = data[start:end].max()
+
+@numba.jit(nopython=True)
+def __coalesce_inplace_weighted_mean(splits, data, weights):
+    for start, end in zip(splits[:-1], splits[1:]):
+        data[start] = np.vdot(data[start:end], weights[start:end]) / weights[start:end].sum()
+
+def coalesce_sparse_row_vec(splits, csr, mode):
+    """ Variant of `coalesce` for 1xN CSR matrices.
+
+    The unused elements of the output are always set to the zero value and
+    pruned. """
+    assert (splits[0], splits[-1]) == (0, csr.shape[1])
+    assert sparse.isspmatrix_csr(csr)
+
+    # make sure that the first element in every partition is explicit.
+    # (this is clearly a suboptimal strategy when csr.nnz << len(splits),
+    #  but it is the easiest to implement)
+    new_data, new_indices, new_indptr = sparse_row_vec__force_values_at(csr, splits[:-1])
+
+    # now we can just call coalesce on the raw data vector
+    effective_splits = np.searchsorted(new_indices, splits)
+    new_data = coalesce(effective_splits, new_data, mode, fill=0)
+
+    new_csr = sparse.csr_matrix((new_data, new_indices, new_indptr), csr.shape)
+    new_csr.eliminate_zeros()
+    return new_csr
+
+def sparse_row_vec__force_values_at(csr, forced_indices):
+    """ Given a CSR matrix, produce a ``(data, indices, indptr)`` triplet
+    describing a new CSR matrix where the given indices are forced to have
+    explicit values (even if they are zero).
+    """
+    assert sparse.isspmatrix_csr(csr)
+    assert csr.shape[0] == 1
+
+    # union of existing indices with the forced indices
+    new_indices = np.insert(csr.indices, np.searchsorted(csr.indices, forced_indices), forced_indices)
+
+    # the data at all of these indices.
+    # let scipy handle this by advanced indexing the old matrix and densifying.
+    new_data = np.asarray(csr[0, new_indices].todense())[0]
+    new_indptr = np.array([0, len(new_indices)])
+
+    return new_data, new_indices, new_indptr
 
 #---------------------------------------------------------------
 # debugging
