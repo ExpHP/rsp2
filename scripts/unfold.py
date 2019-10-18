@@ -1780,7 +1780,7 @@ def get_plot_color_info(plot_color_string, z_pol, raman_dict) -> ColorInfo:
 
     elif mode == 'uniform':
         fixed_color = colors.to_rgb(expect_arg().strip())
-        color = np.zeros(z_pol.shape() + (3,))
+        color = np.zeros(z_pol.shape + (3,))
         color[...] = fixed_color
         return RgbColorInfo(color)
 
