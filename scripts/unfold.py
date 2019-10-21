@@ -9,18 +9,21 @@ from scipy import interpolate as scint
 from scipy import sparse
 import argparse
 from pymatgen import Structure
-import numba
-
-import unfold_lib
 
 try:
     import rsp2
+    import unfold_lib
 except ImportError:
     info = lambda s: print(s, file=sys.stderr)
     info('Please add the following to your PYTHONPATH:')
     info('  (rsp2 source root)/scripts')
     info('  (rsp2 source root)/src/python')
     sys.exit(1)
+
+from unfold_lib import Supercell
+from unfold_lib.util import check_arrays
+from unfold_lib.util import map_with_progress
+import unfold_lib.coalesce as coalesce
 
 from rsp2.io import eigensols, structure_dir, dwim
 
@@ -500,13 +503,7 @@ class TaskGProbs(Task):
         if args.probs_gamma_only and self.qpoint_sfrac.require(args) != [0, 0, 0]:
             raise RuntimeError('--probs-gamma-only requires --qpoint "0 0 0"')
 
-        if args.probs_impl in ['rust', 'auto']:
-            try:
-                unfold_lib.build()
-            except unfold_lib.BuildError:
-                assert unfold_lib.unfold_all is None
-                if args.probs_impl == 'rust':
-                    raise
+        unfold_lib.prepare_implementation(args.probs_impl)
 
     def has_action(self, args):
         return bool(args.write_probs)
@@ -526,7 +523,7 @@ class TaskGProbs(Task):
             # a greater chance of having a bug
             self.translation_deperms.require(args)
 
-            ev_gpoint_probs = unfold_all(
+            ev_gpoint_probs = unfold_lib.unfold_all(
                 superstructure=self.structure.require(args)['projected_structure'],
                 supercell=self.structure.require(args)['supercell'],
                 eigenvectors=self.eigensols.require(args)['ev_projected_eigenvectors'],
@@ -965,253 +962,6 @@ class TaskBandPlot(Task):
 #---------------------------------------------------------------
 # Computation
 
-def unfold_all(
-        superstructure: Structure,
-        supercell: 'Supercell',
-        eigenvectors,
-        qpoint_sfrac,
-        translation_deperms,
-        gamma_only: bool,
-        implementation,
-        progress_prefix = None,
-):
-    """
-    :param superstructure: ``pymatgen.Structure`` object with `sites` sites.
-    :param supercell: ``Supercell`` object.
-    :param eigenvectors: Shape ``(num_evecs, 3 * sites)``, complex or real.
-
-    Each row is an eigenvector.  Their norms may be less than 1, if the
-    structure has been projected onto a single layer, but should not exceed 1.
-    (They will NOT be automatically normalized by this function, as projection
-    onto a layer may create eigenvectors of zero norm)
-
-    :param translation_deperms:  Shape ``(quotient, sites)``.
-    Permutations such that ``(carts + translation_carts[i])[deperms[i]]`` is
-    equivalent to ``carts`` under superlattice translational symmetry, where
-    ``carts`` is the supercell carts.
-
-    :param qpoint_sfrac: Shape ``(3,)``, real.
-    The K point in the SC reciprocal cell at which the eigenvector was computed,
-    in fractional coords.
-
-    :param implementation: ``"rust"`` or ``"python"``
-
-    :param gamma_only: When `True`, only the values at gamma will be computed,
-    and the rest of the output will be zero. For safety, this function will
-    validate that the first `qpoint_sfrac` is `[0, 0, 0]`.
-
-    :param progress_prefix: String used to prefix progress reports.
-    ``None`` disables progress reporting.
-
-    :return: Shape ``(num_evecs, quotient)``
-    For each vector in ``eigenvectors``, its projected probabilities
-    onto ``k + g`` for each g in ``supercell.gpoint_sfracs()``.
-    """
-    super_lattice = superstructure.lattice.matrix
-    prim_lattice = np.linalg.inv(supercell.matrix) @ super_lattice
-
-    # The quotient group of primitive lattice translations modulo the supercell
-    translation_carts = supercell.translation_pfracs() @ prim_lattice
-    translation_sfracs = translation_carts @ np.linalg.inv(super_lattice)
-
-    # debug_quotient_points(translation_carts[:, :2], super_lattice[:2,:2])
-
-    # The quotient group of supercell reciprocal lattice points modulo the
-    # primitive reciprocal cell
-    gpoint_sfracs = supercell.gpoint_sfracs()
-
-    # debug_quotient_points((gpoint_sfracs @ np.linalg.inv(super_lattice).T)[:, :2], np.linalg.inv(prim_lattice).T[:2,:2])
-
-    super_lattice_recip = superstructure.lattice.inv_matrix.T
-    qpoint_cart = qpoint_sfrac @ super_lattice_recip
-    super_carts = superstructure.cart_coords
-
-    # The method is defined on a Bloch function with wavevector Q.  The
-    # eigenvector does not satisfy this property; it is periodic under the
-    # lattice. Rather, the *displacements* are a Bloch function.
-    #
-    # Because the sqrt(mass) factors could mess with our normalization, we don't
-    # construct the true displacement vectors, but rather some sort of
-    # Frankenstein creation that has magnitudes of the eigenvector and the
-    # phases of the displacement vector.
-    #
-    # These are those phase factors.
-    # (remember we follow the sign convention of Phonopy, not of Allen)
-    site_phases = np.exp(2j * np.pi * np.dot(super_carts, qpoint_cart))
-
-    # We also require correction phase factors to accompany the permutation
-    # representation of our translation operators, to handle when sites are
-    # mapped to different images of the supercell.
-    #
-    # See the comment above get_translation_phases for more details.
-    translation_phases = np.vstack([
-        get_translation_phases(
-            qpoint_cart=qpoint_cart,
-            super_carts=super_carts,
-            translation_cart=translation_cart,
-            translation_deperm=translation_deperm,
-        )
-        for (translation_cart, translation_deperm)
-        in zip(translation_carts, translation_deperms)
-    ])
-
-    if unfold_lib.unfold_all is not None and implementation != 'python':
-        func = unfold_lib.unfold_all # Rust
-    else:
-        func = unfold_all__python # Python
-
-    return func(
-        site_phases=site_phases,
-        translation_sfracs=translation_sfracs,
-        translation_deperms=translation_deperms,
-        translation_phases=translation_phases,
-        gpoint_sfracs=gpoint_sfracs,
-        qpoint_sfrac=qpoint_sfrac,
-        eigenvectors=eigenvectors,
-        gamma_only=gamma_only,
-        progress_prefix=progress_prefix,
-    )
-
-def unfold_all__python(
-        site_phases,
-        translation_sfracs,
-        translation_deperms,
-        translation_phases,
-        gpoint_sfracs,
-        qpoint_sfrac,
-        eigenvectors,
-        gamma_only,
-        progress_prefix,
-):
-    progress = None
-    if progress_prefix is not None:
-        def progress(done, count):
-            print(f'{progress_prefix}Unfolding {done:>5} of {count} eigenvectors')
-
-    return np.array(list(map_with_progress(
-        eigenvectors, progress,
-        lambda eigenvector: unfold_one(
-            site_phases=site_phases,
-            translation_sfracs=translation_sfracs,
-            translation_deperms=translation_deperms,
-            translation_phases=translation_phases,
-            gpoint_sfracs=gpoint_sfracs,
-            qpoint_sfrac=qpoint_sfrac,
-            eigenvector=eigenvector.reshape((-1, 3)),
-            gamma_only=gamma_only,
-        )
-    )))
-
-# NOTE: For any change to this function, the corresponding function
-#       in the Rust unfold_lib must be changed accordingly!
-def unfold_one(
-        site_phases,
-        translation_sfracs,
-        translation_deperms,
-        translation_phases,
-        gpoint_sfracs,
-        qpoint_sfrac,
-        eigenvector,
-        gamma_only,
-):
-    """
-    :param site_phases: Shape ``(quotient,)``, complex.
-    The phase factors that must be multiplied into each site when producing
-    displacements from the eigenvector. Should be of the form ``e ^ (i q.x)``.
-
-    :param translation_sfracs: Shape ``(quotient, 3)``, real.
-    The quotient space translations (PC lattice modulo super cell),
-    in units of the supercell basis vectors.
-
-    :param translation_deperms: Shape ``(quotient, sc_sites)``, integral.
-    Permutations such that ``(carts + translation_carts[i])[deperms[i]]``
-    is ordered like the original carts. (i.e. when applied to the coordinate
-    data, it translates by ``-1 * translation_carts[i]``)
-
-    For any vector of per-site metadata ``values``, ``values[deperms[i]]`` is
-    effectively translated by ``translation_carts[i]``.
-
-    :param translation_phases: Shape ``(quotient, sc_sites)``, complex.
-    The phase factors that must be factored into each atom's components after
-    a translation to account for the fact that permuting the sites does not
-    produce the same images of sites as actually translating them would.
-
-    :param gpoint_sfracs: Shape ``(quotient, 3)``, real.
-    Translations in the reciprocal quotient space, in units of the reciprocal
-    lattice basis vectors.
-
-    (SC reciprocal lattice modulo primitive BZ)
-
-    :param qpoint_sfrac: Shape ``(3,)``, real.
-    The Q point in the SC reciprocal cell at which the eigenvector was computed.
-
-    :param eigenvector: Shape ``(sc_sites, 3)``, complex.
-    A normal mode of the supercell. (arbitrary norm)
-
-    :param gamma_only: boolean.
-    A switch that causes the output to only contain the gamma probability.
-    (all other elements will be zero)
-
-    :return: Shape ``(quotient,)``, real.
-    Probabilities of `eigenvector` projected onto each point
-    ``qpoint + gpoints[i]``.
-    """
-
-    site_phases = np.array(site_phases)
-    translation_sfracs = np.array(translation_sfracs)
-    translation_deperms = np.array(translation_deperms)
-    gpoint_sfracs = np.array(gpoint_sfracs)
-    qpoint_sfrac = np.array(qpoint_sfrac)
-    eigenvector = np.array(eigenvector)
-    sizes = check_arrays(
-        site_phases = (site_phases, ['sc_sites'], np.complexfloating),
-        translation_sfracs = (translation_sfracs, ['quotient', 3], np.floating),
-        translation_deperms = (translation_deperms, ['quotient', 'sc_sites'], np.integer),
-        gpoint_sfracs = (gpoint_sfracs, ['quotient', 3], np.floating),
-        qpoint_sfrac = (qpoint_sfrac, [3], np.floating),
-        eigenvector = (eigenvector, ['sc_sites', 3], [np.floating, np.complexfloating]),
-    )
-    # print(repr(eigenvector))
-
-    # Function with the magnitudes of the eigenvector, but the phases
-    # of the displacement vector.
-    bloch_function = eigenvector * site_phases[:, None]
-
-    # Expectation value of every translation operation.
-    inner_prods = np.array([
-        np.vdot(bloch_function, t_phases[:, None] * bloch_function[t_deperm])
-        for (t_deperm, t_phases) in zip(translation_deperms, translation_phases)
-    ])
-
-    # Expectation value of each projector P(Q -> Q + G)
-    def compute_for_g(g):
-        # PBZ (Q + G) dot r for every r
-        k_dot_rs = (qpoint_sfrac + g) @ translation_sfracs.T
-
-        # Phases from Allen Eq 3.  Due to our differing phase conventions,
-        # we have exp(+i...) rather than exp(-i...).
-        phases = np.exp(2j * np.pi * k_dot_rs)
-
-        prob = sum(inner_prods * phases) / sizes['quotient']
-
-        # analytically, these are all real, positive numbers
-        assert abs(prob.imag) < 1e-7
-        assert -1e-7 < prob.real
-        return max(prob.real, 0.0)
-
-    if gamma_only:
-        assert (gpoint_sfracs[0] == [0, 0, 0]).all()
-        gpoint_probs = np.zeros(shape=(len(gpoint_sfracs),))
-        gpoint_probs[0] = compute_for_g(gpoint_sfracs[0])
-    else:
-        gpoint_probs = np.array([compute_for_g(g) for g in gpoint_sfracs])
-
-    # Recall that the eigenvector is not normalized because it could be the zero
-    # vector (due to projection onto a layer).
-    if not gamma_only:
-        np.testing.assert_allclose(gpoint_probs.sum(), np.linalg.norm(eigenvector)**2, atol=1e-7)
-    return gpoint_probs
-
 def collect_translation_deperms(
         superstructure: Structure,
         supercell: 'Supercell',
@@ -1285,74 +1035,6 @@ def get_translation_deperm(
     return compute_permutation_for_rotation(
         fracs_translated, fracs_original, lattice, tol,
     )
-
-# Legend:
-# - a diagram of integers (labeled "Indices") depicts coordinates, by displaying
-#   the number `i` at the position of the `i`th atom.
-# - a diagram with any other label depicts a list of metadata (such as elements
-#   or eigenvector components) by arranging them starting from index 0 in the
-#   lower left, and etc. as if they were to label the original coords.
-# - Parentheses surround the position of the original zeroth atom.
-# - Suppose the qpoint Q of the eigenvector is orthogonal to the x axis.
-#   We let α = exp(i Q.r), where r is the vector from atom 0 to atom 3.
-#   Letters a-i are 3-vectors containing the components of the eigenvector
-#   at each site.
-#
-#                 6  7  8    Bloch Function:     gα²  hα²  iα²
-#    Indices:    3  4  5     (phonopy phase     dα   eα   fα
-#              (0) 1  2       convention)     (a)   b    c
-#
-# Consider the translation that moves the 0th atom to the location originally at
-# index 3. The *correct* bloch function should be:
-#
-#
-#       Expected            dα    eα    fα
-#       Bloch Function:    a     b     c
-#                       (gα−¹) hα−¹  iα−¹
-#
-# However, naively applying the deperm to the bloch function (to "translate" it
-# by this vector) instead yields:
-#
-#       Permuted            dα    eα    fα
-#       Bloch Function:    a     b     c
-#                       (gα²)  hα²   iα²
-#
-# As you can see, g, h, and i do not have the correct phases because those
-# atoms mapped to different images. To find the superlattice translation that
-# describes this discrepancy, we must look at the coords.  First, translate the
-# coords by literally applying the translation.  Then, apply the inverse coperm
-# to make the indices match their original sites.
-#
-#   (applying translation...)      (...then applying inverse coperm)
-#                  6  7  8                     0  1  2
-#                 3  4  5                     6  7  8
-#    Indices:    0  1  2         Indices:    3  4  5
-#              (x) x  x                    (x) x  x
-#
-# If you subtract these from the original coordinates, you get a list of
-# super-lattice point translations that map the permuted atoms to their correct
-# images. Atoms 3..9 need no correction, while atoms 0..3 require a phase
-# correction by some super-lattice vector R.
-# The correction to be applied is exp(i Q.R), which in this case is α−³.
-#
-#                       0  0  0                         1    1    1
-#    Image vectors:    0  0  0    Phase corrections:   1    1    1
-#                    (R) R  R                         α−³  α−³  α−³
-#
-# Those phase corrections are the output of this function.
-def get_translation_phases(
-        qpoint_cart,
-        super_carts,
-        translation_cart,
-        translation_deperm,
-):
-    inverse_coperm = translation_deperm # inverse of inverse
-
-    # translate, permute, and subtract to get superlattice points
-    image_carts = super_carts - (super_carts + translation_cart)[inverse_coperm]
-
-    # dot each atom's R with Q to produce its phase correction
-    return np.exp(2j * np.pi * image_carts @ qpoint_cart)
 
 # Here we encounter a big problem:
 #
@@ -1476,78 +1158,6 @@ def griddata_periodic(
 #---------------------------------------------------------------
 # Physical utils
 
-class Supercell:
-    def __init__(self, matrix):
-        """
-        :param matrix: Shape ``(3, 3)``, integer.
-        Integer matrix satisfying
-        ``matrix @ prim_lattice_matrix == super_lattice_matrix``
-        where the lattice matrices are understood to store a lattice primitive
-        translation in each row.
-        """
-        if isinstance(matrix, Supercell):
-            self.matrix = matrix.matrix
-            self.repeats = matrix.repeats
-            self.t_repeats = matrix.t_repeats
-        else:
-            matrix = np.array(matrix, dtype=int)
-            assert matrix.shape == (3, 3)
-            self.matrix = matrix
-            self.repeats = find_repeats(matrix)
-            self.t_repeats = find_repeats(matrix.T)
-
-    def translation_pfracs(self):
-        """
-        :return: Shape ``(quotient, 3)``, integral.
-
-        Fractional coordinates of quotient-space translations,
-        in units of the primitive cell lattice basis vectors.
-        """
-        return cartesian_product(*(np.arange(n) for n in self.repeats)).astype(float)
-
-    def gpoint_sfracs(self):
-        """
-        :return: Shape ``(quotient, 3)``, integral.
-
-        Fractional coordinates of quotient-space gpoints,
-        in units of the supercell reciprocal lattice basis vectors.
-        """
-        return cartesian_product(*(np.arange(n) for n in self.t_repeats)).astype(float)
-
-    def recip(self):
-        """
-        Get a supercell that describes the reciprocal primitive lattice in terms
-        of the reciprocal supercell lattice.
-        """
-        return Supercell(self.matrix.T)
-
-def find_repeats(supercell_matrix):
-    """
-    Get the number of distinct translations along each lattice primitive
-    translation. (it's the diagonal of the row-based HNF of the matrix)
-
-    :param supercell_matrix: Shape ``(3, 3)``, integer.
-    Integer matrix satisfying
-    ``matrix @ prim_lattice_matrix == super_lattice_matrix``
-    where the lattice matrices are understood to store a lattice primitive
-    translation in each row.
-
-    :return:
-    """
-    from abelian import hermite_normal_form
-    from sympy import Matrix
-
-    expected_volume = abs(round(np.linalg.det(supercell_matrix)))
-
-    supercell_matrix = Matrix(supercell_matrix) # to sympy
-
-    # abelian.hermite_normal_form is column-based, so give it the transpose
-    hnf = hermite_normal_form(supercell_matrix.T)[1].T
-    hnf = np.array(hnf).astype(int) # to numpy
-
-    assert round(np.linalg.det(hnf)) == expected_volume
-    return np.diag(hnf)
-
 def reduce_carts(carts, lattice):
     fracs = carts @ np.linalg.inv(lattice)
     fracs %= 1.0
@@ -1647,22 +1257,22 @@ def compute_band_plot_scatter_data(
             print('Coalescing similar frequencies...')
 
         q_splits = [
-            list(get_coalescing_splits(ev_frequencies, plot_coalesce_threshold))
+            list(coalesce.get_splits(ev_frequencies, plot_coalesce_threshold))
             for ev_frequencies in q_ev_frequencies
         ]
 
         for q_index in range(sizes['qpoint']):
-            coalesce_inplace(q_splits[q_index], q_ev_frequencies[q_index], "mean", fill=np.nan)
+            coalesce.coalesce_inplace(q_splits[q_index], q_ev_frequencies[q_index], "mean", fill=np.nan)
             if q_ev_color_data.ndim == 2:
-                coalesce_inplace(q_splits[q_index], q_ev_color_data[q_index], "max", fill=0)
+                coalesce.coalesce_inplace(q_splits[q_index], q_ev_color_data[q_index], "max", fill=0)
             elif q_ev_color_data.ndim == 3:
-                coalesce_inplace(q_splits[q_index], q_ev_color_data[q_index], "first", fill=0)
+                coalesce.coalesce_inplace(q_splits[q_index], q_ev_color_data[q_index], "first", fill=0)
             else:
                 assert False, "illegal q_ev_color_data dim"
 
         q_g_ev_probs = np.array([
             [
-                coalesce_sparse_row_vec(splits, ev_probs, plot_coalesce_method)
+                coalesce.coalesce_sparse_row_vec(splits, ev_probs, plot_coalesce_method)
                 for ev_probs in g_ev_probs
             ] for (splits, g_ev_probs) in zip(q_splits, q_g_ev_probs)
         ])
@@ -1962,126 +1572,6 @@ def read_baseline_plot(path):
         Y.extend(band['frequency'] * THZ_TO_WAVENUMBER for band in qpoint['band'])
     return X, Y
 
-def get_coalescing_splits(data, threshold):
-    """ Compute split indices for the ``coalesce`` function from a 1D array of
-    sorted data.
-
-    The output is a set of indices that partitions the data into segments
-    such that each segment contains at least one value, and contains a range of
-    values no wider than the threshold. (beyond these properties, the precise
-    selection of groupings is left unspecified)
-    """
-    yield 0
-    data = iter(data)
-    start_value = next(data)
-    for index, x in enumerate(data, start=1):
-        if start_value + threshold < x:
-            yield index
-            start_value = x
-    yield index + 1 # length of data
-
-NO_FILL = object()
-def coalesce(splits, data, mode, fill=NO_FILL):
-    """ Partitions ``data`` at the indices defined in ``splits``, and then
-    reduces each partition along that axis using some function specified by
-    ``mode``.
-
-    ``mode`` is a string which can be ``"mean"``, ``"sum"``, ``"max"``,
-    or ``"first"``.
-    (arbitrary ufuncs are not supported due to limitations of numba)
-
-    To help avoid creating situations where jagged arrays are needed,
-    the output is the same shape as the input. The output of the ufunc is
-    written to the first item in each partition; the rest are optionally
-    filled with a constant. """
-    return coalesce_inplace(splits, data.copy(), mode, fill=fill)
-
-def coalesce_inplace(splits, data, mode, fill=NO_FILL):
-    """ Variant of coalesce that reuses ``data`` for the output buffer. """
-    splits = np.array(splits, copy=False)
-
-    if mode == "sum": __coalesce_inplace_sum(splits, data)
-    elif mode == "mean": __coalesce_inplace_mean(splits, data)
-    elif mode == "max": __coalesce_inplace_max(splits, data)
-    elif mode == "first": pass # the first value of each group is already there!
-    else: raise ValueError(f'Unknown reduction mode: {mode}')
-
-    __coalesce_fill(splits, data, fill=fill)
-
-    return data
-
-def coalesce_inplace_weighted_mean(splits, data, weights, fill=NO_FILL):
-    """ Variant of ``coalesce_inplace`` that performs a weighted mean. """
-    __coalesce_inplace_weighted_mean(splits, data, weights, fill)
-    __coalesce_fill(splits, data, fill=fill)
-
-    return data
-
-def __coalesce_fill(splits, data, fill=NO_FILL):
-    if fill is not NO_FILL:
-        inv_mask = np.ones((splits[-1],), dtype=bool)
-        inv_mask[splits[:-1]] = False
-        data[inv_mask] = fill
-
-@numba.jit(nopython=True)
-def __coalesce_inplace_mean(splits, data):
-    for start, end in zip(splits[:-1], splits[1:]):
-        data[start] = data[start:end].mean()
-
-@numba.jit(nopython=True)
-def __coalesce_inplace_sum(splits, data):
-    for start, end in zip(splits[:-1], splits[1:]):
-        data[start] = data[start:end].sum()
-
-@numba.jit(nopython=True)
-def __coalesce_inplace_max(splits, data):
-    for start, end in zip(splits[:-1], splits[1:]):
-        data[start] = data[start:end].max()
-
-@numba.jit(nopython=True)
-def __coalesce_inplace_weighted_mean(splits, data, weights):
-    for start, end in zip(splits[:-1], splits[1:]):
-        data[start] = np.vdot(data[start:end], weights[start:end]) / weights[start:end].sum()
-
-def coalesce_sparse_row_vec(splits, csr, mode):
-    """ Variant of `coalesce` for 1xN CSR matrices.
-
-    The unused elements of the output are always set to the zero value and
-    pruned. """
-    assert (splits[0], splits[-1]) == (0, csr.shape[1])
-    assert sparse.isspmatrix_csr(csr)
-
-    # make sure that the first element in every partition is explicit.
-    # (this is clearly a suboptimal strategy when csr.nnz << len(splits),
-    #  but it is the easiest to implement)
-    new_data, new_indices, new_indptr = sparse_row_vec__force_values_at(csr, splits[:-1])
-
-    # now we can just call coalesce on the raw data vector
-    effective_splits = np.searchsorted(new_indices, splits)
-    new_data = coalesce(effective_splits, new_data, mode, fill=0)
-
-    new_csr = sparse.csr_matrix((new_data, new_indices, new_indptr), csr.shape)
-    new_csr.eliminate_zeros()
-    return new_csr
-
-def sparse_row_vec__force_values_at(csr, forced_indices):
-    """ Given a CSR matrix, produce a ``(data, indices, indptr)`` triplet
-    describing a new CSR matrix where the given indices are forced to have
-    explicit values (even if they are zero).
-    """
-    assert sparse.isspmatrix_csr(csr)
-    assert csr.shape[0] == 1
-
-    # union of existing indices with the forced indices
-    new_indices = np.insert(csr.indices, np.searchsorted(csr.indices, forced_indices), forced_indices)
-
-    # the data at all of these indices.
-    # let scipy handle this by advanced indexing the old matrix and densifying.
-    new_data = np.asarray(csr[0, new_indices].todense())[0]
-    new_indptr = np.array([0, len(new_indices)])
-
-    return new_data, new_indices, new_indptr
-
 #---------------------------------------------------------------
 # debugging
 
@@ -2210,53 +1700,6 @@ def draw_reduced_points(ax, points2, lattice2, **kw):
     points2 = reduce_carts(points2, lattice2)
     ax.scatter(points2[:, 0], points2[:, 1], **kw)
 
-def check_arrays(**kw):
-    previous_values = {}
-
-    kw = {name: list(data) for name, data in kw.items()}
-    for name in kw:
-        if not sparse.issparse(kw[name][0]):
-            kw[name][0] = np.array(kw[name][0])
-
-    for name, data in kw.items():
-        if len(data) == 2:
-            array, dims = data
-            dtype = None
-        elif len(data) == 3:
-            array, dims, dtype = data
-        else:
-            raise TypeError(f'{name}: Expected (array, shape) or (array, shape, dtype)')
-
-        if dtype:
-            # support one dtype or a list of them
-            if isinstance(dtype, type):
-                dtype = [dtype]
-            if not any(issubclass(np.dtype(array.dtype).type, d) for d in dtype):
-                raise TypeError(f'{name}: Expected one of {dtype}, got {array.dtype}')
-
-        # format names without quotes
-        nice_expected = '[' + ', '.join(map(str, dims)) + ']'
-        if len(dims) != array.ndim:
-            raise TypeError(f'{name}: Wrong number of dimensions (expected shape {nice_expected}, got {list(array.shape)})')
-
-        for axis, dim in enumerate(dims):
-            if isinstance(dim, int):
-                if array.shape[axis] != dim:
-                    raise TypeError(f'{name}: Mismatched dimension (expected shape {nice_expected}, got {list(array.shape)})')
-            elif isinstance(dim, str):
-                if dim not in previous_values:
-                    previous_values[dim] = (array.shape[axis], name, axis)
-
-                if previous_values[dim][0] != array.shape[axis]:
-                    prev_value, prev_name, prev_axis = previous_values[dim]
-                    raise TypeError(
-                        f'Conflicting values for dimension {repr(dim)}:\n'
-                        f' {prev_name}: {kw[prev_name][0].shape} (axis {prev_axis}: {prev_value})\n'
-                        f' {name}: {array.shape} (axis {axis}: {array.shape[axis]})'
-                    )
-
-    return {dim:tup[0] for (dim, tup) in previous_values.items()}
-
 #---------------------------------------------------------------
 # CLI behavior
 
@@ -2355,39 +1798,9 @@ def truncate(array, tol):
         array[np.absolute(array) < tol] = 0.0
         return array
 
-def map_with_progress(
-        xs: tp.Iterator[A],
-        progress: tp.Callable[[int, int], None],
-        function: tp.Callable[[A], B],
-) -> tp.Iterator[B]:
-    yield from (function(x) for x in iter_with_progress(xs, progress))
-
-def iter_with_progress(
-        xs: tp.Iterator[A],
-        progress: tp.Callable[[int, int], None],
-) -> tp.Iterator[A]:
-    xs = list(xs)
-
-    for (num_done, x) in enumerate(xs):
-        if progress:
-            progress(num_done, len(xs))
-
-        yield x
-
-    if progress:
-        progress(len(xs), len(xs))
-
 def add_fuzz_to_interval(ivl, fuzz):
     a, b = ivl
     return a + (a - b) * fuzz, b + (b - a) * fuzz
-
-def cartesian_product(*arrays):
-    la = len(arrays)
-    dtype = np.result_type(*arrays)
-    arr = np.empty([len(a) for a in arrays] + [la], dtype=dtype)
-    for i, a in enumerate(np.ix_(*arrays)):
-        arr[..., i] = a
-    return arr.reshape(-1, la)
 
 def dict_zip(*dicts):
     """
