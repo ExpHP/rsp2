@@ -803,8 +803,9 @@ class TaskBandPlot(Task):
 
         parser.add_argument(
             '--plot-color', type=str, default='zpol', metavar='SCHEME', help=
-            'How the plot points are colored. Choices: [zpol, uniform:COLOR, raman:POL] '
-            '(e.g. --plot-color uniform:blue). POL is either "average-3d" or "backscatter".'
+            'How the plot points are colored. Choices: [zpol, uniform:COLOR, raman:POL, prob:CMAP] '
+            '(e.g. --plot-color uniform:blue). POL is either "average-3d" or "backscatter". '
+            'CMAP names a matplotlib colormap.'
         )
 
         parser.add_argument(
@@ -1678,8 +1679,8 @@ def compute_band_plot_scatter_data(
     assert path_ev_probs.shape == (sizes['plot-x'], sizes['ev'])
     assert path_ev_frequencies.shape == (sizes['plot-x'], sizes['ev'])
 
+    path_ev_probs /= maximum_probability
     path_ev_alpha = path_ev_probs.copy()
-    path_ev_alpha /= maximum_probability
     path_ev_alpha **= alpha_exponent
     path_ev_alpha *= alpha_max
 
@@ -1698,6 +1699,7 @@ def compute_band_plot_scatter_data(
     Y = path_ev_frequencies[path_ev_mask]
     Alpha = path_ev_alpha[path_ev_mask]
     Alpha = np.minimum(Alpha, 1)
+    Prob = path_ev_probs[path_ev_mask]
 
     if plot_using_size:
         Size = Alpha * 20
@@ -1707,7 +1709,7 @@ def compute_band_plot_scatter_data(
 
     ColorData = path_ev_color_data[path_ev_mask]
 
-    C = np.hstack([color_info.data_to_rgb(ColorData), Alpha[:, None]])
+    C = np.hstack([color_info.data_to_rgb(ColorData, Prob), Alpha[:, None]])
 
     return { 'X': X, 'Y': Y, 'C': C, 'Size': Size }
 
@@ -1818,12 +1820,14 @@ class ColorInfo:
         """
         raise NotImplementedError
 
-    def data_to_rgb(self, Data):
+    def data_to_rgb(self, data, path_ev_probs):
         """
         Get the rgb values for a color array.
 
-        :param Data: Shape ``(ndata, ...)`` array of subarrays taken from
+        :param data: Shape ``(ndata, ...)`` array of subarrays taken from
         ``self.q_ev_data()`` at visible data points.
+        :param path_ev_probs: Shape ``(ndata,)`` array of projection probabilities.
+        Used by one of the coloring modes.
         :return: Shape ``(ndata, 3)`` array. May point into ``Data``.
         """
         raise NotImplementedError
@@ -1833,7 +1837,7 @@ class RgbColorInfo(ColorInfo):
         self.__q_ev_rgb = q_ev_rgb
 
     def q_ev_data(self): return self.__q_ev_rgb
-    def data_to_rgb(self, Data): return Data
+    def data_to_rgb(self, data, probs): return data
 
 class CmapColorInfo(ColorInfo):
     def __init__(self, data, cmap, norm, cbar_label):
@@ -1844,7 +1848,21 @@ class CmapColorInfo(ColorInfo):
 
     def cbar_info(self): return self.__cmap, self.__norm, self.__cbar_label
     def q_ev_data(self): return self.__q_ev_data
-    def data_to_rgb(self, Data): return self.__cmap(self.__norm(Data))[:, :3]
+    def data_to_rgb(self, data, probs): return self.__cmap(self.__norm(data))[:, :3]
+
+# This one has to have its own implementation because it cannot possibly store
+# data indexed by Q and eV due to the G points.
+# (it has to wait until we are indexing by plot x)
+class ProbCmapColorInfo(ColorInfo):
+    def __init__(self, shape, cmap, norm, cbar_label):
+        self.__dummy_data = np.zeros(shape)
+        self.__norm = norm
+        self.__cmap = cmap
+        self.__cbar_label = cbar_label
+
+    def cbar_info(self): return self.__cmap, self.__norm, self.__cbar_label
+    def q_ev_data(self): return self.__dummy_data
+    def data_to_rgb(self, data, probs): return self.__cmap(self.__norm(probs))[:, :3]
 
 def get_plot_color_info(plot_color_string, z_pol, raman_dict) -> ColorInfo:
     from matplotlib import colors, cm
@@ -1889,6 +1907,14 @@ def get_plot_color_info(plot_color_string, z_pol, raman_dict) -> ColorInfo:
         cmap = cm.get_cmap('cool_r')
         norm = colors.Normalize(vmin=data.min(), vmax=data.max())
         return CmapColorInfo(data, cmap, norm, label)
+
+    elif mode == 'prob':
+        cmap_name = expect_arg()
+        label = r'Unfolding probability'
+
+        cmap = cm.get_cmap(cmap_name)
+        norm = colors.Normalize(vmin=0., vmax=1.)
+        return ProbCmapColorInfo(z_pol.shape, cmap, norm, label)
 
     else:
         die(f'invalid --plot-color mode: {repr(mode)}')
