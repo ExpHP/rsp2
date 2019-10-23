@@ -114,9 +114,16 @@ def main():
 
     zone_crossings = register(TaskPlotZoneCrossings(structure=structure, band_path=band_path))
 
+    color_info = register(TaskPlotColorInfo(raman_json=raman_json, multi_qpoint_data=multi_qpoint_data))
+
+    scatter_data = register(TaskBandPlotScatterData(
+        band_path=band_path, multi_qpoint_data=multi_qpoint_data,
+        color_info=color_info, band_qg_indices=band_qg_indices,
+    ))
+
     _bandplot = register(TaskBandPlot(
-        band_path=band_path, band_qg_indices=band_qg_indices, raman_json=raman_json,
-        multi_qpoint_data=multi_qpoint_data, zone_crossings=zone_crossings,
+        band_path=band_path, multi_qpoint_data=multi_qpoint_data,
+        scatter_data=scatter_data, zone_crossings=zone_crossings, color_info=color_info,
     ))
 
     for task in all_tasks:
@@ -763,26 +770,65 @@ class TaskPlotZoneCrossings(Task):
 
         return { "xs": zone_crossing_xs }
 
-class TaskBandPlot(Task):
+class TaskPlotColorInfo(Task):
+    def __init__(
+            self,
+            raman_json: TaskRamanJson,
+            multi_qpoint_data: TaskMultiQpointData,
+    ):
+        super().__init__()
+        self.raman_json = raman_json
+        self.multi_qpoint_data = multi_qpoint_data
+
+    def add_parser_opts(self, parser):
+        parser.add_argument(
+            '--plot-color', type=str, default='zpol', metavar='SCHEME', help=
+            'How the plot points are colored. Choices: [zpol, uniform:COLOR, raman:POL, prob:CMAP] '
+            '(e.g. --plot-color uniform:blue). POL is either "average-3d" or "backscatter". '
+            'CMAP names a matplotlib colormap.'
+        )
+
+    def _compute(self, args):
+        cfg_matplotlib()
+
+        multi_qpoint_data = self.multi_qpoint_data.require(args)
+
+        raman_dict = None
+        if args.plot_color.startswith('raman:'):
+            if multi_qpoint_data['num-qpoints'] == 1:
+                # make the dict items indexed by [qpoint (just the one)][ev]
+                raman_dict = self.raman_json.require(args)
+                raman_dict = { k: np.array([v]) for (k, v) in raman_dict.items() }
+            else:
+                warn('raman coloring cannot be used with multiple kpoints')
+                args.plot_color = 'zpol'
+
+        mode_data = multi_qpoint_data['mode-data']
+        q_ev_z_projections = np.array(mode_data['ev_z_projections'])
+
+        color_info = get_plot_color_info(args.plot_color, z_pol=q_ev_z_projections, raman_dict=raman_dict)
+
+        if args.plot_colorbar and color_info.cbar_info() is None:
+            die("--plot-colorbar doesn't make sense for the given --plot-color mode")
+            raise RuntimeError('unreachable')
+
+        return color_info
+
+class TaskBandPlotScatterData(Task):
     def __init__(
             self,
             band_path: TaskBandPath,
             band_qg_indices: TaskBandQGIndices,
-            raman_json: TaskRamanJson,
             multi_qpoint_data: TaskMultiQpointData,
-            zone_crossings: TaskPlotZoneCrossings,
+            color_info: TaskPlotColorInfo,
     ):
         super().__init__()
         self.band_path = band_path
         self.band_qg_indices = band_qg_indices
-        self.raman_json = raman_json
         self.multi_qpoint_data = multi_qpoint_data
-        self.zone_crossings = zone_crossings
+        self.color_info = color_info
 
     def add_parser_opts(self, parser):
-        parser.add_argument('--show', action='store_true', help='show plot')
-        parser.add_argument('--write-plot', metavar='FILE', help='save plot to file')
-
         parser.add_argument(
             '--plot-exponent', type=float, metavar='VALUE', default=1.0, help=
             'Scale probabilities by this exponent before plotting.'
@@ -800,15 +846,72 @@ class TaskBandPlot(Task):
         )
 
         parser.add_argument(
-            '--plot-baseline-file', type=str, metavar='FILE', help=
-            'Data file for a "normal" plot.  Phonopy band.yaml is accepted.'
+            '--plot-using-size', metavar='MODE',
+            nargs='?', const='only', choices=['both', 'only'], help=
+            'Use marker size instead of alpha to represent probability. '
+            '--plot-using-size=both will use size AND alpha.'
         )
 
         parser.add_argument(
-            '--plot-color', type=str, default='zpol', metavar='SCHEME', help=
-            'How the plot points are colored. Choices: [zpol, uniform:COLOR, raman:POL, prob:CMAP] '
-            '(e.g. --plot-color uniform:blue). POL is either "average-3d" or "backscatter". '
-            'CMAP names a matplotlib colormap.'
+            '--plot-coalesce', choices=['none', 'max', 'sum'], default='none',
+            metavar='MODE', help=
+            'Coalesce modes of similar eigenvalue into one. '
+            'The argument decides how to treat the probabilities.'
+        )
+
+        parser.add_argument(
+            '--plot-coalesce-threshold', type=float, default=0.1,
+            metavar='THRESHOLD', help=
+            'Threshold used by --plot-coalesce. (cm^-1)'
+        )
+
+    def _compute(self, args):
+        cfg_matplotlib()
+
+        # Do this early so we can validate it before doing anything expensive.
+        color_info = self.color_info.require(args)
+
+        multi_qpoint_data = self.multi_qpoint_data.require(args)
+
+        return compute_band_plot_scatter_data(
+            q_ev_frequencies=np.array(multi_qpoint_data['mode-data']['ev_frequencies']),
+            q_ev_gpoint_probs=np.array(multi_qpoint_data['probs']),
+            path_g_indices=self.band_qg_indices.require(args)['G'],
+            path_q_indices=self.band_qg_indices.require(args)['Q'],
+            path_x_coordinates=self.band_path.require(args)['plot_x_coordinates'],
+            color_info=color_info,
+            alpha_exponent=args.plot_exponent,
+            alpha_max=args.plot_max_alpha,
+            alpha_truncate=args.plot_truncate,
+            plot_using_size=args.plot_using_size,
+            plot_coalesce_method=args.plot_coalesce,
+            plot_coalesce_threshold=args.plot_coalesce_threshold,
+            verbose=args.verbose,
+        )
+
+class TaskBandPlot(Task):
+    def __init__(
+            self,
+            band_path: TaskBandPath,
+            scatter_data: TaskBandPlotScatterData,
+            multi_qpoint_data: TaskMultiQpointData,
+            zone_crossings: TaskPlotZoneCrossings,
+            color_info: TaskPlotColorInfo,
+    ):
+        super().__init__()
+        self.band_path = band_path
+        self.scatter_data = scatter_data
+        self.multi_qpoint_data = multi_qpoint_data
+        self.zone_crossings = zone_crossings
+        self.color_info = color_info
+
+    def add_parser_opts(self, parser):
+        parser.add_argument('--show', action='store_true', help='show plot')
+        parser.add_argument('--write-plot', metavar='FILE', help='save plot to file')
+
+        parser.add_argument(
+            '--plot-baseline-file', type=str, metavar='FILE', help=
+            'Data file for a "normal" plot.  Phonopy band.yaml is accepted.'
         )
 
         parser.add_argument(
@@ -819,13 +922,6 @@ class TaskBandPlot(Task):
         parser.add_argument(
             '--plot-colorbar', action='store_true', help=
             'Show a colorbar.'
-        )
-
-        parser.add_argument(
-            '--plot-using-size', metavar='MODE',
-            nargs='?', const='only', choices=['both', 'only'], help=
-            'Use marker size instead of alpha to represent probability. '
-            '--plot-using-size=both will use size AND alpha.'
         )
 
         parser.add_argument(
@@ -862,19 +958,6 @@ class TaskBandPlot(Task):
         )
 
         parser.add_argument(
-            '--plot-coalesce', choices=['none', 'max', 'sum'], default='none',
-            metavar='MODE', help=
-            'Coalesce modes of similar eigenvalue into one. '
-            'The argument decides how to treat the probabilities.'
-        )
-
-        parser.add_argument(
-            '--plot-coalesce-threshold', type=float, default=0.1,
-            metavar='THRESHOLD', help=
-            'Threshold used by --plot-coalesce. (cm^-1)'
-        )
-
-        parser.add_argument(
             '--plot-hide-unfolded', action='store_true', help=
             "Don't actually show the unfolded probs. (intended for use with --plot-baseline-file, "
             "so that you can show only the baseline)"
@@ -884,21 +967,12 @@ class TaskBandPlot(Task):
         return args.show or bool(args.write_plot)
 
     def _compute(self, args):
-        # this has to be done before we construct any MPL-related objects
-        # (like e.g. a Norm)
         cfg_matplotlib()
 
-        multi_qpoint_data = self.multi_qpoint_data.require(args)
+        # Do this early so we can validate it before doing anything expensive.
+        color_info = self.color_info.require(args)
 
-        raman_dict = None
-        if args.plot_color.startswith('raman:'):
-            if multi_qpoint_data['num-qpoints'] == 1:
-                # make the dict items indexed by [qpoint (just the one)][ev]
-                raman_dict = self.raman_json.require(args)
-                raman_dict = { k: np.array([v]) for (k, v) in raman_dict.items() }
-            else:
-                warn('raman coloring cannot be used with multiple kpoints')
-                args.plot_color = 'zpol'
+        multi_qpoint_data = self.multi_qpoint_data.require(args)
 
         if args.plot_sidebar and len(multi_qpoint_data) > 1:
             warn("--plot-sidebar doesn't make sense with multiple kpoints")
@@ -909,31 +983,7 @@ class TaskBandPlot(Task):
         else:
             baseline_data = { 'X': [], 'Y': [] }
 
-        mode_data = multi_qpoint_data['mode-data']
-        q_ev_z_projections = np.array(mode_data['ev_z_projections'])
-
-        # Switch based on plot_color so we can validate it before doing anything expensive.
-        color_info = get_plot_color_info(args.plot_color, z_pol=q_ev_z_projections, raman_dict=raman_dict)
-
-        if args.plot_colorbar and color_info.cbar_info() is None:
-            die("--plot-colorbar doesn't make sense for the given --plot-color mode")
-            raise RuntimeError('unreachable')
-
-        scatter_data = compute_band_plot_scatter_data(
-            q_ev_frequencies=np.array(mode_data['ev_frequencies']),
-            q_ev_gpoint_probs=np.array(multi_qpoint_data['probs']),
-            path_g_indices=self.band_qg_indices.require(args)['G'],
-            path_q_indices=self.band_qg_indices.require(args)['Q'],
-            path_x_coordinates=self.band_path.require(args)['plot_x_coordinates'],
-            color_info=color_info,
-            alpha_exponent=args.plot_exponent,
-            alpha_max=args.plot_max_alpha,
-            alpha_truncate=args.plot_truncate,
-            plot_using_size=args.plot_using_size,
-            plot_coalesce_method=args.plot_coalesce,
-            plot_coalesce_threshold=args.plot_coalesce_threshold,
-            verbose=args.verbose,
-        )
+        scatter_data = self.scatter_data.require(args)
 
         return generate_band_plot(
             scatter_data=scatter_data,
@@ -1179,9 +1229,10 @@ def reduce_carts(carts, lattice):
 MplStylesheet = tp.Union[str, tp.Dict[str, tp.Any]]
 
 def cfg_matplotlib():
-    # These font options are pretty sensitive and need to be set extremely
-    # early, before we even do anything so much as construct a Normalize,
-    # else there will be visual glitches.
+    """ Set custom matplotlib settings.  This must be done early, before we
+    even do so much as construct a Normalize, or else labels will look funny.
+
+    This function is safe to call multiple times. """
     import matplotlib
     matplotlib.rcParams.update({
         'text.latex.preamble': [r"""
