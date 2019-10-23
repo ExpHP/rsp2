@@ -822,8 +822,10 @@ class TaskBandPlot(Task):
         )
 
         parser.add_argument(
-            '--plot-using-size', action='store_true', help=
-            'Use marker size instead of alpha to represent probability.'
+            '--plot-using-size', metavar='MODE',
+            nargs='?', const='only', choices=['both', 'only'], help=
+            'Use marker size instead of alpha to represent probability. '
+            '--plot-using-size=both will use size AND alpha.'
         )
 
         parser.add_argument(
@@ -1213,7 +1215,7 @@ def compute_band_plot_scatter_data(
         alpha_truncate: float,
         alpha_exponent: float,
         alpha_max: float,
-        plot_using_size: bool,
+        plot_using_size: tp.Optional[str],
         plot_coalesce_method: tp.Optional[str],
         plot_coalesce_threshold: float,
         verbose: bool = False,
@@ -1315,10 +1317,12 @@ def compute_band_plot_scatter_data(
     Alpha = np.minimum(Alpha, 1)
     Prob = path_ev_probs[path_ev_mask]
 
-    if plot_using_size:
+    if plot_using_size == 'only':
         Size = Alpha * 20
         Alpha = np.ones_like(Alpha)
-    else:
+    elif plot_using_size == 'both':
+        Size = Alpha * 20
+    elif plot_using_size is None:
         Size = np.ones_like(Alpha) * 20
 
     ColorData = path_ev_color_data[path_ev_mask]
