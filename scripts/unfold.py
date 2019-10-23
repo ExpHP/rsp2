@@ -985,9 +985,9 @@ class TaskBandPlot(Task):
 
         if args.plot_baseline_file is not None:
             base_X, base_Y = read_baseline_plot(args.plot_baseline_file)
-            baseline_data = { 'X': base_X, 'Y': base_Y }
+            baseline_data = { 'X': np.array(base_X), 'Y': np.array(base_Y) }
         else:
-            baseline_data = { 'X': [], 'Y': [] }
+            baseline_data = { 'X': np.array([]), 'Y': np.array([]) }
 
         scatter_data = self.scatter_data.require(args)
 
@@ -1259,7 +1259,8 @@ def cfg_matplotlib():
         'font.family': 'serif',
     })
 
-GLOBAL_CONFIG = {
+Style = tp.Union[str, dict]
+GLOBAL_CONFIG: Style = {
     'axes.labelsize': 20,
     'ytick.labelsize': 16,
     'xtick.labelsize': 16,
@@ -1267,7 +1268,7 @@ GLOBAL_CONFIG = {
     'lines.markersize': 20**0.5,
 }
 
-BASELINE_CONFIG = {
+BASELINE_CONFIG: Style = {
     'lines.markersize': 5**0.5,
     'lines.color': 'black',
 }
@@ -1393,23 +1394,23 @@ def compute_band_plot_scatter_data(
     return { 'x': X, 'y': Y, 'rgb': RGB, 'prob': Prob }
 
 def generate_band_plot(
-        scatter_data,
-        baseline_data,
-        color_info,
-        plot_style,
-        plot_unfolded_style,
-        plot_baseline_style,
-        plot_xticks,
-        plot_xticklabels,
-        plot_ylim,
-        plot_zone_crossing_xs,
-        plot_baseline_path,
-        plot_title,
-        plot_sidebar,
-        plot_colorbar,
-        plot_hide_unfolded,
-        plot_using_size,
-        verbose,
+        scatter_data: tp.Dict[str, np.ndarray],
+        baseline_data: tp.Dict[str, np.ndarray],
+        color_info: "ColorInfo",
+        plot_style: tp.List[str],
+        plot_unfolded_style: tp.List[str],
+        plot_baseline_style: tp.List[str],
+        plot_xticks: np.ndarray,
+        plot_xticklabels: np.ndarray,
+        plot_ylim: tp.Tuple[tp.Optional[float], tp.Optional[float]],
+        plot_zone_crossing_xs: np.ndarray,
+        plot_baseline_path: np.ndarray,
+        plot_title: tp.Optional[str],
+        plot_sidebar: bool,
+        plot_colorbar: bool,
+        plot_hide_unfolded: bool,
+        plot_using_size: tp.Optional[str],
+        verbose: bool,
 ):
     import matplotlib.pyplot as plt
 
@@ -1432,7 +1433,7 @@ def generate_band_plot(
 
     C = np.hstack([RGB, Alpha[:, None]])
 
-    with plt.style.context([GLOBAL_CONFIG] + plot_style):
+    with mpl_context([GLOBAL_CONFIG] + plot_style):
         fig = plt.figure(constrained_layout=True)
         # fig.set_tight_layout(True)
 
@@ -1444,10 +1445,10 @@ def generate_band_plot(
             ax = fig.add_subplot(111)
 
         if not plot_hide_unfolded:
-            with plt.style.context(plot_unfolded_style):
+            with mpl_context(plot_unfolded_style):
                 ax.scatter(X, Y, Size, C)
         if plot_baseline_path is not None:
-            with plt.style.context([BASELINE_CONFIG] + plot_baseline_style):
+            with mpl_context([BASELINE_CONFIG] + plot_baseline_style):
                 base_X /= np.max(base_X)
                 base_X *= np.max(X)
                 ax.scatter(base_X, base_Y)
@@ -1486,7 +1487,7 @@ def generate_band_plot(
             # a norm object, which we can use in an empty mappable to give colorbar
             # something to work with.
             sm = cm.ScalarMappable(cmap=cmap, norm=norm)
-            sm.set_array([])
+            sm.set_array(np.array([]))
             cbar = plt.colorbar(sm, ax=ax, aspect=50)
             cbar.ax.tick_params(labelsize='x-large')
             cbar.set_label(cbar_label, size='xx-large')
@@ -1856,6 +1857,11 @@ def check_optional_output_ext(argument, path, only=None, forbid=None):
 
 #---------------------------------------------------------------
 # utils
+
+def mpl_context(arg: tp.Union[Style, tp.List[Style]]):
+    """ ``matplotlib.pyplot.style.context`` with a better type annotation. """
+    import matplotlib.pyplot as plt
+    return plt.style.context(arg)
 
 def window2(xs):
     prev = next(xs)
