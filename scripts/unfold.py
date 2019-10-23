@@ -236,13 +236,16 @@ class TaskStructure(Task):
             'some eigenvectors in the output may be less than 1. (or even =0)',
         )
 
-    def _compute(self, args):
+    @classmethod
+    def read_dir(cls, path, args):
+        """ Can be used by other tasks to read an arbitrary path as if it were
+        the STRUCTURE argument. """
         layer = args.layer
 
-        if not os.path.isdir(args.STRUCTURE):
+        if not os.path.isdir(path):
             die('currently, only rsp2 structure directory format is supported')
 
-        sdir = structure_dir.from_path(args.STRUCTURE)
+        sdir = structure_dir.from_path(path)
         structure = sdir.structure
         if sdir.layer_sc_matrices is None:
             die("the structure must supply layer-sc-matrices")
@@ -267,6 +270,9 @@ class TaskStructure(Task):
             'structure': structure,
             'projected_structure': projected_structure,
         }
+
+    def _compute(self, args):
+        return type(self).read_dir(args.STRUCTURE, args)
 
 class TaskDeperms(Task):
     def __init__(self, structure: TaskStructure):
@@ -892,9 +898,6 @@ class TaskBandPlot(Task):
                 warn('raman coloring cannot be used with multiple kpoints')
                 args.plot_color = 'zpol'
 
-        mode_data = multi_qpoint_data['mode-data']
-        q_ev_gpoint_probs = np.array(multi_qpoint_data['probs'])
-
         if args.plot_sidebar and len(multi_qpoint_data) > 1:
             warn("--plot-sidebar doesn't make sense with multiple kpoints")
 
@@ -904,6 +907,7 @@ class TaskBandPlot(Task):
         else:
             baseline_data = { 'X': [], 'Y': [] }
 
+        mode_data = multi_qpoint_data['mode-data']
         q_ev_z_projections = np.array(mode_data['ev_z_projections'])
 
         # Switch based on plot_color so we can validate it before doing anything expensive.
@@ -915,7 +919,7 @@ class TaskBandPlot(Task):
 
         scatter_data = compute_band_plot_scatter_data(
             q_ev_frequencies=np.array(mode_data['ev_frequencies']),
-            q_ev_gpoint_probs=q_ev_gpoint_probs,
+            q_ev_gpoint_probs=np.array(multi_qpoint_data['probs']),
             path_g_indices=self.band_qg_indices.require(args)['G'],
             path_q_indices=self.band_qg_indices.require(args)['Q'],
             path_x_coordinates=self.band_path.require(args)['plot_x_coordinates'],
