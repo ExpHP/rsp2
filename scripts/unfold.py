@@ -830,6 +830,21 @@ class TaskBandPlotScatterData(Task):
 
     def add_parser_opts(self, parser):
         parser.add_argument(
+            '--write-scatter-data', metavar='FILE', help=
+            'Write data for a scatter plot, containing color data and total '
+            'probability (after coalescing similar modes) for each point. '
+            "Output is any format supported by rsp2's dwim IO facilities "
+            '(e.g. .json.gz), and will contain a mapping of string keys '
+            '(e.g. "x") to lists of floats.'
+        )
+
+        parser.add_argument(
+            '--scatter-data', metavar='FILE', help=
+            'Path to file previously written through --write-scatter-data, '
+            'allowing one to skip the somewhat expensive step of coalescing.'
+        )
+
+        parser.add_argument(
             '--plot-coalesce', choices=['none', 'max', 'sum'], default='none',
             metavar='MODE', help=
             'Coalesce modes of similar eigenvalue into one. '
@@ -851,8 +866,18 @@ class TaskBandPlotScatterData(Task):
             "Prefer to use --plot-truncate unless using --write-scatter-data."
         )
 
+    def check_upfront(self, args):
+        check_optional_input(args.scatter_data)
+        check_optional_output_ext('--write-probs', args.write_scatter_data, forbid=['.npy', '.npz'])
+
+    def has_action(self, args):
+        return bool(args.write_scatter_data)
+
     def _compute(self, args):
         cfg_matplotlib()
+
+        if args.scatter_data:
+            return type(self).read_file(args.scatter_data)
 
         # Do this early so we can validate it before doing anything expensive.
         color_info = self.color_info.require(args)
@@ -871,6 +896,19 @@ class TaskBandPlotScatterData(Task):
             coalesced_truncate=args.plot_truncate_coalesced,
             verbose=args.verbose,
         )
+
+    @classmethod
+    def read_file(cls, path):
+        return {
+            key: np.array(lst)
+            for (key, lst) in dwim.from_path(path).items()
+        }
+
+    def _do_action(self, args):
+        if args.write_scatter_data:
+            d = self.require(args)
+            d = { key: array.tolist() for (key, array) in d.items() }
+            dwim.to_path(args.write_scatter_data, d)
 
 class TaskBandPlot(Task):
     def __init__(
