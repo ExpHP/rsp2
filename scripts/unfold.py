@@ -830,29 +830,6 @@ class TaskBandPlotScatterData(Task):
 
     def add_parser_opts(self, parser):
         parser.add_argument(
-            '--plot-exponent', type=float, metavar='VALUE', default=1.0, help=
-            'Scale probabilities by this exponent before plotting.'
-        )
-
-        parser.add_argument(
-            '--plot-max-alpha', type=float, metavar='VALUE', default=1.0, help=
-            'Scale probabilities by this exponent before plotting.'
-        )
-
-        parser.add_argument(
-            '--plot-truncate', type=float, metavar='VALUE', default=0.0, help=
-            'Don\'t plot points whose final alpha is less than this. '
-            'This can be a good idea for SVG and PDF outputs.'
-        )
-
-        parser.add_argument(
-            '--plot-using-size', metavar='MODE',
-            nargs='?', const='only', choices=['both', 'only'], help=
-            'Use marker size instead of alpha to represent probability. '
-            '--plot-using-size=both will use size AND alpha.'
-        )
-
-        parser.add_argument(
             '--plot-coalesce', choices=['none', 'max', 'sum'], default='none',
             metavar='MODE', help=
             'Coalesce modes of similar eigenvalue into one. '
@@ -863,6 +840,15 @@ class TaskBandPlotScatterData(Task):
             '--plot-coalesce-threshold', type=float, default=0.1,
             metavar='THRESHOLD', help=
             'Threshold used by --plot-coalesce. (cm^-1)'
+        )
+
+        parser.add_argument(
+            '--plot-truncate-coalesced', type=float, metavar='VALUE', default=0.0, help=
+            'Eliminate points whose coalesced probability is less than this. '
+            'In contrast to --plot-truncate, this option will ignore the '
+            'effects of --plot-exponent and --plot-max-alpha, and it will be '
+            'reflected in the output of --write-scatter-data. '
+            "Prefer to use --plot-truncate unless using --write-scatter-data."
         )
 
     def _compute(self, args):
@@ -880,12 +866,9 @@ class TaskBandPlotScatterData(Task):
             path_q_indices=self.band_qg_indices.require(args)['Q'],
             path_x_coordinates=self.band_path.require(args)['plot_x_coordinates'],
             color_info=color_info,
-            alpha_exponent=args.plot_exponent,
-            alpha_max=args.plot_max_alpha,
-            alpha_truncate=args.plot_truncate,
-            plot_using_size=args.plot_using_size,
             plot_coalesce_method=args.plot_coalesce,
             plot_coalesce_threshold=args.plot_coalesce_threshold,
+            coalesced_truncate=args.plot_truncate_coalesced,
             verbose=args.verbose,
         )
 
@@ -963,6 +946,29 @@ class TaskBandPlot(Task):
             "so that you can show only the baseline)"
         )
 
+        parser.add_argument(
+            '--plot-using-size', metavar='MODE',
+            nargs='?', const='only', choices=['both', 'only'], help=
+            'Use marker size instead of alpha to represent probability. '
+            '--plot-using-size=both will use size AND alpha.'
+        )
+
+        parser.add_argument(
+            '--plot-exponent', type=float, metavar='VALUE', default=1.0, help=
+            'Scale probabilities by this exponent before plotting.'
+        )
+
+        parser.add_argument(
+            '--plot-max-alpha', type=float, metavar='VALUE', default=1.0, help=
+            'Scale probabilities by this factor before plotting.'
+        )
+
+        parser.add_argument(
+            '--plot-truncate', type=float, metavar='VALUE', default=1e-3, help=
+            'Don\'t plot points whose final alpha is less than this. '
+            'This can be a good idea for SVG and PDF outputs.'
+        )
+
     def has_action(self, args):
         return args.show or bool(args.write_plot)
 
@@ -985,6 +991,15 @@ class TaskBandPlot(Task):
 
         scatter_data = self.scatter_data.require(args)
 
+        Alpha = scatter_data['prob'].copy()
+        Alpha **= args.plot_exponent
+        Alpha *= args.plot_max_alpha
+        Alpha = np.minimum(Alpha, 1)
+        mask = Alpha > args.plot_truncate
+
+        scatter_data['alpha'] = Alpha
+        scatter_data = { key: array[mask] for (key, array) in scatter_data.items() }
+
         return generate_band_plot(
             scatter_data=scatter_data,
             baseline_data=baseline_data,
@@ -1001,6 +1016,7 @@ class TaskBandPlot(Task):
             plot_sidebar=args.plot_sidebar,
             plot_colorbar=args.plot_colorbar,
             plot_hide_unfolded=args.plot_hide_unfolded,
+            plot_using_size=args.plot_using_size,
             verbose=args.verbose,
         )
 
@@ -1263,14 +1279,23 @@ def compute_band_plot_scatter_data(
         path_q_indices: np.ndarray,
         path_x_coordinates: np.ndarray,
         color_info: "ColorInfo",
-        alpha_truncate: float,
-        alpha_exponent: float,
-        alpha_max: float,
-        plot_using_size: tp.Optional[str],
+        coalesced_truncate: float,
         plot_coalesce_method: tp.Optional[str],
         plot_coalesce_threshold: float,
         verbose: bool = False,
 ):
+    """
+    Produces data for the final set of scatter points that will be plotted.
+
+    Main responsibility is to handle all of the indexing mayhem:
+
+    * Taking data indexed by Q and Ev, and reindexing it to select data points
+      that lie along the plotted path.
+    * Coalescing data at similar eigenvalue. (this leaves holes in the data for
+      a while that require careful treatment w.r.t. indexing)
+    * Filtering out points that still have miniscule probability after
+      coalescing.
+    """
     sizes = check_arrays(
         q_ev_frequencies = (q_ev_frequencies, ['qpoint', 'ev'], np.floating),
         q_ev_gpoint_probs = (q_ev_gpoint_probs, ['qpoint'], object),
@@ -1347,13 +1372,9 @@ def compute_band_plot_scatter_data(
     assert path_ev_frequencies.shape == (sizes['plot-x'], sizes['ev'])
 
     path_ev_probs /= maximum_probability
-    path_ev_alpha = path_ev_probs.copy()
-    path_ev_alpha **= alpha_exponent
-    path_ev_alpha *= alpha_max
 
-    # reduce the number of scatter plot points sent to matplotlib
     path_ev_mask = np.logical_and(
-        path_ev_alpha > alpha_truncate, # remove probs too small to be visible
+        path_ev_probs > coalesced_truncate, # remove probs too small to matter
         np.isfinite(path_ev_frequencies), # remove holes left behind by coalesce
     )
 
@@ -1364,23 +1385,12 @@ def compute_band_plot_scatter_data(
 
     X = np.array(X)
     Y = path_ev_frequencies[path_ev_mask]
-    Alpha = path_ev_alpha[path_ev_mask]
-    Alpha = np.minimum(Alpha, 1)
     Prob = path_ev_probs[path_ev_mask]
-
-    if plot_using_size == 'only':
-        Size = Alpha * 20
-        Alpha = np.ones_like(Alpha)
-    elif plot_using_size == 'both':
-        Size = Alpha * 20
-    elif plot_using_size is None:
-        Size = np.ones_like(Alpha) * 20
-
     ColorData = path_ev_color_data[path_ev_mask]
 
-    C = np.hstack([color_info.data_to_rgb(ColorData, Prob), Alpha[:, None]])
+    RGB = color_info.data_to_rgb(ColorData, Prob)
 
-    return { 'X': X, 'Y': Y, 'C': C, 'Size': Size }
+    return { 'x': X, 'y': Y, 'rgb': RGB, 'prob': Prob }
 
 def generate_band_plot(
         scatter_data,
@@ -1398,19 +1408,29 @@ def generate_band_plot(
         plot_sidebar,
         plot_colorbar,
         plot_hide_unfolded,
+        plot_using_size,
         verbose,
 ):
     import matplotlib.pyplot as plt
 
-    X = scatter_data['X']
-    Y = scatter_data['Y']
-    C = scatter_data['C']
-    Size = scatter_data['Size']
-    base_X = baseline_data['X']
-    base_Y = baseline_data['Y']
+    X, Y = scatter_data['x'], scatter_data['y']
+    RGB, Prob = scatter_data['rgb'], scatter_data['prob']
+    Alpha = scatter_data['alpha']
+    base_X, base_Y = baseline_data['X'], baseline_data['Y']
 
     if verbose:
         print(f'Plotting {len(X)} points!')
+
+    if plot_using_size == 'only':
+        Size = Alpha * 20
+        Alpha = np.ones_like(Alpha)
+    elif plot_using_size == 'both':
+        Size = Prob * 20
+    elif plot_using_size is None:
+        Size = np.ones_like(Alpha) * 20
+    else: assert False, "(BUG) invalid plot_using_size!?"
+
+    C = np.hstack([RGB, Alpha[:, None]])
 
     with plt.style.context([GLOBAL_CONFIG] + plot_style):
         fig = plt.figure(constrained_layout=True)
@@ -1489,13 +1509,13 @@ class ColorInfo:
         """
         raise NotImplementedError
 
-    def data_to_rgb(self, data, path_ev_probs):
+    def data_to_rgb(self, data, probs):
         """
         Get the rgb values for a color array.
 
         :param data: Shape ``(ndata, ...)`` array of subarrays taken from
         ``self.q_ev_data()`` at visible data points.
-        :param path_ev_probs: Shape ``(ndata,)`` array of projection probabilities.
+        :param probs: Shape ``(ndata,)`` array of projection probabilities.
         Used by one of the coloring modes.
         :return: Shape ``(ndata, 3)`` array. May point into ``Data``.
         """
