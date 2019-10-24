@@ -24,7 +24,7 @@ petgraph = "0.4"
 slice-of-array = "0.2.1"
 ordered-float = "1.0"
 itertools = "0.7"
-lazy_static = "0.2"
+lazy_static = "1.4"
 num-integer = "0.1"
 log = "0.4"
 serde = { version = "1.0.91", features = ["derive", "rc"], optional = true }

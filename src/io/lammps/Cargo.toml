@@ -24,7 +24,7 @@ lammps-sys = { version = "0.6.0", features = ["exceptions", "package-user-omp"] 
 rsp2-assert-close = { path = "../../util/assert-close" }
 
 log = "0.4"
-lazy_static = "0.2"
+lazy_static = "1.4"
 chrono = "0.4"
 failure = "0.1.2"
 slice-of-array = "0.2.1"

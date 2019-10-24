@@ -22,7 +22,7 @@ rsp2-newtype-indices = { path = "../util/newtype-indices" }
 rsp2-minimize = { path = "../minimize" }
 
 slice-of-array = "0.2.1"
-lazy_static = "0.2"
+lazy_static = "1.4"
 enum-map = "0.4.1"
 petgraph = "0.4"
 failure = "0.1.2"

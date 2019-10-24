@@ -61,8 +61,8 @@ where
 #[macro_export]
 macro_rules! once {
     ($($tok:tt)*) => {{
-        use std::sync::{Once, ONCE_INIT};
-        static ONCE: Once = ONCE_INIT;
+        use std::sync::{Once};
+        static ONCE: Once = Once::new();
         ONCE.call_once(|| { $($tok)* });
     }};
 }
