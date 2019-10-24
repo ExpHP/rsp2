@@ -114,7 +114,7 @@ pub(crate) fn perform_acoustic_search(
 
     let mut kinds = vec![None; frequencies.len()];
 
-    { // quickly spot translational modes
+    let t_end = { // quickly spot translational modes
 
         let stop_index = {
             // We want to search a little bit past the negative eigenvalues, but not *too* far.
@@ -131,20 +131,21 @@ pub(crate) fn perform_acoustic_search(
                 kinds[i] = Some(ModeKind::Translational);
             }
         }
+        t_end
+    };
 
-        // if there's more than three then the eigenbasis clearly isn't even orthonormal
-        //
-        // (NOTE: The above statement was originally written under the false assumption that
-        //        the eigenvectors are the directions, but I think it is still correct?
-        //        Haven't worked it out.)
-        ensure!(
-            kinds.iter().filter(|&x| x == &Some(ModeKind::Translational)).count() <= 3,
-            "More than 3 pure translational modes! These eigenvectors are garbage!");
+    // if there's more than three then the eigenbasis clearly isn't even orthonormal
+    //
+    // (NOTE: The above statement was originally written under the false assumption that
+    //        the eigenvectors are the directions, but I think it is still correct?
+    //        Haven't worked it out.)
+    ensure!(
+        kinds.iter().filter(|&x| x == &Some(ModeKind::Translational)).count() <= 3,
+        "More than 3 pure translational modes! These eigenvectors are garbage!");
 
-        // Everything after the last translational or negative mode is vibrational.
-        kinds.truncate(t_end);
-        kinds.resize(frequencies.len(), Some(ModeKind::Vibrational));
-    }
+    // Everything after the last translational or negative mode is vibrational.
+    kinds.truncate(t_end);
+    kinds.resize(frequencies.len(), Some(ModeKind::Vibrational));
 
     // look at the negative eigenvectors for rotations and true imaginary modes
     let mut diff_at_pos = {
@@ -157,7 +158,7 @@ pub(crate) fn perform_acoustic_search(
 
     let mut rotational_count = 0;
     let mut uncertain_indices = vec![];
-    for (i, direction) in ev_directions().take(zero_index).enumerate() {
+    for (i, direction) in ev_directions().take(t_end).enumerate() {
         if kinds[i].is_some() {
             continue;
         }
@@ -224,3 +225,53 @@ pub(crate) fn perform_acoustic_search(
         .collect::<Vec<_>>()
         .into()
 })}
+
+//pub(crate) fn perform_acoustic_search(
+//    pot: &dyn PotentialBuilder,
+//    frequencies: &[f64],
+//    eigenvectors: &GammaBasis3,
+//    coords: &Coords,
+//    meta: HList3<
+//        meta::SiteElements,
+//        meta::SiteMasses,
+//        Option<meta::FracBonds>,
+//    >,
+//    settings: &cfg::AcousticSearch,
+//) -> FailResult<Rc<[ModeKind]>>
+
+#[test]
+fn try_to_break_it() {
+    use std::sync::Arc;
+    use rsp2_array_types::V3;
+    use rsp2_structure::{Lattice, CoordsKind};
+    use crate::math::basis::GammaKet3;
+
+    let pot = PotentialBuilder::from_config_parts(
+        None, // trial_dir
+        None, // on_demand
+        &from_json!("serial"), // threading
+        &from_json!({}), // lammps
+        &from_json!(["test-func-zero"]), // config
+    ).unwrap();
+
+    let ir2 = f64::sqrt(2.0).recip();
+    perform_acoustic_search(
+        &pot,
+        &[-1., 0.1, 0.2, 0.3 ,0.4, 200.0],
+        &GammaBasis3(Arc::new(vec![
+            GammaKet3(vec![V3([ir2, 0.0, 0.0]), V3([-ir2, 0.0, 0.0])]),
+            GammaKet3(vec![V3([ir2, 0.0, 0.0]), V3([ir2, 0.0, 0.0])]),
+            GammaKet3(vec![V3([0.0, ir2, 0.0]), V3([0.0, -ir2, 0.0])]), // non-acoustic before acoustic
+            GammaKet3(vec![V3([0.0, ir2, 0.0]), V3([0.0, ir2, 0.0])]),
+            GammaKet3(vec![V3([0.0, 0.0, ir2]), V3([0.0, 0.0, ir2])]),
+            GammaKet3(vec![V3([0.0, 0.0, ir2]), V3([0.0, 0.0, -ir2])]),
+        ])),
+        &Coords::new(Lattice::eye(), CoordsKind::Carts(vec![V3::zero(); 2])),
+        hlist![
+            vec![meta::Element::CARBON; 2].into(),
+            vec![meta::Mass(12f64); 2].into(),
+            None,
+        ],
+        &from_json!({}),
+    ).unwrap();
+}

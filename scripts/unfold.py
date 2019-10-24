@@ -608,6 +608,17 @@ class TaskBandPath(Task):
             "Alias for --plot-path."
         )
 
+        parser.add_argument(
+            '--write-highsym-xs', metavar='FILE', help=
+            'Record x locations of high symmetry points. If --write-scatter-data '
+            'is used, the values written to this file will be exactly equal to '
+            'some of the x values in that file.  May be any format supported by '
+            "rsp2's dwim IO facilities (e.g. .json.xz).",
+        )
+
+    def has_action(self, args):
+        return bool(args.write_highsym_xs)
+
     def _compute(self, args):
         from ase.dft.kpoints import bandpath, parse_path_string
 
@@ -640,6 +651,10 @@ class TaskBandPath(Task):
             'plot_xticklabels': point_names,
             'highsym_pfracs': highsym_pfracs,
         }
+
+    def _do_action(self, args):
+        if args.write_highsym_xs:
+            dwim.to_path(args.write_highsym_xs, self.require(args)['plot_xticks'].tolist())
 
 class TaskMultiQpointData(Task):
     def __init__(
