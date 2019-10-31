@@ -633,7 +633,7 @@ class TaskRawBandPath(Task):
         #       function) do adapt to the user's specific choice of primitive cell.
         #       (at least, for reasonable cells; I haven't tested it with a highly
         #       skewed cell). Respect!
-        plot_kpoint_pfracs, plot_x_coordinates, plot_xticks = bandpath(args.plot_kpath_str, prim_lattice, 300)
+        path_kpoint_pfracs, path_x_coordinates, plot_xticks = bandpath(args.plot_kpath_str, prim_lattice, 300)
         highsym_pfracs = bandpath(args.plot_kpath_str, prim_lattice, 1)[0]
 
         point_names = parse_path_string(args.plot_kpath_str)
@@ -644,8 +644,8 @@ class TaskRawBandPath(Task):
         point_names = [r'$\mathrm{\Gamma}$' if x == 'G' else x for x in point_names]
 
         return {
-            'plot_kpoint_pfracs': plot_kpoint_pfracs,
-            'plot_x_coordinates': plot_x_coordinates,
+            'path_kpoint_pfracs': path_kpoint_pfracs,
+            'path_x_coordinates': path_x_coordinates,
             'plot_xticks': plot_xticks,
             'plot_xticklabels': point_names,
             'highsym_pfracs': highsym_pfracs,
@@ -748,7 +748,7 @@ class TaskRawBandQGIndices(Task):
                 super_lattice=self.structure.require(args)['structure'].lattice.matrix,
                 supercell=self.structure.require(args)['supercell'],
                 qpoint_sfrac=self.multi_qpoint_data.require(args)['qpoint-sfrac'],
-                plot_kpoint_pfracs=self.raw_band_path.require(args)['plot_kpoint_pfracs'],
+                path_kpoint_pfracs=self.raw_band_path.require(args)['path_kpoint_pfracs'],
         )
 
 class TaskPlotZoneCrossings(Task):
@@ -852,8 +852,8 @@ class TaskBandPath(Task):
         return decimate_plot_x(
             {
                 "highsym_pfracs": self.raw_band_path.require(args)['highsym_pfracs'],
-                "plot_kpoint_pfracs": self.raw_band_path.require(args)['plot_kpoint_pfracs'],
-                "plot_x_coordinates": self.raw_band_path.require(args)['plot_x_coordinates'],
+                "path_kpoint_pfracs": self.raw_band_path.require(args)['path_kpoint_pfracs'],
+                "path_x_coordinates": self.raw_band_path.require(args)['path_x_coordinates'],
                 "plot_xticks": self.raw_band_path.require(args)['plot_xticks'],
                 "plot_xticklabels": self.raw_band_path.require(args)['plot_xticklabels'],
                 "path_q_indices": self.band_qg_indices.require(args)['Q'],
@@ -935,7 +935,7 @@ class TaskBandPlotScatterData(Task):
             q_ev_gpoint_probs=np.array(multi_qpoint_data['probs']),
             path_g_indices=self.band_path.require(args)['path_g_indices'],
             path_q_indices=self.band_path.require(args)['path_q_indices'],
-            path_x_coordinates=self.band_path.require(args)['plot_x_coordinates'],
+            path_x_coordinates=self.band_path.require(args)['path_x_coordinates'],
             color_info=color_info,
             plot_coalesce_method=args.plot_coalesce,
             plot_coalesce_threshold=args.plot_coalesce_threshold,
@@ -1213,7 +1213,7 @@ def resample_qg_indices(
         super_lattice,
         supercell,
         qpoint_sfrac,
-        plot_kpoint_pfracs,
+        path_kpoint_pfracs,
 ):
     gpoint_sfracs = supercell.gpoint_sfracs()
 
@@ -1221,7 +1221,7 @@ def resample_qg_indices(
         super_lattice = (super_lattice, [3, 3], np.floating),
         gpoint_sfracs = (gpoint_sfracs, ['quotient', 3], np.floating),
         qpoint_sfrac = (qpoint_sfrac, ['qpoint', 3], np.floating),
-        plot_kpoint_pfracs = (plot_kpoint_pfracs, ['plot-x', 3], np.floating),
+        path_kpoint_pfracs = (path_kpoint_pfracs, ['plot-x', 3], np.floating),
     )
 
     prim_lattice = np.linalg.inv(supercell.matrix) @ super_lattice
@@ -1238,7 +1238,7 @@ def resample_qg_indices(
     qg_q_ids, qg_g_ids = np.mgrid[0:sizes['qpoint'], 0:sizes['quotient']].reshape((2, -1))
 
     # For every point on the plot x-axis, the index of the closest Q + G point
-    plot_kpoint_carts = plot_kpoint_pfracs @ np.linalg.inv(prim_lattice).T
+    plot_kpoint_carts = path_kpoint_pfracs @ np.linalg.inv(prim_lattice).T
     plot_kpoint_qg_ids = griddata_periodic(
         points=qg_carts,
         values=np.arange(sizes['qpoint'] * sizes['quotient']),
@@ -1313,8 +1313,8 @@ def griddata_periodic(
 
 def decimate_plot_x(d, decimate_x: int):
     d = dict(d)
-    plot_kpoint_pfracs = d.pop('plot_kpoint_pfracs')
-    plot_x_coordinates = d.pop('plot_x_coordinates')
+    path_kpoint_pfracs = d.pop('path_kpoint_pfracs')
+    path_x_coordinates = d.pop('path_x_coordinates')
     plot_xticks = d.pop('plot_xticks')
     plot_xticklabels = d.pop('plot_xticklabels')
     highsym_pfracs = d.pop('highsym_pfracs')
@@ -1322,7 +1322,7 @@ def decimate_plot_x(d, decimate_x: int):
     path_g_indices = d.pop('path_g_indices')
     assert not d, f'unhandled member: {repr(next(iter(d.keys())))}'
 
-    highsym_indices = [i for (i, x) in enumerate(plot_x_coordinates) if x in plot_xticks]
+    highsym_indices = [i for (i, x) in enumerate(path_x_coordinates) if x in plot_xticks]
 
     def get_decimated_range(start, end):
         if decimate_x == 1:
@@ -1364,8 +1364,8 @@ def decimate_plot_x(d, decimate_x: int):
         start = end
 
     return {
-        'plot_kpoint_pfracs': plot_kpoint_pfracs[decimated_indices],
-        'plot_x_coordinates': plot_x_coordinates[decimated_indices],
+        'path_kpoint_pfracs': path_kpoint_pfracs[decimated_indices],
+        'path_x_coordinates': path_x_coordinates[decimated_indices],
         'plot_xticks': plot_xticks,
         'plot_xticklabels': plot_xticklabels,
         'highsym_pfracs': highsym_pfracs,
