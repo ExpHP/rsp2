@@ -102,7 +102,7 @@ def main():
 
     ev_gpoint_probs = register(TaskGProbs(structure=structure, qpoint_sfrac=qpoint_sfrac, eigensols=eigensols, translation_deperms=translation_deperms))
 
-    band_path = register(TaskBandPath(structure=structure))
+    raw_band_path = register(TaskRawBandPath(structure=structure))
 
     mode_data = register(TaskEigenmodeData(eigensols=eigensols))
 
@@ -110,16 +110,15 @@ def main():
 
     multi_qpoint_data = register(TaskMultiQpointData(mode_data=mode_data, qpoint_sfrac=qpoint_sfrac, ev_gpoint_probs=ev_gpoint_probs))
 
-    band_qg_indices = register(TaskBandQGIndices(structure=structure, multi_qpoint_data=multi_qpoint_data, band_path=band_path))
+    band_qg_indices = register(TaskRawBandQGIndices(structure=structure, multi_qpoint_data=multi_qpoint_data, raw_band_path=raw_band_path))
 
-    zone_crossings = register(TaskPlotZoneCrossings(structure=structure, band_path=band_path))
+    band_path = register(TaskBandPath(raw_band_path=raw_band_path, band_qg_indices=band_qg_indices, multi_qpoint_data=multi_qpoint_data))
+
+    zone_crossings = register(TaskPlotZoneCrossings(structure=structure, raw_band_path=raw_band_path))
 
     color_info = register(TaskPlotColorInfo(raman_json=raman_json, multi_qpoint_data=multi_qpoint_data))
 
-    scatter_data = register(TaskBandPlotScatterData(
-        band_path=band_path, multi_qpoint_data=multi_qpoint_data,
-        color_info=color_info, band_qg_indices=band_qg_indices,
-    ))
+    scatter_data = register(TaskBandPlotScatterData(band_path=band_path, multi_qpoint_data=multi_qpoint_data, color_info=color_info))
 
     _bandplot = register(TaskBandPlot(
         band_path=band_path, multi_qpoint_data=multi_qpoint_data,
@@ -583,7 +582,7 @@ class TaskGProbs(Task):
 
         return ev_gpoint_probs
 
-class TaskBandPath(Task):
+class TaskRawBandPath(Task):
     def __init__(
             self,
             structure: TaskStructure,
@@ -732,16 +731,16 @@ Q-point in individual runs using --write-probs and --write-mode-data.
 """.strip().replace('\n', ' ')
 
 # Performs resampling along the high symmetry path.
-class TaskBandQGIndices(Task):
+class TaskRawBandQGIndices(Task):
     def __init__(
             self,
             structure: TaskStructure,
-            band_path: TaskBandPath,
+            raw_band_path: TaskRawBandPath,
             multi_qpoint_data: TaskMultiQpointData,
     ):
         super().__init__()
         self.structure = structure
-        self.band_path = band_path
+        self.raw_band_path = raw_band_path
         self.multi_qpoint_data = multi_qpoint_data
 
     def _compute(self, args):
@@ -749,18 +748,18 @@ class TaskBandQGIndices(Task):
                 super_lattice=self.structure.require(args)['structure'].lattice.matrix,
                 supercell=self.structure.require(args)['supercell'],
                 qpoint_sfrac=self.multi_qpoint_data.require(args)['qpoint-sfrac'],
-                plot_kpoint_pfracs=self.band_path.require(args)['plot_kpoint_pfracs'],
+                plot_kpoint_pfracs=self.raw_band_path.require(args)['plot_kpoint_pfracs'],
         )
 
 class TaskPlotZoneCrossings(Task):
     def __init__(
             self,
             structure: TaskStructure,
-            band_path: TaskBandPath,
+            raw_band_path: TaskRawBandPath,
     ):
         super().__init__()
         self.structure = structure
-        self.band_path = band_path
+        self.raw_band_path = raw_band_path
 
     def add_parser_opts(self, parser):
         parser.add_argument(
@@ -776,9 +775,9 @@ class TaskPlotZoneCrossings(Task):
         if args.plot_zone_crossings:
             assert args.plot_zone_crossings == 'parallel'
             zone_crossing_xs = get_parallelogram_zone_crossings(
-                highsym_pfracs=self.band_path.require(args)['highsym_pfracs'],
+                highsym_pfracs=self.raw_band_path.require(args)['highsym_pfracs'],
                 supercell=self.structure.require(args)['supercell'],
-                plot_xticks=self.band_path.require(args)['plot_xticks'],
+                plot_xticks=self.raw_band_path.require(args)['plot_xticks'],
             )
         else:
             zone_crossing_xs = np.array([])
@@ -829,17 +828,49 @@ class TaskPlotColorInfo(Task):
 
         return color_info
 
+class TaskBandPath(Task):
+    def __init__(
+            self,
+            raw_band_path: TaskRawBandPath,
+            band_qg_indices: TaskRawBandQGIndices,
+            multi_qpoint_data: TaskMultiQpointData,
+    ):
+        super().__init__()
+        self.raw_band_path = raw_band_path
+        self.band_qg_indices = band_qg_indices
+        self.multi_qpoint_data = multi_qpoint_data
+
+    def add_parser_opts(self, parser):
+        parser.add_argument(
+            '--decimate-x', type=int, metavar='N', default=1, help=
+            'When multiple consecutive x points on the plot map to the same '
+            '(Q, G) indices, only include every Nth point. The points that '
+            'land on top of the high symmetry points are always included.'
+        )
+
+    def _compute(self, args):
+        return decimate_plot_x(
+            {
+                "highsym_pfracs": self.raw_band_path.require(args)['highsym_pfracs'],
+                "plot_kpoint_pfracs": self.raw_band_path.require(args)['plot_kpoint_pfracs'],
+                "plot_x_coordinates": self.raw_band_path.require(args)['plot_x_coordinates'],
+                "plot_xticks": self.raw_band_path.require(args)['plot_xticks'],
+                "plot_xticklabels": self.raw_band_path.require(args)['plot_xticklabels'],
+                "path_q_indices": self.band_qg_indices.require(args)['Q'],
+                "path_g_indices": self.band_qg_indices.require(args)['G'],
+            },
+            decimate_x=args.decimate_x,
+        )
+
 class TaskBandPlotScatterData(Task):
     def __init__(
             self,
             band_path: TaskBandPath,
-            band_qg_indices: TaskBandQGIndices,
             multi_qpoint_data: TaskMultiQpointData,
             color_info: TaskPlotColorInfo,
     ):
         super().__init__()
         self.band_path = band_path
-        self.band_qg_indices = band_qg_indices
         self.multi_qpoint_data = multi_qpoint_data
         self.color_info = color_info
 
@@ -902,8 +933,8 @@ class TaskBandPlotScatterData(Task):
         return compute_band_plot_scatter_data(
             q_ev_frequencies=np.array(multi_qpoint_data['mode-data']['ev_frequencies']),
             q_ev_gpoint_probs=np.array(multi_qpoint_data['probs']),
-            path_g_indices=self.band_qg_indices.require(args)['G'],
-            path_q_indices=self.band_qg_indices.require(args)['Q'],
+            path_g_indices=self.band_path.require(args)['path_g_indices'],
+            path_q_indices=self.band_path.require(args)['path_q_indices'],
             path_x_coordinates=self.band_path.require(args)['plot_x_coordinates'],
             color_info=color_info,
             plot_coalesce_method=args.plot_coalesce,
@@ -1279,6 +1310,68 @@ def griddata_periodic(
     #    debug_path(points, lattice, xi)
 
     return scint.griddata(points, values, xi, **kwargs)
+
+def decimate_plot_x(d, decimate_x: int):
+    d = dict(d)
+    plot_kpoint_pfracs = d.pop('plot_kpoint_pfracs')
+    plot_x_coordinates = d.pop('plot_x_coordinates')
+    plot_xticks = d.pop('plot_xticks')
+    plot_xticklabels = d.pop('plot_xticklabels')
+    highsym_pfracs = d.pop('highsym_pfracs')
+    path_q_indices = d.pop('path_q_indices')
+    path_g_indices = d.pop('path_g_indices')
+    assert not d, f'unhandled member: {repr(next(iter(d.keys())))}'
+
+    highsym_indices = [i for (i, x) in enumerate(plot_x_coordinates) if x in plot_xticks]
+
+    def get_decimated_range(start, end):
+        if decimate_x == 1:
+            return range(start, end)
+
+        # guarantee that a highsym index is plotted
+        highsym_indices_in_range = [i for i in highsym_indices if i in range(start, end)]
+        if highsym_indices_in_range:
+            if len(highsym_indices_in_range) > 1:
+                # we can't guarantee they'll all survive decimation
+                warn('multiple highsym indices on a contiguous x region!')
+            offset = (highsym_indices_in_range[0] - start) % decimate_x
+            r = range(start + offset, end, decimate_x)
+            assert highsym_indices_in_range[0] in r
+            return r
+
+        # otherwise, among those offsets that produce the best approximation of
+        # the decimation ratio for this group...
+        target_count = max(round((end - start) / decimate_x), 1)
+        candidate_ranges = [range(start + i, end, decimate_x) for i in range(decimate_x)]
+        candidate_ranges = [r for r in candidate_ranges if len(r) == target_count]
+        assert candidate_ranges
+
+        # ...pick the centermost.
+        return candidate_ranges[len(candidate_ranges) // 2]
+
+    get_qg = lambda i: (path_q_indices[i], path_g_indices[i])
+
+    start = 0
+    decimated_indices = []
+    while start != len(path_q_indices):
+        for end in range(start, len(path_q_indices)):
+            if get_qg(start) != get_qg(end):
+                break
+        else:
+            end = len(path_q_indices)
+
+        decimated_indices.extend(get_decimated_range(start, end))
+        start = end
+
+    return {
+        'plot_kpoint_pfracs': plot_kpoint_pfracs[decimated_indices],
+        'plot_x_coordinates': plot_x_coordinates[decimated_indices],
+        'plot_xticks': plot_xticks,
+        'plot_xticklabels': plot_xticklabels,
+        'highsym_pfracs': highsym_pfracs,
+        'path_q_indices': path_q_indices[decimated_indices],
+        'path_g_indices': path_g_indices[decimated_indices],
+    }
 
 #---------------------------------------------------------------
 # Physical utils
