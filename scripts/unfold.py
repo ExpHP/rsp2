@@ -1048,9 +1048,19 @@ class TaskBandPlot(Task):
         )
 
         parser.add_argument(
+            '--plot-scatter-size', type=float, metavar='SIZE', default=20, help=
+            'Maximum scatter point size.'
+        )
+
+        parser.add_argument(
             '--plot-truncate', type=float, metavar='VALUE', default=1e-3, help=
             'Don\'t plot points whose final alpha is less than this. '
             'This can be a good idea for SVG and PDF outputs.'
+        )
+
+        parser.add_argument(
+            '--plot-dpi', type=int, metavar='DPI', default=None, help=
+            'DPI when saving e.g. a PNG image using --write-plot.'
         )
 
     def has_action(self, args):
@@ -1101,6 +1111,7 @@ class TaskBandPlot(Task):
             plot_colorbar=args.plot_colorbar,
             plot_hide_unfolded=args.plot_hide_unfolded,
             plot_using_size=args.plot_using_size,
+            plot_scatter_size=args.plot_scatter_size,
             verbose=args.verbose,
         )
 
@@ -1108,7 +1119,10 @@ class TaskBandPlot(Task):
         fig, ax = self.require(args)
 
         if args.write_plot:
-            fig.savefig(args.write_plot)
+            kw = {}
+            if args.plot_dpi is not None:
+                kw['dpi'] = args.plot_dpi
+            fig.savefig(args.write_plot, **kw)
 
         if args.show:
             import matplotlib.pyplot as plt
@@ -1556,6 +1570,7 @@ def generate_band_plot(
         plot_colorbar: bool,
         plot_hide_unfolded: bool,
         plot_using_size: tp.Optional[str],
+        plot_scatter_size: float,
         verbose: bool,
 ):
     import matplotlib.pyplot as plt
@@ -1569,12 +1584,12 @@ def generate_band_plot(
         print(f'Plotting {len(X)} points!')
 
     if plot_using_size == 'only':
-        Size = Alpha * 20
+        Size = Alpha * plot_scatter_size
         Alpha = np.ones_like(Alpha)
     elif plot_using_size == 'both':
-        Size = Prob * 20
+        Size = Prob * plot_scatter_size
     elif plot_using_size is None:
-        Size = np.ones_like(Alpha) * 20
+        Size = np.ones_like(Alpha) * plot_scatter_size
     else: assert False, "(BUG) invalid plot_using_size!?"
 
     C = np.hstack([RGB, Alpha[:, None]])
