@@ -8,6 +8,7 @@ import typing as tp
 from scipy import interpolate as scint
 from scipy import sparse
 import argparse
+import itertools
 from pymatgen import Structure
 
 try:
@@ -522,7 +523,7 @@ class TaskGProbs(Task):
 
     def _compute(self, args):
         if args.probs:
-            return type(self).read_file(args.probs, args)
+            ev_gpoint_probs = type(self).read_file(args.probs, args)
         else:
             if args.verbose:
                 print('--probs not supplied. Will compute by unfolding eigensols.')
@@ -545,12 +546,12 @@ class TaskGProbs(Task):
                 implementation=args.probs_impl,
                 progress_prefix=progress_prefix,
             )
-            ev_gpoint_probs = type(self).__postprocess(ev_gpoint_probs, args)
+        ev_gpoint_probs = type(self).__postprocess(ev_gpoint_probs, args)
 
-            if args.probs_gamma_only:
-                return { 'raw': ev_gpoint_probs }
-            else:
-                return { 'raw': ev_gpoint_probs, 'full': ev_gpoint_probs }
+        if args.probs_gamma_only:
+            return { 'raw': ev_gpoint_probs }
+        else:
+            return { 'raw': ev_gpoint_probs, 'full': ev_gpoint_probs }
 
     def require_full(self, args):
         if args.probs_gamma_only:
@@ -603,7 +604,7 @@ class TaskRawBandPath(Task):
         # quick to generate; I might want it back because it could be much
         # smaller than the input it is generated from!)
         parser.add_argument(
-            '--band-path', help=
+            '--band-path', dest='plot_kpath_str', help=
             "Alias for --plot-path."
         )
 
@@ -1062,6 +1063,27 @@ class TaskBandPlot(Task):
             '--plot-dpi', type=int, metavar='DPI', default=None, help=
             'DPI when saving e.g. a PNG image using --write-plot.'
         )
+
+    def check_upfront(self, args):
+        check_optional_input(args.plot_baseline_file)
+
+        for path in itertools.chain.from_iterable([
+            args.plot_style,
+            args.plot_unfolded_style,
+            args.plot_baseline_style,
+        ]):
+            try:
+                # Allow MPL to check globally installed styles in addition to
+                # absolute/relative filepaths.
+                with mpl_context(path):
+                    pass
+            except OSError:
+                # Probably a missing file, in which case this should fail
+                # with a nice error message.
+                check_optional_input(path)
+
+                # but in case that didn't fail...
+                raise
 
     def has_action(self, args):
         return args.show or bool(args.write_plot)
