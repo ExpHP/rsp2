@@ -1,6 +1,47 @@
 import numpy as np
 import scipy.sparse as sparse
-import numba
+
+from .util import run_once
+
+@run_once
+def __lazy_define_jitted_funcs():
+    try:
+        import numba
+    except ImportError:
+        import warnings
+        warnings.warn('coalescing without numba installed. This may be slow!')
+
+        class numba:
+            @staticmethod
+            def jit(*args, **kw):
+                return lambda func: func
+
+    def make_global(f):
+        globals()[f.__name__] = f
+
+    @make_global
+    @numba.jit(nopython=True)
+    def __coalesce_inplace_mean(splits, data):
+        for start, end in zip(splits[:-1], splits[1:]):
+            data[start] = data[start:end].mean()
+
+    @make_global
+    @numba.jit(nopython=True)
+    def __coalesce_inplace_sum(splits, data):
+        for start, end in zip(splits[:-1], splits[1:]):
+            data[start] = data[start:end].sum()
+
+    @make_global
+    @numba.jit(nopython=True)
+    def __coalesce_inplace_max(splits, data):
+        for start, end in zip(splits[:-1], splits[1:]):
+            data[start] = data[start:end].max()
+
+    @make_global
+    @numba.jit(nopython=True)
+    def __coalesce_inplace_weighted_mean(splits, data, weights):
+        for start, end in zip(splits[:-1], splits[1:]):
+            data[start] = np.vdot(data[start:end], weights[start:end]) / weights[start:end].sum()
 
 def get_splits(data, threshold):
     """ Compute split indices for the ``coalesce`` function from a 1D array of
@@ -43,6 +84,8 @@ def coalesce_inplace(splits, data, mode, fill=NO_FILL):
     """ Variant of coalesce that reuses ``data`` for the output buffer. """
     splits = np.array(splits, copy=False)
 
+    __lazy_define_jitted_funcs()
+
     if mode == "sum": __coalesce_inplace_sum(splits, data)
     elif mode == "mean": __coalesce_inplace_mean(splits, data)
     elif mode == "max": __coalesce_inplace_max(splits, data)
@@ -55,6 +98,8 @@ def coalesce_inplace(splits, data, mode, fill=NO_FILL):
 
 def coalesce_inplace_weighted_mean(splits, data, weights, fill=NO_FILL):
     """ Variant of ``coalesce_inplace`` that performs a weighted mean. """
+    __lazy_define_jitted_funcs()
+
     __coalesce_inplace_weighted_mean(splits, data, weights, fill)
     __coalesce_fill(splits, data, fill=fill)
 
@@ -65,26 +110,6 @@ def __coalesce_fill(splits, data, fill=NO_FILL):
         inv_mask = np.ones((splits[-1],), dtype=bool)
         inv_mask[splits[:-1]] = False
         data[inv_mask] = fill
-
-@numba.jit(nopython=True)
-def __coalesce_inplace_mean(splits, data):
-    for start, end in zip(splits[:-1], splits[1:]):
-        data[start] = data[start:end].mean()
-
-@numba.jit(nopython=True)
-def __coalesce_inplace_sum(splits, data):
-    for start, end in zip(splits[:-1], splits[1:]):
-        data[start] = data[start:end].sum()
-
-@numba.jit(nopython=True)
-def __coalesce_inplace_max(splits, data):
-    for start, end in zip(splits[:-1], splits[1:]):
-        data[start] = data[start:end].max()
-
-@numba.jit(nopython=True)
-def __coalesce_inplace_weighted_mean(splits, data, weights):
-    for start, end in zip(splits[:-1], splits[1:]):
-        data[start] = np.vdot(data[start:end], weights[start:end]) / weights[start:end].sum()
 
 def coalesce_sparse_row_vec(splits, csr, mode):
     """ Variant of `coalesce` for 1xN CSR matrices.
