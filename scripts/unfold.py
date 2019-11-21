@@ -244,11 +244,9 @@ class TaskStructure(Task):
         )
 
     @classmethod
-    def read_dir(cls, path, args):
+    def read_dir(cls, path, layer):
         """ Can be used by other tasks to read an arbitrary path as if it were
         the STRUCTURE argument. """
-        layer = args.layer
-
         if not os.path.isdir(path):
             die('currently, only rsp2 structure directory format is supported')
 
@@ -256,7 +254,7 @@ class TaskStructure(Task):
         structure = sdir.structure
         if sdir.layer_sc_matrices is None:
             die("the structure must supply layer-sc-matrices")
-        supercell = Supercell(sdir.layer_sc_matrices[args.layer])
+        supercell = Supercell(sdir.layer_sc_matrices[layer])
 
         # Project everything onto a single layer
         if sdir.layers is None:
@@ -279,7 +277,7 @@ class TaskStructure(Task):
         }
 
     def _compute(self, args):
-        return type(self).read_dir(args.STRUCTURE, args)
+        return type(self).read_dir(args.STRUCTURE, layer=args.layer)
 
 class TaskDeperms(Task):
     def __init__(self, structure: TaskStructure):
@@ -509,7 +507,7 @@ class TaskGProbs(Task):
             'probabilities. (e.g. plotting)',
         )
 
-    def check_upfront(self, args):
+    def check_upfront(self, args: argparse.Namespace):
         check_optional_input(args.probs)
         check_optional_output_ext('--write-probs', args.write_probs, forbid='.npy')
 
@@ -518,12 +516,16 @@ class TaskGProbs(Task):
 
         unfold_lib.prepare_implementation(args.probs_impl)
 
-    def has_action(self, args):
+    def has_action(self, args: argparse.Namespace):
         return bool(args.write_probs)
 
-    def _compute(self, args):
+    def _compute(self, args: argparse.Namespace):
         if args.probs:
-            ev_gpoint_probs = type(self).read_file(args.probs, args)
+            ev_gpoint_probs = type(self).read_file(
+                args.probs,
+                args.probs_threshold,
+                verbose=args.verbose,
+            )
         else:
             if args.verbose:
                 print('--probs not supplied. Will compute by unfolding eigensols.')
@@ -546,38 +548,42 @@ class TaskGProbs(Task):
                 implementation=args.probs_impl,
                 progress_prefix=progress_prefix,
             )
-        ev_gpoint_probs = type(self).__postprocess(ev_gpoint_probs, args)
+        ev_gpoint_probs = type(self).__postprocess(
+            ev_gpoint_probs,
+            probs_threshold=args.probs_threshold,
+            verbose=args.verbose,
+        )
 
         if args.probs_gamma_only:
             return { 'raw': ev_gpoint_probs }
         else:
             return { 'raw': ev_gpoint_probs, 'full': ev_gpoint_probs }
 
-    def require_full(self, args):
+    def require_full(self, args: argparse.Namespace):
         if args.probs_gamma_only:
             die('--probs-gamma-only is incompatible with some of the requested actions')
         return self.require(args)['full']
 
-    def _do_action(self, args):
+    def _do_action(self, args: argparse.Namespace):
         ev_gpoint_probs = self.require(args)['raw']
         if args.write_probs:
             dwim.to_path(args.write_probs, ev_gpoint_probs)
 
     @classmethod
-    def read_file(cls, path, args):
+    def read_file(cls, path: str, probs_threshold: float, verbose: bool = False):
         """ Can be used by other tasks to replicate the behavior of --probs. """
         ev_gpoint_probs = dwim.from_path(path)
-        return cls.__postprocess(ev_gpoint_probs, args)
+        return cls.__postprocess(ev_gpoint_probs, verbose=verbose, probs_threshold=probs_threshold)
 
     @classmethod
-    def __postprocess(cls, ev_gpoint_probs, args):
-        if args.verbose:
+    def __postprocess(cls, ev_gpoint_probs, probs_threshold, verbose):
+        if verbose:
             debug_bin_magnitudes(ev_gpoint_probs)
 
-        ev_gpoint_probs = truncate(ev_gpoint_probs, args.probs_threshold)
+        ev_gpoint_probs = truncate(ev_gpoint_probs, probs_threshold)
         ev_gpoint_probs = sparse.csr_matrix(ev_gpoint_probs)
 
-        if args.verbose:
+        if verbose:
             density = ev_gpoint_probs.nnz / product(ev_gpoint_probs.shape)
             print('Probs matrix density: {:.4g}%'.format(100.0 * density))
 
@@ -682,7 +688,11 @@ class TaskMultiQpointData(Task):
 
     def _compute(self, args):
         if args.multi_qpoint_file:
-            return type(self).read_file(args.multi_qpoint_file, args)
+            return type(self).read_file(
+                args.multi_qpoint_file,
+                verbose=args.verbose,
+                probs_threshold=args.probs_threshold,
+            )
         else:
             return type(self).__process_dicts({
                 "qpoint-sfrac": self.qpoint_sfrac.require(args),
@@ -691,7 +701,7 @@ class TaskMultiQpointData(Task):
             })
 
     @classmethod
-    def read_file(cls, path, args):
+    def read_file(cls, path, probs_threshold, verbose=False):
         d = dwim.from_path(path)
         if not isinstance(d, list):
             die(f'Expected {path} to contain a sequence/array.')
@@ -705,7 +715,7 @@ class TaskMultiQpointData(Task):
             dicts.append({
                 "qpoint-sfrac": TaskQpointSfrac.parse(item.pop('qpoint')),
                 "mode-data": TaskEigenmodeData.read_file(rel_path(item.pop('mode-data'))),
-                "probs": TaskGProbs.read_file(rel_path(item.pop('probs')), args),
+                "probs": TaskGProbs.read_file(rel_path(item.pop('probs')), probs_threshold=probs_threshold,  verbose=verbose),
             })
             unrecognized_keys.update(item)
 
@@ -891,6 +901,7 @@ class TaskBandPlotScatterData(Task):
             'allowing one to skip the somewhat expensive step of coalescing.'
         )
 
+        # FIXME: Remove 'max' option.
         parser.add_argument(
             '--plot-coalesce', choices=['none', 'max', 'sum'], default='none',
             metavar='MODE', help=
@@ -1309,8 +1320,8 @@ def griddata_periodic(
 
     The lattice is assumed to have small skew.
     """
-    points_frac = reduce_carts(points, lattice) @ np.linalg.inv(lattice)
-    xi_frac = reduce_carts(xi, lattice) @ np.linalg.inv(lattice)
+    points_frac = unfold_lib.reduce_carts(points, lattice) @ np.linalg.inv(lattice)
+    xi_frac = unfold_lib.reduce_carts(xi, lattice) @ np.linalg.inv(lattice)
 
     #debug_path((points_frac @ lattice)[:,:2], lattice[:2,:2], (xi_frac @ lattice)[:,:2], _supercell.recip())
 
@@ -1408,15 +1419,6 @@ def decimate_plot_x(d, decimate_x: int):
         'path_q_indices': path_q_indices[decimated_indices],
         'path_g_indices': path_g_indices[decimated_indices],
     }
-
-#---------------------------------------------------------------
-# Physical utils
-
-def reduce_carts(carts, lattice):
-    fracs = carts @ np.linalg.inv(lattice)
-    fracs %= 1.0
-    fracs %= 1.0 # for values like -1e-20
-    return fracs @ lattice
 
 #----------------------------------------------------------------
 # Plotting
@@ -1960,7 +1962,7 @@ def lattice_path(lattice2):
     return np.array([[0,0], lattice2[0], lattice2[0]+lattice2[1], lattice2[1], [0,0]])
 
 def draw_reduced_points(ax, points2, lattice2, **kw):
-    points2 = reduce_carts(points2, lattice2)
+    points2 = unfold_lib.reduce_carts(points2, lattice2)
     ax.scatter(points2[:, 0], points2[:, 1], **kw)
 
 #---------------------------------------------------------------

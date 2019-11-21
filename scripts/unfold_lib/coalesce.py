@@ -53,16 +53,19 @@ def get_splits(data, threshold):
     selection of groupings is left unspecified). The first element is always 0,
     and the last element is always the length of the data.
     """
-    yield 0
     data = iter(data)
-    start_value = next(data)
 
-    index = 0  # correct end value in case the loop runs 0 iterations
-    for index, x in enumerate(data, start=1):
-        if start_value + threshold < x:
-            yield index
-            start_value = x
-    yield index + 1 # length of data
+    def inner():
+        yield 0
+        start_value = next(data)
+        index = 0  # correct end value in case the loop runs 0 iterations
+        for index, x in enumerate(data, start=1):
+            if start_value + threshold < x:
+                yield index
+                start_value = x
+        yield index + 1 # length of data
+
+    return list(inner())
 
 NO_FILL = object()
 def coalesce(splits, data, mode, fill=NO_FILL):

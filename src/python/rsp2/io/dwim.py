@@ -239,7 +239,10 @@ def to_path_impl(
         import json
         if to_dict is not None:
             obj = to_dict(obj, path=fullpath)
-        json.dump(obj, wrap_text(file))
+
+        f = wrap_text(file)
+        json.dump(obj, f)
+        print(file=f) # trailing newline
 
     elif _endswith_nocase(path, '.npy'):
         import numpy

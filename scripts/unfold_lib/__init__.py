@@ -189,6 +189,28 @@ def get_translation_phases(
     return np.exp(2j * np.pi * image_carts @ qpoint_cart)
 
 #---------------------------------------------------------------
+# Physical utils
+
+def reduce_carts(carts, lattice):
+    fracs = carts @ np.linalg.inv(lattice)
+    fracs %= 1.0
+    fracs %= 1.0 # for values like -1e-20
+    return fracs @ lattice
+
+def shortest_image_norm(cart, lattice):
+    frac = cart @ np.linalg.inv(lattice)
+    cart = (frac % 1) @ lattice
+    return shortest_image_norm_fast(cart, lattice)
+
+__CELLS_AROUND_ORIGIN = np.array([
+    [a, b, c]
+    for a in range(-1, 2)
+    for b in range(-1, 2)
+    for c in range(-1, 2)
+])
+def shortest_image_norm_fast(cart, lattice):
+    images = __CELLS_AROUND_ORIGIN @ lattice + cart
+    return np.linalg.norm(images, axis=1).min()
 
 class Supercell:
     def __init__(self, matrix):
