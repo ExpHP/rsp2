@@ -21,12 +21,13 @@ It also has a large number of rust dependencies, but these are automatically man
 
 ## Python
 
-There is a `requirements.txt` suitable for use with `venv`.  To install all required python dependencies:
+rsp2 requires a specific, old version of phonopy.  To facilitate running the code, there is a `requirements.txt` suitable for use with `venv`.  To install all required python dependencies:
 
 ```
 # First time usage
 python3 -m venv venv
 . venv/bin/activate
+python3 -m pip install numpy==1.16.4 # needed in advance by phonopy's setup.py
 python3 -m pip install -r requirements.txt
 
 # Afterwards
@@ -83,9 +84,9 @@ You **must** manually install DFTB+. [See this page for details](https://github.
 
 > `cargo run --release --bin=rsp2 -- --help` and *good luck*
 
-Because there is currently one or *maybe two* people who need to use the code (and this count includes the author!), the CLI binaries have no stable interface.  Config files, CLI arguments, inputs and outputs undergo major revisions on a complete whim.
+Because there is currently one or *maybe two* people who need to use the code (and this count includes the author!), the CLI binaries have no stable interface. CLI arguments in particular may undergo major revisions on a complete whim.  Input and output file formats are a bit more stable as of late as the author has needed to work with some fairly old files, but there are no guarantees.
 
-This situation has improved *slightly* in recent times, as changes to the config file now generally at least try to preserve backwards compatibility by keeping deprecated flags around.
+Thankfully, changes to the config file now at least generally attempt to preserve backwards compatibility.  Generally speaking, old config files will continue to work and will cause rsp2 to behave the same way as it did originally.  If a config item is renamed or relocated, you will see deprecation warnings telling you what you should write instead. (also, one of the output files from `rsp2` is a normalized `settings.yaml` file).
 
 ## MPI
 
@@ -96,6 +97,12 @@ cargo build --release --bin=rsp2
 cargo run --release --bin=rsp2-library-paths >release.path
 LD_LIBRARY_PATH=$(cat release.path):${LD_LIBRARY_PATH} mpirun target/release/rsp2 ARGS GO HERE
 ```
+
+## Band unfolding script
+
+The unfolding script used to analyze the output of `rsp2` on layered 2D materials is also included in this repository.
+
+[See this page for details](https://github.com/ExpHP/dftbplus-sys/blob/master/doc/unfolding.md).
 
 # License
 

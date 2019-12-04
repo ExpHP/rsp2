@@ -203,6 +203,8 @@ class TaskQpointSfrac(Task):
         )
 
     def _compute(self, args):
+        if args.qpoint is None:
+            die('--qpoint is required for this action')
         return list(args.qpoint)
 
     @classmethod
@@ -755,8 +757,8 @@ class TaskRawBandQGIndices(Task):
         return resample_qg_indices(
                 super_lattice=self.structure.require(args)['structure'].lattice.matrix,
                 supercell=self.structure.require(args)['supercell'],
-                qpoint_sfrac=self.multi_qpoint_data.require(args)['qpoint-sfrac'],
                 path_kpoint_pfracs=self.raw_band_path.require(args)['path_kpoint_pfracs'],
+                qpoint_sfrac=self.multi_qpoint_data.require(args)['qpoint-sfrac'],
         )
 
 class TaskPlotZoneCrossings(Task):
@@ -935,16 +937,17 @@ class TaskBandPlotScatterData(Task):
             return type(self).read_file(args.scatter_data)
 
         # Do this early so we can validate it before doing anything expensive.
-        color_info = self.color_info.require(args)
+        band_path = self.band_path.require(args)
+        color_info = self.color_info.require(args) # note: also requires multi_qpoint_data
 
         multi_qpoint_data = self.multi_qpoint_data.require(args)
 
         return compute_band_plot_scatter_data(
             q_ev_frequencies=np.array(multi_qpoint_data['mode-data']['ev_frequencies']),
             q_ev_gpoint_probs=np.array(multi_qpoint_data['probs']),
-            path_g_indices=self.band_path.require(args)['path_g_indices'],
-            path_q_indices=self.band_path.require(args)['path_q_indices'],
-            path_x_coordinates=self.band_path.require(args)['path_x_coordinates'],
+            path_g_indices=band_path['path_g_indices'],
+            path_q_indices=band_path['path_q_indices'],
+            path_x_coordinates=band_path['path_x_coordinates'],
             color_info=color_info,
             plot_coalesce_method=args.plot_coalesce,
             plot_coalesce_threshold=args.plot_coalesce_threshold,
@@ -984,8 +987,9 @@ class TaskBandPlot(Task):
     def add_parser_opts(self, parser):
         parser.add_argument('--show', action='store_true', help='show plot')
         parser.add_argument(
-            '--write-plot', metavar='FILE', action='append',
-            help='save plot to file. May be specified multiple times.',
+            '--write-plot', metavar='FILE', action='append', default=[], help=
+            'Save plot to file. Can be of any file type supported by matplotlib. '
+            'May be specified multiple times, in case you want multiple formats.',
         )
 
         parser.add_argument(
