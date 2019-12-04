@@ -986,7 +986,10 @@ class TaskBandPlot(Task):
 
     def add_parser_opts(self, parser):
         parser.add_argument('--show', action='store_true', help='show plot')
-        parser.add_argument('--write-plot', metavar='FILE', help='save plot to file')
+        parser.add_argument(
+            '--write-plot', metavar='FILE', action='append',
+            help='save plot to file. May be specified multiple times.',
+        )
 
         parser.add_argument(
             '--plot-baseline-file', type=str, metavar='FILE', help=
@@ -1134,6 +1137,7 @@ class TaskBandPlot(Task):
             plot_style=args.plot_style,
             plot_unfolded_style=args.plot_unfolded_style,
             plot_baseline_style=args.plot_baseline_style,
+            plot_xmax=self.band_path.require(args)['path_x_coordinates'][-1],
             plot_xticks=self.band_path.require(args)['plot_xticks'],
             plot_xticklabels=self.band_path.require(args)['plot_xticklabels'],
             plot_ylim=args.plot_ylim,
@@ -1151,13 +1155,17 @@ class TaskBandPlot(Task):
     def _do_action(self, args):
         fig, ax = self.require(args)
 
-        if args.write_plot:
+        for path in args.write_plot:
             kw = {}
             if args.plot_dpi is not None:
                 kw['dpi'] = args.plot_dpi
-            fig.savefig(args.write_plot, **kw)
+            if args.verbose:
+                print(f'Writing {path}')
+            fig.savefig(path, **kw)
 
         if args.show:
+            if args.verbose:
+                print(f'Rendering preview')
             import matplotlib.pyplot as plt
             # fig.show() # doesn't do anything :/
             plt.show()
@@ -1438,6 +1446,7 @@ def cfg_matplotlib():
         'text.latex.preamble': [r"""
 \usepackage{gensymb}
 \usepackage{amsmath}
+\usepackage{siunitx}
 """],
         'text.usetex': True,
         'font.family': 'serif',
@@ -1581,6 +1590,7 @@ def generate_band_plot(
         scatter_data: tp.Dict[str, np.ndarray],
         baseline_data: tp.Dict[str, np.ndarray],
         color_info: "ColorInfo",
+        plot_xmax: float,
         plot_style: tp.List[str],
         plot_unfolded_style: tp.List[str],
         plot_baseline_style: tp.List[str],
@@ -1639,12 +1649,12 @@ def generate_band_plot(
                 ax.scatter(base_X, base_Y)
 
         for x in plot_xticks:
-            ax.axvline(x, color='k')
+            ax.axvline(x, color='k', zorder=0)
 
         for x in plot_zone_crossing_xs:
-            ax.axvline(x, color='k', ls=':')
+            ax.axvline(x, color='k', ls=':', zorder=0)
 
-        ax.set_xlim(X.min(), X.max())
+        ax.set_xlim(0, plot_xmax)
         ax.set_xticks(plot_xticks)
         ax.set_xticklabels(plot_xticklabels)
         ax.set_ylabel('Frequency (cm$^{-1}$)')
