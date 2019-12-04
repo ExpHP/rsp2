@@ -626,7 +626,7 @@ class TaskRawBandPath(Task):
         return bool(args.write_highsym_xs)
 
     def _compute(self, args):
-        from ase.dft.kpoints import bandpath, parse_path_string
+        from ase.dft.kpoints import bandpath
 
         supercell = self.structure.require(args)['supercell']
         super_lattice = self.structure.require(args)['structure'].lattice.matrix
@@ -640,15 +640,12 @@ class TaskRawBandPath(Task):
         #       function) do adapt to the user's specific choice of primitive cell.
         #       (at least, for reasonable cells; I haven't tested it with a highly
         #       skewed cell). Respect!
-        path_kpoint_pfracs, path_x_coordinates, plot_xticks = bandpath(args.plot_kpath_str, prim_lattice, 300)
-        highsym_pfracs = bandpath(args.plot_kpath_str, prim_lattice, 1)[0]
-
-        point_names = parse_path_string(args.plot_kpath_str)
-        if len(point_names) > 1:
-            die('This script currently does not support plots along discontinuous paths.')
-        point_names, = point_names
-
+        path = bandpath(args.plot_kpath_str, prim_lattice, 300)
+        path_kpoint_pfracs = path.kpts
+        path_x_coordinates, plot_xticks, point_names = path.get_linear_kpoint_axis()
         point_names = [r'$\mathrm{\Gamma}$' if x == 'G' else x for x in point_names]
+
+        highsym_pfracs = bandpath(args.plot_kpath_str, prim_lattice, 1).get_linear_kpoint_axis()[0]
 
         return {
             'path_kpoint_pfracs': path_kpoint_pfracs,
