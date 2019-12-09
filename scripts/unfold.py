@@ -380,12 +380,11 @@ class TaskEigensols(Task):
             ev_eigenvalues, ev_eigenvectors = eigensols.from_path(args.eigensols)
 
         else:
-            import scipy.linalg
             if args.verbose:
                 print('--eigensols not supplied. Will diagonalize dynmat.')
 
             m = self.dynmat.require(args)
-            ev_eigenvalues, ev_eigenvectors = scipy.linalg.eigh(m.todense(), overwrite_a=True)
+            ev_eigenvalues, ev_eigenvectors = unfold_lib.destructive_eigh(m.todense())
             ev_eigenvectors = ev_eigenvectors.T
 
         # use less memory in the common case where atoms are ordered by layer

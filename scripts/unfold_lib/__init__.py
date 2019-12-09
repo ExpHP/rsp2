@@ -283,3 +283,32 @@ def find_repeats(supercell_matrix):
 
     assert round(np.linalg.det(hnf)) == expected_volume
     return np.diag(hnf)
+
+#---------------------------------------------------------------
+# Other utils
+
+def destructive_eigh(m, *args, **kw):
+    """
+    ``scipy.linalg.eigh`` wrapper that potentially uses less memory by
+    destroying the input array.
+
+    This is similar to supplying ``overwrite_a`` to ``eigh``, except that it
+    also works for C-order arrays in addition to Fortran-order arrays.
+    For C-order arrays, it may produce slightly different results from eigh
+    if the matrix is not perfectly hermitian.
+    """
+    import scipy.linalg
+
+    kw['overwrite_a'] = True
+    if 'lower' not in kw:
+        kw['lower'] = True
+
+    # must be fortran-order for overwrite_a to work
+    if not np.isfortran(m) and np.isfortran(m.T):
+        m = m.T
+        if np.iscomplexobj(m):
+            # (don't do m = m.conj, that would allocate)
+            m.imag *= -1
+        kw['lower'] = not kw['lower']
+
+    return scipy.linalg.eigh(m, *args, **kw)
