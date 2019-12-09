@@ -338,7 +338,11 @@ class TaskDynmat(Task):
     def _compute(self, args):
         if not args.dynmat:
             die('--dynmat is required for this action')
-        return sparse.load_npz(args.dynmat)
+
+        m = sparse.load_npz(args.dynmat)
+        if np.all(m.data.imag == 0.0):
+            m = m.real
+        return m
 
 class TaskEigensols(Task):
     def __init__(self, structure: TaskStructure, dynmat: TaskDynmat):
@@ -381,9 +385,7 @@ class TaskEigensols(Task):
                 print('--eigensols not supplied. Will diagonalize dynmat.')
 
             m = self.dynmat.require(args)
-            if np.all(m.data.imag == 0.0):
-                m = m.real
-            ev_eigenvalues, ev_eigenvectors = scipy.linalg.eigh(m.todense())
+            ev_eigenvalues, ev_eigenvectors = scipy.linalg.eigh(m.todense(), overwrite_a=True)
             ev_eigenvectors = ev_eigenvectors.T
 
         ev_projected_eigenvectors = ev_eigenvectors.reshape((-1, nsites, 3))[:, mask]
