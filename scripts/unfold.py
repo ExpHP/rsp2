@@ -388,7 +388,10 @@ class TaskEigensols(Task):
             ev_eigenvalues, ev_eigenvectors = scipy.linalg.eigh(m.todense(), overwrite_a=True)
             ev_eigenvectors = ev_eigenvectors.T
 
-        ev_projected_eigenvectors = ev_eigenvectors.reshape((-1, nsites, 3))[:, mask]
+        # use less memory in the common case where atoms are ordered by layer
+        mask_or_slice = to_slice_if_possible(mask)
+
+        ev_projected_eigenvectors = ev_eigenvectors.reshape((-1, nsites, 3))[:, mask_or_slice]
 
         return {
             'ev_eigenvalues': ev_eigenvalues,
@@ -2096,6 +2099,22 @@ def dict_zip(*dicts):
             raise KeyError(f"Mismatched keysets in fold_dicts: {sorted(keyset)}, {sorted(set(d))}")
 
     return { key: [d[key] for d in dicts] for key in keyset }
+
+def to_slice_if_possible(mask):
+    """
+    Take a 1D boolean array intended for use in advanced indexing, and either
+    return the input mask unchanged, or a ``slice`` with equivalent meaning.
+
+    This can allow reduced memory usage, as a ``slice`` enables basic indexing
+    (avoiding copies).
+    """
+    assert mask.ndim == 1
+    indices, = np.where(mask)
+    unique_diffs = set(indices[1:] - indices[:-1])
+    if len(unique_diffs) == 1:
+        return slice(indices[0], indices[-1] + 1, unique_diffs.pop())
+    else:
+        return mask
 
 #---------------------------------------------------------------
 
