@@ -13,12 +13,17 @@ def unfold_all(
         gamma_only,
         progress_prefix,
 ):
+    import sys
+
+    overwrite_line = sys.stdout.isatty()
+
     progress = None
     if progress_prefix is not None:
         def progress(done, count):
-            print(f'{progress_prefix}Unfolding {done:>5} of {count} eigenvectors')
+            end = '\r' if overwrite_line else None
+            print(f'{progress_prefix}Unfolding {done:>5} of {count} eigenvectors', end=end)
 
-    return np.array(list(map_with_progress(
+    out = np.array(list(map_with_progress(
         eigenvectors, progress,
         lambda eigenvector: unfold_one(
             site_phases=site_phases,
@@ -31,6 +36,9 @@ def unfold_all(
             gamma_only=gamma_only,
         )
     )))
+    if overwrite_line:
+        print()
+    return out
 
 # NOTE: For any change to this function, the corresponding function
 #       in the Rust unfold_lib must be changed accordingly!
@@ -122,7 +130,7 @@ def unfold_one(
         # we have exp(+i...) rather than exp(-i...).
         phases = np.exp(2j * np.pi * k_dot_rs)
 
-        prob = sum(inner_prods * phases) / sizes['quotient']
+        prob = (inner_prods * phases).sum() / sizes['quotient']
 
         # analytically, these are all real, positive numbers
         assert abs(prob.imag) < 1e-7

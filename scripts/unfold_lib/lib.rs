@@ -95,8 +95,10 @@ fn unfold_all(
         translation_phases.chunks(num_sites).collect()
     };
 
+    let overwrite_line = atty::is(atty::Stream::Stdout);
     let progress = progress_prefix.map(|prefix| {
-        move |done, total| println!("{}Unfolded {:>5} of {} eigenvectors", prefix, done, total)
+        let end = if overwrite_line { "\r" } else { "\n" };
+        move |done, total| print!("{}Unfolded {:>5} of {} eigenvectors{}", prefix, done, total, end)
     });
 
     let iter = zip_eq!(eigenvectors.chunks(num_sites), output.chunks_mut(num_quotient)).enumerate();
@@ -121,6 +123,9 @@ fn unfold_all(
 
     if let Some(progress) = progress {
         progress(num_total, num_total);
+        if overwrite_line {
+            println!();
+        }
     }
 }
 
