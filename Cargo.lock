@@ -1365,6 +1365,7 @@ version = "0.1.0"
 name = "rsp2c-unfold"
 version = "0.1.0"
 dependencies = [
+ "atty 0.2.11 (registry+https://github.com/rust-lang/crates.io-index)",
  "num-complex 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "rayon 1.0.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "rsp2-array-types 0.1.0",

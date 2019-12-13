@@ -65,6 +65,7 @@ rsp2-dynmat = "src/dynmat"
 # This also makes it easier to migrate the entire workspace
 # to a new version of a dependency.
 [preferred-versions]
+atty = "0.2.0"
 byte-tools = "0.2.0"
 clap = "2"
 chrono = "0.4"

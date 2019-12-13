@@ -311,15 +311,19 @@ class TaskDeperms(Task):
             progress_callback = None
             if args.verbose:
                 def progress_callback(done, count):
-                    print(f'Deperms: {done:>5} of {count} translations')
+                    end = '\r' if sys.stdout.isatty() else None
+                    print(f'Deperms: {done:>5} of {count} translations', end=end)
 
-            return collect_translation_deperms(
+            out = collect_translation_deperms(
                 superstructure=self.structure.require(args)['projected_structure'],
                 supercell=self.structure.require(args)['supercell'],
                 axis_mask=np.array([1,1,0]),
                 tol=DEFAULT_TOL,
                 progress=progress_callback,
             )
+            if sys.stdout.isatty():
+                print()
+            return out
 
     def _do_action(self, args):
         if args.write_perms:
