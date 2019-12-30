@@ -54,7 +54,7 @@ MPI support is enabled by default, but you can build without MPI by supplying th
 LAMMPS is used to provide the following potentials:
 
 * AIREBO
-* REBO + `kolmogorov/crespi/full`
+* REBO + `kolmogorov/crespi/full` (with nonlocal normals; rsp2 uses local normals)
 * Versions of rsp2's built-in potentials that lack support for lattice parameter optimization, but which fully model the bondorder factors in REBO.
 
 rsp2 currently automatically builds an old version of LAMMPS.  **At the time of writing, this version is known to be incorrect for pure (non-AIREBO) REBO on some H−C bonds.**
