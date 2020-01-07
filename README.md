@@ -78,13 +78,22 @@ $ pkg-config --libs --cflags liblammps
 
 All DFTB+ potentials are available.
 
-You **must** manually install DFTB+. [See this page for details](https://github.com/ExpHP/dftbplus-sys/blob/master/doc/installing-dftbplus.md).
+You must **manually** install DFTB+. [See this page for details](https://github.com/ExpHP/dftbplus-sys/blob/master/doc/installing-dftbplus.md).
 
 # Running
 
 > `cargo run --release --bin=rsp2 -- --help` and *good luck*
 
 Because there is currently one or *maybe two* people who need to use the code (and this count includes the author!), the CLI binaries have no stable interface. CLI arguments in particular may undergo major revisions on a complete whim.  Input and output file formats are a bit more stable as of late as the author has needed to work with some fairly old files, but there are no guarantees.
+
+One or more config files is required (supplied with the `-c` flag). It will be easiest to start with an existing config file from a previous run (ask me for one, or piece one together from the pieces in `tests/`). There is, at present, no documentation of the config file that is written for end-users.  In order to work with the config file:
+
+* The file format is YAML.
+  * All mappings use `kebab-case` strings as keys.
+  * There are a couple of small extensions to the format, described in the text given by `--help` for the `-c` flag.
+* Documentation for the fields is provided **[in the source code](https://github.com/ExpHP/rsp2/blob/master/src/tasks/config/config.rs).**
+  * Start at `struct Settings` and read the doc comments.
+  * The config file itself is declaratively defined using the `serde` rust crate, so learning a bit about types in rust and how serde encodes them will be useful.
 
 Thankfully, changes to the config file now at least generally attempt to preserve backwards compatibility.  Generally speaking, old config files will continue to work and will cause rsp2 to behave the same way as it did originally.  If a config item is renamed or relocated, you will see deprecation warnings telling you what you should write instead. (also, one of the output files from `rsp2` is a normalized `settings.yaml` file).
 
