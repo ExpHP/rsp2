@@ -1030,10 +1030,6 @@ pub enum PhononEigensolver {
     #[serde(rename_all = "kebab-case")]
     Dense {},
 
-    // FIXME: This should be split into two separate eigensolvers 'Sparse' and 'Dense',
-    //        but it seems tricky to rewrite the code in rsp2_tasks::cmd that matches on it
-    //        without introducing code duplication.  What a mess...
-    //
     /// Deprecated.  Use either 'sparse' or 'dense'.
     #[serde(rename_all = "kebab-case")]
     Rsp2 {
