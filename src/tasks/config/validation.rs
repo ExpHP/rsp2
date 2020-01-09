@@ -24,9 +24,11 @@ impl Settings {
             &mut self._deprecated_lammps_settings,
         );
         fix_version(&mut self.version)?;
-        fix_deprecated_eigensolver(&mut self.phonons.eigensolver);
 
-        check_phonons(&self.phonons, &self.potential)?;
+        if let Some(phonons) = &mut self.phonons {
+            fix_deprecated_eigensolver(&mut phonons.eigensolver);
+            check_phonons(&phonons, &self.potential)?;
+        }
 
         Ok(ValidatedSettings(self))
     }

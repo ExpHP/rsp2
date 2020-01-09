@@ -24,6 +24,7 @@ use super::trial::TrialDir;
 use super::GammaSystemAnalysis;
 use super::{write_eigen_info_for_humans, write_eigen_info_for_machines};
 use super::{EvLoopStructureKind, Iteration};
+use super::StopAfter;
 use super::param_optimization::RelaxationOptimizationHelper;
 
 use rsp2_tasks_config::{self as cfg, Settings};
@@ -53,9 +54,24 @@ impl TrialDir {
             Option<meta::LayerScMatrices>,
             Option<meta::FracBonds>,
         >,
-        stop_after_dynmat: bool, // HACK
+        stop_after: StopAfter, // HACK
     ) -> FailResult<(Coords, Option<(GammaSystemAnalysis, Iteration)>)>
     {
+        // `stop_after`, augmented with config sections required by those steps
+        enum StopAfterPlus<'a> {
+            Cg,
+            Dynmat(&'a cfg::Phonons),
+            DontStop(&'a cfg::Phonons),
+        }
+
+        let stop_after = match (stop_after, &settings.phonons) {
+            (StopAfter::Cg, _) => StopAfterPlus::Cg,
+            (StopAfter::Dynmat, Some(cfg)) => StopAfterPlus::Dynmat(cfg),
+            (StopAfter::DontStop, Some(cfg)) => StopAfterPlus::DontStop(cfg),
+            (StopAfter::Dynmat, None) |
+            (StopAfter::DontStop, None) => bail!("`phonons:` config section is required"),
+        };
+
         if !settings.ev_loop.enable {
             let iteration = None;
             let coords = self.do_ev_loop_stuff_before_dynmat(
@@ -76,19 +92,26 @@ impl TrialDir {
                 &settings, pot, meta.sift(), Some(iteration), coords,
             )?;
 
+            // rsp2-acgsd stops here
+            let phonon_settings = match stop_after {
+                StopAfterPlus::Cg => return Err(super::StoppedEarly.into()),
+                StopAfterPlus::Dynmat(cfg) |
+                StopAfterPlus::DontStop(cfg) => cfg,
+            };
+
             let qpoint = V3::zero();
             let dynmat = super::do_compute_dynmat(
-                Some(self), settings, pot, qpoint, &coords, meta.sift(),
+                Some(self), settings, phonon_settings, pot, qpoint, &coords, meta.sift(),
             )?;
             dynmat.save(self.gamma_dynmat_path(iteration))?;
 
             // rsp2-acgsd-and-dynmat stops here
-            if stop_after_dynmat {
-                return Err(super::StoppedAfterDynmat.into());
+            if let StopAfterPlus::Dynmat(_) = stop_after {
+                return Err(super::StoppedEarly.into());
             }
 
             let (freqs, evecs) = pot.eco_mode(|eco_proof| {
-                super::do_diagonalize_dynmat(settings, dynmat, eco_proof)
+                super::do_diagonalize_dynmat(phonon_settings, dynmat, eco_proof)
             })?;
 
             trace!("============================");

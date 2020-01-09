@@ -15,7 +15,7 @@
 use crate::FailResult;
 use crate::VersionInfo;
 use crate::cmd::trial::{TrialDir, NewTrialDirArgs};
-use crate::cmd::{StructureFileType, DidEvChasing};
+use crate::cmd::{StructureFileType, DidEvChasing, StopAfter};
 use crate::traits::{Save, Load};
 use crate::ui::logging::{init_global_logger, SetGlobalLogfile};
 use crate::ui::cfg_merging::ConfigSources;
@@ -57,7 +57,7 @@ where
 
         result.unwrap_or_else(|e| {
             // HACK
-            if let Some(crate::cmd::StoppedAfterDynmat) = e.downcast_ref() {
+            if let Some(crate::cmd::StoppedEarly) = e.downcast_ref() {
                 return;
             }
 
@@ -319,17 +319,23 @@ impl AppendLogInner {
 
 // %% CRATES: binary: rsp2 %%
 pub fn rsp2(bin_name: &str, version: VersionInfo) -> ! {
-    _rsp2_acgsd(false, bin_name, version)
+    _rsp2_full_program(StopAfter::DontStop, bin_name, version)
+}
+
+// HACK
+// %% CRATES: binary: rsp2-acgsd %%
+pub fn rsp2_acgsd(bin_name: &str, version: VersionInfo) -> ! {
+    _rsp2_full_program(StopAfter::Cg, bin_name, version)
 }
 
 // HACK
 // %% CRATES: binary: rsp2-acgsd-and-dynmat %%
 pub fn rsp2_acgsd_and_dynmat(bin_name: &str, version: VersionInfo) -> ! {
-    _rsp2_acgsd(true, bin_name, version)
+    _rsp2_full_program(StopAfter::Dynmat, bin_name, version)
 }
 
-fn _rsp2_acgsd(
-    stop_after_dynmat: bool,
+fn _rsp2_full_program(
+    stop_after: StopAfter,
     bin_name: &str,
     version: VersionInfo,
 ) -> ! {
@@ -351,7 +357,7 @@ fn _rsp2_acgsd(
         logfile.start(PathFile::new(trial.new_logfile_path()?)?)?;
 
         let ValidatedSettings(settings) = trial.read_base_settings()?;
-        trial.run_relax_with_eigenvectors(mpi_on_demand, &settings, filetype, &input, stop_after_dynmat)
+        trial.run_relax_with_eigenvectors(mpi_on_demand, &settings, filetype, &input, stop_after)
     });
 }
 

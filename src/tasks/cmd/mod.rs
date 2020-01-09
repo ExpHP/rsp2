@@ -112,7 +112,10 @@ impl fmt::Display for Iteration {
 #[derive(Debug, Fail)]
 #[fail(display = "stopped after dynmat.  THIS IS NOT AN ACTUAL ERROR. THIS IS A DUMB HACK. \
 You should not see this message.")]
-pub(crate) struct StoppedAfterDynmat;
+pub(crate) struct StoppedEarly;
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum StopAfter { Cg, Dynmat, DontStop }
 
 impl TrialDir {
     pub(crate) fn run_relax_with_eigenvectors(
@@ -122,9 +125,16 @@ impl TrialDir {
         file_format: StructureFileType,
         input: &PathAbs,
         // shameful HACK
-        stop_after_dynmat: bool,
+        stop_after: StopAfter,
     ) -> FailResult<()>
     {Ok({
+        match (stop_after, &settings.phonons) {
+            (StopAfter::Dynmat, None) |
+            (StopAfter::DontStop, None) => bail!("`phonons` config section is required"),
+            (StopAfter::Cg, None) => {},
+            (_, Some(_)) => {},
+        }
+
         let pot = PotentialBuilder::from_root_config(Some(&self), on_demand, &settings)?;
 
         let (optimizable_coords, mut meta) = {
@@ -164,7 +174,7 @@ impl TrialDir {
             let (coords, stuff) = {
                 self.do_main_ev_loop(
                     settings, &*pot, original_coords, meta.sift(),
-                    stop_after_dynmat,
+                    stop_after,
                 )?
             };
 
@@ -303,6 +313,7 @@ impl TrialDir {
 fn do_compute_dynmat(
     trial_dir: Option<&TrialDir>,
     settings: &Settings,
+    phonons_settings: &cfg::Phonons,
     pot: &dyn PotentialBuilder,
     qpoint_pfrac: V3,
     prim_coords: &Coords,
@@ -314,14 +325,14 @@ fn do_compute_dynmat(
     >,
 ) -> FailResult<DynamicalMatrix>
 {
-    if settings.phonons.analytic_hessian {
+    if phonons_settings.analytic_hessian {
         return do_compute_dynmat_with_hessian(
-            settings, pot, qpoint_pfrac, prim_coords, prim_meta,
+            settings, phonons_settings, pot, qpoint_pfrac, prim_coords, prim_meta,
         );
     }
 
-    let displacement_distance = settings.phonons.displacement_distance.expect("missing displacement-distance should have been caught sooner");
-    let symprec = settings.phonons.symmetry_tolerance.expect("missing symmetry-tolerance should have been caught sooner");
+    let displacement_distance = phonons_settings.displacement_distance.expect("missing displacement-distance should have been caught sooner");
+    let symprec = phonons_settings.symmetry_tolerance.expect("missing symmetry-tolerance should have been caught sooner");
 
     // Here exists a great deal of logic for dealing with supercells.
     // Ideally it would be factored out somehow to be less in your face,
@@ -332,7 +343,7 @@ fn do_compute_dynmat(
     // For now, we just make heavy use of scoping to keep the number of names in scope smallish.
     trace!("Constructing supercell");
     let (ref super_coords, ref sc) = {
-        let sc_dim = settings.phonons.supercell.dim_for_unitcell(prim_coords.lattice());
+        let sc_dim = phonons_settings.supercell.dim_for_unitcell(prim_coords.lattice());
         rsp2_structure::supercell::diagonal(sc_dim).build(prim_coords)
     };
 
@@ -358,10 +369,10 @@ fn do_compute_dynmat(
     };
 
     let mut phonopy_info = None;
-    let prim_displacements = match settings.phonons.disp_finder {
+    let prim_displacements = match phonons_settings.disp_finder {
         cfg::PhononDispFinder::Phonopy { diag: _ } => {
             let the_phonopy_info = self::phonopy::phonopy_displacements(
-                &settings.phonons, prim_coords, prim_meta.sift(), sc, super_coords,
+                &phonons_settings, prim_coords, prim_meta.sift(), sc, super_coords,
             )?;
 
             let prim_displacements = the_phonopy_info.prim_displacements.clone();
@@ -390,7 +401,7 @@ fn do_compute_dynmat(
         cfg::PhononDispFinder::Rsp2 { ref directions } => {
             trace!("Computing deperms in primitive cell");
 
-            let prim_deperms = do_compute_deperms(&settings.phonons, &prim_coords, &cart_ops)?;
+            let prim_deperms = do_compute_deperms(&phonons_settings, &prim_coords, &cart_ops)?;
             let prim_stars = crate::math::stars::compute_stars(&prim_deperms);
 
             let prim_displacements = crate::math::displacements::compute_displacements(
@@ -420,7 +431,7 @@ fn do_compute_dynmat(
     let super_meta = replicate_meta_for_force_constants(settings, &super_coords, &sc, prim_meta.sift())?;
 
     trace!("Computing deperms in supercell");
-    let super_deperms = do_compute_deperms(&settings.phonons, &super_coords, &cart_ops)?;
+    let super_deperms = do_compute_deperms(&phonons_settings, &super_coords, &cart_ops)?;
 
     trace!("num spacegroup ops: {}", cart_ops.len());
     trace!("num displacements:  {}", super_displacements.len());
@@ -492,7 +503,7 @@ fn do_compute_dynmat(
         &super_deperms,
         &sc,
     )?;
-    let force_constants = impose_sum_rule(settings, &sc, force_constants);
+    let force_constants = impose_sum_rule(phonons_settings, &sc, force_constants);
 
     if log_enabled!(target: "rsp2_tasks::special::phonopy_force_constants", log::Level::Trace) {
         if let Some(phonopy_info) = &phonopy_info {
@@ -546,6 +557,7 @@ fn do_compute_dynmat(
 // Vastly simpler than do_compute_dynmat
 fn do_compute_dynmat_with_hessian(
     settings: &Settings,
+    phonons_settings: &cfg::Phonons,
     pot: &dyn PotentialBuilder,
     qpoint_pfrac: V3,
     prim_coords: &Coords,
@@ -559,14 +571,14 @@ fn do_compute_dynmat_with_hessian(
 {
     trace!("Constructing supercell");
     let (ref super_coords, ref sc) = {
-        let sc_dim = settings.phonons.supercell.dim_for_unitcell(prim_coords.lattice());
+        let sc_dim = phonons_settings.supercell.dim_for_unitcell(prim_coords.lattice());
         rsp2_structure::supercell::diagonal(sc_dim).build(prim_coords)
     };
 
     let super_meta = replicate_meta_for_force_constants(settings, &super_coords, &sc, prim_meta.sift())?;
 
     let force_constants = do_force_constants_using_hessian(pot, &super_coords, super_meta.sift(), &sc)?;
-    let force_constants = impose_sum_rule(settings, &sc, force_constants);
+    let force_constants = impose_sum_rule(phonons_settings, &sc, force_constants);
 
     trace!("Computing sparse dynamical matrix");
     let dynmat = {
@@ -620,11 +632,11 @@ fn replicate_meta_for_force_constants(
 }
 
 fn impose_sum_rule(
-    settings: &Settings,
+    phonon_settings: &cfg::Phonons,
     sc: &SupercellToken,
     force_constants: ForceConstants,
 ) -> ForceConstants {
-    match settings.phonons.sum_rule {
+    match phonon_settings.sum_rule {
         None => force_constants,
 
         Some(cfg::PhononSumRule::TranslationalLikePhonopy { level })  => {
@@ -656,7 +668,7 @@ fn do_compute_deperms(
 }
 
 fn do_diagonalize_dynmat(
-    settings: &Settings,
+    phonons_settings: &cfg::Phonons,
     dynmat: DynamicalMatrix,
     // don't let MPI processes compete with python's threads
     _: EcoModeProof<'_>,
@@ -670,7 +682,7 @@ fn do_diagonalize_dynmat(
     }
     trace!("Diagonalizing dynamical matrix");
     let (freqs, evecs) = {
-        match settings.phonons.eigensolver {
+        match phonons_settings.eigensolver {
             cfg::PhononEigensolver::Phonopy(cfg::AlwaysFail(never, _)) => match never {},
             cfg::PhononEigensolver::Rsp2 { .. } => panic!("(BUG!) setting phonons.eigensolver is not normalized!"),
             cfg::PhononEigensolver::Dense {} => {
@@ -1240,13 +1252,19 @@ impl TrialDir {
     {Ok({
         let pot = PotentialBuilder::from_root_config(Some(&self), on_demand, &settings)?;
 
+        let phonons_settings = match &settings.phonons {
+            Some(x) => x,
+            None => bail!("`phonons` settings is required to do EV analysis"),
+        };
+
         let qpoint = V3::zero();
         let dynmat = do_compute_dynmat(
-            Some(&self), settings, &*pot, qpoint, &stored.coords, stored.meta().sift(),
+            Some(&self), settings, phonons_settings,
+            &*pot, qpoint, &stored.coords, stored.meta().sift(),
         )?;
         // Don't write the dynamical matrix; unclear where to put it.
         let (freqs, evecs) = pot.eco_mode(|eco_proof| {
-            do_diagonalize_dynmat(&settings, dynmat, eco_proof)
+            do_diagonalize_dynmat(&phonons_settings, dynmat, eco_proof)
         })?;
 
         trace!("============================");
@@ -1301,7 +1319,12 @@ pub(crate) fn run_dynmat_analysis(
 ) -> FailResult<GammaSystemAnalysis>
 {
     eco_mode_without_potential(settings, on_demand, |eco_proof| Ok({
-        let (freqs, evecs) = do_diagonalize_dynmat(settings, dynmat, eco_proof)?;
+        let phonons_settings = match &settings.phonons {
+            Some(x) => x,
+            None => bail!("`phonons` config section is required for rsp2-dynmat-analysis"),
+        };
+
+        let (freqs, evecs) = do_diagonalize_dynmat(phonons_settings, dynmat, eco_proof)?;
 
         trace!("Computing eigensystem info");
         let ev_analysis = do_gamma_system_analysis(
@@ -1566,10 +1589,15 @@ pub(crate) fn run_dynmat_at_q(
 ) -> FailResult<DynamicalMatrix> {
     let pot = PotentialBuilder::from_root_config(None, on_demand, &settings)?;
 
+    let phonons_settings = match &settings.phonons {
+        Some(x) => x,
+        None => bail!("`phonons` config section is required to compute dynamical matrices"),
+    };
+
     let meta = structure.meta();
     let coords = structure.coords;
 
-    do_compute_dynmat(None, settings, &pot, qpoint_frac, &coords, meta.sift())
+    do_compute_dynmat(None, settings, phonons_settings, &pot, qpoint_frac, &coords, meta.sift())
 }
 
 //=================================================================
@@ -1611,6 +1639,11 @@ impl TrialDir {
         use crate::cmd::EvLoopStructureKind::*;
         use crate::filetypes::Eigensols;
 
+        let phonons_settings = match &settings.phonons {
+            Some(x) => x,
+            None => bail!("`rsp2-run-after-diagonalization` cannot be used without a `phonons:` config section"),
+        };
+
         let pot = PotentialBuilder::from_root_config(Some(&self), on_demand, &settings)?;
 
         let (coords, meta) = self.read_stored_structure_data(&self.structure_path(PreEvChase(prev_iteration)))?;
@@ -1620,7 +1653,7 @@ impl TrialDir {
                 trace!("Diagonalizing due to --diagonalize.");
                 pot.eco_mode(|proof| {
                     let dynmat = DynamicalMatrix::load(self.join(self.gamma_dynmat_path(prev_iteration)))?;
-                    do_diagonalize_dynmat(settings, dynmat, proof)
+                    do_diagonalize_dynmat(phonons_settings, dynmat, proof)
                 })?
             } else {
                 let Eigensols {
@@ -1656,7 +1689,7 @@ impl TrialDir {
         }
 
         let qpoint = V3::zero();
-        let dynmat = do_compute_dynmat(Some(self), settings, &pot, qpoint, &coords, meta.sift())?;
+        let dynmat = do_compute_dynmat(Some(self), settings, phonons_settings, &pot, qpoint, &coords, meta.sift())?;
         dynmat.save(self.gamma_dynmat_path(next_iteration))?;
 
         Ok(did_ev_chasing)

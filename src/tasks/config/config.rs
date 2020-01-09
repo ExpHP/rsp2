@@ -98,7 +98,7 @@ pub struct Settings {
     pub cg: Cg,
 
     /// See the type for documentation.
-    pub phonons: Phonons,
+    pub phonons: Nullable<Phonons>,
 
     /// See the type for documentation.
     pub ev_chase: EigenvectorChase,
