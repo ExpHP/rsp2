@@ -60,5 +60,9 @@ def eigsh_custom(A,
 # precompute OPinv for faster repeated shift-invert calls
 def get_OPinv(A, sigma, tol=0):
     # FIXME usage of scipy implementation detail
-    matvec = spla.eigen.arpack.get_OPinv_matvec(A, M=None, symmetric=True, sigma=sigma, tol=tol)
+    try:
+        matvec = spla.eigen.arpack.get_OPinv_matvec(A, M=None, symmetric=True, sigma=sigma, tol=tol)
+    except TypeError:
+        # argument name changed
+        matvec = spla.eigen.arpack.get_OPinv_matvec(A, M=None, hermitian=True, sigma=sigma, tol=tol)
     return spla.LinearOperator(A.shape, matvec=matvec, dtype=A.dtype)
