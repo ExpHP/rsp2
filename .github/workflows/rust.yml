@@ -1,0 +1,58 @@
+name: Rust
+
+on: [push]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v1
+
+    - name: Cache cargo registry
+      uses: actions/cache@v1
+      with:
+        path: ~/.cargo/registry
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+    - name: Cache cargo index
+      uses: actions/cache@v1
+      with:
+        path: ~/.cargo/git
+        key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+    - name: Cache cargo build
+      uses: actions/cache@v1
+      with:
+        path: target
+        key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Cache venv
+      id: cache-venv
+      uses: actions/cache@v1
+      with:
+        path: venv
+        key: ${{ runner.os }}-python-venv-${{ hashFiles('requirements.txt') }}
+
+    - name: Set up Python 3.7
+      uses: actions/setup-python@v1
+      with:
+        python-version: 3.7
+
+    - name: Install Package Requirements
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y liblapack-dev libopenmpi-dev libffi-dev
+
+    - name: Install Python dependencies
+      if: steps.cache-venv.outputs.cache-hit != 'true'
+      run: |
+        # use venv because then we can cache it
+        python -m venv venv
+        source venv/bin/activate
+        python -m pip install --upgrade pip
+        # phonopy doesn't like it if numpy isn't installed first
+        pip install -r <(grep numpy requirements.txt)
+        pip install -r requirements.txt
+
+    - name: Build
+      run: cargo build --verbose
+    - name: Run tests
+      run: cargo test --verbose
