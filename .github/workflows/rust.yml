@@ -39,7 +39,7 @@ jobs:
     - name: Install Package Requirements
       run: |
         sudo apt-get update
-        sudo apt-get install -y liblapack-dev libopenmpi-dev libffi-dev
+        sudo apt-get install -y liblapack-dev libopenmpi-dev libffi-dev libclang-dev gfortran
 
     - name: Install Python dependencies
       if: steps.cache-venv.outputs.cache-hit != 'true'
