@@ -479,6 +479,8 @@ gen_each!{
 
 // ---------------------------------------------------------------------------
 
+// slice-of-array integration.
+
 gen_each!{
     @{Mn_n}
     for_each!( {$Mn:ident $n:tt} ) => {

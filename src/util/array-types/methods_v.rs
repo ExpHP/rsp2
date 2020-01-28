@@ -349,7 +349,7 @@ pub trait RandomUnit: IsV + Sized {
 
 // http://mathworld.wolfram.com/CirclePointPicking.html
 impl<X: Field> RandomUnit for V2<X>
- where X: PrimitiveFloat,
+where X: PrimitiveFloat,
 {
     #[inline]
     fn random_unit_with(mut rng: impl rand::Rng) -> Self
@@ -370,7 +370,7 @@ impl<X: Field> RandomUnit for V2<X>
 
 // http://mathworld.wolfram.com/CirclePointPicking.html
 impl<X: Field> RandomUnit for V3<X>
- where X: PrimitiveFloat,
+where X: PrimitiveFloat,
 {
     #[inline]
     fn random_unit_with(mut rng: impl rand::Rng) -> Self
@@ -392,6 +392,29 @@ impl<X: Field> RandomUnit for V3<X>
 }
 
 // ---------------------------------------------------------------------------
+
+// stdlib integration
+
+gen_each!{
+    @{Vn_n}
+    for_each!( {$Vn:ident $n:tt} ) => {
+        impl<X: Semiring> std::iter::Sum for $Vn<X>
+        where X: PrimitiveSemiring,
+        {
+            fn sum<I: Iterator<Item=$Vn<X>>>(iter: I) -> Self {
+                iter.fold($Vn::zero(), |a, b| a + b)
+            }
+        }
+
+        impl<'a, X: Semiring> std::iter::Sum<&'a $Vn<X>> for $Vn<X>
+        where X: PrimitiveSemiring,
+        {
+            fn sum<I: Iterator<Item=&'a $Vn<X>>>(iter: I) -> Self {
+                iter.fold($Vn::zero(), |a, b| a + b)
+            }
+        }
+    }
+}
 
 // slice-of-array integration.
 
