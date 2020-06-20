@@ -46,6 +46,17 @@ const WEAK_RAMAN_TOL: filetypes::RamanJsonTolerances = filetypes::RamanJsonToler
     intensity_nonzero_rel_tol: 1e-4,
 };
 
+
+// Used by tests that optimize the lattice anisotropically and with changing cell angle.
+const VERY_WEAK_RAMAN_TOL: filetypes::RamanJsonTolerances = filetypes::RamanJsonTolerances {
+    frequency: filetypes::FrequencyTolerances {
+        max_acoustic: 0.01,
+        rel_tol: 5e-2,
+    },
+    intensity_nonzero_thresh: 1e-12,
+    intensity_nonzero_rel_tol: 1e-1,
+};
+
 // Uses the rust reimplementations of REBO/KCZ
 #[ignore] // This test is expensive; use `cargo test -- --ignored` to run it!
 #[test]
@@ -110,6 +121,46 @@ fn simple_test_optimize() -> Result<()> {
                 after_cg.coords.lattice().norms(),
                 [2.4592708, 2.4592708, 13.374096],
             );
+        }))
+        .run()
+}
+
+// Tests lattice optimization during relaxation.
+#[ignore] // This test is expensive; use `cargo test -- --ignored` to run it!
+#[test]
+fn simple_test_optimize_matrix() -> Result<()> {
+    let env = cli_test::Environment::init();
+    CliTest::cargo_binary(&env, "rsp2")
+        .arg("-c").arg(resource("defaults.yaml"))
+        .arg("-c").arg(resource("simple-relax-optimize-22.yaml"))
+        .arg(resource("simple-badangle.vasp").as_path())
+        .arg("-o").arg("out")
+        .check_file::<filetypes::RamanJson>(
+            "out/raman.json".as_ref(),
+            resource("simple-out/raman.json").as_ref(),
+            VERY_WEAK_RAMAN_TOL,
+        )
+        .check(|dir| Ok({
+            let cell_angle = |latt: &rsp2_structure::Lattice| {
+                let u = latt.vectors()[0].unit();
+                let v = latt.vectors()[1].unit();
+                f64::acos(u.dot(&v))
+            };
+            let before_cg = read_poscar(dir.join("out/initial.structure/POSCAR"))?;
+            assert_close!(
+                rel=1e-5,
+                before_cg.coords.lattice().norms(),
+                [2.33630723, 2.3363072, 13.374096],
+            );
+            assert_close!(rel=1e-5, f64::to_radians(119.), cell_angle(before_cg.coords.lattice()));
+
+            let after_cg = read_poscar(dir.join("out/ev-loop-01.1.structure/POSCAR"))?;
+            assert_close!(
+                rel=1e-5,
+                after_cg.coords.lattice().norms(),
+                [2.4592708, 2.4592708, 13.374096],
+            );
+            assert_close!(rel=1e-5, f64::to_radians(120.), cell_angle(after_cg.coords.lattice()));
         }))
         .run()
 }

@@ -90,6 +90,23 @@ pub struct Settings {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parameters: Nullable<Parameters>,
 
+    /// Provide relaxation of the top left 2x2 lattice submatrix.
+    ///
+    /// If supplied (an empty mapping will do), `parameters` will be ignored and
+    /// all four elements of the 2x2 submatrix will be optimized.
+    ///
+    /// This is a temporary hack until a more natural design for how to write
+    /// config for this can be designed.
+    ///
+    /// # Example:
+    ///
+    /// ```yaml
+    /// lattice-relax-22: {}
+    /// ```
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lattice_relax_22: Nullable<LatticeRelax>,
+
     /// See the type for documentation.
     #[serde(default)]
     pub acoustic_search: AcousticSearch,
@@ -223,6 +240,11 @@ impl Default for ScaleRanges {
         }
     }
 }
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub struct LatticeRelax {}
 
 pub type Parameters = [Parameter; 3];
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]

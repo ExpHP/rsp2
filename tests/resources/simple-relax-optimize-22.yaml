@@ -1,0 +1,34 @@
+# NOTE: apply this after defaults.yaml
+
+potential:
+  - kc-z-new:
+      cutoff: 14
+      cutoff-length: 0 # simulate lammps' quirks
+  - rebo-nonreactive:
+      params: lammps
+
+cg:
+  stop-condition:
+    any:
+      - value-delta:
+          rel-greater-than: 0
+          steps-ago: 10
+      - iterations: 1000 # increase max number of iterations
+
+scale-ranges:
+  scalables:
+    # make the lattice parameter incorrect
+    - parameter:
+        axis-mask: [1, 1, 0]
+        value: 0.95
+
+# enable full optimization of 2x2 submatrix
+lattice-relax-22: {}
+
+phonons:
+  eigensolver:
+    dense: {}
+
+bond-radius: 1.8
+lammps:
+  processor-axis-mask: [true, true, false]

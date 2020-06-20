@@ -25,7 +25,7 @@ use super::GammaSystemAnalysis;
 use super::{write_eigen_info_for_humans, write_eigen_info_for_machines};
 use super::{EvLoopStructureKind, Iteration};
 use super::StopAfter;
-use super::param_optimization::RelaxationOptimizationHelper;
+use super::param_optimization::{RelaxationOptimizationHelper, ParamOptimizationHelper, LatticeOptimizationHelper};
 
 use rsp2_tasks_config::{self as cfg, Settings};
 
@@ -162,7 +162,9 @@ impl TrialDir {
 
         let snapshot_fn = SnapshotFn::new(self.snapshot_structure_path(), meta.sift(), &settings.snapshot);
         let coords = do_cg_relax_with_param_optimization_if_supported(
-            pot, &settings.cg, snapshot_fn, settings.parameters.as_ref(), coords, meta.sift(),
+            pot, &settings.cg, snapshot_fn,
+            settings.parameters.as_ref(), settings.lattice_relax_22.as_ref(),
+            coords, meta.sift(),
         )?;
 
         trace!("============================");
@@ -396,13 +398,15 @@ fn do_cg_relax_with_param_optimization_if_supported(
     cg_settings: &cfg::Cg,
     snapshot_fn: SnapshotFn,
     parameters: Option<&cfg::Parameters>,
+    lattice_relax_settings: Option<&cfg::LatticeRelax>,
     // NOTE: takes ownership of coords because it is likely an accident to reuse them
     coords: Coords,
     meta: CommonMeta,
 ) -> FailResult<Coords>
 {
-    if let Some(parameters) = parameters {
-        if let Some(x) = do_cg_relax_with_param_optimization(pot, cg_settings, snapshot_fn.clone(), parameters, &coords, meta.sift())? {
+    //if let Some(parameters) = parameters {
+    if parameters.is_some() || lattice_relax_settings.is_some() {
+        if let Some(x) = do_cg_relax_with_param_optimization(pot, cg_settings, snapshot_fn.clone(), parameters, lattice_relax_settings, &coords, meta.sift())? {
             return Ok(x);
         } else {
             trace!("Not relaxing with parameters because the potential does not support it.");
@@ -418,7 +422,8 @@ fn do_cg_relax_with_param_optimization(
     pot: &dyn PotentialBuilder,
     cg_settings: &cfg::Cg,
     snapshot_fn: SnapshotFn,
-    parameters: &cfg::Parameters,
+    parameters: Option<&cfg::Parameters>,
+    lattice_relax_settings: Option<&cfg::LatticeRelax>,
     coords: &Coords,
     meta: CommonMeta,
 ) -> FailResult<Option<Coords>>
@@ -429,7 +434,16 @@ fn do_cg_relax_with_param_optimization(
     };
 
     // Object that encapsulates the coordinate conversion logic for param optimization
-    let param_helper = Rc::new(RelaxationOptimizationHelper::new(parameters, coords.lattice()));
+    let param_helper = match (parameters, lattice_relax_settings) {
+        // lattice-based takes precedence
+        (_, Some(cfg)) => {
+            Rc::new(RelaxationOptimizationHelper::LatticeBased(LatticeOptimizationHelper::new(cfg, coords.lattice())))
+        },
+        (Some(cfg), None) => {
+            Rc::new(RelaxationOptimizationHelper::ParamBased(ParamOptimizationHelper::new(cfg, coords.lattice())))
+        },
+        (None, None) => unreachable!("checked beforehand"),
+    };
 
     let (mut cg, stop_condition_cereal) = cg_builder_from_config(cg_settings);
 
@@ -479,32 +493,8 @@ fn do_cg_relax_with_param_optimization(
          cg.run(
             &param_helper.flatten_coords(&coords),
             {
-                struct Adapter {
-                    helper: Rc<RelaxationOptimizationHelper>,
-                    bond_diff_fn: Box<dyn BondDiffFn<CommonMeta>>,
-                    meta: CommonMeta,
-                }
-
-                impl cg::DiffFn for Adapter {
-                    type Error = failure::Error;
-
-                    fn compute(&mut self, flat_coords: &[f64]) -> Result<(f64, Vec<f64>), failure::Error> {
-                        let Adapter { ref helper, ref mut bond_diff_fn, ref meta } = *self;
-                        let ref coords = helper.unflatten_coords(flat_coords);
-                        let (value, bond_grads) = bond_diff_fn.compute(coords, meta.clone())?;
-                        let flat_grad = helper.flatten_grad(flat_coords, &bond_grads);
-                        Ok((value, flat_grad))
-                    }
-
-                    fn check(&mut self, flat_coords: &[f64]) -> Result<(), failure::Error> {
-                        let Adapter { ref helper, ref mut bond_diff_fn, ref meta } = *self;
-                        let ref coords = helper.unflatten_coords(flat_coords);
-                        bond_diff_fn.check(coords, meta.clone())
-                    }
-                }
-
                 let helper = param_helper.clone();
-                Adapter { helper, bond_diff_fn, meta }
+                crate::cmd::param_optimization::OptimizingDiffFn { helper, bond_diff_fn, meta }
             },
         ).unwrap().position
     };
