@@ -21,7 +21,7 @@ except ImportError:
     info('  (rsp2 source root)/src/python')
     sys.exit(1)
 
-from unfold_lib import Supercell
+from unfold_lib import Supercell, griddata_periodic
 from unfold_lib.util import check_arrays
 from unfold_lib.util import map_with_progress
 import unfold_lib.coalesce as coalesce
@@ -1002,7 +1002,8 @@ class TaskBandPlot(Task):
 
         parser.add_argument(
             '--plot-baseline-file', type=str, metavar='FILE', help=
-            'Data file for a "normal" plot.  Phonopy band.yaml is accepted.'
+            'Data file for a "normal" plot. (e.g. bands from the structure whose BZ '
+            'we are unfolding into).  Phonopy band.yaml is accepted.'
         )
 
         parser.add_argument(
@@ -1031,6 +1032,12 @@ class TaskBandPlot(Task):
             'This can be supplied multiple times.'
         )
 
+        # because axes.prop_cycle in .mplrc files doesn't seem to work
+        parser.add_argument(
+            '--plot-baseline-color', metavar='COLOR', default='uniform:#770000', help=
+            'Set color for the baseline.  Must be of form "uniform:MPLCOLORSTRING"'
+        )
+
         parser.add_argument(
             '--plot-unfolded-style', metavar='STYLE', action='append', default=[], help=
             'Apply a matplotlib stylesheet to the scatter plot for the '
@@ -1041,6 +1048,11 @@ class TaskBandPlot(Task):
             '--plot-baseline-style', metavar='STYLE', action='append', default=[], help=
             'Apply a matplotlib stylesheet to the baseline scatter plot if '
             'there is one. This can be supplied multiple times.'
+        )
+
+        parser.add_argument(
+            '--plot-baseline-mode', metavar='MODE', default='scatter', choices=['scatter', 'line'], help=
+            "'scatter' or 'line' for plotting the baseline bands."
         )
 
         parser.add_argument(
@@ -1139,6 +1151,10 @@ class TaskBandPlot(Task):
         scatter_data['alpha'] = Alpha
         scatter_data = { key: array[mask] for (key, array) in scatter_data.items() }
 
+        if not args.plot_baseline_color.startswith('uniform:'):
+            die(f'invalid baseline color string: {repr(args.plot_baseline_color)} (must begin with "uniform:")')
+        plot_baseline_color = args.plot_baseline_color[len('uniform:'):]
+
         return generate_band_plot(
             scatter_data=scatter_data,
             baseline_data=baseline_data,
@@ -1146,6 +1162,8 @@ class TaskBandPlot(Task):
             plot_style=args.plot_style,
             plot_unfolded_style=args.plot_unfolded_style,
             plot_baseline_style=args.plot_baseline_style,
+            plot_baseline_mode=args.plot_baseline_mode,
+            plot_baseline_color=plot_baseline_color,
             plot_xmax=self.band_path.require(args)['path_x_coordinates'][-1],
             plot_xticks=self.band_path.require(args)['plot_xticks'],
             plot_xticklabels=self.band_path.require(args)['plot_xticklabels'],
@@ -1319,61 +1337,6 @@ def resample_qg_indices(
         'Q': qg_q_ids[plot_kpoint_qg_ids],
         'G': qg_g_ids[plot_kpoint_qg_ids],
     }
-
-def griddata_periodic(
-        points,
-        values,
-        xi,
-        lattice,
-        _supercell=None,
-        # set this to reduce memory overhead
-        periodic_axis_mask=(1,1,1),
-        **kwargs,
-):
-    """
-    scipy.interpolate.griddata, but where points (in cartesian) are periodic
-    with the given lattice.  The data provided is complemented by images
-    from the surrounding unit cells.
-
-    The lattice is assumed to have small skew.
-    """
-    points_frac = unfold_lib.reduce_carts(points, lattice) @ np.linalg.inv(lattice)
-    xi_frac = unfold_lib.reduce_carts(xi, lattice) @ np.linalg.inv(lattice)
-
-    #debug_path((points_frac @ lattice)[:,:2], lattice[:2,:2], (xi_frac @ lattice)[:,:2], _supercell.recip())
-
-    for axis, mask_bit in enumerate(periodic_axis_mask):
-        if mask_bit:
-            unit = [0] * 3
-            unit[axis] = 1
-
-            points_frac = np.vstack([
-                points_frac - unit,
-                points_frac,
-                points_frac + unit,
-                ])
-            values = np.hstack([values] * 3)
-
-    points = points_frac @ lattice
-    xi = xi_frac @ lattice
-
-    # Delete axes in which the points have no actual extent, because
-    # they'll make QHull mad. (we'd be giving it a degenerate problem)
-    true_axis_mask = [1, 1, 1]
-    for axis in reversed(range(3)):
-        max_point = points_frac[:, axis].max()
-        if np.allclose(max_point, points_frac[:, axis].min()):
-            np.testing.assert_allclose(max_point, xi_frac[:, axis].min())
-            np.testing.assert_allclose(max_point, xi_frac[:, axis].max())
-
-            xi = np.delete(xi, axis, axis=1)
-            points = np.delete(points, axis, axis=1)
-            true_axis_mask[axis] = 0
-
-    #if xi.shape[1] == 2:
-    #    debug_path(points, lattice, xi)
-
-    return scint.griddata(points, values, xi, **kwargs)
 
 def decimate_plot_x(d, decimate_x: int):
     d = dict(d)
@@ -1603,6 +1566,8 @@ def generate_band_plot(
         plot_style: tp.List[str],
         plot_unfolded_style: tp.List[str],
         plot_baseline_style: tp.List[str],
+        plot_baseline_mode: str,
+        plot_baseline_color: str,
         plot_xticks: np.ndarray,
         plot_xticklabels: np.ndarray,
         plot_ylim: tp.Tuple[tp.Optional[float], tp.Optional[float]],
@@ -1655,7 +1620,14 @@ def generate_band_plot(
             with mpl_context([BASELINE_CONFIG] + plot_baseline_style):
                 base_X /= np.max(base_X)
                 base_X *= np.max(X)
-                ax.scatter(base_X, base_Y)
+                if plot_baseline_mode == 'scatter':
+                    ax.scatter(base_X.reshape(-1), base_Y.reshape(-1), color=plot_baseline_color)
+                elif plot_baseline_mode == 'line':
+                    for (base_X_row, base_Y_row) in zip(base_X, base_Y):
+                        ax.plot(base_X_row, base_Y_row, color=plot_baseline_color)
+                else: assert False, plot_baseline_mode
+
+        ax.axhline(0, color='k', linestyle=':', zorder=0)
 
         for x in plot_xticks:
             ax.axvline(x, color='k', zorder=0)
@@ -1852,8 +1824,11 @@ def read_baseline_plot(path):
     d = dwim.from_path(path)
     d = d['phonon']
     for qpoint in d:
-        X.extend([qpoint['distance']] * len(qpoint['band']))
-        Y.extend(band['frequency'] * THZ_TO_WAVENUMBER for band in qpoint['band'])
+        X.append([qpoint['distance']] * len(qpoint['band']))
+        Y.append([band['frequency'] * THZ_TO_WAVENUMBER for band in qpoint['band']])
+    # order by band, then frequency
+    X = np.array(X).T
+    Y = np.array(Y).T
     return X, Y
 
 #---------------------------------------------------------------

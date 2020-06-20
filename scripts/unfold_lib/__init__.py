@@ -284,6 +284,63 @@ def find_repeats(supercell_matrix):
     assert round(np.linalg.det(hnf)) == expected_volume
     return np.diag(hnf)
 
+def griddata_periodic(
+        points,
+        values,
+        xi,
+        lattice,
+        _supercell=None, # only for debugging
+        # set this to reduce memory overhead
+        periodic_axis_mask=(1,1,1),
+        **kwargs,
+):
+    """
+    scipy.interpolate.griddata, but where points (in cartesian) are periodic
+    with the given lattice.  The data provided is complemented by images
+    from the surrounding unit cells.
+
+    The lattice is assumed to have small skew.
+    """
+    import scipy.interpolate as scint
+
+    points_frac = reduce_carts(points, lattice) @ np.linalg.inv(lattice)
+    xi_frac = reduce_carts(xi, lattice) @ np.linalg.inv(lattice)
+
+    #debug_path((points_frac @ lattice)[:,:2], lattice[:2,:2], (xi_frac @ lattice)[:,:2], _supercell.recip())
+
+    for axis, mask_bit in enumerate(periodic_axis_mask):
+        if mask_bit:
+            unit = [0] * 3
+            unit[axis] = 1
+
+            points_frac = np.vstack([
+                points_frac - unit,
+                points_frac,
+                points_frac + unit,
+                ])
+            values = np.hstack([values] * 3)
+
+    points = points_frac @ lattice
+    xi = xi_frac @ lattice
+
+    # Delete axes in which the points have no actual extent, because
+    # they'll make QHull mad. (we'd be giving it a degenerate problem)
+    true_axis_mask = [1, 1, 1]
+    for axis in reversed(range(3)):
+        max_point = points_frac[:, axis].max()
+        if np.allclose(max_point, points_frac[:, axis].min()):
+            np.testing.assert_allclose(max_point, xi_frac[:, axis].min())
+            np.testing.assert_allclose(max_point, xi_frac[:, axis].max())
+
+            xi = np.delete(xi, axis, axis=1)
+            points = np.delete(points, axis, axis=1)
+            true_axis_mask[axis] = 0
+
+    #if xi.shape[1] == 2:
+    #    debug_path(points, lattice, xi)
+
+    return scint.griddata(points, values, xi, **kwargs)
+
 #---------------------------------------------------------------
 # Other utils
 
