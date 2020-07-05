@@ -209,3 +209,4 @@ impl Params {
 
 // Helps downstream code compute the "local normal" as defined in the Kolmogorov/Crespi paper.
 pub use crate::util::geometry::unit_cross;
+pub use crate::util::geometry::unit;

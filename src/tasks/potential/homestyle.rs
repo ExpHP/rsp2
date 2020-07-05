@@ -119,31 +119,38 @@ mod kc {
             );
             bonds.set_check_frequency(skin_check_frequency);
 
+            let get_bond_graph = || {
+                let intralayer_bonds: Option<meta::FracBonds> = meta.pick();
+                let intralayer_bonds = match intralayer_bonds {
+                    Some(bonds) => bonds,
+                    None => {
+                        // FIXME: copypasta
+                        let elements: meta::SiteElements = meta.pick();
+                        std::rc::Rc::new(rsp2_structure::bonds::FracBonds::compute_with_meta(
+                            coords,
+                            elements.iter().cloned(),
+                            |&a, &b| match (a, b) {
+                                (Element::CARBON, Element::CARBON) => Some(2.01),
+                                (Element::CARBON, Element::HYDROGEN) |
+                                (Element::HYDROGEN, Element::CARBON) => Some(1.51),
+                                (Element::HYDROGEN, Element::HYDROGEN) => Some(1.21),
+                                _ => None,
+                            },
+                        ).expect("couldn't get bonds"))
+                    },
+                };
+                intralayer_bonds.to_periodic_graph()
+            };
+
             let normal_info = match normals {
                 cfg::KolmogorovCrespiNormals::Z {} => NormalInfo::Z,
-                cfg::KolmogorovCrespiNormals::Local {} => {
-                    let intralayer_bonds: Option<meta::FracBonds> = meta.pick();
-                    let intralayer_bonds = match intralayer_bonds {
-                        Some(bonds) => bonds,
-                        None => {
-                            // FIXME: copypasta
-                            let elements: meta::SiteElements = meta.pick();
-                            std::rc::Rc::new(rsp2_structure::bonds::FracBonds::compute_with_meta(
-                                coords,
-                                elements.iter().cloned(),
-                                |&a, &b| match (a, b) {
-                                    (Element::CARBON, Element::CARBON) => Some(2.01),
-                                    (Element::CARBON, Element::HYDROGEN) |
-                                    (Element::HYDROGEN, Element::CARBON) => Some(1.51),
-                                    (Element::HYDROGEN, Element::HYDROGEN) => Some(1.21),
-                                    _ => None,
-                                },
-                            ).expect("couldn't get bonds"))
-                        },
-                    };
-                    let intralayer_graph = intralayer_bonds.to_periodic_graph();
-
-                    NormalInfo::Local { intralayer_graph }
+                cfg::KolmogorovCrespiNormals::LocalFast {} => NormalInfo::NotZ {
+                    kind: NormalKind::LocalFast,
+                    intralayer_graph: get_bond_graph(),
+                },
+                cfg::KolmogorovCrespiNormals::LocalTrue {} => NormalInfo::NotZ {
+                    kind: NormalKind::Local,
+                    intralayer_graph: get_bond_graph(),
                 },
             };
 
@@ -168,10 +175,13 @@ mod kc {
         normal_info: NormalInfo,
     }
 
+    // FIXME we should probably just get rid of this type in favor of NormalKind
+    //
     // Information needed to compute normals
     enum NormalInfo {
         Z,
-        Local {
+        NotZ {
+            kind: NormalKind,
             intralayer_graph: PeriodicGraph,
         },
     }
@@ -257,8 +267,8 @@ mod kc {
                     }).unzip()
             },
 
-            NormalInfo::Local { intralayer_graph } => {
-                let normals = LocalNormals::compute(&intralayer_graph, coords)?;
+            &NormalInfo::NotZ { kind, ref intralayer_graph } => {
+                let normals = Normals::compute(intralayer_graph, coords, kind)?;
 
                 let (part_values, grad_items): (Vec<_>, Vec<_>) = {
                     CondIterator::new(interaction_pairs, parallel)
@@ -293,13 +303,11 @@ mod kc {
                 }
 
                 for (site, d_normal) in normal_grads.into_iter().enumerate() {
-                    let [term_1, term_2] = normals.get_bond_grad_terms(site, d_normal);
-                    bond_grads.push(term_1);
-                    bond_grads.push(term_2);
+                    bond_grads.extend(normals.get_bond_grad_terms(site, d_normal));
                 }
 
                 (part_values, bond_grads)
-            }, // NormalInfo::Local => { ... }
+            }, // NormalInfo::NotZ => { ... }
         }; // let (part_values, bond_grads) = match normal_info { ... }
         let value = part_values.iter().sum();
         Ok((value, bond_grads))
@@ -344,7 +352,7 @@ mod kc {
                         }).unzip()
                 },
 
-                NormalInfo::Local { .. } => {
+                NormalInfo::NotZ { .. } => {
                     unimplemented!("analytic hessian with general normal vectors for Kolmogorov Crespi is not supported!");
                 },
             }
@@ -379,7 +387,8 @@ mod kc {
         {Ok({
             match self.cfg.normals {
                 cfg::KolmogorovCrespiNormals::Z {} => Box::new(self.optimized_disp_fn_for_z(coords, meta)?),
-                cfg::KolmogorovCrespiNormals::Local {} => self._default_initialize_disp_fn(coords, meta)?,
+                cfg::KolmogorovCrespiNormals::LocalFast {} |
+                cfg::KolmogorovCrespiNormals::LocalTrue {} => self._default_initialize_disp_fn(coords, meta)?,
             }
         })}
 
@@ -438,34 +447,54 @@ mod kc {
         }
     }
 
-    use local_normals::LocalNormals;
-    mod local_normals {
+    use normals::{Normals, NormalKind};
+    mod normals {
         use super::*;
+        use stack::{ArrayVec, Vector as _};
 
-        pub struct LocalNormals {
-            data: Vec<LocalNormalData>,
+        pub struct Normals {
+            data: Vec<NormalData>,
         }
 
-        struct LocalNormalData {
+        #[derive(Debug, Copy, Clone)]
+        pub enum NormalKind {
+            /// Local normals, as originally implemented in rsp2.
+            ///
+            /// This definition comes from a slight misinterpretation of the paper.
+            /// It defines the local using ONLY the three neighbors. (it is the normal
+            /// of the plane that those three neighbors co-inhabit)
+            LocalFast,
+
+            /// Local normals, as ACTUALLY defined in Kolmogorov and Crespi, 2005.
+            ///
+            /// The exact definition comes from this sentence in the paper:
+            /// "For example, one can average the three normalized cross
+            /// products of the displacement vectors to the nearest neighbors."
+            Local,
+        }
+
+        /// Data for the normal at a single site.
+        struct NormalData {
             normal: V3,
-            // virtual bonds...
-            bond_12: FracBond, // ...from the first neighbor to the second neighbor
-            bond_13: FracBond, // ...from the first neighbor to the third neighbor
-            // ...in cartesian form...
-            r12: V3,
-            r13: V3,
-            // ...and derivatives with respect to those bonds
-            normal_J_r12: M33,
-            normal_J_r13: M33,
-            // (note: there is no need to consider the virtual bond between the second and third
-            //        neighbors, and in fact, doing so would double-count some forces once we convert
-            //        back from per-bond forces to per-site forces)
+            /// Data for every bond (WITHIN a layer) that played a role in computing `normal`,
+            /// so that derivatives with respect to the bonds can be recovered.
+            ///
+            /// The bonds don't need to be in canonical order.
+            items: ArrayVec<[NormalItem; 3]>,
         }
 
-        impl LocalNormals {
+        /// Describes the derivative of a single normal with respect to a single bond.
+        struct NormalItem {
+            bond: FracBond, // the virtual bond...
+            r: V3, // ...in cartesian form...
+            normal_J_r: M33, // ...and derivative with respect to it
+        }
+
+        impl Normals {
             pub fn compute(
                 intralayer_graph: &PeriodicGraph,
                 coords: &Coords,
+                normal_kind: NormalKind,
             ) -> FailResult<Self> {
                 assert_eq!(coords.len(), intralayer_graph.node_count());
                 let lattice = coords.lattice();
@@ -473,9 +502,9 @@ mod kc {
 
                 let data = {
                     (0..coords.len()).map(|site| {
-                        let mut edges = intralayer_graph.frac_bonds_from(site);
-                        match (edges.next(), edges.next(), edges.next(), edges.next()) {
-                            (Some(b01), Some(b02), Some(b03), None) => {
+                        match normal_kind {
+                            NormalKind::LocalFast => {
+                                let [b01, b02, b03] = Self::expect_three_bonds(intralayer_graph, site)?;
                                 let bond_12 = b01.flip().join(b02).expect("(BUG) bond mismatch?");
                                 let bond_13 = b01.flip().join(b03).expect("(BUG) bond mismatch?");
 
@@ -484,21 +513,59 @@ mod kc {
 
                                 let (normal, (normal_J_r12, normal_J_r13)) = crespi_imp::unit_cross(r12, r13);
 
-                                Ok(LocalNormalData {
-                                    normal, bond_12, bond_13, normal_J_r12, normal_J_r13, r12, r13,
-                                })
+                                let mut items = ArrayVec::new();
+                                items.push(NormalItem { bond: bond_12, r: r12, normal_J_r: normal_J_r12 });
+                                items.push(NormalItem { bond: bond_13, r: r13, normal_J_r: normal_J_r13 });
+
+                                Ok(NormalData { normal, items })
                             },
-                            _ => bail!{
-                                "\
-                                    'kc.normals: local' requires all sites to have three neighbors; \
-                                    a site was found with {}.\
-                                ", intralayer_graph.frac_bonds_from(site).count(),
+                            NormalKind::Local => {
+                                let [bond_01, bond_02, bond_03] = Self::expect_three_bonds(intralayer_graph, site)?;
+                                let r01 = bond_01.cart_vector_using_carts(lattice, &carts);
+                                let r02 = bond_02.cart_vector_using_carts(lattice, &carts);
+                                let r03 = bond_03.cart_vector_using_carts(lattice, &carts);
+
+                                let (n012, (n012_J_r01, n012_J_r02)) = crespi_imp::unit_cross(r01, r02);
+                                let (n023, (n023_J_r02, n023_J_r03)) = crespi_imp::unit_cross(r02, r03);
+                                let (n031, (n031_J_r03, n031_J_r01)) = crespi_imp::unit_cross(r03, r01);
+
+                                let nsum = n012 + n023 + n031;
+                                let nsum_J_r01 = n012_J_r01 + n031_J_r01;
+                                let nsum_J_r02 = n023_J_r02 + n012_J_r02;
+                                let nsum_J_r03 = n031_J_r03 + n023_J_r03;
+
+                                let (normal, normal_J_nsum) = crespi_imp::unit(nsum);
+                                let normal_J_r01 = normal_J_nsum * nsum_J_r01;
+                                let normal_J_r02 = normal_J_nsum * nsum_J_r02;
+                                let normal_J_r03 = normal_J_nsum * nsum_J_r03;
+
+                                let mut items = ArrayVec::new();
+                                items.push(NormalItem { bond: bond_01, r: r01, normal_J_r: normal_J_r01 });
+                                items.push(NormalItem { bond: bond_02, r: r02, normal_J_r: normal_J_r02 });
+                                items.push(NormalItem { bond: bond_03, r: r03, normal_J_r: normal_J_r03 });
+
+                                Ok(NormalData { normal, items })
                             },
                         }
                     }).collect::<FailResult<_>>()?
                 };
 
-                Ok(LocalNormals { data })
+                Ok(Normals { data })
+            }
+
+            /// Get FracBonds pointing from `site` to its neighbors, but fail if there are
+            /// not exactly three neighbors.
+            fn expect_three_bonds(intralayer_graph: &PeriodicGraph, site: usize) -> FailResult<[FracBond; 3]> {
+                let mut edges = intralayer_graph.frac_bonds_from(site);
+                match (edges.next(), edges.next(), edges.next(), edges.next()) {
+                    (Some(b01), Some(b02), Some(b03), None) => Ok([b01, b02, b03]),
+                    _ => bail!{
+                        "\
+                            The chosen 'kc.normals' setting requires all sites to have three neighbors; \
+                            a site was found with {}.\
+                        ", intralayer_graph.frac_bonds_from(site).count(),
+                    },
+                }
             }
 
             pub fn lookup(&self, index: usize) -> V3 {
@@ -509,24 +576,13 @@ mod kc {
                 &self,
                 site: usize,
                 value_d_normal: V3,
-            ) -> [BondGrad; 2] {
-                let LocalNormalData {
-                    normal: _, bond_12, bond_13, normal_J_r12, normal_J_r13, r12, r13,
-                } = self.data[site];
-
-                let grad_12 = BondGrad {
-                    minus_site: bond_12.from,
-                    plus_site: bond_12.to,
-                    grad: value_d_normal * normal_J_r12,
-                    cart_vector: r12,
-                };
-                let grad_13 = BondGrad {
-                    minus_site: bond_13.from,
-                    plus_site: bond_13.to,
-                    grad: value_d_normal * normal_J_r13,
-                    cart_vector: r13,
-                };
-                [grad_12, grad_13]
+            ) -> ArrayVec<[BondGrad; 3]> {
+                self.data[site].items.iter().map(|item| BondGrad {
+                    minus_site: item.bond.from,
+                    plus_site: item.bond.to,
+                    grad: value_d_normal * item.normal_J_r,
+                    cart_vector: item.r,
+                }).collect()
             }
         }
     }

@@ -13,7 +13,7 @@
 ** ********************************************************************** */
 
 use crate::{FailResult, FailOk};
-use crate::potential::{PotentialBuilder, DiffFn, BondDiffFn, DynCgDiffFn, CommonMeta};
+use crate::potential::{PotentialBuilder, DiffFn, DynCgDiffFn, CommonMeta};
 use crate::meta::{self, prelude::*};
 use crate::hlist_aliases::*;
 use crate::math::basis::{GammaBasis3, EvDirection};
