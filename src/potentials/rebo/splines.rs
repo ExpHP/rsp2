@@ -155,6 +155,13 @@ pub mod T {
         pub static ref STUART: SplineSet = SplineSet {
             CC: stuart_CC(),
         };
+
+        /// The TCC spline found in:
+        ///
+        /// * The optimized Brenner potential (Lindsay, 2010)
+        pub static ref LINDSAY: SplineSet = SplineSet {
+            CC: lindsay_CC(),
+        };
     }
 
     /// Brenner, Table 5\
@@ -172,6 +179,15 @@ pub mod T {
         let mut input = tricubic::Input::default();
         input.value.assign((2, 2, 1), -0.035_140);
         input.value.assign((2, 2, 2..=9), -0.004_048); // NOTE: different from Brenner
+
+        input.solve().unwrap()
+    }
+
+    /// Lindsay, Table III
+    fn lindsay_CC() -> TricubicGrid {
+        let mut input = tricubic::Input::default();
+        input.value.assign((2, 2, 1), -0.035_140);
+        input.value.assign((2, 2, 2..=9), -0.0165); // NOTE: different from Brenner
 
         input.solve().unwrap()
     }
@@ -808,6 +824,44 @@ format_lmp(hcurve)
         },
     };
 
+    const LINDSAY_POLY: Polynomial1d<[f64; 6]> = Polynomial1d([
+        // Segment 2: -1/2 to -1/3  (2pi/3 to 109.47°)
+        -29.0523, -61.9925, -51.4108,
+        -19.9928,  -3.1822,   0.0000,
+    ]);
+
+    /// Given directly by Lindsay (2010), table II.
+    ///
+    /// Lindsay changes the coefficients for one of the piecewise polynomial segments.
+    ///
+    /// (TODO: Changing only one region of a spline seems suspicious.  Does this introduce
+    ///        discontinuities into the second derivative?)
+    ///
+    /// (FIXME: This gives outrageous data on AB graphene,
+    ///         leading to HF modes about 2600 wavenumber;
+    ///         nothing like Lindsay's figure 2!!!)
+    ///
+    /// The file `CH.airebo-nonreactive` in the tests directory also uses these.
+    pub const LINDSAY: SplineSet = SplineSet {
+        carbon_high_coord: SmallSpline1d {
+            x_div: &BRENNER.carbon_high_coord.x_div,
+            poly: &[
+                BRENNER.carbon_high_coord.poly[0],
+                LINDSAY_POLY,
+                BRENNER.carbon_high_coord.poly[2],
+            ],
+        },
+        carbon_low_coord: SmallSpline1d {
+            x_div: &BRENNER.carbon_low_coord.x_div,
+            poly: &[
+                BRENNER.carbon_low_coord.poly[0],
+                LINDSAY_POLY,
+                BRENNER.carbon_low_coord.poly[2],
+            ],
+        },
+        ..BRENNER
+    };
+
     impl<Array: Borrow<[f64]> + 'static> SmallSpline1d<Array> {
         pub fn evaluate(&self, x: f64) -> (f64, f64) {
             // NOTE: This linear search will *almost always* stop at one of the first two
@@ -828,7 +882,7 @@ format_lmp(hcurve)
     }
 
     /// A polynomial with coefficients listed in decreasing order
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Copy)]
     pub struct Polynomial1d<Array>(pub Array);
 
     impl<Array: Borrow<[f64]>> Polynomial1d<Array> {

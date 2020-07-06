@@ -648,6 +648,7 @@ mod rebo {
                     cfg::PotentialReboNewParams::Lammps => rebo_imp::Params::new_lammps(),
                     cfg::PotentialReboNewParams::LammpsFavata => rebo_imp::Params::new_favata(),
                     cfg::PotentialReboNewParams::Brenner => rebo_imp::Params::new_brenner(),
+                    cfg::PotentialReboNewParams::Lindsay => rebo_imp::Params::new_lindsay(),
                 };
 
                 // NOTE: We can't (currently) use the bonds from meta because they might not have

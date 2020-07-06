@@ -897,6 +897,12 @@ pub enum PotentialReboNewParams {
     Brenner,
     Lammps,
     LammpsFavata,
+    /// Experimental feature.
+    ///
+    /// This currently yields absurdly large frequencies for
+    /// Bernal-stacked BLG and may require further investigation.
+    #[serde(rename = "experimental-lindsay")]
+    Lindsay,
 }
 
 #[derive(Serialize, Deserialize)]

@@ -39,6 +39,7 @@
 //! * **2nd gen REBO:** Donald W Brenner et al 2002 J. Phys.: Condens. Matter 14 783
 //! * **AIREBO:** Steven J Stuart et al J. Chem. Phys. 112, 6472 (2000)
 //! * **LAMMPS:** S. Plimpton, J Comp Phys, 117, 1-19 (1995)
+//! * **Optimized parameters for phonons:** L. Lindsay and D. A. Broido, Phys. Rev. B, 81, 205441 (2010)
 
 use super::splines::{self, TricubicGrid, BicubicGrid};
 use crate::FailResult;
@@ -407,6 +408,20 @@ mod params {
             let mut params = Self::new_lammps();
             params.P = Cow::Borrowed(&splines::P::FAVATA);
             params
+        }
+
+        /// Parameters optimized for phonon frequencies in Lindsay (2010).
+        ///
+        /// MIGHT BE BUGGY/INCORRECT.
+        pub fn new_lindsay() -> Self {
+            Params {
+                use_airebo_lambda: false,
+                G: Cow::Owned(splines::G::LINDSAY),
+                P: Cow::Borrowed(&splines::P::BRENNER),
+                T: Cow::Borrowed(&splines::T::LINDSAY),
+                F: Cow::Borrowed(&splines::F::BRENNER),
+                by_type: Params::new_brenner().by_type,
+            }
         }
     }
 }
