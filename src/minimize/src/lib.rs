@@ -30,3 +30,4 @@ pub use crate::hager_ls::linesearch;
 pub mod exact_ls;
 pub use crate::exact_ls::linesearch as exact_ls;
 pub mod numerical;
+pub mod fire;

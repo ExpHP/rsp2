@@ -552,6 +552,8 @@ impl Builder {
     /// Set up a "standard" output function that writes some formatted lines on each iteration.
     /// The output format may change.
     ///
+    /// Example usage: `builder.basic_output_fn(|s| println!("{}", s))`
+    ///
     /// This will exist alongside any previously existing output functions.
     pub fn basic_output_fn(&mut self, emit: impl Clone + FnMut(fmt::Arguments<'_>) + 'static) -> &mut Self {
         self.output_fn(get_basic_output_fn(emit))
@@ -902,8 +904,6 @@ fn cg<F: DiffFn>(
     let mut value_history = vec![last_saved.value];
     // Describes the previous iteration
     let mut last_last = None::<Last>; // FIXME name
-    // Record of previous directions
-    let mut past_directions: VecDeque<Vec<f64>> = Default::default();
 
     // deliberately spelt plural as it counts how many have elapsed
     for iterations in 0.. {
@@ -1147,11 +1147,6 @@ fn cg<F: DiffFn>(
         let d_value = next_point.value - saved.value;
         let V(d_position) = v(&next_point.position) - v(&saved.position);
         let V(d_gradient) = v(&next_point.gradient) - v(&saved.gradient);
-
-        past_directions.push_front(direction.clone());
-        if past_directions.len() > 4 {
-            past_directions.pop_back();
-        };
 
         last_last = Some(Last { direction, d_value, d_position, d_gradient, ls_failed });
 

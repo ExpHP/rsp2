@@ -90,8 +90,8 @@ impl Params {
 
     /// Constants used for calculation of the Kolmogorov-Crespi potential.
     ///
-    /// These match the values used by default by the implementation of `kolmogorov/crespi/z` in
-    /// Lammps, which is scaled to Lammps' rebo's bond length.
+    /// These match the values used by default by the implementation of `kolmogorov/crespi/full` in
+    /// Lammps.
     ///
     /// # Citation
     /// Wengen Ouyang, Davide Mandelli, Michael Urbakh, Oded Hod, arXiv:1806.09555 (2018).
