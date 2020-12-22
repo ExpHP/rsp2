@@ -85,19 +85,22 @@ mod low_level {
             let input_path = path_to_c_string(&input_path)?;
             let output_path = path_to_c_string(&output_path)?;
 
-            let mut p_dftb: ffi::DftbPlus = unsafe { mem::uninitialized() };
-            let mut p_input: ffi::DftbPlusInput = unsafe { mem::uninitialized() };
+            let mut p_dftb = mem::MaybeUninit::<ffi::DftbPlus>::uninit();
+            let mut p_input = mem::MaybeUninit::<ffi::DftbPlusInput>::uninit();
 
             // FIXME: how to detect errors that occur in DFTB+?
             // It looks to me like we are helplessly doomed to invoke undefined behavior...
-            api_trace!("dftbp_init({:p}, \"{}\");", &p_dftb, output_path_display);
-            unsafe { ffi::dftbp_init(&mut p_dftb, output_path.as_ptr()); }
+            api_trace!("dftbp_init({:p}, \"{}\");", p_dftb.as_mut_ptr(), output_path_display);
+            unsafe { ffi::dftbp_init(p_dftb.as_mut_ptr(), output_path.as_ptr()); }
 
-            api_trace!("dftbp_get_input_from_file({:p}, \"{}\", {:p});", &p_dftb, input_path_display, &p_input);
-            unsafe { ffi::dftbp_get_input_from_file(&mut p_dftb, input_path.as_ptr(), &mut p_input); }
+            api_trace!("dftbp_get_input_from_file({:p}, \"{}\", {:p});", p_dftb.as_mut_ptr(), input_path_display, p_input.as_mut_ptr());
+            unsafe { ffi::dftbp_get_input_from_file(p_dftb.as_mut_ptr(), input_path.as_ptr(), p_input.as_mut_ptr()); }
 
-            api_trace!("dftbp_process_input({:p}, {:p});", &p_dftb, &p_input);
-            unsafe { ffi::dftbp_process_input(&mut p_dftb, &mut p_input); }
+            api_trace!("dftbp_process_input({:p}, {:p});", p_dftb.as_mut_ptr(), p_input.as_mut_ptr());
+            unsafe { ffi::dftbp_process_input(p_dftb.as_mut_ptr(), p_input.as_mut_ptr()); }
+
+            let p_dftb = unsafe { p_dftb.assume_init() };
+            let p_input = unsafe { p_input.assume_init() };
 
             Ok(Instance { p_dftb, p_input })
         }
