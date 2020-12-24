@@ -1,15 +1,16 @@
 # User config file template for crates in this workspace.
 #
 # You can copy it to crates.d/config.toml
-#
-# (CAUTION: don't trust that the values in here are necessarily the defaults,
-#  because this file is currently maintained by hand and mistakes are possible)
 
-[nightly-cargo]
-# Enables nightly cargo features
+[general]
 
 # Optimizes the crates listed under [always-optimize] in crates.toml
-always-optimize-some-deps = false
+always-optimize-some-deps = true
+
+[nightly-cargo]
+# Options that enables nightly cargo features
+
+# Currently there are no such options.
 
 [simulated-workspace]
 # A.k.a. "VSCode compatibility mode"

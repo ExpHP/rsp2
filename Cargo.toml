@@ -166,4 +166,14 @@ exclude = [
     "scripts/rsp2-pot-debug",
 ]
 
+[profile.dev.package."rsp2-array-types"]
+opt-level = 3
 
+[profile.dev.package."rsp2-kets"]
+opt-level = 3
+
+[profile.dev.package."rsp2-potentials"]
+opt-level = 3
+
+[profile.dev.package."rsp2-structure"]
+opt-level = 3
