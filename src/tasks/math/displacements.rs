@@ -113,7 +113,7 @@ fn _compute_displacements<DispI: Idx, SiteI: Idx, OperI: Idx, StarI: Idx>(
         // The loop logic here is precisely as awkward as it needs to be, though it will never run
         // more than three times.  Each iteration, 1-3 vectors are added to `current_basis`.
         let mut current_basis = vec![];
-        'three: while current_basis.len() < 3 {
+        while current_basis.len() < 3 {
             // Find best remaining choice that isn't redundant.
             let choice = {
                 // !! FIXME !!
