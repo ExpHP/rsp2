@@ -341,9 +341,9 @@ fn do_compute_dynmat(
     // (but last time I tried to do so, I found the resulting function signature too obnoxious)
     //
     // For now, we just make heavy use of scoping to keep the number of names in scope smallish.
-    trace!("Constructing supercell");
     let (ref super_coords, ref sc) = {
         let sc_dim = phonons_settings.supercell.dim_for_unitcell(prim_coords.lattice());
+        trace!("Constructing supercell (dim: {:?})", sc_dim);
         rsp2_structure::supercell::diagonal(sc_dim).build(prim_coords)
     };
 

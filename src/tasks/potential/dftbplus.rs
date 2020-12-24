@@ -60,76 +60,6 @@ impl Builder {
     }
 }
 
-// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-// FIXME: Workaround for https://github.com/dftbplus/dftbplus/issues/247 .
-//        Basically: avoid calling dftbp_final, ever.
-//
-//        Okay only because we know that RSP2 never tries to compute structures where
-//        anything besides the coords or lattice have changed. (i.e. nothing ever changes
-//        that would require a new instance of DFTB+)
-//        (unless you try to do a supercell, in which case this may do bad things.
-//         Hope for a quick fix upstream!)
-// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-mod cache {
-    use super::*;
-
-    lazy_static!{
-        static ref CACHED_INSTANCE: std::sync::Mutex<Option<FakeSendSync<wrapper::DftbPlus>>> = {
-            std::sync::Mutex::new(None)
-        };
-    }
-
-    pub fn get_or_create<E>(f: impl FnOnce() -> Result<wrapper::DftbPlus, E>) -> Result<Cached, E> {
-        let mut guard = CACHED_INSTANCE.try_lock().expect("cannot use DFTB+ in parallel");
-        if guard.is_none() {
-            let dftb = f()?;
-            // FIXME FIXME FIXME
-            // probably not correct, but all of this can be removed as soon
-            // as https://github.com/dftbplus/dftbplus/issues/247 is fixed
-            let dftb = unsafe { FakeSendSync::new_unchecked(dftb) };
-            *guard = Some(dftb);
-        }
-        Ok(Cached(guard))
-    }
-
-    // A MutexGuard<Option<T>> that is known to be Some
-    pub struct Cached(std::sync::MutexGuard<'static, Option<FakeSendSync<wrapper::DftbPlus>>>);
-
-    impl std::ops::Deref for Cached {
-        type Target = wrapper::DftbPlus;
-
-        fn deref(&self) -> &Self::Target
-        { &**self.0.as_ref().unwrap() }
-    }
-
-    impl std::ops::DerefMut for Cached {
-        fn deref_mut(&mut self) -> &mut Self::Target
-        { &mut **self.0.as_mut().unwrap() }
-    }
-
-    use fake_send_sync::FakeSendSync;
-    mod fake_send_sync {
-        pub struct FakeSendSync<T>(T);
-
-        unsafe impl<T> Send for FakeSendSync<T> { }
-        unsafe impl<T> Sync for FakeSendSync<T> { }
-
-        impl<T> FakeSendSync<T> {
-            pub unsafe fn new_unchecked(x: T) -> Self { FakeSendSync(x) }
-        }
-
-        impl<T> std::ops::Deref for FakeSendSync<T> {
-            type Target = T;
-
-            fn deref(&self) -> &Self::Target { &self.0 }
-        }
-
-        impl<T> std::ops::DerefMut for FakeSendSync<T> {
-            fn deref_mut(&mut self) -> &mut Self::Target { &mut self.0 }
-        }
-    }
-}
-
 impl PotentialBuilder<CommonMeta> for Builder {
     fn initialize_bond_diff_fn(&self, _: &Coords, _: CommonMeta) -> FailResult<Option<Box<dyn BondDiffFn<CommonMeta>>>>
     { Ok(None) }
@@ -145,16 +75,15 @@ impl PotentialBuilder<CommonMeta> for Builder {
         let elements: meta::SiteElements = meta.pick();
 
         let mut dftb_builder = self.inner.clone();
-        let dftb = cache::get_or_create(|| {
+        let dftb = {
             dftb_builder
                 .initial_coords(coords)
                 .elements(&elements)
-                .build()
-        })?;
+                .build()?
+        };
 
         // a DiffFn 'lambda' whose type will be erased
-        struct MyDiffFn(cache::Cached);
-        //struct MyDiffFn(wrapper::DftbPlus);
+        struct MyDiffFn(wrapper::DftbPlus);
         impl DiffFn<CommonMeta> for MyDiffFn {
             fn compute(&mut self, coords: &Coords, meta: CommonMeta) -> FailResult<(f64, Vec<V3>)> {
                 let dftb = &mut self.0;

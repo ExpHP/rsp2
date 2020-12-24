@@ -329,10 +329,10 @@ def griddata_periodic(
     for axis in reversed(range(3)):
         max_point = points_frac[:, axis].max()
         if np.allclose(max_point, points_frac[:, axis].min()):
-            np.testing.assert_allclose(max_point, xi_frac[:, axis].min())
-            np.testing.assert_allclose(max_point, xi_frac[:, axis].max())
+            np.testing.assert_allclose(max_point, xi_frac[..., axis].min())
+            np.testing.assert_allclose(max_point, xi_frac[..., axis].max())
 
-            xi = np.delete(xi, axis, axis=1)
+            xi = np.delete(xi, axis, axis=xi.ndim-1)
             points = np.delete(points, axis, axis=1)
             true_axis_mask[axis] = 0
 
