@@ -991,7 +991,7 @@ fn auto_adjust_lattice(diag: &mut [f64; 3], skews: &mut Skews) {
 }
 
 use std::os::raw::c_double;
-#[link(name = "m")]
+#[link_name = "m"]
 extern {
     fn nextafter(from: c_double, to: c_double) -> c_double;
 }

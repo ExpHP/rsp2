@@ -189,7 +189,7 @@ pub mod symmetry_yaml {
 
     // Monomorphic to ensure that all the yaml parsing code is generated inside this crate
     pub fn _read(r: &mut dyn Read) -> FailResult<SymmetryYaml>
-    {Ok(serde_yaml::from_reader(r)?)}
+    {Ok({ serde_yaml::from_reader(r)? })}
 }
 
 pub use force_sets::ForceSets;
