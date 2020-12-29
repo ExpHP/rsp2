@@ -27,7 +27,7 @@ enum-map = "0.4.1"
 petgraph = "0.4"
 failure = "0.1.2"
 stack = "0.3"
-rayon = "1.0.1"
+rayon = "1.5"
 rayon-cond = "0.1.0"
 log = "0.4"
 
