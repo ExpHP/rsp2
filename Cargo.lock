@@ -579,15 +579,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lapack-src"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92b348b4b770b1092add976188242941b92272f3bad95cfbacadbfcb0c8923eb"
-dependencies = [
- "openblas-src",
-]
-
-[[package]]
 name = "lapacke"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1272,11 +1263,11 @@ name = "rsp2-linalg"
 version = "0.1.0"
 dependencies = [
  "failure",
- "lapack-src",
  "lapacke",
  "ndarray",
  "num-integer",
  "num-traits 0.2.5",
+ "openblas-src",
  "rand 0.3.22",
  "rsp2-array-types",
  "rsp2-assert-close",
@@ -1436,8 +1427,6 @@ dependencies = [
  "indoc",
  "itertools 0.7.8",
  "lammps-sys",
- "lapack-src",
- "lapacke",
  "lazy_static 1.4.0",
  "log 0.4.3",
  "mpi",

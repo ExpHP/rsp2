@@ -63,8 +63,6 @@ path = "lib.rs"
 !!frunk
 !!shlex
 !!indoc
-!!lapacke
-!!lapack-src
 !!num-traits
 !!num-complex
 !!num-cpus
