@@ -111,7 +111,7 @@ LD_LIBRARY_PATH=$(cat release.path):${LD_LIBRARY_PATH} mpirun target/release/rsp
 
 The unfolding script used to analyze the output of `rsp2` on layered 2D materials is also included in this repository.
 
-[See this page for details](https://github.com/ExpHP/dftbplus-sys/blob/master/doc/unfolding.md).
+[See this page for details](https://github.com/ExpHP/rsp2/blob/master/doc/unfolding.md).
 
 # License
 
