@@ -244,6 +244,10 @@ def to_path_impl(
         json.dump(obj, f)
         print(file=f) # trailing newline
 
+    elif _endswith_nocase(path, '.yaml'):
+        import rsp2.io._yaml_shim as yaml
+        yaml.dump(obj, wrap_text(file))
+
     elif _endswith_nocase(path, '.npy'):
         import numpy
         numpy.save(file, obj)
