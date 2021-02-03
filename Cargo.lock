@@ -882,6 +882,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19b17cddbe7ec3f8bc800887bab5e717348c95ea2ca0b1bf0837fb964dc67099"
 
 [[package]]
+name = "perm-vec"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "160d8aff501cbf2f9afa1da0599556cebc2ca23e3b899a0f1670a05604177996"
+dependencies = [
+ "rand 0.3.22",
+]
+
+[[package]]
 name = "petgraph"
 version = "0.4.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1370,7 +1379,7 @@ name = "rsp2-soa-ops"
 version = "0.1.0"
 dependencies = [
  "frunk",
- "rand 0.3.22",
+ "perm-vec",
 ]
 
 [[package]]
