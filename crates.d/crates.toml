@@ -118,6 +118,7 @@ objekt = "0.1.1"
 rayon-cond = "0.1.0"
 dftbplus-sys = { git = "https://github.com/ExpHP/dftbplus-sys", tag = "v0.0.2" }
 tee = "0.1.0"
+perm-vec = "0.1"
 
 #--------------------------------------------
 # Always optimize some crates when they appear as dependencies.
