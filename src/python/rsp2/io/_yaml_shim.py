@@ -10,7 +10,7 @@ import functools
 
 try:
     from ruamel import YAML as yaml
-    yaml = yaml(typ='safe')
+    yaml = yaml(typ='rt')
     load = yaml.load
     dump = yaml.dump
     load_all = yaml.load_all
