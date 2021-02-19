@@ -22,37 +22,45 @@ use rsp2_array_types::{V3, M33};
 
 // why is this pub(crate)? I don't remember...
 pub(crate) type Displacements = Vec<(usize, V3)>;
-pub use disp_yaml::DispYaml;
-pub mod disp_yaml {
+pub use phonopy_disp_yaml::PhonopyDispYaml;
+pub mod phonopy_disp_yaml {
     use super::*;
 
     mod cereal {
         use super::*;
 
+        /// Form of `phonopy_disp.yaml`.  Well, just the parts we're interested in.
         #[derive(Deserialize)]
-        pub(super) struct DispYaml {
+        pub(super) struct PhonopyDispYaml {
             pub displacements: Vec<Displacement>,
+            pub supercell: Supercell,
+        }
+
+        #[derive(Deserialize)]
+        pub(super) struct Supercell {
             pub lattice: M33,
             pub points: Vec<Point>,
         }
 
         #[derive(Deserialize)]
         pub(super) struct Displacement {
+            /// Indexed from 1.
             pub atom: u32,
-            pub direction: V3,
+            /// Cartesian displacement.
             pub displacement: V3,
         }
 
         #[derive(Deserialize)]
         pub(super) struct Point {
             pub symbol: String,
+            /// Fractional coordinates.
             pub coordinates: V3,
             pub mass: f64,
         }
     }
 
-    /// A parsed disp.yaml
-    pub struct DispYaml {
+    /// A parsed form of `phonopy_disp.yaml`
+    pub struct PhonopyDispYaml {
         pub coords: Coords,
         // note: these used to be exposed as Strings, but I can't for the
         //       life of me remember why. Was it just to "decrease coupling?"
@@ -72,16 +80,17 @@ pub mod disp_yaml {
         coords
     }
 
-    pub fn read(mut r: impl Read) -> FailResult<DispYaml>
+    pub fn read(mut r: impl Read) -> FailResult<PhonopyDispYaml>
     { _read(&mut r) }
 
     // Monomorphic to ensure that all the yaml parsing code is generated inside this crate
-    pub fn _read(r: &mut dyn Read) -> FailResult<DispYaml>
+    pub fn _read(r: &mut dyn Read) -> FailResult<PhonopyDispYaml>
     {
         use rsp2_structure::{CoordsKind, Lattice};
-        use self::cereal::{Point, Displacement, DispYaml as RawDispYaml};
+        use self::cereal::{Point, Displacement, Supercell, PhonopyDispYaml as RawPhonopyYaml};
 
-        let RawDispYaml { displacements, lattice, points } = serde_yaml::from_reader(r)?;
+        let RawPhonopyYaml { supercell, displacements } = serde_yaml::from_reader(r)?;
+        let Supercell { lattice, points } = supercell;
 
         let (mut fracs, mut elements, mut masses) = (vec![], vec![], vec![]);
         for Point { symbol, coordinates, mass } in points {
@@ -98,7 +107,7 @@ pub mod disp_yaml {
                 .map(|Displacement { atom, displacement, .. }| ((atom - 1) as usize, displacement))
                 .collect();
 
-        Ok(DispYaml { coords, elements, masses, displacements })
+        Ok(PhonopyDispYaml { coords, elements, masses, displacements })
     }
 }
 

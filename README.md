@@ -21,16 +21,16 @@ It also has a large number of rust dependencies, but these are automatically man
 
 ## Python
 
-rsp2 requires a specific, old version of phonopy.  To facilitate running the code, there is a `requirements.txt` suitable for use with `venv`.  To install all required python dependencies:
+To facilitate running the code, there is a `requirements.txt` suitable for use with `venv`.  To install all required python dependencies:
 
 ```
 # First time usage
 python3 -m venv venv
 . venv/bin/activate
-python3 -m pip install numpy==1.16.4 # needed in advance by phonopy's setup.py
+python3 -m pip install wheel  # can speed up other installs
 python3 -m pip install -r requirements.txt
 
-# Afterwards
+# Future usage
 . venv/bin/activate
 ```
 

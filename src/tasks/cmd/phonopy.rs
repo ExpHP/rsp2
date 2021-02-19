@@ -86,10 +86,10 @@ impl Load for SymmetryYaml {
 
 //--------------------------------------------------------
 
-type DispYaml = rsp2_phonopy_io::DispYaml;
-impl Load for DispYaml {
+type PhonopyDispYaml = rsp2_phonopy_io::PhonopyDispYaml;
+impl Load for PhonopyDispYaml {
     fn load(path: impl AsPath) -> FailResult<Self>
-    { Ok(rsp2_phonopy_io::disp_yaml::read(fsx::open(path.as_path())?)?) }
+    { Ok(rsp2_phonopy_io::phonopy_disp_yaml::read(fsx::open(path.as_path())?)?) }
 }
 
 //--------------------------------------------------------
@@ -286,7 +286,7 @@ mod builder {
                     command
                         .args(&extra_args.0)
                         .arg(FNAME_CONF_DISPS)
-                        .arg("--sym")
+                        .arg("--symmetry")
                         .current_dir(&dir)
                         .stdout(fsx::create(dir.join(FNAME_OUT_SYMMETRY))?);
 
@@ -327,10 +327,10 @@ mod builder {
 
 /// Represents a directory with the following data:
 /// - `POSCAR`: The input structure
-/// - `disp.yaml`: Phonopy file with displacements
+/// - `phonopy_disp.yaml`: Phonopy file with displacements
 /// - configuration settings which impact the selection of displacements
 ///   - `--tol`, `--dim`
-/// - `symmetry.yaml`: Output of `phonopy --sym`, currently present
+/// - `symmetry.yaml`: Output of `phonopy --symmetry`, currently present
 ///   only for validation purposes. (we use spglib)
 ///
 /// Generally, the next step is to supply the force sets, turning this
@@ -346,7 +346,7 @@ mod builder {
 struct DirWithDisps {
     dir: TempDir,
     displacements: Vec<(usize, V3)>,
-    // These are cached in memory from `disp.yaml` due to the likelihood
+    // These are cached in memory from `phonopy_disp.yaml` due to the likelihood
     // that code using `DirWithDisps` will need them.
     super_coords: Coords,
     super_meta: HList2<meta::SiteElements, meta::SiteMasses>,
@@ -363,7 +363,7 @@ impl DirWithDisps {
     {Ok({
         for name in &[
             "POSCAR",
-            "disp.yaml",
+            "phonopy_disp.yaml",
             FNAME_CONF_DISPS,
             FNAME_SETTINGS_ARGS,
             FNAME_OUT_SYMMETRY,
@@ -374,10 +374,10 @@ impl DirWithDisps {
             }
         }
 
-        trace!("Parsing disp.yaml...");
-        let DispYaml {
+        trace!("Parsing phonopy_disp.yaml...");
+        let PhonopyDispYaml {
             displacements, coords, elements, masses,
-        } = Load::load(dir.as_path().join("disp.yaml"))?;
+        } = Load::load(dir.as_path().join("phonopy_disp.yaml"))?;
         let elements: Rc<[_]> = elements.into();
         let masses: Rc<[_]> = masses.into_iter().map(meta::Mass).collect::<Vec<_>>().into();
         let meta = hlist![elements, masses];
@@ -390,7 +390,7 @@ impl DirWithDisps {
         }
     })}
 
-    /// Get the structure from `disp.yaml`.
+    /// Get the structure from `phonopy_disp.yaml`.
     ///
     /// # Note
     ///

@@ -1889,6 +1889,8 @@ def draw_axis_vectors(ax, lattice, **kw):
 
 def draw_prim_cell_boundaries(ax, prim_lattice, super_lattice, **kw):
     import itertools
+    # NOTE: shapely is not listed in requirements.txt because it is annoying
+    #       to install, and this function is only ever used for debugging.
     from shapely.geometry import Polygon, LineString, Point
     from matplotlib.collections import LineCollection
 

@@ -1,6 +1,11 @@
 import numpy as np
 from . import dwim
 
+# = sqrt(eV/amu)/angstrom/(2*pi)/THz
+SQRT_EIGENVALUE_TO_THZ = 15.6333043006705
+# = THz / (c / cm)
+THZ_TO_WAVENUMBER = 33.3564095198152
+
 def to_path(path, esols):
     """
     :param path: filepath
@@ -52,6 +57,22 @@ def to_npz(file, esols, **_kw):
     evals, evecs = esols
     np.savez_compressed(file, eigenvalues=evals, eigenvectors=evecs)
 
+def thz_from_eigenvalue(eigenvalue):
+    """
+    Converts eigenvalue in rsp2's natural units to terahertz.
+    Supports numpy arrays.
+
+    Negative eigenvalues will be represented as negative frequencies
+    rather than imaginary.
+    """
+    eigenvalue = np.array(eigenvalue)
+
+    return (
+            SQRT_EIGENVALUE_TO_THZ
+            * np.absolute(eigenvalue) ** 0.5
+            * np.sign(eigenvalue)
+    )
+
 def wavenumber_from_eigenvalue(eigenvalue):
     """
     Converts eigenvalue in rsp2's natural units to wavenumber in cm^-1.
@@ -60,15 +81,4 @@ def wavenumber_from_eigenvalue(eigenvalue):
     Negative eigenvalues will be represented as negative frequencies
     rather than imaginary.
     """
-    eigenvalue = np.array(eigenvalue)
-
-    # = sqrt(eV/amu)/angstrom/(2*pi)/THz
-    SQRT_EIGENVALUE_TO_THZ = 15.6333043006705
-    # = THz / (c / cm)
-    THZ_TO_WAVENUMBER = 33.3564095198152
-
-    return (
-            SQRT_EIGENVALUE_TO_THZ * THZ_TO_WAVENUMBER
-            * np.absolute(eigenvalue) ** 0.5
-            * np.sign(eigenvalue)
-    )
+    return THZ_TO_WAVENUMBER * thz_from_eigenvalue(eigenvalue)

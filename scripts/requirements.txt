@@ -1,7 +1,6 @@
 ase==3.18.1
 abelian==1.0.1
-sympy==1.2
-Pillow==5.3.0
-matplotlib==3.1.0
-Shapely==1.6.4.post2
+sympy==1.7.1
+Pillow==8.1.0
+matplotlib==3.3.4
 numba==0.45.1
