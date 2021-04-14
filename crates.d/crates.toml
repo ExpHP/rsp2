@@ -74,6 +74,8 @@ either = "1"
 fern = { version = "0.5", features = ["colored"] }
 env_logger = "0.6.1"
 extension-trait = "0.1.2"
+# NOTE: we want to slowly phase out failure in favor of 'anyhow' and 'thiserror'.
+# (this should be done bottom-up)
 failure = "0.1.2"
 itertools = "0.7"
 lazy_static = "1.4"
@@ -120,6 +122,7 @@ rayon-cond = "0.1.0"
 dftbplus-sys = { git = "https://github.com/ExpHP/dftbplus-sys", tag = "v0.0.2" }
 tee = "0.1.0"
 perm-vec = "0.1"
+thiserror = "1.0.0"
 
 #--------------------------------------------
 # Always optimize some crates when they appear as dependencies.

@@ -14,6 +14,8 @@ path = "lib.rs"
 !!rsp2-util-macros
 
 !!enum-map
+!!thiserror
+!!log
 
 [features]
 !!NIGHTLY-FEATURE-LINE

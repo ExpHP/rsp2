@@ -14,11 +14,11 @@
 //!
 //! Adapted from the sp2 code.
 
-use crate::FailResult;
 use crate::math::basis::GammaBasis3;
 use crate::meta::{Element, Mass};
-use enum_map::EnumMap;
+use enum_map::{EnumMap, enum_map};
 use rsp2_array_types::{dot, V3, M33};
+use rsp2_structure::Element;
 use rsp2_structure::bonds::{CartBond, CartBonds};
 
 pub struct PolConstant {
@@ -56,17 +56,21 @@ fn raman_prefactor(
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum BondType { CC, CH, HH }
 
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum BondPolError {
+    #[error("no polarization constants specified for bonds between {} and {}", .0.symbol(), .1.symbol())]
+    UnsupportedBond(Element, Element)
+}
+
 impl BondType {
-    fn from_elements(a: Element, b: Element) -> FailResult<BondType> {
+    fn from_elements(a: Element, b: Element) -> Result<BondType, BondPolError> {
         Ok(match (a, b) {
             (Element::CARBON, Element::CARBON) => BondType::CC,
             (Element::CARBON, Element::HYDROGEN) => BondType::CH,
             (Element::HYDROGEN, Element::CARBON) => BondType::CH,
             (Element::HYDROGEN, Element::HYDROGEN) => BondType::HH,
-            _ => bail!{
-                "No polarization constants specified for bonds between {} and {}",
-                a.symbol(), b.symbol(),
-            },
+            _ => return Err(BondPolError::UnsupportedBond(a, b)),
         })
     }
 }
@@ -272,7 +276,7 @@ pub struct Input<'a> {
 }
 
 impl<'a> Input<'a> {
-    pub fn compute_ev_raman_tensors(self) -> FailResult<Vec<RamanTensor>> {
+    pub fn compute_ev_raman_tensors(self) -> Result<Vec<RamanTensor>, BondPolError> {
         let Input {
             ev_frequencies, ev_eigenvectors,
             temperature, site_elements, site_masses, bonds,
