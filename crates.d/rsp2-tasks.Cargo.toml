@@ -35,6 +35,7 @@ path = "lib.rs"
 !!rsp2-phonopy-io
 !!rsp2-sparse
 !!rsp2-dynmat
+!!rsp2-bond-polarizability
 
 !!clap
 !!slice-of-array
@@ -59,7 +60,6 @@ path = "lib.rs"
 !!serde-yaml
 !!serde-ignored
 !!path-abs
-!!enum-map
 !!frunk
 !!shlex
 !!indoc
