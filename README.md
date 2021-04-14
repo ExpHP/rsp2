@@ -21,16 +21,16 @@ It also has a large number of rust dependencies, but these are automatically man
 
 ## Python
 
-rsp2 requires a specific, old version of phonopy.  To facilitate running the code, there is a `requirements.txt` suitable for use with `venv`.  To install all required python dependencies:
+To facilitate running the code, there is a `requirements.txt` suitable for use with `venv`.  To install all required python dependencies:
 
 ```
 # First time usage
 python3 -m venv venv
 . venv/bin/activate
-python3 -m pip install numpy==1.16.4 # needed in advance by phonopy's setup.py
+python3 -m pip install wheel  # can speed up other installs
 python3 -m pip install -r requirements.txt
 
-# Afterwards
+# Future usage
 . venv/bin/activate
 ```
 
@@ -111,7 +111,7 @@ LD_LIBRARY_PATH=$(cat release.path):${LD_LIBRARY_PATH} mpirun target/release/rsp
 
 The unfolding script used to analyze the output of `rsp2` on layered 2D materials is also included in this repository.
 
-[See this page for details](https://github.com/ExpHP/dftbplus-sys/blob/master/doc/unfolding.md).
+[See this page for details](https://github.com/ExpHP/rsp2/blob/master/doc/unfolding.md).
 
 # License
 
