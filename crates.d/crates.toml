@@ -54,6 +54,7 @@ rsp2c-unfold        = "scripts/unfold_lib"
 rsp2-phonopy-io = "src/io/phonopy"
 rsp2-sparse = "src/util/sparse"
 rsp2-dynmat = "src/dynmat"
+rsp2-bond-polarizability = "src/math/bond-polarizability"
 #!!INSERTION POINT FOR NEW CRATES!!#
 # (do not edit the above line!)
 

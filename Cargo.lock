@@ -1135,6 +1135,7 @@ dependencies = [
  "rand 0.3.22",
  "rsp2-array-types",
  "rsp2-assert-close",
+ "rsp2-bond-polarizability",
  "rsp2-clap",
  "rsp2-dftbplus",
  "rsp2-dynmat",
@@ -1179,6 +1180,10 @@ dependencies = [
 
 [[package]]
 name = "rsp2-assert-close"
+version = "0.1.0"
+
+[[package]]
+name = "rsp2-bond-polarizability"
 version = "0.1.0"
 
 [[package]]
