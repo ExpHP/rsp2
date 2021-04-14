@@ -28,7 +28,6 @@
 #[macro_use] extern crate rsp2_assert_close;
 
 #[macro_use] extern crate extension_trait;
-#[macro_use] extern crate enum_map;
 #[macro_use] extern crate frunk;
 #[macro_use] extern crate indoc;
 #[macro_use] extern crate lazy_static;

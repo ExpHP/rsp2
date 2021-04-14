@@ -40,6 +40,7 @@ rsp2-dftbplus = { path = "../io/dftbplus", optional = true, default-features = f
 rsp2-phonopy-io = { path = "../io/phonopy" }
 rsp2-sparse = { path = "../util/sparse" }
 rsp2-dynmat = { path = "../dynmat" }
+rsp2-bond-polarizability = { path = "../math/bond-polarizability" }
 
 clap = "2"
 slice-of-array = "0.2.1"
@@ -64,7 +65,6 @@ serde_json = "1"
 serde_yaml = "0.7"
 serde_ignored = "0.0.4"
 path_abs = "0.5.0"
-enum-map = "0.4.1"
 frunk = "0.2.0"
 shlex = "0.1.1"
 indoc = "0.2.3"
@@ -82,8 +82,8 @@ xz2 = "0.1.6"
 [features]
 default = []
 
-nightly = ["beta", "rsp2-array-types/nightly", "rsp2-assert-close/nightly", "rsp2-clap/nightly", "rsp2-dftbplus/nightly", "rsp2-dynmat/nightly", "rsp2-fs-util/nightly", "rsp2-lammps-wrap/nightly", "rsp2-linalg/nightly", "rsp2-minimize/nightly", "rsp2-newtype-indices/nightly", "rsp2-phonopy-io/nightly", "rsp2-potentials/nightly", "rsp2-python/nightly", "rsp2-slice-math/nightly", "rsp2-soa-ops/nightly", "rsp2-sparse/nightly", "rsp2-structure-io/nightly", "rsp2-structure/nightly", "rsp2-tasks-config/nightly", "rsp2-util-macros/nightly"]
-beta = ["rsp2-array-types/beta", "rsp2-assert-close/beta", "rsp2-clap/beta", "rsp2-dftbplus/beta", "rsp2-dynmat/beta", "rsp2-fs-util/beta", "rsp2-lammps-wrap/beta", "rsp2-linalg/beta", "rsp2-minimize/beta", "rsp2-newtype-indices/beta", "rsp2-phonopy-io/beta", "rsp2-potentials/beta", "rsp2-python/beta", "rsp2-slice-math/beta", "rsp2-soa-ops/beta", "rsp2-sparse/beta", "rsp2-structure-io/beta", "rsp2-structure/beta", "rsp2-tasks-config/beta", "rsp2-util-macros/beta"]
+nightly = ["beta", "rsp2-array-types/nightly", "rsp2-assert-close/nightly", "rsp2-bond-polarizability/nightly", "rsp2-clap/nightly", "rsp2-dftbplus/nightly", "rsp2-dynmat/nightly", "rsp2-fs-util/nightly", "rsp2-lammps-wrap/nightly", "rsp2-linalg/nightly", "rsp2-minimize/nightly", "rsp2-newtype-indices/nightly", "rsp2-phonopy-io/nightly", "rsp2-potentials/nightly", "rsp2-python/nightly", "rsp2-slice-math/nightly", "rsp2-soa-ops/nightly", "rsp2-sparse/nightly", "rsp2-structure-io/nightly", "rsp2-structure/nightly", "rsp2-tasks-config/nightly", "rsp2-util-macros/nightly"]
+beta = ["rsp2-array-types/beta", "rsp2-assert-close/beta", "rsp2-bond-polarizability/beta", "rsp2-clap/beta", "rsp2-dftbplus/beta", "rsp2-dynmat/beta", "rsp2-fs-util/beta", "rsp2-lammps-wrap/beta", "rsp2-linalg/beta", "rsp2-minimize/beta", "rsp2-newtype-indices/beta", "rsp2-phonopy-io/beta", "rsp2-potentials/beta", "rsp2-python/beta", "rsp2-slice-math/beta", "rsp2-soa-ops/beta", "rsp2-sparse/beta", "rsp2-structure-io/beta", "rsp2-structure/beta", "rsp2-tasks-config/beta", "rsp2-util-macros/beta"]
 
 # FIXME
 # Features for optional deps, because the implicit features defined by deps do not scale well.
