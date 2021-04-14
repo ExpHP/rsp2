@@ -14,12 +14,67 @@
 //!
 //! Adapted from the sp2 code.
 
-use crate::math::basis::GammaBasis3;
-use crate::meta::{Element, Mass};
+#[macro_use] extern crate rsp2_util_macros;
+#[macro_use] extern crate log;
+
 use enum_map::{EnumMap, enum_map};
 use rsp2_array_types::{dot, V3, M33};
 use rsp2_structure::Element;
 use rsp2_structure::bonds::{CartBond, CartBonds};
+
+pub type Mass = f64;
+
+/// Interface for computing bond polarization.
+///
+/// Essentially, this struct exists to simulate named arguments.
+pub struct Input<'a, Evs>
+where
+    Evs: IntoIterator<Item=&'a [V3]>,
+{
+    /// Kelvin.
+    pub temperature: f64,
+    /// Normal mode frequencies, in cm^-1.
+    pub ev_frequencies: &'a [f64],
+    /// Normal mode eigenvectors, normalized.
+    pub ev_eigenvectors: Evs,
+    /// Element of each site.  Used to determine bond polarizability coefficients.
+    pub site_elements: &'a [Element],
+    /// Masses of each site, in AMU.
+    pub site_masses: &'a [f64],
+    pub bonds: &'a CartBonds,
+}
+
+impl<'a, Evs> Input<'a, Evs>
+where
+    Evs: IntoIterator<Item=&'a [V3]>,
+{
+    pub fn compute_ev_raman_tensors(self) -> Result<Vec<RamanTensor>, BondPolError> {
+        let Input {
+            ev_frequencies, ev_eigenvectors,
+            temperature, site_elements, site_masses, bonds,
+        } = self;
+        let mut ev_eigenvectors = ev_eigenvectors.into_iter();
+
+        let pol_constants = default_CH_pol_constants();
+
+        let out = ev_frequencies.into_iter().zip(ev_eigenvectors.by_ref())
+            .map(|(&frequency, eigs)| {
+                let prefactor = raman_prefactor(frequency, temperature);
+                let tensor = raman_tensor(
+                    eigs,
+                    site_masses,
+                    bonds,
+                    site_elements,
+                    &pol_constants,
+                )?;
+                Ok(RamanTensor { prefactor, tensor })
+            }).collect::<Result<Vec<_>, BondPolError>>()?;
+
+        assert!(ev_eigenvectors.next().is_none(), "more eigenvectors than frequencies!");
+        assert_eq!(out.len(), ev_frequencies.len(), "more frequencies than eigenvectors!");
+        Ok(out)
+    }
+}
 
 pub struct PolConstant {
     /// `a_par  -   a_perp`
@@ -197,7 +252,7 @@ fn raman_tensor(
     bonds: &CartBonds,
     types: &[Element],
     pol_constants: &PolConstants,
-) -> FailResult<M33> {
+) -> Result<M33, BondPolError> {
     // kronecker delta value
     let kdelta = <M33>::eye();
 
@@ -208,7 +263,7 @@ fn raman_tensor(
         let bond_type = BondType::from_elements(types[from], types[to])?;
 
         // phonon eigenvector for this atom, need to mass normalize
-        let eig: V3 = eigenvector[from] / f64::sqrt(masses[from].0);
+        let eig: V3 = eigenvector[from] / f64::sqrt(masses[from]);
 
         // unit bond vector and length, used later
         let distance: f64 = bond_vector.norm();
@@ -263,38 +318,4 @@ pub enum LightPolarization {
     Average,
     // previously:  avg = true, backscatter = true,
     BackscatterZ,
-}
-
-/// Quick little struct to simulate named arguments
-pub struct Input<'a> {
-    pub temperature: f64,
-    pub ev_frequencies: &'a [f64],
-    pub ev_eigenvectors: &'a GammaBasis3,
-    pub site_elements: &'a [Element],
-    pub site_masses: &'a [Mass],
-    pub bonds: &'a CartBonds,
-}
-
-impl<'a> Input<'a> {
-    pub fn compute_ev_raman_tensors(self) -> Result<Vec<RamanTensor>, BondPolError> {
-        let Input {
-            ev_frequencies, ev_eigenvectors,
-            temperature, site_elements, site_masses, bonds,
-        } = self;
-
-        let pol_constants = default_CH_pol_constants();
-
-        zip_eq!(ev_frequencies, &*ev_eigenvectors.0)
-            .map(|(&frequency, eigs)| {
-                let prefactor = raman_prefactor(frequency, temperature);
-                let tensor = raman_tensor(
-                    &eigs.0,
-                    site_masses,
-                    bonds,
-                    site_elements,
-                    &pol_constants,
-                )?;
-                Ok(RamanTensor { prefactor, tensor })
-            }).collect()
-    }
 }
