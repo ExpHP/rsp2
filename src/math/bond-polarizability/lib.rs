@@ -257,7 +257,8 @@ fn raman_tensor(
     let kdelta = <M33>::eye();
 
     let mut tensor = M33::zero();
-    let mut ignored_count = 0;
+    let mut ignored_by_type = 0;
+    let mut ignored_by_distance = 0;
     let mut ignored_distance = 0.0_f64;
     for CartBond { from, to, cart_vector: bond_vector } in bonds {
         let bond_type = BondType::from_elements(types[from], types[to])?;
@@ -272,13 +273,18 @@ fn raman_tensor(
         let pc = match &pol_constants[bond_type] {
             Some(pc) => pc,
             // ignore bonds which have no corresponding polarization constants
-            None => continue,
+            // FIXME: This seems confusing together with BondPolError::UnsupportedBond.
+            None => {
+                ignored_by_type += 1;
+                continue;
+            },
         };
 
         // check if bond is actually valid (via length)
         if distance > pc.max_len {
-            ignored_count += 1;
+            ignored_by_distance += 1;
             ignored_distance = ignored_distance.max(distance);
+            continue;
         }
 
         let const_one  = pc.c1; // `a_par  -   a_perp`
@@ -296,14 +302,21 @@ fn raman_tensor(
         });
     } // for Bond { ... } in bonds
 
-    if ignored_count > 0 {
+    if ignored_by_distance > 0 {
         warn_once!(
             "{} out of {} bonds were ignored because they were too long! \
             (max length {})",
-            ignored_count, bonds.len(),
+            ignored_by_distance, bonds.len(),
             ignored_distance,
         );
     }
+    if ignored_by_type > 0 {
+        warn_once!(
+            "{} out of {} bonds were ignored due to missing bondpol coefficients!",
+            ignored_by_type, bonds.len(),
+        );
+    }
+
     Ok(tensor)
 }
 
