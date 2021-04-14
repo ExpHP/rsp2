@@ -39,6 +39,7 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 !!rsp2-phonopy-io
 !!rsp2-sparse
 !!rsp2-dynmat
+!!rsp2-bond-polarizability
 #!!INSERTION POINT FOR NEW CRATES!!#
 # (do not edit the above line!)
 
