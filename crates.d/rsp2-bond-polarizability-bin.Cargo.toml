@@ -1,0 +1,30 @@
+[package]
+!!CRATE-NAME-LINE
+version = "0.1.0"
+authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
+!!LICENSE-PERMISSIVE
+!!DEFAULT-EDITION
+
+[[bin]]
+name = "rsp2-bond-polarizability"
+path = "main.rs"
+
+[dependencies]
+!!rsp2-clap
+!!rsp2-structure
+!!rsp2-structure-io
+!!rsp2-fs-util
+!!rsp2-dynmat
+!!rsp2-bond-polarizability
+!!rsp2-array-types
+
+!!clap
+!!env-logger
+!!failure
+!!serde
+!!serde-json
+!!log
+!!flate2
+
+[features]
+!!NIGHTLY-FEATURE-LINE
