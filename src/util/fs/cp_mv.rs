@@ -9,7 +9,7 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use crate::FailResult;
+use crate::{FsResult, FsError};
 use std::ffi::OsStr;
 use std::process::{Command, Stdio};
 use std::io::Read;
@@ -32,14 +32,14 @@ use std::io::Read;
 ///
 /// (who ever knew so much complexity was secretly hiding in
 ///  /usr/bin/mv?)
-pub fn mv<P, Q>(src: P, dest: Q) -> FailResult<()>
+pub fn mv<P, Q>(src: P, dest: Q) -> FsResult<()>
 where
     P: AsRef<OsStr>,
     Q: AsRef<OsStr>,
 { Move::new().one(src, dest) }
 
 /// Calls `cp -aT`.
-pub fn cp_a<P, Q>(src: P, dest: Q) -> FailResult<()>
+pub fn cp_a<P, Q>(src: P, dest: Q) -> FsResult<()>
 where
     P: AsRef<OsStr>,
     Q: AsRef<OsStr>,
@@ -92,14 +92,14 @@ macro_rules! impl_move_cmd_wrapper {
             { self.0.magic_directory = value; self }
 
             /// `mv src dest`
-            pub fn one<P, Q>(&self, src: P, dest: Q) -> FailResult<()>
+            pub fn one<P, Q>(&self, src: P, dest: Q) -> FsResult<()>
             where
                 P: AsRef<OsStr>,
                 Q: AsRef<OsStr>,
             { self.0.one(src, dest) }
 
             /// `mv -t dest src1 [src2...]`
-            pub fn many<P, Q, Qs>(&self, target: P, sources: Qs) -> FailResult<()>
+            pub fn many<P, Q, Qs>(&self, target: P, sources: Qs) -> FsResult<()>
             where
                 P: AsRef<OsStr>,
                 Q: AsRef<OsStr>,
@@ -188,7 +188,7 @@ impl MoveCmd {
         cmd
     }
 
-    fn one<P, Q>(&self, src: P, dest: Q) -> FailResult<()>
+    fn one<P, Q>(&self, src: P, dest: Q) -> FsResult<()>
     where
         P: AsRef<OsStr>,
         Q: AsRef<OsStr>,
@@ -202,7 +202,7 @@ impl MoveCmd {
         Self::call_and_check(cmd)?;
     })}
 
-    fn many<P, Q, Qs>(&self, target: P, sources: Qs) -> FailResult<()>
+    fn many<P, Q, Qs>(&self, target: P, sources: Qs) -> FsResult<()>
     where
         P: AsRef<OsStr>,
         Q: AsRef<OsStr>,
@@ -214,23 +214,24 @@ impl MoveCmd {
         Self::call_and_check(cmd)?;
     })}
 
-    fn call_and_check(mut cmd: Command) -> FailResult<()>
+    fn call_and_check(mut cmd: Command) -> FsResult<()>
     {Ok({
         let mut child = cmd
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
-            .spawn()?;
+            .spawn()
+            .map_err(|e| FsError::Custom(format!("{:?} failed to execute: {}", cmd, e)))?;
 
         let stderr = {
             let mut stderr = child.stderr.take().unwrap();
             let mut s = String::new();
-            stderr.read_to_string(&mut s)?;
+            stderr.read_to_string(&mut s).map_err(|e| FsError::Custom(format!("while reading child stderr: {}", e)))?;
             s
         };
 
-        let code = child.wait()?;
+        let code = child.wait().map_err(|e| FsError::Custom(format!("while waiting for child process: {}", e)))?;
         if !code.success() {
-            bail!("{:?} failed with code {} and message: {}", cmd, code, stderr);
+            return Err(FsError::Custom(format!("{:?} failed with code {} and message: {}", cmd, code, stderr)));
         }
     })}
 }
