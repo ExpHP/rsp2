@@ -1021,7 +1021,27 @@ impl DynamicalMatrix {
 
         Some(out)
     }
+
+    pub fn compute_eigensolutions_dense_gamma(&self) -> (Eigenvalues, Vec<Vec<V3>>) {
+        trace!("Computing all eigensolutions.");
+        let mut flat = self.to_dense_flat_real().expect("(BUG!) expected real matrix!");
+        let mut eigenvalues = vec![f64::NAN; 3 * self.num_atoms()];
+        let mut eigenvectors_flat = vec![f64::NAN; flat.len()];
+
+        rsp2_linalg::dynmat::diagonalize_real(&mut flat, &mut eigenvalues, &mut eigenvectors_flat);
+
+        // save that precious memory!
+        drop(flat);
+
+        let eigenvectors = eigenvectors_flat.chunks(3 * self.num_atoms())
+            .map(|data| data.nest().to_vec()).collect();
+
+        (Eigenvalues { eigenvalues }, eigenvectors)
+    }
 }
+
+/// Trivial wrapper type to help ensure eigenvalues don't get mistaken for frequencies.
+pub struct Eigenvalues { pub eigenvalues: Vec<f64> }
 
 // ------------------------------------------------------
 

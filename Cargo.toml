@@ -112,6 +112,7 @@ rsp2-phonopy-io = { path = "src/io/phonopy" }
 rsp2-sparse = { path = "src/util/sparse" }
 rsp2-dynmat = { path = "src/dynmat" }
 rsp2-bond-polarizability = { path = "src/math/bond-polarizability" }
+rsp2-bond-polarizability-bin = { path = "src/binary-crates/bond-polarizability" }
 #!!INSERTION POINT FOR NEW CRATES!!#
 # (do not edit the above line!)
 
@@ -159,8 +160,8 @@ test-diff=["rsp2-integration-test/test-diff"]
 mpi-support = ["mpi", "rsp2-tasks/mpi-support"]
 dftbplus-support = ["rsp2-tasks/dftbplus-support"]
 
-nightly = ["beta", "rsp2-array-types/nightly", "rsp2-assert-close/nightly", "rsp2-bond-polarizability/nightly", "rsp2-clap/nightly", "rsp2-dftbplus/nightly", "rsp2-dynmat/nightly", "rsp2-fs-util/nightly", "rsp2-integration-test/nightly", "rsp2-lammps-wrap/nightly", "rsp2-linalg/nightly", "rsp2-minimize/nightly", "rsp2-newtype-indices/nightly", "rsp2-phonopy-io/nightly", "rsp2-potentials/nightly", "rsp2-python/nightly", "rsp2-slice-math/nightly", "rsp2-soa-ops/nightly", "rsp2-sparse/nightly", "rsp2-structure-io/nightly", "rsp2-structure/nightly", "rsp2-tasks-config/nightly", "rsp2-tasks/nightly", "rsp2-util-macros/nightly", "rsp2c-unfold/nightly"]
-beta = ["rsp2-array-types/beta", "rsp2-assert-close/beta", "rsp2-bond-polarizability/beta", "rsp2-clap/beta", "rsp2-dftbplus/beta", "rsp2-dynmat/beta", "rsp2-fs-util/beta", "rsp2-integration-test/beta", "rsp2-lammps-wrap/beta", "rsp2-linalg/beta", "rsp2-minimize/beta", "rsp2-newtype-indices/beta", "rsp2-phonopy-io/beta", "rsp2-potentials/beta", "rsp2-python/beta", "rsp2-slice-math/beta", "rsp2-soa-ops/beta", "rsp2-sparse/beta", "rsp2-structure-io/beta", "rsp2-structure/beta", "rsp2-tasks-config/beta", "rsp2-tasks/beta", "rsp2-util-macros/beta", "rsp2c-unfold/beta"]
+nightly = ["beta", "rsp2-array-types/nightly", "rsp2-assert-close/nightly", "rsp2-bond-polarizability-bin/nightly", "rsp2-bond-polarizability/nightly", "rsp2-clap/nightly", "rsp2-dftbplus/nightly", "rsp2-dynmat/nightly", "rsp2-fs-util/nightly", "rsp2-integration-test/nightly", "rsp2-lammps-wrap/nightly", "rsp2-linalg/nightly", "rsp2-minimize/nightly", "rsp2-newtype-indices/nightly", "rsp2-phonopy-io/nightly", "rsp2-potentials/nightly", "rsp2-python/nightly", "rsp2-slice-math/nightly", "rsp2-soa-ops/nightly", "rsp2-sparse/nightly", "rsp2-structure-io/nightly", "rsp2-structure/nightly", "rsp2-tasks-config/nightly", "rsp2-tasks/nightly", "rsp2-util-macros/nightly", "rsp2c-unfold/nightly"]
+beta = ["rsp2-array-types/beta", "rsp2-assert-close/beta", "rsp2-bond-polarizability-bin/beta", "rsp2-bond-polarizability/beta", "rsp2-clap/beta", "rsp2-dftbplus/beta", "rsp2-dynmat/beta", "rsp2-fs-util/beta", "rsp2-integration-test/beta", "rsp2-lammps-wrap/beta", "rsp2-linalg/beta", "rsp2-minimize/beta", "rsp2-newtype-indices/beta", "rsp2-phonopy-io/beta", "rsp2-potentials/beta", "rsp2-python/beta", "rsp2-slice-math/beta", "rsp2-soa-ops/beta", "rsp2-sparse/beta", "rsp2-structure-io/beta", "rsp2-structure/beta", "rsp2-tasks-config/beta", "rsp2-tasks/beta", "rsp2-util-macros/beta", "rsp2c-unfold/beta"]
 
 [workspace]
 exclude = [

@@ -55,6 +55,7 @@ rsp2-phonopy-io = "src/io/phonopy"
 rsp2-sparse = "src/util/sparse"
 rsp2-dynmat = "src/dynmat"
 rsp2-bond-polarizability = "src/math/bond-polarizability"
+rsp2-bond-polarizability-bin = "src/binary-crates/bond-polarizability"
 #!!INSERTION POINT FOR NEW CRATES!!#
 # (do not edit the above line!)
 
@@ -123,6 +124,7 @@ dftbplus-sys = { git = "https://github.com/ExpHP/dftbplus-sys", tag = "v0.0.2" }
 tee = "0.1.0"
 perm-vec = "0.1"
 thiserror = "1.0.0"
+flate2 = "1.0.0"
 
 #--------------------------------------------
 # Always optimize some crates when they appear as dependencies.

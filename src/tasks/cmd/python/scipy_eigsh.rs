@@ -208,23 +208,9 @@ pub fn compute_negative_eigensolutions_gamma(
 pub fn compute_eigensolutions_dense_gamma(dynmat: &DynamicalMatrix) -> (Vec<f64>, GammaBasis3) {
     use crate::math::basis::GammaKet3;
 
-    trace!("Computing all eigensolutions.");
-    let mut flat = dynmat.to_dense_flat_real().expect("(BUG!) expected real matrix!");
-    let mut eigenvalues = vec![std::f64::NAN; 3 * dynmat.num_atoms()];
-    let mut eigenvectors_flat = vec![std::f64::NAN; flat.len()];
+    let (eigenvalues, eigenvectors) = dynmat.compute_eigensolutions_dense_gamma();
 
-    rsp2_linalg::dynmat::diagonalize_real(&mut flat, &mut eigenvalues, &mut eigenvectors_flat);
-
-    // save that precious memory!
-    drop(flat);
-
-    let mut kets = vec![];
-    for eigenvector_data in eigenvectors_flat.chunks(3 * dynmat.num_atoms()) {
-        kets.push(GammaKet3(eigenvector_data.nest().to_vec()));
-    }
-    let eigenvectors = GammaBasis3(Arc::new(kets));
-
-    let frequencies = eigenvalues.into_iter().map(crate::filetypes::eigensols::eigenvalue_to_frequency).collect();
-
+    let frequencies = eigenvalues.eigenvalues.into_iter().map(crate::filetypes::eigensols::eigenvalue_to_frequency).collect();
+    let eigenvectors = GammaBasis3(Arc::new(eigenvectors.into_iter().map(GammaKet3).collect()));
     (frequencies, eigenvectors)
 }

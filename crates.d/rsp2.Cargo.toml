@@ -40,6 +40,7 @@ authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
 !!rsp2-sparse
 !!rsp2-dynmat
 !!rsp2-bond-polarizability
+!!rsp2-bond-polarizability-bin
 #!!INSERTION POINT FOR NEW CRATES!!#
 # (do not edit the above line!)
 

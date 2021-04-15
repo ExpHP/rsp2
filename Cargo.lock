@@ -7,6 +7,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9fa948f9ec9f095cc955efbe4fd00ac5774ef933cc2442562a8fe5a57c4ef919"
 
 [[package]]
+name = "adler"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f26201604c87b1e01bd3d98f8d5d9a8fcbb815e8cedb41ffccbeb4bf593a35fe"
+
+[[package]]
 name = "aho-corasick"
 version = "0.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -229,6 +235,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "crc32fast"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "81156fece84ab6a9f2afdb109ce3ae577e42b1228441eded99bd77f627953b1a"
+dependencies = [
+ "cfg-if 1.0.0",
+]
+
+[[package]]
 name = "crossbeam-channel"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -406,6 +421,18 @@ name = "fixedbitset"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "86d4de0081402f5e88cdac65c8dcdcc73118c1a7a465e2a05f0da05843a8ea33"
+
+[[package]]
+name = "flate2"
+version = "1.0.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cd3aec53de10fe96d7d8c565eb17f2c687bb5518a2ec453b5b1252964526abe0"
+dependencies = [
+ "cfg-if 1.0.0",
+ "crc32fast",
+ "libc",
+ "miniz_oxide",
+]
 
 [[package]]
 name = "frunk"
@@ -621,9 +648,9 @@ checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 
 [[package]]
 name = "libc"
-version = "0.2.43"
+version = "0.2.93"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "76e3a3ef172f1a0b9a9ff0dd1491ae5e6c948b94479a3021819ba7d860c8645d"
+checksum = "9385f66bf6105b241aa65a61cb923ef20efc665cb9f9bb50ac2f0c4b7f378d41"
 
 [[package]]
 name = "libffi"
@@ -729,6 +756,16 @@ version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "157b4208e3059a8f9e78d559edc658e13df41410cb3ae03979c83130067fdd87"
 dependencies = [
+ "autocfg",
+]
+
+[[package]]
+name = "miniz_oxide"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a92518e98c078586bc6c934028adcca4c92a53d6a958196de835170a01d84e4b"
+dependencies = [
+ "adler",
  "autocfg",
 ]
 
@@ -1154,6 +1191,7 @@ dependencies = [
  "rsp2-array-types",
  "rsp2-assert-close",
  "rsp2-bond-polarizability",
+ "rsp2-bond-polarizability-bin",
  "rsp2-clap",
  "rsp2-dftbplus",
  "rsp2-dynmat",
@@ -1210,6 +1248,26 @@ dependencies = [
  "rsp2-structure",
  "rsp2-util-macros",
  "thiserror",
+]
+
+[[package]]
+name = "rsp2-bond-polarizability-bin"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "env_logger 0.6.1",
+ "failure",
+ "flate2",
+ "log 0.4.3",
+ "rsp2-array-types",
+ "rsp2-bond-polarizability",
+ "rsp2-clap",
+ "rsp2-dynmat",
+ "rsp2-fs-util",
+ "rsp2-structure",
+ "rsp2-structure-io",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
