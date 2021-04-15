@@ -10,7 +10,7 @@ description = "Adds error context to fs operations.  Sort of superceded by path_
 path = "lib.rs"
 
 [dependencies]
-!!failure
+!!thiserror
 !!tempdir
 !!log
 

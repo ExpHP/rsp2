@@ -1313,9 +1313,9 @@ dependencies = [
 name = "rsp2-fs-util"
 version = "0.1.0"
 dependencies = [
- "failure",
  "log 0.4.3",
  "tempdir",
+ "thiserror",
 ]
 
 [[package]]
@@ -1475,10 +1475,10 @@ dependencies = [
 name = "rsp2-sparse"
 version = "0.1.0"
 dependencies = [
- "failure",
  "num-traits 0.2.5",
  "rsp2-newtype-indices",
  "rsp2-util-macros",
+ "thiserror",
 ]
 
 [[package]]

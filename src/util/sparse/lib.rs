@@ -22,7 +22,6 @@
 //! operations.
 
 #[macro_use] extern crate rsp2_util_macros;
-#[macro_use] extern crate failure;
 
 use std::collections::BTreeMap;
 use std::ops::{Range, Add, AddAssign};
@@ -30,11 +29,11 @@ use num_traits::Zero;
 use rsp2_newtype_indices::{Idx, Indexed};
 
 /// Returned by `validate` to indicate that a sparse matrix is invalid.
-#[derive(Fail, Debug)]
-#[fail(display = "{}", message)]
+#[derive(Debug, thiserror::Error)]
+#[error("{}", message)]
 pub struct SparseMatrixError {
     message: String,
-    backtrace: failure::Backtrace,
+    // backtrace: std::backtrace::Backtrace,
 }
 
 macro_rules! ensure {
@@ -42,7 +41,7 @@ macro_rules! ensure {
         if !$cond {
             return Err(SparseMatrixError {
                 message: format!($($arg)*),
-                backtrace: failure::Backtrace::new(),
+                // backtrace: failure::Backtrace::new(),
             })
         }
     }

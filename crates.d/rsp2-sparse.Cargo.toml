@@ -13,7 +13,7 @@ path = "lib.rs"
 !!rsp2-newtype-indices
 !!rsp2-util-macros
 
-!!failure
+!!thiserror
 !!num-traits
 
 [features]
