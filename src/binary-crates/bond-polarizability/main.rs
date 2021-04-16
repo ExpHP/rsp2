@@ -74,11 +74,11 @@ pub fn _main() -> FailResult<()> {
         }.compute_ev_raman_tensors()?;
         let tensors = tensors.into_iter().map(|tensor| tensor.tensor().clone()).collect::<Vec<_>>();
 
-        Ok(OutputData { temperature, raman_tensors: tensors })
+        Ok(OutputDataItem { temperature, raman_tensors: tensors })
     }).collect::<FailResult<Vec<_>>>()?;
 
     let out_file = fsx::create(out_path)?;
-    serde_json::to_writer(out_file, &data)?;
+    serde_json::to_writer(out_file, &Output { data, frequencies })?;
     Ok(())
 }
 
@@ -100,9 +100,16 @@ fn element_mass(elem: Element) -> FailResult<f64>
     }
 })}
 
+/// All output data.
+#[derive(serde::Serialize)]
+struct Output {
+    frequencies: Vec<f64>,
+    data: Vec<OutputDataItem>,
+}
+
 /// Data at a single temperature.
 #[derive(serde::Serialize)]
-struct OutputData {
+struct OutputDataItem {
     temperature: f64,
     #[serde(rename = "raman")]
     raman_tensors: Vec<M33>,
