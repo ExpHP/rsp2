@@ -5,16 +5,4 @@ PKGNAME=rsp2-bond-polarizability-bin
 BINNAME=rsp2-bond-polarizability
 BINPATH=$RSP2/target/release/$BINNAME
 
-if [[ "$(readlink -f "$RSP2")" == "$(readlink -f .)" ]]; then
-  MANIFEST_PATH=
-else
-  MANIFEST_PATH="--manifest-path="'"'"$RSP2/Cargo.toml"'"'
-fi
-
-if [[ ! -e $BINPATH ]]; then
-  echo >&2 "$BINNAME is not built! Please run"
-  echo >&2 "    cargo build $MANIFEST_PATH --release --package=$PKGNAME"
-  exit 1
-fi
-
-"$BINPATH" "$@"
+cargo run --manifest-path "$RSP2/Cargo.toml" --package="$PKGNAME" --release -- "$@"
