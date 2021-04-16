@@ -100,9 +100,11 @@ fn element_mass(elem: Element) -> FailResult<f64>
     }
 })}
 
+/// Data at a single temperature.
 #[derive(serde::Serialize)]
 struct OutputData {
     temperature: f64,
+    #[serde(rename = "raman")]
     raman_tensors: Vec<M33>,
 }
 
