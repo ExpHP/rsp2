@@ -54,10 +54,7 @@ install:
 # additional python packages
 - pip install --upgrade pip
 - pip install --progress-bar=off setuptools wheel
-- pip install --progress-bar=off --only-binary=numpy,scipy numpy scipy
-- pip install --progress-bar=off spglib
-- pip install --progress-bar=off phonopy==1.13.0.64 # rsp2 does not yet support 1.13.2
-- pip install --progress-bar=off pymatgen
+- pip install --progress-bar=off --only-binary=numpy,scipy -r requirements.txt
 
 - $TRAVIS_BUILD_DIR/travis/install-openmpi.sh
 
