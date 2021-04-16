@@ -1,6 +1,5 @@
 import json
 import os
-from pymatgen.io.vasp import Poscar
 
 def from_path(path):
     # TODO: should maybe support .tar.gz or .tar.xz
@@ -15,6 +14,8 @@ class StructureDir:
 
     @classmethod
     def from_dir(cls, path):
+        from pymatgen.io.vasp import Poscar
+
         structure = Poscar.from_file(os.path.join(path, 'POSCAR')).structure
         with open(os.path.join(path, 'meta.json')) as f:
             meta = json.load(f)
