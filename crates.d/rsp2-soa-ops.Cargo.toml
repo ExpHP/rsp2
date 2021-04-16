@@ -12,6 +12,9 @@ path = "lib.rs"
 [dependencies]
 !!frunk { optional = true }
 !!perm-vec
+# FIXME: I'd like to make this one optional, but the unit tests require it.
+#        Try again after https://github.com/rust-lang/cargo/issues/5565
+!!rand
 
 [features]
 !!NIGHTLY-FEATURE-LINE

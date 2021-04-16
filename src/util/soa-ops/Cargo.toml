@@ -17,6 +17,9 @@ path = "lib.rs"
 [dependencies]
 frunk = { version = "0.2.0", optional = true }
 perm-vec = "0.1"
+# FIXME: I'd like to make this one optional, but the unit tests require it.
+#        Try again after https://github.com/rust-lang/cargo/issues/5565
+rand = "0.3"
 
 [features]
 nightly = ["beta"]
