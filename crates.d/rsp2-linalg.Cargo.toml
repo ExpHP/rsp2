@@ -16,7 +16,7 @@ path = "lib.rs"
 !!slice-of-array
 #!!frunk
 !!lapacke
-!!lapack-src
+!!openblas-src
 !!ndarray
 !!rand
 !!num-traits

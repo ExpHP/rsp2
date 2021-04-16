@@ -69,7 +69,7 @@ frunk = "0.2.0"
 shlex = "0.1.1"
 indoc = "0.2.3"
 lapacke = "0.2"
-lapack-src = { version = "0.6", features = ["openblas"] }
+openblas-src = { version = "0.10", features = ["static"] }
 num-traits = "0.2.3"
 num-complex = "0.2.1"
 num_cpus = "1.8"

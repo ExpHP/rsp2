@@ -64,7 +64,7 @@ path = "lib.rs"
 !!shlex
 !!indoc
 !!lapacke
-!!lapack-src
+!!openblas-src
 !!num-traits
 !!num-complex
 !!num-cpus
