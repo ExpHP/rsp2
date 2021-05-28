@@ -1552,6 +1552,7 @@ version = "0.1.0"
 dependencies = [
  "frunk",
  "perm-vec",
+ "rand 0.3.22",
 ]
 
 [[package]]
