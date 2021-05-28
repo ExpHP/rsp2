@@ -15,6 +15,8 @@ libffi
 libllvm and libclang
 blas and lapacke
 mpi (optional; see below)
+clang
+cmake (if a system version of lammps is not available)
 ```
 
 It also has a large number of rust dependencies, but these are automatically managed by cargo.
