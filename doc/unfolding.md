@@ -2,6 +2,10 @@
 
 `scripts/unfold.py` is a script for generating band plots of unfolded band data.
 
+## Worked Example
+
+If you like to follow along with a worked example, [you can find one here](https://gist.github.com/ExpHP/d22f050b00bc345d859ecda7d1c8bf78).
+
 ## Stability warning
 
 `unfold.py` is a monolithic tool that undergoes frequent breaking changes, especially to its CLI arguments.  If you want to write code that depends on it, you may have better luck depending on the python functions and classes that have been factored out into `unfold_lib`, as these are somewhat more stable.
