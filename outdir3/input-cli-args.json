@@ -1,1 +1,0 @@
-["target/debug/rsp2","-c","settings.yaml","layers.yaml","-o","outdir3","--force"]

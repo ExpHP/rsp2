@@ -1,8 +1,0 @@
-[   0.000s][[96m INFO[0m] rsp2 ((unknown) (unknown))
-[   0.862s][[96m INFO[0m] Available resources for parallelism:
-[   0.862s][[96m INFO[0m]     MPI: N/A (disabled during compilation)
-[   0.863s][[96m INFO[0m]  OpenMP: 1 thread(s) per process (OMP_NUM_THREADS)
-[   0.864s][[96m INFO[0m]        : 8 thread(s) in single-process tasks (RSP2_MAX_THREADS)
-[   0.866s][[96m INFO[0m]   rayon: 8 thread(s) on the root process
-[   0.921s][[91mERROR[0m] potential: invalid type: unit variant, expected newtype variant at line 3 column 3
-[   0.922s][[91mERROR[0m] (If you found the above error message to be particularly lacking in detail, try again with RUST_BACKTRACE=1)
