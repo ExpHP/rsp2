@@ -1,0 +1,12 @@
+[   0.000s][[96m INFO[0m] rsp2 ((unknown) (unknown))
+[   0.804s][[96m INFO[0m] Available resources for parallelism:
+[   0.805s][[96m INFO[0m]     MPI: N/A (disabled during compilation)
+[   0.805s][[96m INFO[0m]  OpenMP: 1 thread(s) per process (OMP_NUM_THREADS)
+[   0.805s][[96m INFO[0m]        : 8 thread(s) in single-process tasks (RSP2_MAX_THREADS)
+[   0.807s][[96m INFO[0m]   rayon: 8 thread(s) on the root process
+[   0.852s][[33m WARN[0m] Settings file has no `version` field! Assuming `version: 1`. (the latest is version 1)
+[   0.860s][[36mTRACE[0m] Optimizing lattice param
+[ 168.588s][[96m INFO[0m] Optimized lattice param: 2.4592144753635603 (from (2.38, 2.54))
+[ 168.589s][[36mTRACE[0m] Optimizing layer separation 0
+[ 349.858s][[96m INFO[0m] Optimized layer separation 0: 3.4597343950503987 (from (3.15, 3.55))
+[ 349.859s][[36mTRACE[0m] Optimizing layer separation 1

@@ -79,6 +79,7 @@ mod cereal {
         // Number of unique images to generate along each layer lattice vector
         #[serde(default = "defaults::layer::repeat")]
         pub repeat: [u32; 2],
+        pub site_atoms: Vec<String>,
         // Common translation for all positions in layer.
         // NOTE: units of layer lattice
         #[serde(default = "defaults::layer::shift")]
@@ -123,6 +124,7 @@ mod middle {
         pub transform: M33,
         pub repeat: [u32; 3],
         pub shift: V3,
+        pub site_atoms: Vec<String>,
     }
 }
 
@@ -148,7 +150,7 @@ fn interpret_cereal(cereal: self::cereal::Root) -> FailResult<middle::Layers>
         let self::cereal::Layer {
             frac_lattice, frac_sites,
             cart_lattice, cart_sites,
-            transform, repeat, shift,
+            transform, repeat, shift, site_atoms
         } = layer;
 
         #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -181,11 +183,11 @@ fn interpret_cereal(cereal: self::cereal::Root) -> FailResult<middle::Layers>
                 }
             }
         };
-
+        let site_atoms = site_atoms;
         let transform = m22_to_m33(&transform);
         let shift = V3([shift[0], shift[1], 0.0]);
         let repeat = [repeat[0], repeat[1], 1];
-        middle::Layer { cart_lattice, frac_lattice, cart_sites, transform, repeat, shift }
+        middle::Layer { cart_lattice, frac_lattice, cart_sites, transform, repeat, site_atoms, shift }
     })}).collect::<FailResult<Vec<_>>>()?;
 
     middle::Layers { lattice_a, full_lattice, layers, layer_seps, vacuum_sep }
@@ -199,9 +201,12 @@ fn assemble_from_cereal(cereal: self::cereal::Root) -> FailResult<Assemble>
     } = interpret_cereal(cereal)?;
 
     let mut fracs_in_plane = vec![];
+    let mut atoms = vec![];
+
     for layer in layers.into_iter() {
         let lattice = layer.cart_lattice.clone();
         let sites = layer.cart_sites.clone();
+        let layer_atoms = layer.site_atoms.clone();
 
         let mut structure = Coords::new(lattice, CoordsKind::Carts(sites));
         structure.translate_frac(&layer.shift);
@@ -224,11 +229,17 @@ fn assemble_from_cereal(cereal: self::cereal::Root) -> FailResult<Assemble>
             Lattice::new(&full_lattice),
             CoordsKind::Carts(superstructure.to_carts()),
         );
+
         // FIXME this reduction is just a bandaid for the above-mentioned issue.
         //       (taking unique positions in the diagonal layer supercells and mapping
         //        them into the cell that we generally use for the structure)
         superstructure.reduce_positions();
         fracs_in_plane.push(superstructure.to_fracs());
+
+        for frac in 0..superstructure.num_atoms(){
+            atoms.push(layer_atoms[frac % layer_atoms.len()].clone());
+        }
+       
     }
 
     let carts_along_normal = {
@@ -247,6 +258,7 @@ fn assemble_from_cereal(cereal: self::cereal::Root) -> FailResult<Assemble>
         initial_vacuum_sep: vacuum_sep,
         check_intralayer_distance: None,
         part: None,
+        atoms: atoms,
     };
 
     // FIXME: some of the possible errors produced by `from_raw` here are

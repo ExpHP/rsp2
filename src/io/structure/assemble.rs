@@ -41,6 +41,7 @@ pub struct Assemble {
     /// between the first layer encountered on either side of the boundary)
     pub vacuum_sep: f64,
     layer_seps: Vec<f64>, // [layer] (length: nlayer - 1)
+    pub atoms: Vec<String>
 }
 
 impl Assemble {
@@ -163,6 +164,8 @@ pub struct RawAssemble {
     /// This is to help catch bugs related to accidentally wrapping `carts_along_normal`
     /// across a periodic boundary.
     pub check_intralayer_distance: Option<f64>,
+    pub atoms: Vec<String>
+
 }
 
 impl Assemble {
@@ -170,7 +173,7 @@ impl Assemble {
         let RawAssemble {
             normal_axis, lattice, fracs_in_plane, carts_along_normal,
             initial_vacuum_sep, initial_layer_seps, initial_scale,
-            check_intralayer_distance, part,
+            check_intralayer_distance, part, atoms
         } = raw;
         assert!(normal_axis < 3);
 
@@ -259,7 +262,7 @@ impl Assemble {
         let layer_seps = initial_layer_seps;
         Ok(Assemble {
             normal_axis, scale, lattice, fracs_in_plane, carts_along_normal,
-            vacuum_sep, layer_seps, perm,
+            vacuum_sep, layer_seps, perm, atoms
         })
     }
 }

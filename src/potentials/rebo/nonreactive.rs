@@ -154,15 +154,15 @@ enum Debug { Auto, Never }
 pub type SiteBondVec<T> = ArrayVec<[T; SITE_MAX_BONDS]>;
 
 /// The most bonds an atom can have.
-pub const SITE_MAX_BONDS: usize = 4;
+pub const SITE_MAX_BONDS: usize = 6;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, enum_map::Enum)]
 pub enum AtomType { Carbon, Hydrogen }
 impl AtomType {
-    pub fn char(self) -> char {
+    pub fn char(self) -> &'static str {
         match self {
-            AtomType::Carbon => 'C',
-            AtomType::Hydrogen => 'H',
+            AtomType::Carbon => "C",
+            AtomType::Hydrogen => "H",
         }
     }
 

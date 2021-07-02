@@ -495,6 +495,57 @@ mod airebo {
     }
 }
 
+pub use self::reaxff::ReaxFF;
+mod reaxff {
+    use super::*;
+
+    #[derive(Debug, Clone)]
+    pub enum ReaxFF {
+        ReaxFF {},
+    }
+
+    impl<'a> From<&'a cfg::LammpsPotentialReaxFF> for ReaxFF {
+        fn from(cfg: &'a cfg::LammpsPotentialReaxFF) -> Self {
+            let cfg::LammpsPotentialReaxFF { .. } = *cfg;
+            ReaxFF::ReaxFF{}
+        }
+    }
+
+
+    impl LammpsPotential for ReaxFF {
+        type Meta = CommonMeta;
+
+        fn molecule_ids(&self, _: &Coords, _: &CommonMeta) -> Option<Vec<usize>> { None }
+
+        fn atom_types(&self, _: &Coords, meta: &CommonMeta) -> Vec<AtomType>
+        {
+            let elements: meta::SiteElements = meta.pick();
+            elements.iter().map(|elem| match elem.symbol() {
+                "Mo" => AtomType::new(1),
+                "S" => AtomType::new(2),
+                sym => panic!("Unexpected element in ReaxFF: {}", sym),
+            }).collect()
+        }
+
+        fn init_info(&self, _: &Coords, meta: &CommonMeta) -> InitInfo {
+            let masses = vec![
+                only_unique_mass(meta, consts::MOLYBDENUM),
+                only_unique_mass(meta, consts::SULFUR),
+            ];
+            let pair_style;
+            match *self {
+                ReaxFF::ReaxFF {..} => {
+                    pair_style = PairStyle::named("reax/c");
+                },
+            };
+            let pair_coeffs = vec![
+                PairCoeff::new(.., ..).args(&["ffield.reax.mos2", "Mo", "S"]),
+            ];
+            InitInfo { masses, pair_style, pair_coeffs }
+        }
+    }
+}
+
 pub use self::kc_z::KolmogorovCrespiZ;
 mod kc_z {
     use super::*;

@@ -1,0 +1,62 @@
+---
+potential:
+  - kc-layered:
+      cutoff: 13
+      cutoff-length: 2
+      params: original
+      normals:
+        local: {}
+  - rebo-nonreactive:
+      params: lammps
+scale-ranges:
+  repeat-count: 2
+  scalables:
+    - parameter:
+        axis-mask:
+          - 1
+          - 1
+          - 0
+        guess: 2.46
+        range:
+          - 2.38
+          - 2.54
+    - layer-seps:
+        guess: 3.38
+        range:
+          - 3.15
+          - 3.55
+cg:
+  stop-condition:
+    grad-max: 0.001
+ev-loop:
+  min-positive-iter: 1
+  max-iter: 3
+  fail: false
+ev-chase:
+  cg:
+    stop-condition:
+      any:
+        - value-delta:
+            rel-greater-than: 0
+            steps-ago: 10
+        - iterations: 100
+threading: rayon
+phonons:
+  supercell:
+    target:
+      - 35
+      - 35
+      - 0
+  disp-finder:
+    rsp2: {}
+  eigensolver:
+    dense: {}
+  symmetry-tolerance: 0.001
+  displacement-distance: 0.0001
+parameters:
+  - a
+  - a
+  - ~
+animate: {}
+layer-gamma-threshold: 0.2
+bond-radius: 1.8

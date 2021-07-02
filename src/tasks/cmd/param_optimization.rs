@@ -13,6 +13,7 @@ use crate::{FailResult};
 use crate::potential::{CommonMeta, PotentialBuilder, DiffFn, BondGrad, BondDiffFn};
 use crate::meta::{prelude::*};
 
+use rsp2_tasks_config::MaskBit;
 use rsp2_minimize::exact_ls::{Value, Golden};
 use rsp2_structure::{Lattice, CoordsKind, Coords};
 use rsp2_structure::layer::{LayersPerUnitCell, require_simple_axis_normal};
@@ -155,12 +156,22 @@ fn add_scalables(
         },
 
         (
-            &cfg::Scalable::UniformLayerSep { .. },
-            &ScalableCoords::UnknownLayers { .. },
-        ) | (
-            &cfg::Scalable::LayerSeps { .. },
+            &cfg::Scalable::UniformLayerSep { .. } | &cfg::Scalable::LayerSeps { .. },
             &ScalableCoords::UnknownLayers { .. },
         ) => bail!("cannot scale layer separations when layers have not been determined"),
+
+        (
+            &cfg::Scalable::UniformLayerSep { ref mask, .. } | &cfg::Scalable::LayerSeps { ref mask, .. },
+            &ScalableCoords::KnownLayers { ref layer_builder, .. },
+        ) => {
+            if let Some(mask) = mask {
+                ensure!(
+                    mask.len() == layer_builder.num_layer_seps(),
+                    "a layer-sep mask has the wrong length (expected {} elements, got {:?})",
+                    layer_builder.num_layer_seps(), mask,
+                )
+            }
+        },
 
         _ => {},
     }
@@ -195,15 +206,19 @@ fn add_scalables(
             });
         },
 
-        &cfg::Scalable::UniformLayerSep { ref range } => {
+        &cfg::Scalable::UniformLayerSep { ref range, ref mask } => {
             // one scalable for all layers
+            let n_layer_seps = n_layer_seps.expect("BUG!");
+            let mask = mask.clone().unwrap_or(vec![MaskBit(true); n_layer_seps]);
             emit(Scalable {
                 name: format!("a uniform layer separation"),
-                setter: Box::new(|s, val| match s {
+                setter: Box::new(move |s, val| match s {
                     ScalableCoords::UnknownLayers { .. } => unreachable!(),
                     ScalableCoords::KnownLayers { layer_builder, .. } => {
-                        for x in layer_builder.layer_seps() {
-                            *x = val;
+                        for k in 0..n_layer_seps {
+                            if mask[k].0 {
+                                layer_builder.layer_seps()[k] = val;
+                            }
                         }
                     },
                 }),
@@ -211,10 +226,14 @@ fn add_scalables(
             });
         },
 
-        &cfg::Scalable::LayerSeps { ref range } => {
+        &cfg::Scalable::LayerSeps { ref range, ref mask } => {
             // separate scalables for each layer
             let n_layer_seps = n_layer_seps.expect("BUG!");
+            let mask = mask.clone().unwrap_or(vec![MaskBit(true); n_layer_seps]);
             for k in 0..n_layer_seps {
+                if !mask[k].0 {
+                    continue;
+                }
                 emit(Scalable {
                     name: format!("layer separation {}", k),
                     setter: Box::new(move |s, val| match s {
@@ -303,6 +322,7 @@ impl ScalableCoords {
             initial_scale: Some([1.0; 3]),
             part: Some(layers.get_part()),
             check_intralayer_distance: Some(cfg.threshold),
+            atoms: vec![],
         }).unwrap();
         ScalableCoords::KnownLayers { layer_builder }
     }

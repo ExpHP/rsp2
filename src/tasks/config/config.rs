@@ -316,7 +316,7 @@ pub enum Scalable {
         range: ScalableRange,
     },
 
-    /// Optimize a single value shared by all layer separations.
+    /// Optimize a single value shared by multiple layer separations.
     ///
     /// Under certain conditions, the optimum separation IS identical for
     /// all layers (e.g. generated structures where all pairs of layers
@@ -326,6 +326,9 @@ pub enum Scalable {
     /// is "good enough" that CG can be trusted to take care of the rest.
     #[serde(rename_all = "kebab-case")]
     UniformLayerSep {
+        /// Toggle which separations are affected.  For n layers, this must have n-1 elements.
+        #[serde(default)]
+        mask: OrDefault<Vec<MaskBit>>,
         #[serde(flatten)]
         range: ScalableRange,
     },
@@ -333,6 +336,9 @@ pub enum Scalable {
     /// Optimize each layer separation individually. Can be costly.
     #[serde(rename_all = "kebab-case")]
     LayerSeps {
+        /// Toggle which separations are affected.  For n layers, this must have n-1 elements.
+        #[serde(default)]
+        mask: OrDefault<Vec<MaskBit>>,
         #[serde(flatten)]
         range: ScalableRange,
     },
@@ -622,6 +628,7 @@ pub enum PotentialKind {
 
     /// Arranges atoms into a chain along the first lattice vector.
     #[serde(rename = "test-func-chainify")] TestChainify,
+
 }
 
 #[derive(Serialize, Deserialize)]
@@ -638,6 +645,7 @@ pub enum LammpsPotentialKind {
     #[serde(rename = "kc-z")] KolmogorovCrespiZ(LammpsPotentialKolmogorovCrespiZ),
     /// `pair_style hybrid rebo kolmogorov/crespi/full`
     #[serde(rename = "kc-full")] KolmogorovCrespiFull(LammpsPotentialKolmogorovCrespiFull),
+    #[serde(rename = "reaxff")] ReaxFF(LammpsPotentialReaxFF),
 }
 
 #[derive(Serialize, Deserialize)]
@@ -660,6 +668,12 @@ pub struct LammpsPotentialAirebo {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub omp: OrDefault<bool>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub struct LammpsPotentialReaxFF {
 }
 
 #[derive(Serialize, Deserialize)]

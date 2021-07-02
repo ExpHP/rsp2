@@ -58,6 +58,7 @@ use rsp2_structure::{Coords, Lattice};
 use rsp2_structure::{
     layer::LayersPerUnitCell,
     bonds::FracBonds,
+    Element,
 };
 
 use rsp2_fs_util::{create, rm_rf, hard_link};
@@ -135,7 +136,7 @@ impl TrialDir {
             (_, Some(_)) => {},
         }
 
-        let pot = PotentialBuilder::from_root_config(Some(&self), on_demand, &settings)?;
+        let pot = <dyn PotentialBuilder>::from_root_config(Some(&self), on_demand, &settings)?;
 
         let (optimizable_coords, mut meta) = {
             read_optimizable_structure(
@@ -1122,7 +1123,7 @@ pub(crate) fn run_shear_plot(
 
     let EnergySurfaceArgs { density, extend_border, layer: translated_layer } = plot_args;
 
-    let pot = PotentialBuilder::from_config_parts(
+    let pot = <dyn PotentialBuilder>::from_config_parts(
         None,
         on_demand,
         &settings.threading,
@@ -1250,7 +1251,7 @@ impl TrialDir {
         stored: StoredStructure,
     ) -> FailResult<()>
     {Ok({
-        let pot = PotentialBuilder::from_root_config(Some(&self), on_demand, &settings)?;
+        let pot = <dyn PotentialBuilder>::from_root_config(Some(&self), on_demand, &settings)?;
 
         let phonons_settings = match &settings.phonons {
             Some(x) => x,
@@ -1357,7 +1358,7 @@ pub(crate) fn run_plot_vdw(
         update_style: cfg::LammpsUpdateStyle::Fast { sync_positions_every: 1 }.into(),
         processor_axis_mask: [true; 3].into(),
     };
-    let pot = PotentialBuilder::from_config_parts(None, on_demand, &threading, &lammps, pot)?;
+    let pot = <dyn PotentialBuilder>::from_config_parts(None, on_demand, &threading, &lammps, pot)?;
 
     let lattice = {
         let a = rs.iter().fold(0.0, |a, &b| f64::max(a, b)) + 20.0;
@@ -1410,7 +1411,7 @@ pub(crate) fn run_converge_vdw(
         update_style: cfg::LammpsUpdateStyle::Fast { sync_positions_every: 1 }.into(),
         processor_axis_mask: [true; 3].into(),
     };
-    let pot = PotentialBuilder::from_config_parts(None, on_demand, &threading, &lammps, pot)?;
+    let pot = <dyn PotentialBuilder>::from_config_parts(None, on_demand, &threading, &lammps, pot)?;
 
     let lattice = Lattice::orthorhombic(40.0, 40.0, 40.0);
     let direction = {
@@ -1473,7 +1474,7 @@ pub(crate) fn run_single_force_computation(
         })).fold_ok()?
     });
 
-    let pot = PotentialBuilder::from_root_config(None, on_demand, &settings)?;
+    let pot = <dyn PotentialBuilder>::from_root_config(None, on_demand, &settings)?;
 
     pot.one_off().compute_force(&coords, meta.sift())?
 })}
@@ -1531,7 +1532,7 @@ pub(crate) fn run_layer_mode_frequencies(
         OnlyUniqueResult::NoValues => unreachable!(),
     };
 
-    let pot = PotentialBuilder::from_root_config(None, on_demand, &settings)?;
+    let pot = <dyn PotentialBuilder>::from_root_config(None, on_demand, &settings)?;
     let mut diff_fn = pot.initialize_diff_fn(&original_coords, meta.sift())?;
 
     warn!("Don't quote these values, only compare them!  (I'm not sure about the prefactor...)");
@@ -1587,7 +1588,7 @@ pub(crate) fn run_dynmat_at_q(
     qpoint_frac: V3,
     structure: StoredStructure,
 ) -> FailResult<DynamicalMatrix> {
-    let pot = PotentialBuilder::from_root_config(None, on_demand, &settings)?;
+    let pot = <dyn PotentialBuilder>::from_root_config(None, on_demand, &settings)?;
 
     let phonons_settings = match &settings.phonons {
         Some(x) => x,
@@ -1644,7 +1645,7 @@ impl TrialDir {
             None => bail!("`rsp2-run-after-diagonalization` cannot be used without a `phonons:` config section"),
         };
 
-        let pot = PotentialBuilder::from_root_config(Some(&self), on_demand, &settings)?;
+        let pot = <dyn PotentialBuilder>::from_root_config(Some(&self), on_demand, &settings)?;
 
         let (coords, meta) = self.read_stored_structure_data(&self.structure_path(PreEvChase(prev_iteration)))?;
 
@@ -1881,7 +1882,12 @@ pub(crate) fn read_optimizable_structure(
             });
 
             out_layers = Some(layer_builder.atom_layers().into_iter().map(Layer).collect::<Vec<_>>().into());
-            out_elements = vec![CARBON; layer_builder.num_atoms()].into();
+            //println!("{:?}",layer_builder.atoms);
+            let mut elements = vec![];
+            for atom in layer_builder.atoms.clone(){
+                elements.push(Element::get_from_symbol(&atom));
+            }
+            out_elements = elements.into();
             out_masses = masses_by_config(mass_cfg, out_elements.clone())?;
             out_coords = ScalableCoords::KnownLayers { layer_builder };
             out_bonds = None; // Determine bonds AFTER parameter optimization.

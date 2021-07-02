@@ -66,6 +66,12 @@ impl Element {
         Ok(Element(n))
     }
 
+    pub fn get_from_symbol(s: &str) -> Self
+    {
+        let n = SHORT_TO_NUMBER.get(s).unwrap();
+        Element(*n)
+    }
+
     pub fn atomic_number(&self) -> u32
     { self.0.into() }
 

@@ -582,9 +582,9 @@ impl dyn PotentialBuilder {
                         cfg::PotentialKind::Lammps(_) => {
                             assert!(!found_lammps, "(BUG!) more than one lammps potential after validation!?");
                             found_lammps = true;
-                            PotentialBuilder::single_from_config_parts(trial_dir, on_demand.take(), threading, lammps, &cfg)
+                            <dyn PotentialBuilder>::single_from_config_parts(trial_dir, on_demand.take(), threading, lammps, &cfg)
                         },
-                        _ => PotentialBuilder::single_from_config_parts(trial_dir, None, threading, lammps, &cfg),
+                        _ => <dyn PotentialBuilder>::single_from_config_parts(trial_dir, None, threading, lammps, &cfg),
                     }
                 })
                 .collect::<FailResult<Vec<_>>>()?
@@ -631,6 +631,11 @@ impl dyn PotentialBuilder {
                 },
                 cfg::LammpsPotentialKind::KolmogorovCrespiFull(cfg) => {
                     let lammps_pot = self::lammps::KolmogorovCrespiFull::from(cfg);
+                    let pot = self::lammps::Builder::new(trial_dir, on_demand, threading, lammps, lammps_pot)?;
+                    Ok(Box::new(pot))
+                },
+                cfg::LammpsPotentialKind::ReaxFF(cfg) => {
+                    let lammps_pot = self::lammps::ReaxFF::from(cfg);
                     let pot = self::lammps::Builder::new(trial_dir, on_demand, threading, lammps, lammps_pot)?;
                     Ok(Box::new(pot))
                 },
