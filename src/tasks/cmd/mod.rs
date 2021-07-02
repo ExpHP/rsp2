@@ -1882,7 +1882,6 @@ pub(crate) fn read_optimizable_structure(
             });
 
             out_layers = Some(layer_builder.atom_layers().into_iter().map(Layer).collect::<Vec<_>>().into());
-            //println!("{:?}",layer_builder.atoms);
             let mut elements = vec![];
             for atom in layer_builder.atoms.clone(){
                 elements.push(Element::get_from_symbol(&atom));
