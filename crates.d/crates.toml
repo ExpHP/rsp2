@@ -104,7 +104,7 @@ path_abs = "0.5.0"
 enum-map = "0.4.1"
 frunk = "0.2.0"
 shlex = "0.1.1"
-indoc = "0.2.3"
+indoc = "1"
 lapacke = "0.2"
 openblas-src = { version = "0.10", features = ["static"] }
 ndarray = "0.11.2"

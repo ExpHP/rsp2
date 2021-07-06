@@ -67,7 +67,7 @@ serde_ignored = "0.0.4"
 path_abs = "0.5.0"
 frunk = "0.2.0"
 shlex = "0.1.1"
-indoc = "0.2.3"
+indoc = "1"
 lapacke = "0.2"
 openblas-src = { version = "0.10", features = ["static"] }
 num-traits = "0.2.3"
