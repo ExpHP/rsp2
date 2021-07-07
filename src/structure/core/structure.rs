@@ -519,10 +519,10 @@ mod compiletest {
         // `*_mut` is the perfect opportunity to indirectly test `ensure_only_*`,
         // because there is simply no way that these methods can preserve the
         // other coordinate system's data and still be correct.
-        assert_eq!(coords.carts_mut(), &mut ORIG_CARTS);
+        assert_eq!(coords.carts_mut(), &ORIG_CARTS);
         assert_eq!(coords.as_carts_cached(), Some(&ORIG_CARTS[..]));
         assert_eq!(coords.as_fracs_cached(), None);
-        assert_eq!(coords.fracs_mut(), &mut ORIG_FRACS);
+        assert_eq!(coords.fracs_mut(), &ORIG_FRACS);
         assert_eq!(coords.as_fracs_cached(), Some(&ORIG_FRACS[..]));
         assert_eq!(coords.as_carts_cached(), None);
 

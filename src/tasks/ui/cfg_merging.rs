@@ -147,7 +147,7 @@ mod resolve_from_arg {
             ($s:expr) => {
                 let e = Config::resolve_from_arg($s).unwrap_err();
                 match e.downcast() {
-                    Err(_) => panic!($s),
+                    Err(_) => panic!("{}", $s),
                     Ok(InternalReplaceError) => {},
                 }
             };
