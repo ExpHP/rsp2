@@ -19,7 +19,7 @@ rsp2-clap = { path = "../../util/clap" }
 rsp2-structure = { path = "../../structure" }
 rsp2-structure-io = { path = "../../io/structure" }
 rsp2-fs-util = { path = "../../util/fs" }
-rsp2-dynmat = { path = "../../dynmat" }
+rsp2-dynmat = { path = "../../dynmat", features = ["npz"] }
 rsp2-bond-polarizability = { path = "../../math/bond-polarizability" }
 rsp2-array-types = { path = "../../util/array-types" }
 

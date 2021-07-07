@@ -39,7 +39,7 @@ rsp2-python = { path = "../python" }
 rsp2-dftbplus = { path = "../io/dftbplus", optional = true, default-features = false }
 rsp2-phonopy-io = { path = "../io/phonopy" }
 rsp2-sparse = { path = "../util/sparse" }
-rsp2-dynmat = { path = "../dynmat" }
+rsp2-dynmat = { path = "../dynmat", features = ["npz", "serde"] }
 rsp2-bond-polarizability = { path = "../math/bond-polarizability" }
 
 clap = "2"
@@ -51,6 +51,7 @@ tee = "0.1.0"
 env_logger = "0.6.1"
 failure = "0.1.2"
 fern = { version = "0.5", features = ["colored"] }
+flate2 = "1.0.0"
 either = "1"
 extension-trait = "0.1.2"
 itertools = "0.7"

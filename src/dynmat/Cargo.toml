@@ -22,11 +22,12 @@ rsp2-newtype-indices = { path = "../util/newtype-indices" }
 rsp2-sparse = { path = "../util/sparse" }
 rsp2-util-macros = { path = "../util/macros" }
 rsp2-linalg = { path = "../linalg" }
-serde = { version = "1.0.91", features = ["derive", "rc"] }
+serde = { version = "1.0.91", features = ["derive", "rc"], optional = true }
 slice-of-array = "0.2.1"
 failure = "0.1.2"
 num-traits = "0.2.3"
 log = "0.4"
+npyz = { version = "0.6.1", features = ["complex", "npz"], optional = true }
 
 [dev-dependencies]
 rand = "0.3"
@@ -34,3 +35,14 @@ rand = "0.3"
 [features]
 nightly = ["beta", "rsp2-array-types/nightly", "rsp2-linalg/nightly", "rsp2-newtype-indices/nightly", "rsp2-soa-ops/nightly", "rsp2-sparse/nightly", "rsp2-structure/nightly", "rsp2-util-macros/nightly"]
 beta = ["rsp2-array-types/beta", "rsp2-linalg/beta", "rsp2-newtype-indices/beta", "rsp2-soa-ops/beta", "rsp2-sparse/beta", "rsp2-structure/beta", "rsp2-util-macros/beta"]
+
+npz = ["npyz"]
+
+# FIXME
+# Features for optional deps, because the implicit features defined by deps do not scale well.
+# For now, THESE are what you should toggle in dependent crates.
+#
+# Once namespaced-features are stabilized, these features will be renamed after the deps.
+# see https://github.com/rust-lang/cargo/issues/1286 (problem and proposal)
+#     https://github.com/rust-lang/cargo/issues/5565 (tracking issue, of sorts)
+serde-support = ["serde", "rsp2-array-types/serde-support"]

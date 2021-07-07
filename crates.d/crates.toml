@@ -125,6 +125,7 @@ tee = "0.1.0"
 perm-vec = "0.1"
 thiserror = "1.0.0"
 flate2 = "1.0.0"
+npyz = { version = "0.6.1", features = ["complex", "npz"] }
 
 #--------------------------------------------
 # Always optimize some crates when they appear as dependencies.

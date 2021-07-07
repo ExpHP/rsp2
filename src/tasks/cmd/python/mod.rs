@@ -12,7 +12,6 @@
 pub use self::spglib::SpgDataset;
 pub mod scipy_eigsh;
 mod spglib;
-pub mod convert;
 
 //---------------------------------------------------------
 use crate::{FailResult};

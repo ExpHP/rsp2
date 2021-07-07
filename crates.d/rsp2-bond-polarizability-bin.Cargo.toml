@@ -14,7 +14,7 @@ path = "main.rs"
 !!rsp2-structure
 !!rsp2-structure-io
 !!rsp2-fs-util
-!!rsp2-dynmat
+!!rsp2-dynmat { features = ["npz"] }
 !!rsp2-bond-polarizability
 !!rsp2-array-types
 

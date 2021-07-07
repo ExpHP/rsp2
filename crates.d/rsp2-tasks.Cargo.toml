@@ -34,7 +34,7 @@ path = "lib.rs"
 !!rsp2-dftbplus { optional = true, default-features = false }
 !!rsp2-phonopy-io
 !!rsp2-sparse
-!!rsp2-dynmat
+!!rsp2-dynmat { features = ["npz", "serde"] }
 !!rsp2-bond-polarizability
 
 !!clap
@@ -46,6 +46,7 @@ path = "lib.rs"
 !!env-logger
 !!failure
 !!fern
+!!flate2
 !!either
 !!extension-trait
 !!itertools

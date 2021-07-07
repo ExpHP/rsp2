@@ -10,6 +10,7 @@
 ** ************************************************************************ */
 
 #[macro_use] extern crate log;
+#[cfg(feature = "serde")]
 #[macro_use] extern crate serde;
 #[macro_use] extern crate failure;
 #[macro_use] extern crate rsp2_newtype_indices;
@@ -974,26 +975,9 @@ impl DynamicalMatrix {
         DynamicalMatrix(csr)
     }
 
-    pub fn cereal(&self) -> Cereal {
-        self.0.validate().expect("(BUG!) invalid sparse data");
-        Cereal {
-            dim: self.0.dim,
-            complex_blocks: self.0.val.to_vec(),
-            col: index_cast(self.0.col.to_vec()),
-            row_ptr: self.0.row_ptr.raw.to_vec(),
-        }
-    }
-
-    pub fn from_cereal(cereal: Cereal) -> FailResult<Self> {
-        let csr = RawCsr {
-            dim: cereal.dim,
-            val: cereal.complex_blocks,
-            col: index_cast(cereal.col),
-            row_ptr: Indexed::from_raw(cereal.row_ptr),
-        };
-        csr.validate()?;
-
-        Ok(DynamicalMatrix(csr))
+    pub fn is_real(&self) -> bool {
+        let zero = M33::<f64>::zero();
+        self.0.val.iter().all(|Complex33(_, imag)| imag == &zero)
     }
 
     /// If the matrix is real, produce a flat `Vec` representation.
@@ -1039,6 +1023,134 @@ impl DynamicalMatrix {
         (Eigenvalues { eigenvalues }, eigenvectors)
     }
 }
+
+/// Reading and writing NPZ.
+#[cfg(feature = "npz")]
+impl DynamicalMatrix {
+    /// Save to an NPZ file as a scipy BSR matrix.
+    ///
+    /// This method performs a space optimization by writing a real-typed matrix
+    /// if all of the imaginary parts are zero.
+    pub fn write_npz<W: std::io::Write + std::io::Seek>(&self, writer: W) -> FailResult<()> {
+        self.0.validate().expect("(BUG!) invalid sparse data");
+
+        let shape: [u64; 2] = [self.0.dim.0 as u64 * 3, self.0.dim.1 as u64 * 3];
+        let indices: Vec<u64> = self.0.col.iter().map(|&PrimI(p)| p as u64).collect();
+        let indptr: &[usize] = &self.0.row_ptr.raw;
+        let blocksize = [3, 3];
+
+        if self.is_real() {
+            let data = self._flat_data_real();
+            npyz::sparse::BsrBase { shape, data, indices, indptr, blocksize }
+                .write_npz(&mut npyz::npz::NpzWriter::new(writer))?;
+        } else {
+            let data = self._flat_data_complex();
+            npyz::sparse::BsrBase { shape, data, indices, indptr, blocksize }
+                .write_npz(&mut npyz::npz::NpzWriter::new(writer))?;
+        }
+        Ok(())
+    }
+
+    fn _flat_data_real(&self) -> Vec<f64> {
+        let mut data = vec![];
+        for Complex33(block, _) in &self.0.val {
+            for row in block {
+                data.extend(row.iter().copied())
+            }
+        }
+        data
+    }
+
+    fn _flat_data_complex(&self) -> Vec<npyz::num_complex::Complex64> {
+        let mut data = vec![];
+        for Complex33(real, imag) in &self.0.val {
+            for i in 0..3 {
+                for j in 0..3 {
+                    data.push(npyz::num_complex::Complex::new(real[i][j], imag[i][j]));
+                }
+            }
+        }
+        data
+    }
+
+    /// Read from a scipy BSR matrix saved to NPZ.
+    pub fn read_npz<R: std::io::Read + std::io::Seek>(reader: R) -> FailResult<Self> {
+        use npyz::sparse::Bsr;
+
+        let mut npz = npyz::npz::NpzArchive::new(reader)?;
+
+        // Dynmat can be real or complex.
+        // Try reading real first so that if neither succeeds, the error will be for Complex.
+        let complex_bsr = if let Ok(real_bsr) = Bsr::<f64>::from_npz(&mut npz) {
+            let Bsr { data, indices, indptr, blocksize, shape } = real_bsr;
+            let data = data.iter().map(|&x| x.into()).collect();
+            Bsr { data, indices, indptr, blocksize, shape }
+        } else {
+            Bsr::<npyz::num_complex::Complex64>::from_npz(&mut npz)?
+        };
+
+        // unflatten
+        let val = Self::_val_from_flat_data_complex(&complex_bsr.data);
+        let col = complex_bsr.indices.iter().map(|&p| PrimI(p as usize)).collect();
+        let row_ptr = Indexed::from_raw(complex_bsr.indptr);
+        assert_eq!(complex_bsr.shape[0] % 3, 0);
+        assert_eq!(complex_bsr.shape[1] % 3, 0);
+        let dim = ((complex_bsr.shape[0] / 3) as usize, (complex_bsr.shape[1] / 3) as usize);
+        let csr = RawCsr { val, col, row_ptr, dim };
+        csr.validate()?;
+
+        Ok(DynamicalMatrix(csr))
+    }
+
+    fn _val_from_flat_data_complex(data: &[npyz::num_complex::Complex64]) -> Vec<Complex33> {
+        assert_eq!(data.len() % 9, 0);
+        data.chunks(9).map(|chunk| {
+            let mut c33 = Complex33(M33::zero(), M33::zero());
+            for r in 0..3 {
+                for c in 0..3 {
+                    let complex = chunk[3*r + c];
+                    c33.0[r][c] = complex.re;
+                    c33.1[r][c] = complex.im;
+                }
+            }
+            c33
+        }).collect()
+    }
+}
+
+/// Serialization and deserialization
+impl DynamicalMatrix {
+    /// Create a struct that can be serialized using serde.
+    ///
+    /// This is used by rsp2's legacy `'.json.gz'` format for dynamical matrices,
+    /// which is still useful in practice as it is a fair bit more portable than npz.
+    pub fn cereal(&self) -> Cereal {
+        self.0.validate().expect("(BUG!) invalid sparse data");
+        Cereal {
+            dim: self.0.dim,
+            complex_blocks: self.0.val.to_vec(),
+            col: index_cast(self.0.col.to_vec()),
+            row_ptr: self.0.row_ptr.raw.to_vec(),
+        }
+    }
+
+    /// Construct from a deserialized `'.json.gz'`.
+    ///
+    /// This is used by rsp2's legacy `'.json.gz'` format for dynamical matrices,
+    /// which is still useful in practice as it is a fair bit more portable than npz.
+    pub fn from_cereal(cereal: Cereal) -> FailResult<Self> {
+        let csr = RawCsr {
+            dim: cereal.dim,
+            val: cereal.complex_blocks,
+            col: index_cast(cereal.col),
+            row_ptr: Indexed::from_raw(cereal.row_ptr),
+        };
+        csr.validate()?;
+
+        Ok(DynamicalMatrix(csr))
+    }
+}
+
 
 /// Trivial wrapper type to help ensure eigenvalues don't get mistaken for frequencies.
 pub struct Eigenvalues { pub eigenvalues: Vec<f64> }
@@ -1090,8 +1202,10 @@ impl<'a> SupercellWrapper<'a> {
 
 // ------------------------------------------------------
 
-#[derive(Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
+#[cfg_attr(feature = "serde",
+    derive(Deserialize, Serialize),
+    serde(rename_all = "kebab-case"),
+)]
 pub struct Cereal {
     // these should be suitable for col and row_ptr (i.e. no additional factor of 3).
     pub dim: (usize, usize),
@@ -1110,7 +1224,7 @@ mod complex_33 {
 
     // element type of the dynamical matrix, used to shoehorn it into a sparse matrix container
     #[derive(Debug, Copy, Clone, PartialEq)]
-    #[derive(Serialize, Deserialize)]
+    #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
     pub struct Complex33(pub M33, pub M33);
 
     impl num_traits::Zero for Complex33 {
@@ -1227,5 +1341,64 @@ mod tests {
         };
 
         assert_eq!(expected.to_dense_matrix(), actual.to_dense_matrix());
+    }
+
+    #[test]
+    #[cfg(feature = "npz")]
+    fn npz_real() {
+        npz_generic((2.0, 0.0), "f8")
+    }
+
+    #[test]
+    #[cfg(feature = "npz")]
+    fn npz_complex() {
+        npz_generic((2.0, -1.0), "c16")
+    }
+
+    #[cfg(feature = "npz")]
+    fn npz_generic((real, imag): (f64, f64), expected_type_str: &str) {
+        use num_traits::Zero;
+
+        // BSR with two nonzero blocks
+        let mut initial = DynamicalMatrix(RawCsr {
+            dim: (7, 10),
+            val: vec![Complex33::zero(), Complex33::zero()],
+            col: vec![PrimI(3), PrimI(4)],  // supercolumns 3 and 4
+            row_ptr: Indexed::from_raw(vec![0, 0, 0, 0, 0, 2, 2, 2]),  // superrow 4
+        });
+        // put the value somewhere in each block
+        initial.0.val[0].0[1][2] = real;
+        initial.0.val[0].1[1][2] = imag;
+        initial.0.val[1].0[1][0] = real;
+        initial.0.val[1].1[1][0] = imag;
+
+        // Write to an npz
+        let mut cursor = std::io::Cursor::new(vec![]);
+        initial.write_npz(&mut cursor).unwrap();
+        let bytes = cursor.into_inner();
+
+        // Read back and compare
+        let matrix_read = DynamicalMatrix::read_npz(std::io::Cursor::new(&bytes)).unwrap();
+        assert_eq!(matrix_read.0.dim, initial.0.dim);
+        assert_eq!(matrix_read.0.col, initial.0.col);
+        assert_eq!(matrix_read.0.row_ptr, initial.0.row_ptr);
+        assert_eq!(matrix_read.0.val, initial.0.val);
+
+        // Read back again as general NPZ for further inspection
+        let mut npz = npyz::npz::NpzArchive::new(std::io::Cursor::new(&bytes[..])).unwrap();
+        // Shape in the NPZ file should include the factor of 3
+        assert_eq!(
+            npz.by_name("shape").unwrap().unwrap().into_vec::<i64>().unwrap(),
+            vec![21, 30],
+        );
+        // Check the dtype to make sure we performed the space optimization for real matrices
+        let data = npz.by_name("data").unwrap().unwrap();
+        match data.dtype() {
+            npyz::DType::Plain(type_str) => {
+                // The [1..] is to ignore the endianness character
+                assert_eq!(&type_str.to_string()[1..], expected_type_str);
+            },
+            d => panic!("dtype {:?}", d),
+        }
     }
 }

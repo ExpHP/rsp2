@@ -17,7 +17,7 @@ use rsp2_structure::Coords;
 use rsp2_structure_io::{Poscar, Xyz, v_sim::{self, VSimAscii}};
 use path_abs::{FileRead, FileWrite};
 use std::borrow::Borrow;
-use std::io::BufReader;
+use std::io::{BufReader, BufWriter};
 
 /// Uniform-ish "load a file" API for use by the highest level code (cmd).
 /// Kinda technical debt now.
@@ -111,15 +111,39 @@ where
 }
 
 impl Load for rsp2_dynmat::DynamicalMatrix {
-    /// Read a dynamical matrix in any format supported by the rsp2.io python module.
+    /// Read a dynamical matrix in `.json`, `.json.gz`, or `.npz`.
     fn load(path: impl AsPath) -> FailResult<Self> {
-        crate::cmd::python::convert::read_dynmat(path)
+        let path = path.as_path();
+        let lower = path.to_string_lossy().to_ascii_lowercase();
+        let reader = BufReader::new(FileRead::open(&path)?);
+        if lower.ends_with(".npz") {
+            rsp2_dynmat::DynamicalMatrix::read_npz(reader)
+        } else {
+            let mut reader: Box<dyn std::io::Read> = Box::new(reader);
+            if lower.ends_with(".gz") {
+                reader = Box::new(flate2::read::GzDecoder::new(reader));
+            }
+            let cereal = serde_json::from_reader(reader)?;
+            rsp2_dynmat::DynamicalMatrix::from_cereal(cereal)
+        }
     }
 }
 
 impl Save for rsp2_dynmat::DynamicalMatrix {
-    /// Read a dynamical matrix in any format supported by the rsp2.io python module.
+    /// Write a dynamical matrix in `.json`, `.json.gz`, or `.npz`.
     fn save(&self, path: impl AsPath) -> FailResult<()> {
-        crate::cmd::python::convert::write_dynmat(path, self)
+        let path = path.as_path();
+        let lower = path.to_string_lossy().to_ascii_lowercase();
+        let writer = BufWriter::new(FileWrite::create(&path)?);
+        if lower.ends_with(".npz") {
+            self.write_npz(writer)?;
+        } else {
+            let mut writer: Box<dyn std::io::Write> = Box::new(writer);
+            if lower.ends_with(".gz") {
+                writer = Box::new(flate2::write::GzEncoder::new(writer, Default::default()));
+            }
+            serde_json::to_writer(writer, &self.cereal())?;
+        }
+        Ok(())
     }
 }
