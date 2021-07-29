@@ -15,7 +15,7 @@
 use crate::{FailResult, FailOk};
 use crate::assemble::{RawAssemble, Assemble};
 
-use rsp2_structure::{CoordsKind, Lattice, Coords};
+use rsp2_structure::{CoordsKind, Lattice, Coords, Element};
 use std::io::Read;
 
 use rsp2_array_types::{M22, M33, mat, V2, V3, inv, Unvee};
@@ -91,7 +91,7 @@ mod cereal {
 
         pub fn a() -> f64 { 1.0 }
         pub fn vacuum_sep() -> f64 { 10.0 }
-        pub fn layer_sep() -> Either<f64, Vec<f64>> { Either::A(1.0) }
+        pub fn layer_sep() -> Either<f64, Vec<f64>> { Either::A(1.5) }
 
         pub mod layer {
             use super::*;
@@ -124,7 +124,7 @@ mod middle {
         pub transform: M33,
         pub repeat: [u32; 3],
         pub shift: V3,
-        pub site_atoms: Vec<String>,
+        pub site_atoms: Vec<Element>,
     }
 }
 
@@ -183,7 +183,11 @@ fn interpret_cereal(cereal: self::cereal::Root) -> FailResult<middle::Layers>
                 }
             }
         };
-        let site_atoms = site_atoms;
+        let mut els = vec![];
+        for atom in site_atoms{
+            els.push(Element::from_symbol(&atom).unwrap());
+        }
+        let site_atoms = els;
         let transform = m22_to_m33(&transform);
         let shift = V3([shift[0], shift[1], 0.0]);
         let repeat = [repeat[0], repeat[1], 1];

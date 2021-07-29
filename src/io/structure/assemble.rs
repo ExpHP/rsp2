@@ -11,7 +11,7 @@
 
 use crate::{FailResult};
 
-use rsp2_structure::{CoordsKind, Lattice, Coords};
+use rsp2_structure::{CoordsKind, Lattice, Coords, Element};
 
 use rsp2_soa_ops::{Part, Perm, Permute};
 use rsp2_array_types::{M33, V3, dot};
@@ -41,7 +41,7 @@ pub struct Assemble {
     /// between the first layer encountered on either side of the boundary)
     pub vacuum_sep: f64,
     layer_seps: Vec<f64>, // [layer] (length: nlayer - 1)
-    pub atoms: Vec<String>
+    pub atoms: Vec<Element>
 }
 
 impl Assemble {
@@ -164,7 +164,7 @@ pub struct RawAssemble {
     /// This is to help catch bugs related to accidentally wrapping `carts_along_normal`
     /// across a periodic boundary.
     pub check_intralayer_distance: Option<f64>,
-    pub atoms: Vec<String>
+    pub atoms: Vec<Element>
 
 }
 

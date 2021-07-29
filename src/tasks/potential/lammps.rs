@@ -535,11 +535,11 @@ mod reaxff {
             let pair_style;
             match *self {
                 ReaxFF::ReaxFF {..} => {
-                    pair_style = PairStyle::named("reax/c");
+                    pair_style = PairStyle::named("reax/c NULL safezone 5 mincap 100"); //safezone and mincap extend memory segments
                 },
             };
             let pair_coeffs = vec![
-                PairCoeff::new(.., ..).args(&["ffield.reax.mos2", "Mo", "S"]),
+                PairCoeff::new(.., ..).args(&["ffield.reax.mos2_old", "Mo", "S"]),
             ];
             InitInfo { masses, pair_style, pair_coeffs }
         }

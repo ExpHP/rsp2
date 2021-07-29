@@ -58,7 +58,6 @@ use rsp2_structure::{Coords, Lattice};
 use rsp2_structure::{
     layer::LayersPerUnitCell,
     bonds::FracBonds,
-    Element,
 };
 
 use rsp2_fs_util::{create, rm_rf, hard_link};
@@ -1882,11 +1881,7 @@ pub(crate) fn read_optimizable_structure(
             });
 
             out_layers = Some(layer_builder.atom_layers().into_iter().map(Layer).collect::<Vec<_>>().into());
-            let mut elements = vec![];
-            for atom in layer_builder.atoms.clone(){
-                elements.push(Element::get_from_symbol(&atom));
-            }
-            out_elements = elements.into();
+            out_elements = layer_builder.atoms.clone().into();
             out_masses = masses_by_config(mass_cfg, out_elements.clone())?;
             out_coords = ScalableCoords::KnownLayers { layer_builder };
             out_bonds = None; // Determine bonds AFTER parameter optimization.

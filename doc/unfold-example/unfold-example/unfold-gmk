@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+{ # force bash to read into memory
+[[ $RSP2 ]] || { echo >&2 'rsp2 env not set up!'; exit 1; }
+[[ $1 ]] || { echo >&2 'which directory?'; exit 1; }
+
+# Where are the files?
+dir=$1; shift
+
+args=(
+$RSP2/scripts/unfold.py
+    $dir/initial.structure
+    --write-perms=$dir/perms.npy.xz
+); "${args[@]}"
+
+args=(
+$RSP2/scripts/unfold.py
+    $dir/initial.structure
+    --perms=$dir/perms.npy.xz
+    --qpoint="0 0 0"
+    --write-mode-data=$dir/mode-data-gamma.npz
+    --write-probs=$dir/probs-gamma.npz
+    --dynmat $dir/dynmat-gamma.npz
+    --verbose --debug --probs-impl=rust
+); "${args[@]}"
+
+args=(
+$RSP2/scripts/unfold.py
+    $dir/initial.structure
+    --perms=$dir/perms.npy.xz
+    --qpoint="1/3 1/3 0"
+    --write-mode-data=$dir/mode-data-k.npz
+    --write-probs=$dir/probs-k.npz
+    --dynmat $dir/dynmat-k.npz
+    --verbose --debug --probs-impl=rust
+); "${args[@]}"
+
+args=(
+$RSP2/scripts/unfold.py
+    $dir/initial.structure
+    --perms=$dir/perms.npy.xz
+    --qpoint="1/2 0 0"
+    --write-mode-data=$dir/mode-data-m.npz
+    --write-probs=$dir/probs-m.npz
+    --dynmat $dir/dynmat-m.npz
+    --verbose --debug --probs-impl=rust
+); "${args[@]}"
+
+}
