@@ -1,6 +1,0 @@
-figure.figsize : 8, 4
-lines.markersize : 1.2622776601683795
-axes.labelsize : 15
-ytick.labelsize : 15
-xtick.labelsize : 20
-axes.titlesize : 20
