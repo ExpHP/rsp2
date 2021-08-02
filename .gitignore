@@ -17,4 +17,7 @@ log.lammps
 
 crates.d/config.toml
 
+log.cite
+etc/profile.d/lammps.csh
+
 venv

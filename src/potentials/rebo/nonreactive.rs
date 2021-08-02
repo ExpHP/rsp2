@@ -159,10 +159,10 @@ pub const SITE_MAX_BONDS: usize = 4;
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, enum_map::Enum)]
 pub enum AtomType { Carbon, Hydrogen }
 impl AtomType {
-    pub fn char(self) -> &'static str {
+    pub fn element(self) -> Element {
         match self {
-            AtomType::Carbon => "C",
-            AtomType::Hydrogen => "H",
+            AtomType::Carbon => Element::from_symbol("C").unwrap(),
+            AtomType::Hydrogen => Element::from_symbol("H").unwrap(),
         }
     }
 

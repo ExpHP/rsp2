@@ -635,9 +635,9 @@ impl<P: Potential> Lammps<P>
 
         if &(pair_style.to_string())[..17] == "pair_style reax/c"{
             lmp.commands(&[
-                "units real",                   // Angstroms, picoseconds, eV
+                "units real",                   // Angstroms, picoseconds, Kcal/mol
                 "neigh_modify delay 0",         // disable delay for a safer `run pre no`
-                "atom_style charge",            // attributes to store per-atom
+                "atom_style charge",            // attributes to store per-atom and required q value
                 "thermo_modify lost error",     // don't let atoms disappear without telling us
                 "atom_modify map array",        // store all positions in an array
                 "atom_modify sort 0 0.0",       // don't reorder atoms during simulation
