@@ -178,6 +178,9 @@ impl SupercellToken {
     }
 
     /// Get the supercell matrix.
+    ///
+    /// Each row of this matrix describes a basis vector of the supercell lattice as a linear combination
+    /// of the basis vectors of the primitive lattice.
     #[inline]
     pub fn matrix(&self) -> M33<i32> {
         self.matrix
