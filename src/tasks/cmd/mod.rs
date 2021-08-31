@@ -863,7 +863,7 @@ fn save_force_sets_for_tests(
     };
 
     let force_sets = ForceSets {
-        sc_dims: sc.periods(),
+        sc_dims: sc.as_diagonal().expect("only diagonal supercell supported"),
         super_coords: super_coords.clone(),
         force_sets: force_sets.clone().into_iter().map(|row| row.into_iter().collect()).collect(),
         super_displacements: super_displacements.to_vec(),

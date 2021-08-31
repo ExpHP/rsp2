@@ -472,7 +472,7 @@ pub fn phonopy_displacements(
         }
         builder.displacements(prim_coords, prim_meta.sift())?
     };
-    let sc_dims = sc.periods();
+    let sc_dims = sc.as_diagonal().expect("non-diagonal supercell for phonopy not implemented");
     assert_eq!(settings.supercell.dim_for_unitcell(prim_coords.lattice()), sc_dims);
 
     // cmon, big money, big money....

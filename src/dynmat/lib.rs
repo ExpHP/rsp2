@@ -707,7 +707,7 @@ impl SuperForceConstants {
             let mut permuted_fcs = self.clone();
 
             // skip 0 because 'self' already has the data for 0 cell translation
-            for _ in 1..sc.raw.periods()[axis] {
+            for _ in 1..sc.raw.iteration_periods()[axis] {
                 permuted_fcs = permuted_fcs.permuted_by(&deperm);
                 self.0 = self.0 + permuted_fcs.0.clone();
             }

@@ -12,7 +12,7 @@
 use crate::{Lattice, CoordsKind, Coords};
 
 use rsp2_soa_ops::{Perm};
-use rsp2_array_types::{V3};
+use rsp2_array_types::{V3, M33};
 
 
 // ---------------------------------------------------------------
@@ -66,8 +66,9 @@ impl Builder {
     // convert into a data structure with precomputed info for general supercell matrices
     fn into_sc_token(self, num_primitive_atoms: usize) -> SupercellToken {
         let Builder { offset, diagonal: periods } = self;
+        let matrix = M33::from_diag(V3(periods).map(|x| x as i32));
         let integer_lattice = Lattice::diagonal(&V3(periods).map(|x| x as f64));
-        SupercellToken { offset, periods, integer_lattice, num_primitive_atoms }
+        SupercellToken { offset, periods, matrix, integer_lattice, num_primitive_atoms }
     }
 }
 
@@ -106,6 +107,9 @@ fn _make_supercell(builder: Builder, coords: &Coords) -> (Coords, SupercellToken
 /// the needs of rsp2. You must use the methods on this type if you need to convert
 /// between index representations, or to work in the subgroup of cell images.
 ///
+/// In general, this represents an arbitrary supercell matrix (a 3x3 matrix of integers
+/// with nonzero determinant), though most supercells are diagonal.
+///
 /// It provides a variety of methods for converting between various forms of indices,
 /// summarized below along with the terms that frequently appear in method names:
 ///
@@ -130,10 +134,12 @@ fn _make_supercell(builder: Builder, coords: &Coords) -> (Coords, SupercellToken
 pub struct SupercellToken {
     // Precomputed diagonal of the Hermite Normal Form of `integer_lattice`.
     periods: [u32; 3],
+    // supercell in units of primitive cell vectors.  Elements are integral
+    matrix: M33<i32>,
     // defines the range of `lattice_point`s
     offset: V3<i32>,
     num_primitive_atoms: usize,
-    // supercell in units of primitive cell vectors.  Elements are integral
+    // the supercell matrix in floating point form, with its inverse.
     integer_lattice: Lattice,
 }
 
@@ -148,8 +154,48 @@ pub type OwnedMetas<'a, T> = std::vec::Drain<'a, T>;
 
 impl SupercellToken {
     #[inline]
+    #[deprecated = "\
+    Use as_diagonal() instead if you require a diagonal cell.  \
+    If you simply want to iterate over cells, consider iterating over lattice points instead.  \
+    If you *really* need this, and are writing code that does properly support non-diagonal cells, \
+    use iteration_periods()."]
     pub fn periods(&self) -> [u32; 3] {
         self.periods
+    }
+
+    /// Get the number of cells along each axis, for the purpose of manually iterating over **`cell`**s
+    /// or translational symmetries. (and *only* these purposes!)
+    ///
+    /// This is defined even for non-diagonal supercell matrices; it is the absolute values of
+    /// the diagonal of the Hermite Normal Form of the supercell matrix. (note: it is unspecified
+    /// whether the upper triangular or lower triangular HNF is used, so do not compute this yourself!)
+    ///
+    /// **Important:**  Do not use this to communicate information about the supercell to other software.
+    /// Use [`Self::matrix`] or [`Self::as_diagonal`].
+    #[inline]
+    pub fn iteration_periods(&self) -> [u32; 3] {
+        self.periods
+    }
+
+    /// Get the supercell matrix.
+    #[inline]
+    pub fn matrix(&self) -> M33<i32> {
+        self.matrix
+    }
+
+    /// Get the periods of the supercell, if and only if it is diagonal.
+    ///
+    /// This exists for interfacing with other software that does not support arbitrary supercell matrices.
+    #[inline]
+    pub fn as_diagonal(&self) -> Option<[u32; 3]> {
+        for r in 0..3 {
+            for c in 0..3 {
+                if r == c && self.matrix[r][c] <= 0 || r != c && self.matrix[r][c] != 0 {
+                    return None;
+                }
+            }
+        }
+        Some(self.periods)
     }
 
     /// The number of images taken of the unit cell contained in the supercell.
@@ -212,7 +258,7 @@ impl SupercellToken {
         );
 
         let num_cells = self.num_cells();
-        let SupercellToken { periods, offset, ref integer_lattice, num_primitive_atoms } = *self;
+        let SupercellToken { periods, offset, ref integer_lattice, num_primitive_atoms, matrix: _ } = *self;
         let Coords { lattice, coords } = coords;
 
         let primitive_lattice = integer_lattice.inverse_matrix() * &lattice;
