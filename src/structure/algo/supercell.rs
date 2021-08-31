@@ -116,7 +116,7 @@ fn _make_supercell(builder: Builder, coords: &Coords) -> (Coords, SupercellToken
 ///   index of a site in the superstructure. `0 <= atom < num_supercell_atoms`.
 ///
 /// * **`cell: [u32; 3]`** -
-///   the index of an image of the primitive structure. `0 <= cell[k] < periods[k]`.
+///   the index of an image of the primitive structure. `0 <= cell[k] < periods[k]`,
 ///   Like site indices, these are considered to be unique identifiers, and are expected to
 ///   be in bounds. **The vector difference of two cells is a meaningless quantity.**
 ///

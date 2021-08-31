@@ -126,7 +126,7 @@ impl Lattice {
     /// Get the normal to the family of planes with a given Miller index.
     ///
     /// Miller indices with `gcd > 1` are permitted and are interpreted according to
-    /// the documentation in the [`miller`] module.  They should produce the same value
+    /// the documentation in the [`crate::miller`] module.  They should produce the same value
     /// as a primitive vector, numerical errors not withstanding.
     ///
     /// # Panics
@@ -138,7 +138,7 @@ impl Lattice {
     /// Get the interplanar spacing of the family of planes specified by a Miller index.
     ///
     /// Miller indices with `gcd > 1` are permitted and are interpreted according to
-    /// the documentation in the [`miller`] module.  They should produce a spacing that
+    /// the documentation in the [`crate::miller`] module.  They should produce a spacing that
     /// is `1 / gcd` times the typical spacing.
     ///
     /// # Panics

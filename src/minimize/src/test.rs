@@ -245,7 +245,7 @@ pub mod n_dee {
     /// It has no local extrema aside from the global minimum.
     ///
     /// References:
-    /// * https://www.sfu.ca/~ssurjano/trid.html
+    /// * <https://www.sfu.ca/~ssurjano/trid.html>
     pub struct Trid(pub usize);
     impl Trid {
         pub fn min_position(&self) -> Vec<f64> {

@@ -393,7 +393,7 @@ pub enum ScalableRange {
 pub enum UnfoldBands {
     /// Use a method based on Zheng, Fawei; Zhang, Ping (2017).
     /// "Phonon Unfolding: A program for unfolding phonon dispersions of materials",
-    ///   Mendeley Data, v1 http://dx.doi.org/10.17632/3hpx6zmxhg.1
+    ///   Mendeley Data, v1 <http://dx.doi.org/10.17632/3hpx6zmxhg.1>
     ///
     /// This has not been used much lately, and I lack confidence in the correctness of its
     /// implementation. My honest suggestion is: don't bother.

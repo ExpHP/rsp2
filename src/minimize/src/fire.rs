@@ -51,7 +51,7 @@ impl Params {
 #[serde(rename_all = "kebab-case")]
 pub enum Integrator {
     /// Semi-implicit Euler integration recommended by
-    /// https://www.sciencedirect.com/science/article/pii/S0927025620300756
+    /// <https://www.sciencedirect.com/science/article/pii/S0927025620300756>
     EulerImplicit {},
 }
 

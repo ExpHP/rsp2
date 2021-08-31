@@ -301,7 +301,7 @@ pub mod stop_condition {
     /// The recommended method for constructing one of these is to deserialize it from JSON.  The
     /// set of basic conditions is documented in `#[serde]` annotations on [`Simple`], and there
     /// are additionally `"all"` and `"any"` meta-conditions that are provided by
-    /// [`::stop_condition::Cereal`].
+    /// [`crate::stop_condition::Cereal`].
     ///
     /// If this doesn't fit your needs, you can use CG's Builder API to define your own arbitrary
     /// stop conditions as functions of [`AlgorithmState`].
