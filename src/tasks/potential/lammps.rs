@@ -109,6 +109,11 @@ impl<P: Clone> Builder<P>
             }));
         }
 
+        if std::env::var_os("LAMMPS_POTENTIALS").is_none() {
+            bail!("rsp2 requires you to set the LAMMPS_POTENTIALS environment variable.");
+        }
+
+
         #[cfg(feature = "mpi")] {
             if *threading != cfg::Threading::Lammps && crate::env::num_mpi_processes() != 1 {
                 // We can't fool lammps into thinking it has fewer processes than it actually has.
