@@ -761,12 +761,26 @@ class TaskRawBandQGIndices(Task):
         self.raw_band_path = raw_band_path
         self.multi_qpoint_data = multi_qpoint_data
 
+    def add_parser_opts(self, parser):
+        parser.add_argument(
+            '--write-debug-path-plot', help=
+            'Write a plot displaying both the bandplot path and full set of points in the primitive reciprocal cell '
+            'that have unfolded probabilities assigned to them.  This can help identify scenarios in small supercells '
+            'where there are large regions of the band path that do not have any nearby points with data (which can '
+            'create discontinuities in the band plot). '
+            "You can use the path '-' to show the plot via plt.show()."
+        )
+
+    def has_action(self, args):
+        return bool(args.write_debug_path_plot)
+
     def _compute(self, args):
         return resample_qg_indices(
                 super_lattice=self.structure.require(args)['structure'].lattice.matrix,
                 supercell=self.structure.require(args)['supercell'],
                 path_kpoint_pfracs=self.raw_band_path.require(args)['path_kpoint_pfracs'],
                 qpoint_sfrac=self.multi_qpoint_data.require(args)['qpoint-sfrac'],
+                debug_path_outpath=args.write_debug_path_plot,
         )
 
 class TaskPlotZoneCrossings(Task):
@@ -1296,6 +1310,7 @@ def resample_qg_indices(
         supercell,
         qpoint_sfrac,
         path_kpoint_pfracs,
+        debug_path_outpath: tp.Optional[str],
 ):
     gpoint_sfracs = supercell.gpoint_sfracs()
 
@@ -1307,6 +1322,7 @@ def resample_qg_indices(
     )
 
     prim_lattice = np.linalg.inv(supercell.matrix) @ super_lattice
+    prim_recip_lattice = np.linalg.inv(prim_lattice).T
 
     # All of the (Q + G) points at which probabilities were computed.
     qg_sfracs = np.vstack([
@@ -1320,16 +1336,29 @@ def resample_qg_indices(
     qg_q_ids, qg_g_ids = np.mgrid[0:sizes['qpoint'], 0:sizes['quotient']].reshape((2, -1))
 
     # For every point on the plot x-axis, the index of the closest Q + G point
-    plot_kpoint_carts = path_kpoint_pfracs @ np.linalg.inv(prim_lattice).T
+    plot_kpoint_carts = path_kpoint_pfracs @ prim_recip_lattice
     plot_kpoint_qg_ids = griddata_periodic(
         points=qg_carts,
         values=np.arange(sizes['qpoint'] * sizes['quotient']),
         xi=plot_kpoint_carts,
-        lattice=np.linalg.inv(prim_lattice).T,
+        lattice=prim_recip_lattice,
         periodic_axis_mask=[1,1,0],
         method='nearest',
         _supercell=supercell,
     )
+
+    if debug_path_outpath:
+        fig, _ax = debug_path(
+            points=qg_carts[:, :2],
+            lattice=prim_recip_lattice[:2, :2],
+            path=plot_kpoint_carts[:, :2],
+            supercell=supercell.recip(),
+        )
+        if debug_path_outpath == '-':
+            import matplotlib.pyplot as plt
+            plt.show()
+        else:
+            fig.savefig(debug_path_outpath)
 
     # For every plot on the plot x-axis, the indices of Q and G for the
     # nearest (Q + G)
@@ -1859,6 +1888,8 @@ def debug_quotient_points(points2, lattice2):
 def debug_path(points, lattice, path, supercell=None):
     import matplotlib.pyplot as plt
 
+    points = unfold_lib.reduce_carts(points, lattice)
+
     fig, ax = plt.subplots(figsize=(7, 8))
     ax.scatter(points[:, 0], points[:, 1])
     ax.set(aspect='equal', adjustable='box')
@@ -1874,7 +1905,7 @@ def debug_path(points, lattice, path, supercell=None):
     ax.set_xlim(add_fuzz_to_interval((min(cell_path[:, 0]), max(cell_path[:, 0])), 0.05))
     ax.set_ylim(add_fuzz_to_interval((min(cell_path[:, 1]), max(cell_path[:, 1])), 0.05))
 
-    plt.show()
+    return fig, ax
 
 def draw_axis_vectors(ax, lattice, **kw):
     from matplotlib.collections import LineCollection
