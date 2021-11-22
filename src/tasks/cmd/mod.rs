@@ -135,7 +135,7 @@ impl TrialDir {
             (_, Some(_)) => {},
         }
 
-        let pot = PotentialBuilder::from_root_config(Some(&self), on_demand, &settings)?;
+        let pot = <dyn PotentialBuilder>::from_root_config(Some(&self), on_demand, &settings)?;
 
         let (optimizable_coords, mut meta) = {
             read_optimizable_structure(
@@ -923,7 +923,7 @@ fn save_force_sets_for_tests(
     };
 
     let force_sets = ForceSets {
-        sc_dims: sc.periods(),
+        sc_dims: sc.as_diagonal().unwrap(),
         super_coords: super_coords.clone(),
         force_sets: force_sets.clone().into_iter().map(|row| row.into_iter().collect()).collect(),
         super_displacements: super_displacements.to_vec(),
@@ -1205,7 +1205,7 @@ pub(crate) fn run_shear_plot(
 
     let EnergySurfaceArgs { density, extend_border, layer: translated_layer } = plot_args;
 
-    let pot = PotentialBuilder::from_config_parts(
+    let pot = <dyn PotentialBuilder>::from_config_parts(
         None,
         on_demand,
         &settings.threading,
@@ -1333,7 +1333,7 @@ impl TrialDir {
         stored: StoredStructure,
     ) -> FailResult<()>
     {Ok({
-        let pot = PotentialBuilder::from_root_config(Some(&self), on_demand, &settings)?;
+        let pot = <dyn PotentialBuilder>::from_root_config(Some(&self), on_demand, &settings)?;
 
         let phonons_settings = match &settings.phonons {
             Some(x) => x,
@@ -1440,7 +1440,7 @@ pub(crate) fn run_plot_vdw(
         update_style: cfg::LammpsUpdateStyle::Fast { sync_positions_every: 1 }.into(),
         processor_axis_mask: [true; 3].into(),
     };
-    let pot = PotentialBuilder::from_config_parts(None, on_demand, &threading, &lammps, pot)?;
+    let pot = <dyn PotentialBuilder>::from_config_parts(None, on_demand, &threading, &lammps, pot)?;
 
     let lattice = {
         let a = rs.iter().fold(0.0, |a, &b| f64::max(a, b)) + 20.0;
@@ -1493,7 +1493,7 @@ pub(crate) fn run_converge_vdw(
         update_style: cfg::LammpsUpdateStyle::Fast { sync_positions_every: 1 }.into(),
         processor_axis_mask: [true; 3].into(),
     };
-    let pot = PotentialBuilder::from_config_parts(None, on_demand, &threading, &lammps, pot)?;
+    let pot = <dyn PotentialBuilder>::from_config_parts(None, on_demand, &threading, &lammps, pot)?;
 
     let lattice = Lattice::orthorhombic(40.0, 40.0, 40.0);
     let direction = {
@@ -1556,7 +1556,7 @@ pub(crate) fn run_single_force_computation(
         })).fold_ok()?
     });
 
-    let pot = PotentialBuilder::from_root_config(None, on_demand, &settings)?;
+    let pot = <dyn PotentialBuilder>::from_root_config(None, on_demand, &settings)?;
 
     pot.one_off().compute_force(&coords, meta.sift())?
 })}
@@ -1614,7 +1614,7 @@ pub(crate) fn run_layer_mode_frequencies(
         OnlyUniqueResult::NoValues => unreachable!(),
     };
 
-    let pot = PotentialBuilder::from_root_config(None, on_demand, &settings)?;
+    let pot = <dyn PotentialBuilder>::from_root_config(None, on_demand, &settings)?;
     let mut diff_fn = pot.initialize_diff_fn(&original_coords, meta.sift())?;
 
     warn!("Don't quote these values, only compare them!  (I'm not sure about the prefactor...)");
@@ -1670,7 +1670,7 @@ pub(crate) fn run_dynmat_at_q(
     qpoint_frac: V3,
     structure: StoredStructure,
 ) -> FailResult<DynamicalMatrix> {
-    let pot = PotentialBuilder::from_root_config(None, on_demand, &settings)?;
+    let pot = <dyn PotentialBuilder>::from_root_config(None, on_demand, &settings)?;
 
     let phonons_settings = match &settings.phonons {
         Some(x) => x,
@@ -1690,7 +1690,7 @@ pub(crate) fn run_dynmat_at_qs(
     structure: StoredStructure,
     out_dir: impl AsPath,
 ) -> FailResult<()> {
-    let pot = PotentialBuilder::from_root_config(None, on_demand, &settings)?;
+    let pot = <dyn PotentialBuilder>::from_root_config(None, on_demand, &settings)?;
 
     let phonons_settings = match &settings.phonons {
         Some(x) => x,
@@ -1753,7 +1753,7 @@ impl TrialDir {
             None => bail!("`rsp2-run-after-diagonalization` cannot be used without a `phonons:` config section"),
         };
 
-        let pot = PotentialBuilder::from_root_config(Some(&self), on_demand, &settings)?;
+        let pot = <dyn PotentialBuilder>::from_root_config(Some(&self), on_demand, &settings)?;
 
         let (coords, meta) = self.read_stored_structure_data(&self.structure_path(PreEvChase(prev_iteration)))?;
 

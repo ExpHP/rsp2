@@ -22,7 +22,7 @@
 // FIXME copied from failure 1.0 prerelease; remove once actually released
 macro_rules! throw {
     ($e:expr) => {
-        return Err(::std::convert::Into::into($e));
+        return Err(::std::convert::Into::into($e))
     }
 }
 

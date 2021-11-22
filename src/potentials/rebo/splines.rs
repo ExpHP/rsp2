@@ -31,7 +31,6 @@ pub mod P {
         pub CH: BicubicGrid, // P_CH only. (P_HC is zero)
     }
 
-    #[allow(unused)]
     lazy_static!{
         /// The only fully correct choice for PCC in second-generation REBO.
         ///
@@ -203,7 +202,6 @@ pub mod F {
         pub HH: TricubicGrid,
     }
 
-    #[allow(unused)]
     lazy_static! {
         /// Brenner (2002), Tables 4, 6, and 9.
         ///
