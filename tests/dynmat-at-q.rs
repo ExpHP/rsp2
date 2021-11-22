@@ -1,4 +1,5 @@
-use ::rsp2_integration_test::{CliTest, filetypes, resource, cli_test, Result};
+use rsp2_integration_test::{CliTest, filetypes, resource, cli_test, Result};
+use std::path::PathBuf;
 
 // Check rsp2 against dynmats produced by phonopy.
 //
@@ -17,17 +18,21 @@ use ::rsp2_integration_test::{CliTest, filetypes, resource, cli_test, Result};
 //    * phonopy band.conf
 //    * Assuming you got the hacked version above, `dynmat-${n}.npz` files will have been written.
 
+fn expected_dynmats_and_qpoints() -> impl Iterator<Item=(PathBuf, &'static str)> {
+    vec![
+        (resource("dynmat-at-q/001-0-a-gamma.dynmat.npz"), "0 0 0"),
+        (resource("dynmat-at-q/001-0-a-k.dynmat.npz"), "1/3 1/3 0"),
+        (resource("dynmat-at-q/001-0-a-m.dynmat.npz"), "0.5 0 0"),
+        (resource("dynmat-at-q/001-0-a-m-neg.dynmat.npz"), "-0.5 0 0"),
+    ].into_iter()
+}
+
 #[ignore] // This test is expensive; use `cargo test -- --ignored` to run it!
 #[test]
 fn dynmat_at_q() -> Result<()> {
     let env = cli_test::Environment::init();
 
-    for &(ref expected_outfile, kpoint) in &[
-        (resource("dynmat-at-q/001-0-a-gamma.dynmat.npz"), "0 0 0"),
-        (resource("dynmat-at-q/001-0-a-k.dynmat.npz"), "1/3 1/3 0"),
-        (resource("dynmat-at-q/001-0-a-m.dynmat.npz"), "0.5 0 0"),
-        (resource("dynmat-at-q/001-0-a-m-neg.dynmat.npz"), "-0.5 0 0"),
-    ] {
+    for (expected_outfile, kpoint) in expected_dynmats_and_qpoints() {
         println!("Testing kpoint {}", kpoint);
         CliTest::cargo_binary(&env, "rsp2-dynmat-at-q")
             .arg("-c").arg(resource("dynmat-at-q/settings.yaml"))
@@ -45,4 +50,31 @@ fn dynmat_at_q() -> Result<()> {
             .run()?;
     }
     Ok(())
+}
+
+#[ignore] // This test is expensive; use `cargo test -- --ignored` to run it!
+#[test]
+fn dynmat_at_qs() -> Result<()> {
+    let env = cli_test::Environment::init();
+
+    let mut test = {
+        CliTest::cargo_binary(&env, "rsp2-dynmat-at-qs")
+            .arg("-c").arg(resource("dynmat-at-q/settings.yaml"))
+            .arg(resource("dynmat-at-q/001-0-a.structure"))
+            .arg("--qpoints").arg(resource("dynmat-at-q/dynmat-at-qs.input"))
+            .arg("-o").arg("dynmats")
+    };
+
+    for (index, (expected_outfile, _)) in expected_dynmats_and_qpoints().enumerate() {
+        test = test.check_file::<filetypes::Dynmat>(
+            format!("dynmats/dynmat-{:04}.npz", index).as_ref(),
+            expected_outfile.as_ref(),
+            filetypes::DynmatTolerances {
+                rel_tol: 1e-4,
+                abs_tol: 1e-7,
+            },
+        );
+    }
+
+    test.run()
 }

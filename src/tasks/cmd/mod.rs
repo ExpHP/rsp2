@@ -323,14 +323,130 @@ fn do_compute_dynmat(
         Option<meta::SiteLayers>,
         Option<meta::FracBonds>,
     >,
-) -> FailResult<DynamicalMatrix>
+) -> FailResult<DynamicalMatrix> {
+    let mut out = None;
+    do_compute_dynmats(
+        trial_dir, settings, phonons_settings, pot, &[qpoint_pfrac], prim_coords, prim_meta,
+        |record| {
+            assert!(out.is_none());
+            out = Some(record.dynmat);
+            Ok(())
+        },
+    )?;
+    Ok(out.unwrap())
+}
+
+fn do_compute_dynmats(
+    trial_dir: Option<&TrialDir>,
+    settings: &Settings,
+    phonons_settings: &cfg::Phonons,
+    pot: &dyn PotentialBuilder,
+    qpoint_pfracs: &[V3],
+    prim_coords: &Coords,
+    prim_meta: HList4<
+        meta::SiteElements,
+        meta::SiteMasses,
+        Option<meta::SiteLayers>,
+        Option<meta::FracBonds>,
+    >,
+    mut emit_dynmat: impl FnMut(ComputedDynmat) -> FailResult<()>
+) -> FailResult<()> {
+    let (ref super_coords, ref sc) = phonons_supercell_from_settings(phonons_settings, prim_coords);
+    let ref super_meta = replicate_meta_for_force_constants(settings, &super_coords, &sc, prim_meta.clone())?;
+
+    let force_constants = do_force_constants_for_settings(
+        trial_dir, settings, phonons_settings, pot,
+        prim_coords, prim_meta.clone(), super_coords, super_meta.clone(), sc,
+    )?;
+
+    let debug_files_root = debug_files_root(trial_dir)?;
+
+    trace!("Computing sparse dynamical matrix");
+    for (qpoint_index, &qpoint_pfrac) in qpoint_pfracs.iter().enumerate() {
+        if qpoint_pfracs.len() > 1 {
+            trace!(" - at qpoint {} of {}", qpoint_index + 1, qpoint_pfracs.len());
+        }
+        let dynmat = {
+            let qpoint_cart = qpoint_pfrac * &prim_coords.lattice().reciprocal();
+            let masses: meta::SiteMasses = prim_meta.pick();
+            let masses = masses.iter().map(|&meta::Mass(m)| m).collect::<Vec<_>>();
+            force_constants
+                .dynmat_at_cart_q(&super_coords, qpoint_cart, &sc, &masses)
+                .hermitianize()
+        };
+        // Log target for tests/resources/force-constants fc files
+        if log_enabled!(target: "rsp2_tasks::special::fc_test_files", log::Level::Trace) {
+            save_dynmat_for_tests(&debug_files_root, &dynmat, qpoint_index);
+        }
+        emit_dynmat(ComputedDynmat { qpoint_index, qpoint_pfrac, dynmat })?;
+    }
+    trace!("Done computing dynamical matrix");
+    Ok(())
+}
+
+pub struct ComputedDynmat {
+    pub qpoint_index: usize,
+    pub qpoint_pfrac: V3,
+    pub dynmat: DynamicalMatrix,
+}
+
+fn do_force_constants_for_settings(
+    trial_dir: Option<&TrialDir>,
+    settings: &Settings,
+    phonons_settings: &cfg::Phonons,
+    pot: &dyn PotentialBuilder,
+    prim_coords: &Coords,
+    prim_meta: HList4<
+        meta::SiteElements,
+        meta::SiteMasses,
+        Option<meta::SiteLayers>,
+        Option<meta::FracBonds>,
+    >,
+    super_coords: &Coords,
+    super_meta: HList4<
+        meta::SiteElements,
+        meta::SiteMasses,
+        Option<meta::SiteLayers>,
+        Option<meta::FracBonds>,
+    >,
+    sc: &SupercellToken,
+) -> FailResult<ForceConstants>
 {
     if phonons_settings.analytic_hessian {
-        return do_compute_dynmat_with_hessian(
-            settings, phonons_settings, pot, qpoint_pfrac, prim_coords, prim_meta,
-        );
+        // Annoyingly I could find no integration tests for analytic-hessian so I can't be sure that
+        // I haven't broken anything in a refactor.
+        warn_once!("`analytic-hessian: true` is not frequently used or tested!");
+        do_force_constants_using_hessian(phonons_settings, pot, super_coords, super_meta.sift(), sc)
+    } else {
+        do_force_constants_using_displacements(
+            trial_dir, settings, phonons_settings, pot,
+            prim_coords, prim_meta, super_coords, super_meta.clone(), sc,
+        )
     }
+}
 
+fn do_force_constants_using_displacements(
+    trial_dir: Option<&TrialDir>,
+    settings: &Settings,
+    phonons_settings: &cfg::Phonons,
+    pot: &dyn PotentialBuilder,
+    prim_coords: &Coords,
+    prim_meta: HList4<
+        meta::SiteElements,
+        meta::SiteMasses,
+        Option<meta::SiteLayers>,
+        Option<meta::FracBonds>,
+    >,
+    super_coords: &Coords,
+    super_meta: HList4<
+        meta::SiteElements,
+        meta::SiteMasses,
+        Option<meta::SiteLayers>,
+        Option<meta::FracBonds>,
+    >,
+    sc: &SupercellToken,
+) -> FailResult<ForceConstants>
+{
     let displacement_distance = phonons_settings.displacement_distance.expect("missing displacement-distance should have been caught sooner");
     let symprec = phonons_settings.symmetry_tolerance.expect("missing symmetry-tolerance should have been caught sooner");
 
@@ -341,11 +457,6 @@ fn do_compute_dynmat(
     // (but last time I tried to do so, I found the resulting function signature too obnoxious)
     //
     // For now, we just make heavy use of scoping to keep the number of names in scope smallish.
-    let (ref super_coords, ref sc) = {
-        let sc_dim = phonons_settings.supercell.dim_for_unitcell(prim_coords.lattice());
-        trace!("Constructing supercell (dim: {:?})", sc_dim);
-        rsp2_structure::supercell::diagonal(sc_dim).build(prim_coords)
-    };
 
     let cart_ops = if symprec == 0.0 {
         trace!("Not computing symmetry (symmetry-tolerance = 0)");
@@ -428,8 +539,6 @@ fn do_compute_dynmat(
             .collect()
     };
 
-    let super_meta = replicate_meta_for_force_constants(settings, &super_coords, &sc, prim_meta.sift())?;
-
     trace!("Computing deperms in supercell");
     let super_deperms = do_compute_deperms(&phonons_settings, &super_coords, &cart_ops)?;
 
@@ -450,10 +559,7 @@ fn do_compute_dynmat(
         cart_ops.iter().map(|c| c.cart_rot()).collect()
     };
 
-    let debug_files_root = match trial_dir {
-        Some(d) => d.as_path().to_owned(),
-        None => std::env::current_dir()?,
-    };
+    let debug_files_root = debug_files_root(trial_dir)?;
 
     // Log target for comparison to phonopy
     if log_enabled!(target: "rsp2_tasks::special::phonopy_force_sets", log::Level::Trace) {
@@ -513,7 +619,7 @@ fn do_compute_dynmat(
                 force_constants.to_super_force_constants_with_zeroed_rows(&sc)
                     .permuted_by(deperm_to_phonopy)
             };
-            if let Err(e) = Json(phonopy_fcs.to_dense_matrix()).save(debug_files_root.join("rsp2-fcs.json")) {
+            if let Err(e) = Json(phonopy_fcs.to_dense_matrix()).save(debug_files_root.join("rsp2-phonopy-fcs.json")) {
                 warn!("Error writing force constants debug file: {}", e);
             }
         } else {
@@ -524,16 +630,12 @@ fn do_compute_dynmat(
         }
     }
 
-    trace!("Computing sparse dynamical matrix");
-    let dynmat = {
-        let qpoint_cart = qpoint_pfrac * &prim_coords.lattice().reciprocal();
-        let masses: meta::SiteMasses = prim_meta.pick();
-        let masses = masses.iter().map(|&meta::Mass(m)| m).collect::<Vec<_>>();
-        force_constants
-            .dynmat_at_cart_q(&super_coords, qpoint_cart, &sc, &masses)
-            .hermitianize()
-    };
-    trace!("Done computing dynamical matrix");
+    if log_enabled!(target: "rsp2_tasks::special::force_constants", log::Level::Trace) {
+        trace!("Creating rsp2-fcs.json file for rsp2_tasks::special::force_constants");
+        if let Err(e) = Json(force_constants.to_dense_matrix()).save(debug_files_root.join("rsp2-fcs.json")) {
+            warn!("Error writing force constants debug file: {}", e);
+        }
+    }
 
     // Log target for tests/resources/force-constants fc files
     if log_enabled!(target: "rsp2_tasks::special::fc_test_files", log::Level::Trace) {
@@ -547,51 +649,16 @@ fn do_compute_dynmat(
             &cart_ops,
             &super_displacements,
             &force_sets,
-            &dynmat,
         );
     }
 
-    Ok(dynmat)
+    Ok(force_constants)
 }
 
-// Vastly simpler than do_compute_dynmat
-fn do_compute_dynmat_with_hessian(
-    settings: &Settings,
-    phonons_settings: &cfg::Phonons,
-    pot: &dyn PotentialBuilder,
-    qpoint_pfrac: V3,
-    prim_coords: &Coords,
-    prim_meta: HList4<
-        meta::SiteElements,
-        meta::SiteMasses,
-        Option<meta::SiteLayers>,
-        Option<meta::FracBonds>,
-    >,
-) -> FailResult<DynamicalMatrix>
-{
-    trace!("Constructing supercell");
-    let (ref super_coords, ref sc) = {
-        let sc_dim = phonons_settings.supercell.dim_for_unitcell(prim_coords.lattice());
-        rsp2_structure::supercell::diagonal(sc_dim).build(prim_coords)
-    };
-
-    let super_meta = replicate_meta_for_force_constants(settings, &super_coords, &sc, prim_meta.sift())?;
-
-    let force_constants = do_force_constants_using_hessian(pot, &super_coords, super_meta.sift(), &sc)?;
-    let force_constants = impose_sum_rule(phonons_settings, &sc, force_constants);
-
-    trace!("Computing sparse dynamical matrix");
-    let dynmat = {
-        let qpoint_cart = qpoint_pfrac * &prim_coords.lattice().reciprocal();
-        let masses: meta::SiteMasses = prim_meta.pick();
-        let masses = masses.iter().map(|&meta::Mass(m)| m).collect::<Vec<_>>();
-        force_constants
-            .dynmat_at_cart_q(&super_coords, qpoint_cart, &sc, &masses)
-            .hermitianize()
-    };
-    trace!("Done computing dynamical matrix");
-
-    Ok(dynmat)
+fn phonons_supercell_from_settings(phonons_settings: &cfg::Phonons, prim_coords: &Coords) -> (Coords, SupercellToken) {
+    let sc_dim = phonons_settings.supercell.dim_for_unitcell(prim_coords.lattice());
+    trace!("Constructing supercell (dim: {:?})", sc_dim);
+    rsp2_structure::supercell::diagonal(sc_dim).build(prim_coords)
 }
 
 fn replicate_meta_for_force_constants(
@@ -830,7 +897,6 @@ fn save_force_sets_for_tests(
     cart_ops: &[CartOp],
     super_displacements: &[(usize, V3<f64>)],
     force_sets: &Vec<BTreeMap<usize, V3<f64>>>,
-    dynmat: &DynamicalMatrix,
 ) {
     #[derive(Serialize, Deserialize)]
     #[serde(rename_all = "kebab-case")]
@@ -848,12 +914,6 @@ fn save_force_sets_for_tests(
         #[serde(rename = "displacements")] super_displacements: Vec<(usize, V3)>, // [disp] -> (super, V3)
     }
 
-    #[derive(Serialize, Deserialize)]
-    struct DenseDynmat {
-        real: Vec<Vec<M33>>,
-        imag: Vec<Vec<M33>>,
-    }
-
     let prim_masses: meta::SiteMasses = prim_meta.pick();
 
     let primitive = Primitive {
@@ -863,15 +923,10 @@ fn save_force_sets_for_tests(
     };
 
     let force_sets = ForceSets {
-        sc_dims: sc.as_diagonal().expect("only diagonal supercell supported"),
+        sc_dims: sc.periods(),
         super_coords: super_coords.clone(),
         force_sets: force_sets.clone().into_iter().map(|row| row.into_iter().collect()).collect(),
         super_displacements: super_displacements.to_vec(),
-    };
-
-    let dense_dynmat = DenseDynmat {
-        real: dynmat.0.to_coo().map(|c| c.0).into_dense(),
-        imag: dynmat.0.to_coo().map(|c| c.1).into_dense(),
     };
 
     if let Err(e) = Json(primitive).save(debug_files_root.join("primitive.json")) {
@@ -880,8 +935,34 @@ fn save_force_sets_for_tests(
     if let Err(e) = Json(force_sets).save(debug_files_root.join("super.json")) {
         warn!("{}", e);
     }
-    if let Err(e) = Json(dense_dynmat).save(debug_files_root.join("dynmat.json")) {
+}
+
+fn save_dynmat_for_tests(
+    debug_files_root: impl AsPath,
+    dynmat: &DynamicalMatrix,
+    qpoint_index: usize,
+) {
+    #[derive(Serialize, Deserialize)]
+    struct DenseDynmat {
+        real: Vec<Vec<M33>>,
+        imag: Vec<Vec<M33>>,
+    }
+
+    let dense_dynmat = DenseDynmat {
+        real: dynmat.0.to_coo().map(|c| c.0).into_dense(),
+        imag: dynmat.0.to_coo().map(|c| c.1).into_dense(),
+    };
+
+    let fname = format!("dynmat-{:04}.json", qpoint_index);
+    if let Err(e) = Json(dense_dynmat).save(debug_files_root.as_path().join(fname)) {
         warn!("{}", e);
+    }
+}
+
+fn debug_files_root(trial_dir: Option<&TrialDir>) -> FailResult<PathBuf> {
+    match trial_dir {
+        Some(d) => Ok(d.as_path().to_owned()),
+        None => std::env::current_dir().map_err(Into::into),
     }
 }
 
@@ -1029,20 +1110,21 @@ fn do_force_sets_at_disps_for_sparse(
 })}
 
 fn do_force_constants_using_hessian(
+    phonons_settings: &cfg::Phonons,
     pot: &dyn PotentialBuilder,
-    coords: &Coords,
-    meta: CommonMeta,
+    super_coords: &Coords,
+    super_meta: CommonMeta,
     sc: &SupercellToken,
 ) -> FailResult<ForceConstants>
 {Ok({
     trace!("Computing analytic hessian");
 
-    let mut ddiff_fn = match pot.initialize_pairwise_ddiff_fn(&coords, meta.sift())? {
+    let mut ddiff_fn = match pot.initialize_pairwise_ddiff_fn(&super_coords, super_meta.sift())? {
         Some(ddiff_fn) => ddiff_fn,
         None => bail!("The chosen potential does not implement an analytic Hessian!"),
     };
 
-    let (_, items) = ddiff_fn.compute(coords, meta)?;
+    let (_, items) = ddiff_fn.compute(super_coords, super_meta)?;
 
     let primitive_atoms = sc.atom_primitive_atoms();
     let cells = sc.atom_cells();
@@ -1074,7 +1156,8 @@ fn do_force_constants_using_hessian(
     }
 
     let dim = (sc.num_primitive_atoms(), sc.num_supercell_atoms());
-    ForceConstants(rsp2_sparse::RawCoo { dim, row, col, val }.to_csr())
+    let force_constants = ForceConstants(rsp2_sparse::RawCoo { dim, row, col, val }.to_csr());
+    impose_sum_rule(phonons_settings, &sc, force_constants)
 })}
 
 //=================================================================
@@ -1598,6 +1681,32 @@ pub(crate) fn run_dynmat_at_q(
     let coords = structure.coords;
 
     do_compute_dynmat(None, settings, phonons_settings, &pot, qpoint_frac, &coords, meta.sift())
+}
+
+pub(crate) fn run_dynmat_at_qs(
+    on_demand: Option<LammpsOnDemand>,
+    settings: &Settings,
+    qpoint_fracs: &[V3],
+    structure: StoredStructure,
+    out_dir: impl AsPath,
+) -> FailResult<()> {
+    let pot = PotentialBuilder::from_root_config(None, on_demand, &settings)?;
+
+    let phonons_settings = match &settings.phonons {
+        Some(x) => x,
+        None => bail!("`phonons` config section is required to compute dynamical matrices"),
+    };
+
+    let meta = structure.meta();
+    let coords = structure.coords;
+
+    let out_dir = PathDir::create(out_dir.as_path())?;
+    do_compute_dynmats(None, settings, phonons_settings, &pot, qpoint_fracs, &coords, meta.sift(), |record| {
+        let V3([qx, qy, qz]) = record.qpoint_pfrac;
+        let out_path = out_dir.join(format!("dynmat-{:04}.npz", record.qpoint_index));
+        info!("writing {}  (q = {}, {}, {})", out_path.nice(), qx, qy, qz);
+        record.dynmat.save(out_path)
+    })
 }
 
 //=================================================================

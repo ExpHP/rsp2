@@ -166,7 +166,6 @@ fn show_errors(e: failure::Error) {
 
 fn check_for_deps() -> FailResult<()> {
     crate::cmd::python::check_availability()?;
-
     Ok(())
 }
 
@@ -720,6 +719,39 @@ pub fn dynmat_at_q(bin_name: &str, version: VersionInfo) -> ! {
         let dynmat = crate::cmd::run_dynmat_at_q(mpi_on_demand, &settings, qpoint_frac, structure)?;
 
         dynmat.save(matches.expect_value_of("output"))?;
+
+        Ok(())
+    });
+}
+
+// %% CRATES: binary: rsp2-dynmat-at-qs %%
+pub fn dynmat_at_qs(bin_name: &str, version: VersionInfo) -> ! {
+    use crate::ui::parse_qpoint::QPointsFile;
+
+    wrap_main(version, |logfile, mpi_on_demand| {
+        let (app, de) = CliDeserialize::augment_clap_app({
+            clap::App::new(bin_name)
+                .about("Computes the dynamical matrix at multiple qpoints.")
+                .args(&[
+                    arg!( input=STRUCTURE "Input structure, in rsp2 structure directory format."),
+                    arg!(*qpoints [--qpoints]=QPOINT_FILE "\
+                        file whose lines are space-separated lists of 3 numbers \
+                        (integers, reals, or rationals as X/Y) \
+                        describing the location in units of the reciprocal cell.\
+                    "),
+                    arg!(*output [-o][--output]=PATH "Directory for output dynmat.npz files."),
+                ])
+        });
+        let matches = app.get_matches();
+        let (ConfigArgs(config), AppendLog(append_log)) = de.resolve_args(&matches)?;
+        append_log.start(logfile)?;
+
+        let ValidatedSettings(settings) = config.deserialize()?;
+
+        let QPointsFile(qpoint_fracs) = Load::load(matches.expect_value_of("qpoints"))?;
+        let structure = StoredStructure::load(matches.expect_value_of("input"))?;
+        let out_dir = matches.expect_value_of("output");
+        crate::cmd::run_dynmat_at_qs(mpi_on_demand, &settings, &qpoint_fracs, structure, out_dir)?;
 
         Ok(())
     });

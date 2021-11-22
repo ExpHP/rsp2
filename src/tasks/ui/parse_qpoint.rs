@@ -1,12 +1,13 @@
 use crate::FailResult;
 use rsp2_array_types::V3;
 use slice_of_array::prelude::*;
+use crate::traits::AsPath;
 
 pub fn parse_qpoint(s: &str) -> FailResult<V3> {
     let words: Vec<_> = s.split_ascii_whitespace().collect();
 
     if words.len() != 3 {
-        bail!("Expected 3 whitespace-separated floats or rationals in --qpoint");
+        bail!("Expected 3 whitespace-separated floats or rationals in --qpoint, got {:?}", s);
     }
 
     words.as_array::<V3<_>>().try_map(|word: &str| {
@@ -27,4 +28,24 @@ pub fn parse_qpoint(s: &str) -> FailResult<V3> {
             })
         }
     })
+}
+
+pub struct QPointsFile(pub Vec<V3>);
+
+pub fn parse_qpoint_file(s: &str) -> FailResult<Vec<V3>> {
+    s.lines()
+        .map(|s| {
+            let end = s.find("#").unwrap_or(s.len());
+            s[..end].trim()
+        })
+        .filter(|s| !s.is_empty())
+        .map(parse_qpoint)
+        .collect::<Result<Vec<_>, _>>()
+}
+
+impl crate::traits::Load for crate::ui::parse_qpoint::QPointsFile {
+    fn load(path: impl AsPath) -> FailResult<Self> {
+        let text = path_abs::FileRead::open(path.as_path())?.read_string()?;
+        Ok(QPointsFile(parse_qpoint_file(&text)?))
+    }
 }

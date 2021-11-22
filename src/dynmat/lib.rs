@@ -679,6 +679,10 @@ impl ForceConstants {
         })
     }
 
+    pub fn to_dense_matrix(&self) -> Vec<Vec<M33>> {
+        self.0.to_coo().to_dense()
+    }
+
     pub fn to_super_force_constants_with_all_rows(&self, sc: &SupercellToken) -> SuperForceConstants {
         self.to_super_force_constants_with_zeroed_rows(sc)
             .add_rows_for_other_cells(sc)
