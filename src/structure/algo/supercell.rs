@@ -378,7 +378,8 @@ impl SupercellToken {
 
     /// Get the cell index of the centermost cell.
     ///
-    /// Ties on even-dimensioned axes are broken towards zero.
+    /// Ties on even-dimensioned axes are broken away from zero.
+    /// (i.e. a 2x1x1 supercell would give cell ``(1, 0, 0)``)
     ///
     /// If you need this, then you've probably written some dumb
     /// algorithm that only works with odd-dimensioned supercells

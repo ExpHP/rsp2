@@ -306,8 +306,6 @@ def griddata_periodic(
     points_frac = reduce_carts(points, lattice) @ np.linalg.inv(lattice)
     xi_frac = reduce_carts(xi, lattice) @ np.linalg.inv(lattice)
 
-    #debug_path((points_frac @ lattice)[:,:2], lattice[:2,:2], (xi_frac @ lattice)[:,:2], _supercell.recip())
-
     for axis, mask_bit in enumerate(periodic_axis_mask):
         if mask_bit:
             unit = [0] * 3
@@ -335,9 +333,6 @@ def griddata_periodic(
             xi = np.delete(xi, axis, axis=xi.ndim-1)
             points = np.delete(points, axis, axis=1)
             true_axis_mask[axis] = 0
-
-    #if xi.shape[1] == 2:
-    #    debug_path(points, lattice, xi)
 
     return scint.griddata(points, values, xi, **kwargs)
 
