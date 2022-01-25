@@ -11,6 +11,9 @@
 
 #[macro_use] extern crate rsp2_clap;
 #[macro_use] extern crate log;
+#[macro_use] extern crate failure;
+
+use failure::ResultExt;
 
 use rsp2_structure::{Element, bonds::FracBonds};
 use rsp2_structure_io::Poscar;
@@ -44,16 +47,16 @@ pub fn _main() -> FailResult<()> {
     let structure_path = matches.value_of("input").unwrap();
     let dynmat_path = matches.value_of("dynmat").unwrap();
     let out_path = matches.value_of("out_path").unwrap();
-    let bond_radius = matches.value_of("bond_radius").unwrap_or("1.8").parse()?;
-    let temperature = matches.value_of("temperature").unwrap_or("0").parse()?;
+    let bond_radius = matches.value_of("bond_radius").unwrap_or("1.8").parse::<f64>().with_context(|e| format!("in bond-radius: {}", e))?;
+    let temperature = matches.value_of("temperature").unwrap_or("0").parse::<f64>().with_context(|e| format!("in temperature: {}", e))?;
     let temperatures = vec![temperature];  // TODO: way of specifying multiple temperatures
 
-    let poscar = Poscar::from_reader(fsx::open(structure_path)?)?;
+    let poscar = Poscar::from_reader(fsx::open(structure_path)?).with_context(|e| format!("reading {}: {}", structure_path, e))?;
     trace!("Computing bond graph...");
     let frac_bonds = FracBonds::compute(&poscar.coords, bond_radius)?;
     let cart_bonds = frac_bonds.to_cart_bonds(&poscar.coords);
 
-    let dynmat = read_dynmat(dynmat_path)?;
+    let dynmat = read_dynmat(dynmat_path).with_context(|e| format!("while reading {}: {}", dynmat_path, e))?;
     let (eigenvalues, eigenvectors) = dynmat.compute_eigensolutions_dense_gamma();
 
     let frequencies: Vec<f64> = eigenvalues.eigenvalues.into_iter().map(eigenvalue_to_frequency).collect::<Vec<_>>();
@@ -83,6 +86,16 @@ pub fn _main() -> FailResult<()> {
 }
 
 fn read_dynmat(path: &str) -> FailResult<DynamicalMatrix> {
+    let lower_path = path.to_ascii_lowercase();
+    if lower_path.ends_with(".npz") {
+        let stem = &path[..path.len() - ".npz".len()];
+        bail!("\
+rsp2-bond-polarizability does not support .npz format for dynmats, try the following command:
+(<rsp2_dir>/src/python must be on your PYTHONPATH!)
+
+    python3 -m rsp2.cli.convert_dynmat {} --output {}.json.gz\
+", path, stem);
+    }
     let mut reader: Box<dyn std::io::Read> = Box::new(fsx::open(path)?);
     if path.to_ascii_lowercase().ends_with(".gz") {
         reader = Box::new(flate2::read::GzDecoder::new(reader));
