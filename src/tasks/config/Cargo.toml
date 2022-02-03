@@ -17,6 +17,7 @@ path = "lib.rs"
 [dependencies]
 rsp2-minimize = { path = "../../minimize" }
 rsp2-util-macros = { path = "../../util/macros" }
+rsp2-config-utils = { path = "../../util/config" }
 
 log = "0.4"
 failure = "0.1.2"
@@ -27,5 +28,5 @@ serde_yaml = "0.7"
 serde_ignored = "0.0.4"
 
 [features]
-nightly = ["beta", "rsp2-minimize/nightly", "rsp2-util-macros/nightly"]
-beta = ["rsp2-minimize/beta", "rsp2-util-macros/beta"]
+nightly = ["beta", "rsp2-config-utils/nightly", "rsp2-minimize/nightly", "rsp2-util-macros/nightly"]
+beta = ["rsp2-config-utils/beta", "rsp2-minimize/beta", "rsp2-util-macros/beta"]

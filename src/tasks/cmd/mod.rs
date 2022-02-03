@@ -1034,7 +1034,7 @@ impl TrialDir {
         pot: &dyn PotentialBuilder,
         ev_analysis: &GammaSystemAnalysis,
     ) -> FailResult<()> {Ok({
-        use crate::ui::cfg_merging::{make_nested_mapping, no_summary, merge_summaries};
+        use rsp2_config_utils::merge::{make_nested_mapping, no_summary, merge_summaries};
 
         #[derive(Serialize)]
         #[serde(rename_all = "kebab-case")]

@@ -1315,6 +1315,7 @@ dependencies = [
  "rsp2-bond-polarizability",
  "rsp2-bond-polarizability-bin",
  "rsp2-clap",
+ "rsp2-config-utils",
  "rsp2-dftbplus",
  "rsp2-dynmat",
  "rsp2-fs-util",
@@ -1369,6 +1370,7 @@ dependencies = [
  "rsp2-array-types",
  "rsp2-structure",
  "rsp2-util-macros",
+ "serde",
  "thiserror",
 ]
 
@@ -1384,6 +1386,7 @@ dependencies = [
  "rsp2-array-types",
  "rsp2-bond-polarizability",
  "rsp2-clap",
+ "rsp2-config-utils",
  "rsp2-dynmat",
  "rsp2-fs-util",
  "rsp2-structure",
@@ -1397,6 +1400,18 @@ name = "rsp2-clap"
 version = "0.1.0"
 dependencies = [
  "clap",
+]
+
+[[package]]
+name = "rsp2-config-utils"
+version = "0.1.0"
+dependencies = [
+ "failure",
+ "log 0.4.3",
+ "path_abs 0.5.0",
+ "serde",
+ "serde_ignored",
+ "serde_yaml",
 ]
 
 [[package]]
@@ -1675,6 +1690,7 @@ dependencies = [
  "rsp2-assert-close",
  "rsp2-bond-polarizability",
  "rsp2-clap",
+ "rsp2-config-utils",
  "rsp2-dftbplus",
  "rsp2-dynmat",
  "rsp2-fs-util",
@@ -1711,6 +1727,7 @@ version = "0.1.0"
 dependencies = [
  "failure",
  "log 0.4.3",
+ "rsp2-config-utils",
  "rsp2-minimize",
  "rsp2-util-macros",
  "serde",

@@ -35,7 +35,8 @@ path = "lib.rs"
 !!rsp2-phonopy-io
 !!rsp2-sparse
 !!rsp2-dynmat { features = ["npz", "serde"] }
-!!rsp2-bond-polarizability
+!!rsp2-bond-polarizability { features = ["serde"] }
+!!rsp2-config-utils
 
 !!clap
 !!slice-of-array

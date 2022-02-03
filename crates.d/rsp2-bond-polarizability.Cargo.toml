@@ -16,6 +16,8 @@ path = "lib.rs"
 !!enum-map
 !!thiserror
 !!log
+!!serde { optional = true, features = ["derive"] }
 
 [features]
 !!NIGHTLY-FEATURE-LINE
+

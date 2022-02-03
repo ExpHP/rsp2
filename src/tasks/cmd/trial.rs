@@ -15,11 +15,11 @@ use crate::traits::{Save, AsPath};
 use crate::traits::save::{Json, Yaml};
 use crate::util::{LockfilePath, LockfileGuard};
 use crate::util::ext_traits::PathNiceExt;
-use crate::ui::cfg_merging::ConfigSources;
+use rsp2_config_utils::merge::ConfigSources;
 
 use std::path::{Path, PathBuf};
 use path_abs::{PathDir, PathFile, FileRead, FileWrite};
-use rsp2_tasks_config::YamlRead;
+use rsp2_config_utils::YamlRead;
 use rsp2_fs_util::rm_rf;
 
 pub struct TrialDir {
@@ -170,7 +170,7 @@ impl TrialDir {
 
     pub fn read_modified_settings<T>(
         &mut self,
-        mut sources: crate::ui::cfg_merging::ConfigSources,
+        mut sources: rsp2_config_utils::merge::ConfigSources,
         save_path: Option<impl AsPath>,
     ) -> FailResult<T>
     where T: YamlRead,

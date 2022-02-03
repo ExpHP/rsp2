@@ -15,8 +15,9 @@ path = "main.rs"
 !!rsp2-structure-io
 !!rsp2-fs-util
 !!rsp2-dynmat { features = ["npz"] }
-!!rsp2-bond-polarizability
+!!rsp2-bond-polarizability { features = ["serde"] }
 !!rsp2-array-types
+!!rsp2-config-utils
 
 !!clap
 !!env-logger

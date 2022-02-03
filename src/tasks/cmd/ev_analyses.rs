@@ -11,12 +11,12 @@
 
 use crate::FailResult;
 use crate::ui::color::{ColorByRange, PaintAs, NullPainter};
-use crate::ui::cfg_merging::{no_summary, merge_summaries, make_nested_mapping};
 use crate::math::basis::{GammaBasis3, EvDirection};
 use crate::math::bands::{GammaUnfolder};
 #[allow(unused)] // compiler bug
 use itertools::Itertools;
 use rsp2_tasks_config::Settings;
+use rsp2_config_utils::merge::{no_summary, merge_summaries, make_nested_mapping};
 
 #[allow(unused)] // compiler bug
 use rsp2_soa_ops::{Part, Partition};

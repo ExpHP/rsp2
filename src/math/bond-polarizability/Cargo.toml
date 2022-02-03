@@ -21,7 +21,9 @@ rsp2-util-macros = { path = "../../util/macros" }
 enum-map = "0.4.1"
 thiserror = "1.0.0"
 log = "0.4"
+serde = { version = "1.0.91", features = ["derive", "rc"], optional = true }
 
 [features]
 nightly = ["beta", "rsp2-array-types/nightly", "rsp2-structure/nightly", "rsp2-util-macros/nightly"]
 beta = ["rsp2-array-types/beta", "rsp2-structure/beta", "rsp2-util-macros/beta"]
+

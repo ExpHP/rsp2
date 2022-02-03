@@ -56,6 +56,7 @@ rsp2-sparse = "src/util/sparse"
 rsp2-dynmat = "src/dynmat"
 rsp2-bond-polarizability = "src/math/bond-polarizability"
 rsp2-bond-polarizability-bin = "src/binary-crates/bond-polarizability"
+rsp2-config-utils = "src/util/config"
 #!!INSERTION POINT FOR NEW CRATES!!#
 # (do not edit the above line!)
 

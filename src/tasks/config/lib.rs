@@ -32,80 +32,8 @@ extern crate log;
 extern crate failure;
 #[macro_use]
 extern crate rsp2_util_macros;
-
-use std::io::Read;
-use failure::Error;
-
-pub use monomorphize::YamlRead;
 #[macro_use]
-mod monomorphize {
-    use super::*;
-
-    /// Provides an alternative to serde_yaml::from_reader where all of the
-    /// expensive codegen has already been performed in this crate.
-    pub trait YamlRead: for <'de> serde::Deserialize<'de> {
-        fn from_reader(mut r: impl Read) -> Result<Self, Error>
-        { YamlRead::from_dyn_reader(&mut r) }
-
-        fn from_dyn_reader(r: &mut dyn Read) -> Result<Self, Error> {
-            // serde_ignored needs a Deserializer.
-            // unlike serde_json, serde_yaml doesn't seem to expose a Deserializer that is
-            // directly constructable from a Read... but it does impl Deserialize for Value.
-            //
-            // However, on top of that, deserializing a Value through serde_ignored makes
-            // one lose all of the detail from the error messages. So...
-            //
-            // First, parse to a form that we can read from multiple times.
-            let mut s = String::new();
-            r.read_to_string(&mut s)?;
-
-            // try deserializing from Value, printing warnings on unused keys.
-            // (if value_from_dyn_reader fails, that error should be fine)
-            let value = value_from_str(&s)?;
-
-            match Self::__serde_ignored__from_value(value) {
-                Ok(out) => Ok(out),
-                Err(_) => {
-                    // That error message was surely garbage. Let's re-parse again
-                    // from the string, without serde_ignored:
-                    Self::__serde_yaml__from_str(&s)?;
-                    unreachable!();
-                }
-            }
-        }
-
-        // trait-provided function definitions seem to be lazily monomorphized, so we
-        // must put the meat of what we need monomorphized directly into the impls
-        #[doc(hidden)]
-        fn __serde_ignored__from_value(value: serde_yaml::Value) -> Result<Self, Error>;
-        #[doc(hidden)]
-        fn __serde_yaml__from_str(s: &str) -> Result<Self, Error>;
-    }
-
-    macro_rules! derive_yaml_read {
-        ($Type:ty) => {
-            impl $crate::YamlRead for $Type {
-                fn __serde_ignored__from_value(value: serde_yaml::Value) -> Result<$Type, Error> {
-                    serde_ignored::deserialize(
-                        value,
-                        |path| warn!("Unused config item (possible typo?): {}", path),
-                    ).map_err(Into::into)
-                }
-
-                fn __serde_yaml__from_str(s: &str) -> Result<$Type, Error> {
-                    serde_yaml::from_str(s)
-                        .map_err(Into::into)
-                }
-            }
-        };
-    }
-
-    derive_yaml_read!{serde_yaml::Value}
-
-    // (this also exists solely for codegen reasons)
-    fn value_from_str(r: &str) -> Result<serde_yaml::Value, Error>
-    { serde_yaml::from_str(r).map_err(Into::into) }
-}
+extern crate rsp2_config_utils;
 
 pub use config::*;
 mod config;

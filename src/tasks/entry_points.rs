@@ -18,7 +18,7 @@ use crate::cmd::trial::{TrialDir, NewTrialDirArgs};
 use crate::cmd::{StructureFileType, DidEvChasing, StopAfter};
 use crate::traits::{Save, Load};
 use crate::ui::logging::{init_global_logger, SetGlobalLogfile};
-use crate::ui::cfg_merging::ConfigSources;
+use rsp2_config_utils::merge::ConfigSources;
 use crate::ui::cli_deserialize::CliDeserialize;
 use crate::util::ext_traits::{ArgMatchesExt};
 use crate::filetypes::{StoredStructure, Eigensols};
@@ -182,7 +182,7 @@ struct ConfigOverrideArgs(Option<ConfigSources>);
 impl CliDeserialize for ConfigArgs {
     fn _augment_clap_app<'a, 'b>(app: clap::App<'a, 'b>) -> clap::App<'a, 'b> {
         app.args(&[
-            arg!(*config [-c][--config]=CONFIG... crate::ui::cfg_merging::CONFIG_HELP_STR),
+            arg!(*config [-c][--config]=CONFIG... rsp2_config_utils::merge::CONFIG_HELP_STR),
         ])
     }
 
@@ -193,7 +193,7 @@ impl CliDeserialize for ConfigArgs {
 impl CliDeserialize for ConfigOverrideArgs {
     fn _augment_clap_app<'a, 'b>(app: clap::App<'a, 'b>) -> clap::App<'a, 'b> {
         app.args(&[
-            arg!(?config [-c][--config]=CONFIG... crate::ui::cfg_merging::CONFIG_OVERRIDE_HELP_STR),
+            arg!(?config [-c][--config]=CONFIG... rsp2_config_utils::merge::CONFIG_OVERRIDE_HELP_STR),
         ])
     }
 

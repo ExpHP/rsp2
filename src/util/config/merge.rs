@@ -9,10 +9,9 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
-use crate::FailResult;
+use crate::YamlRead;
 
-use rsp2_tasks_config::YamlRead;
-
+use failure::Error;
 use serde_yaml::{Value, Mapping};
 use path_abs::{PathFile, FileRead};
 use std::path::Path;
@@ -69,14 +68,14 @@ enum ConfigSource {
 
 impl Config {
     /// May do path resolution and file IO
-    pub(crate) fn resolve_from_arg(s: &str) -> FailResult<Config>
+    pub(crate) fn resolve_from_arg(s: &str) -> Result<Config, Error>
     { resolve_from_arg::resolve_from_arg(s) }
 
-    fn read_file(path: impl AsRef<Path>) -> FailResult<Config> {
+    fn read_file(path: impl AsRef<Path>) -> Result<Config, Error> {
         Self::_read_file(path.as_ref())
     }
 
-    fn _read_file(path: &Path) -> FailResult<Config> {
+    fn _read_file(path: &Path) -> Result<Config, Error> {
         let path = PathFile::new(path)?;
         let yaml = YamlRead::from_reader(FileRead::open(&path)?)?;
         let yaml = expand_dot_keys(yaml)?;
@@ -91,13 +90,13 @@ mod resolve_from_arg {
     use super::*;
 
     // May do path resolution and file IO
-    pub(crate) fn resolve_from_arg(s: &str) -> FailResult<Config> {
+    pub(crate) fn resolve_from_arg(s: &str) -> Result<Config, Error> {
         // NOTE: unapologetically, no mechanism is provided for escaping a path containing ':'.
         if s.contains(":") { lit_from_arg(s) }
         else { Config::read_file(s) }
     }
 
-    fn lit_from_arg(s: &str) -> FailResult<Config> {
+    fn lit_from_arg(s: &str) -> Result<Config, Error> {
         let mut it = s.splitn(2, ":");
 
         let key = match it.next() {
@@ -197,7 +196,7 @@ impl ConfigSources {
     /// # Notice
     /// Relative paths will be resolved immediately, and possibly
     /// even opened, read, and parsed as yaml.
-    pub fn resolve_from_args<As>(args: As) -> FailResult<Self>
+    pub fn resolve_from_args<As>(args: As) -> Result<Self, Error>
     where
         As: IntoIterator,
         As::Item: AsRef<str>,
@@ -222,12 +221,12 @@ impl ConfigSources {
 
     // prepend a file source, so that all of the sources in this struct are considered to be
     // patches to it.
-    pub fn prepend_file(&mut self, path: impl AsRef<Path>) -> FailResult<()> {
+    pub fn prepend_file(&mut self, path: impl AsRef<Path>) -> Result<(), Error> {
         self.0.insert(0, Config::read_file(path)?);
         Ok(())
     }
 
-    pub fn deserialize<T: YamlRead>(self) -> FailResult<T> {
+    pub fn deserialize<T: YamlRead>(self) -> Result<T, Error> {
         // (NOTE: This is a Rube Goldberg machine of yaml conversions, all to have nice error
         //        messages. It goes to a Value and then to a string (as that's the easiest way to
         //        get a Read, which is required to have value paths appear in error messages),
@@ -305,14 +304,14 @@ fn merge_nodot_and_replace(a: FullyResolved, b: ConflictFree) -> FullyResolved {
     resolve_replacements_from_two_configs(out)
 }
 
-fn expect_string_key(value: Value) -> FailResult<String> {
+fn expect_string_key(value: Value) -> Result<String, Error> {
     match value {
         Value::String(s) => Ok(s),
         _ => bail!{"yaml contains non-string key"},
     }
 }
 
-fn expand_dot_keys(value: Value) -> FailResult<DotFree> {
+fn expand_dot_keys(value: Value) -> Result<DotFree, Error> {
     match value {
         Value::Mapping(mapping) => {
             mapping.into_iter()
@@ -344,14 +343,14 @@ fn resolve_replacements_from_two_configs(value: DotFree) -> FullyResolved
 
 // validate but don't resolve REPLACE directives, assuming that they came from dot expansion on a
 // single config
-fn validate_replacements_from_one_config(value: DotFree) -> FailResult<ConflictFree>
+fn validate_replacements_from_one_config(value: DotFree) -> Result<ConflictFree, Error>
 { _resolve_replacements(value, true, true) }
 
 fn _resolve_replacements(
     value: DotFree,
     is_single_config: bool,
     dry_run: bool,
-) -> FailResult<ConflictFree> {
+) -> Result<ConflictFree, Error> {
     fold_mappings_depth_first(
         value.0,
         |mapping| Ok({
@@ -377,28 +376,28 @@ fn _resolve_replacements(
 
 fn fold_mappings_depth_first(
     value: Value,
-    mut f: impl FnMut(Mapping) -> FailResult<Value>,
-) -> FailResult<Value>
+    mut f: impl FnMut(Mapping) -> Result<Value, Error>,
+) -> Result<Value, Error>
 { _fold_mappings_depth_first(value, &mut f) }
 
 fn _fold_mappings_depth_first(
     value: Value,
-    f: &mut impl FnMut(Mapping) -> FailResult<Value>,
-) -> FailResult<Value>
+    f: &mut impl FnMut(Mapping) -> Result<Value, Error>,
+) -> Result<Value, Error>
 {Ok({
     match value {
         Value::Mapping(mapping) => {
             let mapping = {
                 mapping.into_iter()
                     .map(|(key, child)| Ok((key, _fold_mappings_depth_first(child, f)?)))
-                    .collect::<FailResult<_>>()?
+                    .collect::<Result<_, Error>>()?
             };
             f(mapping)?
         },
         Value::Sequence(values) => Value::Sequence({
             values.into_iter()
                 .map(|value| _fold_mappings_depth_first(value, f))
-                .collect::<FailResult<_>>()?
+                .collect::<Result<_, Error>>()?
         }),
         value => value,
     }

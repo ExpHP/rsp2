@@ -24,7 +24,6 @@ pub const MAX_VERSION: u32 = 1;
 
 use std::collections::HashMap;
 use std::fmt;
-use failure::Error;
 use crate::option_aliases::{OrDefault, Nullable, Filled};
 
 /// Root settings object.
