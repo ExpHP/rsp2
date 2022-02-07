@@ -45,6 +45,7 @@ pub use crate::meta::LayerScMatrices;
 #[derive(Debug, Clone)] pub struct EvFrequencies(pub Vec<f64>);
 #[derive(Debug, Clone)] pub struct EvEigenvectors(pub GammaBasis3);
 #[derive(Debug, Clone)] pub struct Bonds(pub rsp2_structure::bonds::CartBonds);
+#[derive(Debug, Clone)] pub struct BondPolSettings(pub rsp2_bond_polarizability::Settings);
 
 // Band unfolding is seriously expensive, and not at all useful for the sparse diagonalizer
 // during relaxation.
@@ -76,6 +77,7 @@ pub mod gamma_system_analysis {
         pub ev_eigenvectors:    Option<EvEigenvectors>,
         pub bonds:              Option<Bonds>,
         pub request_to_unfold_bands: Option<RequestToUnfoldBands>,
+        pub bond_pol_settings:  Option<BondPolSettings>,
     }
 
     pub struct GammaSystemAnalysis {
@@ -96,6 +98,7 @@ pub mod gamma_system_analysis {
                 site_coords, site_layers, site_elements, site_masses,
                 layer_sc_mats, ev_frequencies, ev_eigenvectors, bonds,
                 ev_classifications, request_to_unfold_bands,
+                bond_pol_settings,
             } = self;
 
             // since our inputs are all uniquely typed, we can let HList
@@ -103,7 +106,7 @@ pub mod gamma_system_analysis {
             let grab_bag = hlist![
                 site_coords, site_layers, site_elements, site_masses,
                 layer_sc_mats, ev_frequencies, ev_eigenvectors, bonds,
-                request_to_unfold_bands,
+                request_to_unfold_bands, bond_pol_settings,
             ];
 
             let (args, _) = grab_bag.sculpt();
@@ -379,6 +382,7 @@ wrap_maybe_compute! {
         site_elements: &SiteElements,
         ev_frequencies: &EvFrequencies,
         ev_eigenvectors: &EvEigenvectors,
+        settings: &BondPolSettings,
     ) -> FailResult<_>
     = _ev_raman_tensors;
 }
@@ -389,6 +393,7 @@ fn _ev_raman_tensors(
     site_elements: &SiteElements,
     ev_frequencies: &EvFrequencies,
     ev_eigenvectors: &EvEigenvectors,
+    settings: &BondPolSettings,
 ) -> FailResult<EvRamanTensors> {
     use crate::math::bond_polarizability::{Input};
 
@@ -399,6 +404,7 @@ fn _ev_raman_tensors(
         ev_eigenvectors: &ev_eigenvectors.0,
         ev_frequencies: &ev_frequencies.0,
         bonds: &bonds.0,
+        settings: &settings.0,
     }.compute_ev_raman_tensors()
         .map(EvRamanTensors)
 }

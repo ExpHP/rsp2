@@ -1371,6 +1371,7 @@ dependencies = [
  "rsp2-structure",
  "rsp2-util-macros",
  "serde",
+ "serde_json",
  "thiserror",
 ]
 
@@ -1727,6 +1728,7 @@ version = "0.1.0"
 dependencies = [
  "failure",
  "log 0.4.3",
+ "rsp2-bond-polarizability",
  "rsp2-config-utils",
  "rsp2-minimize",
  "rsp2-util-macros",

@@ -211,7 +211,7 @@ impl TrialDir {
 
         let ev_analysis = super::do_gamma_system_analysis(
             &coords, meta.sift(), freqs, evecs, Some(classifications),
-            unfold_bands,
+            &settings.bond_polarizability, unfold_bands,
         )?;
         {
             let file = self.create_file(format!("eigenvalues.{:02}", iteration))?;

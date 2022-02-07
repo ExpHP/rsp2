@@ -20,6 +20,7 @@ use rsp2_structure_io::Poscar;
 use rsp2_array_types::M33;
 use rsp2_dynmat::DynamicalMatrix;
 use rsp2_fs_util as fsx;
+use rsp2_config_utils::merge::ConfigSources;
 
 pub type FailResult<T> = Result<T, failure::Error>; // FIXME forced by usage in other rsp2 crates
 
@@ -40,6 +41,7 @@ pub fn _main() -> FailResult<()> {
                 arg!(*dynmat [--dynmat]=DYNMAT "Dynamical matrix at gamma. (.json.gz)"), // TODO DOCUMENT FORMAT
                 arg!( bond_radius [--bond-radius]=RADIUS "Bond radius (A)"),
                 arg!( temperature [--temperature]=TEMPERATURE "Temperature (K)"),
+                arg!( settings [--config][-c]=SETTINGS... "Settings yaml file")
                 arg!(*out_path [--output][-o]=OUTPATH "Output JSON path"),
             ])
     };
@@ -48,6 +50,8 @@ pub fn _main() -> FailResult<()> {
     let dynmat_path = matches.value_of("dynmat").unwrap();
     let out_path = matches.value_of("out_path").unwrap();
     let bond_radius = matches.value_of("bond_radius").unwrap_or("1.8").parse::<f64>().with_context(|e| format!("in bond-radius: {}", e))?;
+    let configs = ConfigSources::resolve_from_args(matches.values("settings"))?;
+    let settings = configs.deserialize::<Settings>()?;
     let temperature = matches.value_of("temperature").unwrap_or("0").parse::<f64>().with_context(|e| format!("in temperature: {}", e))?;
     let temperatures = vec![temperature];  // TODO: way of specifying multiple temperatures
 
@@ -74,6 +78,7 @@ pub fn _main() -> FailResult<()> {
             /// Masses of each site, in AMU.
             site_masses: &poscar.elements.iter().map(|&elem| element_mass(elem)).collect::<FailResult<Vec<_>>>()?,
             bonds: &cart_bonds,
+            settings: &settings.bond_polarizability,
         }.compute_ev_raman_tensors()?;
         let tensors = tensors.into_iter().map(|tensor| tensor.tensor().clone()).collect::<Vec<_>>();
 
@@ -84,6 +89,15 @@ pub fn _main() -> FailResult<()> {
     serde_json::to_writer(out_file, &Output { data, frequencies })?;
     Ok(())
 }
+
+#[derive(Deserialize)]
+#[serde(rename_all = "kebab-case")]
+struct Settings {
+    #[serde(default)]
+    bond_polarizability: Option<rsp2_bond_polarizability::Settings>,
+}
+
+impl_yaml_read! { Settings }
 
 fn read_dynmat(path: &str) -> FailResult<DynamicalMatrix> {
     let lower_path = path.to_ascii_lowercase();

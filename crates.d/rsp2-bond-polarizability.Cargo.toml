@@ -17,7 +17,12 @@ path = "lib.rs"
 !!thiserror
 !!log
 !!serde { optional = true, features = ["derive"] }
+!!serde-json { optional = true }
 
 [features]
 !!NIGHTLY-FEATURE-LINE
 
+# Once namespaced-features are stabilized, these features will be renamed after the deps.
+# see https://github.com/rust-lang/cargo/issues/1286 (problem and proposal)
+#     https://github.com/rust-lang/cargo/issues/5565 (tracking issue, of sorts)
+serde-support = ["serde", "serde_json"]

@@ -42,6 +42,7 @@ where
     /// Masses of each site, in AMU.
     pub site_masses: &'a [f64],
     pub bonds: &'a CartBonds,
+    pub settings: &'a Settings,
 }
 
 impl<'a, Evs> Input<'a, Evs>
@@ -50,7 +51,7 @@ where
 {
     pub fn compute_ev_raman_tensors(self) -> Result<Vec<RamanTensor>, BondPolError> {
         let Input {
-            ev_frequencies, ev_eigenvectors,
+            ev_frequencies, ev_eigenvectors, settings,
             temperature, site_elements, site_masses, bonds,
         } = self;
         let mut ev_eigenvectors = ev_eigenvectors.into_iter();
@@ -66,6 +67,7 @@ where
                     bonds,
                     site_elements,
                     &pol_constants,
+                    settings,
                 )?;
                 Ok(RamanTensor { prefactor, tensor })
             }).collect::<Result<Vec<_>, BondPolError>>()?;
@@ -76,6 +78,20 @@ where
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[serde(rename_all = "kebab-case")]
+pub struct Settings {
+    #[serde(default = "default_form")]
+    pub form: Form,
+    // TODO: PolConstants here, with presets
+}
+
+impl Default for Settings {
+    fn default() -> Self { from_empty_mapping().expect("invalid default (BUG)") }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct PolConstant {
     /// `a_par  -   a_perp`
     pub c1: f64,
@@ -86,6 +102,21 @@ pub struct PolConstant {
     /// maximum bond length
     pub max_len: f64,
 }
+
+#[derive(Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Form {
+    /// Compute the bond polarizability correctly.
+    Standard,
+    /// Reproduce the buggy results from versions of rsp2 prior to Feb. 3 2022.
+    ///
+    /// These old versions had a sign error in one of the terms which changes
+    /// its symmetry.
+    WithSignError,
+}
+
+const fn default_form() -> Form { Form::Standard }
 
 // NOTE: there are also constant factors out front based on input light frequency
 //       and stuff, so this only gives proportional intensities
@@ -252,9 +283,16 @@ fn raman_tensor(
     bonds: &CartBonds,
     types: &[Element],
     pol_constants: &PolConstants,
+    settings: &Settings,
 ) -> Result<M33, BondPolError> {
     // kronecker delta value
     let kdelta = <M33>::eye();
+
+    // are we replicating old buggy behavior?
+    let term_2_sign = match settings.form {
+        Form::Standard => -1.0,
+        Form::WithSignError => 1.0,
+    };
 
     let mut tensor = M33::zero();
     let mut ignored_by_type = 0;
@@ -296,7 +334,7 @@ fn raman_tensor(
                 (dconst_two / 3.0) * kdelta[r][c]
                     + dconst_one * (rhat[r] * rhat[c] - kdelta[r][c] / 3.0)
             ) + (const_one / distance) * (
-                (rhat[r] * eig[c] + rhat[c] * eig[r])
+                (rhat[r] * eig[c] + term_2_sign * rhat[c] * eig[r])
                     - 2.0 * rhat[r] * rhat[c] * dot(&rhat, &eig)
             )
         });
@@ -331,4 +369,12 @@ pub enum LightPolarization {
     Average,
     // previously:  avg = true, backscatter = true,
     BackscatterZ,
+}
+
+// ----------------------------------------------------------------------------
+
+#[cfg(feature = "serde")]
+fn from_empty_mapping<T: for<'de> serde::Deserialize<'de>>() -> Result<T, serde_json::Error> {
+    // FIXME isn't there a way to do this without serde_json?
+    serde_json::from_str("{}")
 }

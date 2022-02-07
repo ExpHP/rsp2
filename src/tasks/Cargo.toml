@@ -40,7 +40,7 @@ rsp2-dftbplus = { path = "../io/dftbplus", optional = true, default-features = f
 rsp2-phonopy-io = { path = "../io/phonopy" }
 rsp2-sparse = { path = "../util/sparse" }
 rsp2-dynmat = { path = "../dynmat", features = ["npz", "serde"] }
-rsp2-bond-polarizability = { path = "../math/bond-polarizability", features = ["serde"] }
+rsp2-bond-polarizability = { path = "../math/bond-polarizability", features = ["serde-support"] }
 rsp2-config-utils = { path = "../util/config" }
 
 clap = "2"

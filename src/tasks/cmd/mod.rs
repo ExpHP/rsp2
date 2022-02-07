@@ -979,6 +979,7 @@ fn do_gamma_system_analysis(
     freqs: &[f64],
     evecs: &GammaBasis3,
     mode_classifications: Option<Rc<[ModeKind]>>,
+    bond_pol_settings: &rsp2_bond_polarizability::Settings,
     // can set to false to forcibly disable this expensive operation even
     // if all necessary data is available
     unfold_bands: bool,
@@ -1004,6 +1005,7 @@ fn do_gamma_system_analysis(
         ev_eigenvectors: Some(EvEigenvectors(evecs.clone())),
         bonds: cart_bonds.map(Bonds),
         request_to_unfold_bands: if unfold_bands { Some(RequestToUnfoldBands) } else { None },
+        bond_pol_settings: Some(BondPolSettings(bond_pol_settings.clone())),
     }.compute()
 }
 
@@ -1363,6 +1365,7 @@ impl TrialDir {
         let ev_analysis = do_gamma_system_analysis(
             &stored.coords, stored.meta().sift(),
             &freqs, &evecs, Some(classifications),
+            &settings.bond_polarizability,
             true, // unfold bands
         )?;
 
@@ -1381,11 +1384,13 @@ pub(crate) fn run_sparse_analysis(
 ) -> FailResult<GammaSystemAnalysis>
 {Ok({
     trace!("Computing eigensystem info");
+    let bond_pol_settings: rsp2_bond_polarizability::Settings = Default::default(); // FIXME
     let ev_analysis = do_gamma_system_analysis(
         &structure.coords,
         structure.meta().sift(),
         &freqs, &evecs,
         None, // ev_classifications
+        &bond_pol_settings,
         true, // unfold_bands
     )?;
 
@@ -1415,6 +1420,7 @@ pub(crate) fn run_dynmat_analysis(
             structure.meta().sift(),
             &freqs, &evecs,
             None,  // ev_classifications
+            &settings.bond_polarizability,
             false, // unfold_bands
         )?;
 

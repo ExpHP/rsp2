@@ -16,7 +16,7 @@ use crate::meta::{Element, Mass};
 use rsp2_structure::bonds::{CartBonds};
 use rsp2_bond_polarizability as imp;  // implementation moved out to separate crate
 
-pub use imp::{RamanTensor, LightPolarization};
+pub use imp::{RamanTensor, LightPolarization, Settings};
 
 pub struct Input<'a> {
     pub temperature: f64,
@@ -25,6 +25,7 @@ pub struct Input<'a> {
     pub site_elements: &'a [Element],
     pub site_masses: &'a [Mass],
     pub bonds: &'a CartBonds,
+    pub settings: &'a Settings,
 }
 
 impl<'a> Input<'a> {
@@ -37,6 +38,7 @@ impl<'a> Input<'a> {
             site_elements: self.site_elements,
             site_masses: &site_masses,
             bonds: self.bonds,
+            settings: self.settings,
         }.compute_ev_raman_tensors().map_err(Into::into)
     }
 }

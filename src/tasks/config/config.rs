@@ -59,6 +59,10 @@ pub struct Settings {
     /// See [`PotentialKind`] for the list of possibilities.
     pub potential: ValidatedPotential,
 
+    /// Specifies parameters for bond polarizability model.
+    #[serde(default)]
+    pub bond_polarizability: rsp2_bond_polarizability::Settings,
+
     // (FIXME: weird name)
     /// Used to optimize lattice parameters prior to relaxation.
     ///

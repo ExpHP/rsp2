@@ -13,6 +13,7 @@ path = "lib.rs"
 !!rsp2-minimize
 !!rsp2-util-macros
 !!rsp2-config-utils
+!!rsp2-bond-polarizability
 
 !!log
 !!failure
