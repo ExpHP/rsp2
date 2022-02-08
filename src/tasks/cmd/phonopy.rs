@@ -349,6 +349,7 @@ struct DirWithDisps {
     // These are cached in memory from `phonopy_disp.yaml` due to the likelihood
     // that code using `DirWithDisps` will need them.
     super_coords: Coords,
+    #[allow(dead_code)]
     super_meta: HList2<meta::SiteElements, meta::SiteMasses>,
 }
 

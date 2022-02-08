@@ -41,7 +41,7 @@ pub(crate) struct LammpsOwner {
     ptr: &'static mut c_void,
     // Lammps holds some fingers into the argv we give it,
     // so we gotta make sure they don't get freed too early.
-    argv: CArgv,
+    _argv: CArgv,
 }
 
 impl LammpsOwner {
@@ -78,7 +78,7 @@ impl LammpsOwner {
             ptr.as_mut()
         }.ok_or_else(|| format_err!("Lammps initialization failed"))?;
 
-        LammpsOwner { argv, ptr }
+        LammpsOwner { _argv: argv, ptr }
     })}
 
     /// Construct without an MPI communicator.
@@ -110,7 +110,7 @@ impl LammpsOwner {
             ptr.as_mut()
         }.ok_or_else(|| format_err!("Lammps initialization failed"))?;
 
-        LammpsOwner { argv, ptr }
+        LammpsOwner { _argv: argv, ptr }
     })}
 }
 

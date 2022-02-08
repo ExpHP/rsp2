@@ -853,9 +853,7 @@ pub(crate) mod internal_types {
     pub(crate) struct Last {
         pub(crate) direction: Vec<f64>, // direction searched (normalized)
 
-        // NOTE: These next three are all zero when linesearch has failed.
-        //       This can be a problem for d_value in particular.
-        pub(crate) d_value: f64,          // change in value
+        // NOTE: These next two are both zero when linesearch has failed.
         pub(crate) d_position: Vec<f64>,  // change in position
         pub(crate) d_gradient: Vec<f64>,  // change in gradient
 
@@ -1144,11 +1142,10 @@ fn cg<F: DiffFn>(
 
         // NOTE: If linesearch failed, then next_alpha was zero and so
         //       next_point is saved.point(). Hence, all of these will be zero.
-        let d_value = next_point.value - saved.value;
         let V(d_position) = v(&next_point.position) - v(&saved.position);
         let V(d_gradient) = v(&next_point.gradient) - v(&saved.gradient);
 
-        last_last = Some(Last { direction, d_value, d_position, d_gradient, ls_failed });
+        last_last = Some(Last { direction, d_position, d_gradient, ls_failed });
 
         last_saved = match ls_failed {
             true => saved.clone(),
