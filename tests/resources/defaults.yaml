@@ -14,11 +14,6 @@ scale-ranges:
   fail: true
   scalables: []
 
-bond-polarizability:
-  # FIXME: the test files should be updated using the new, correct
-  #        form for bond polarizability
-  form: with-sign-error  # due to legacy test files
-
 cg:
   stop-condition:
     any:

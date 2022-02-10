@@ -199,6 +199,26 @@ fn simple_test_scale_ranges() -> Result<()> {
         .run()
 }
 
+
+// Uses the rust reimplementations of REBO/KCZ
+#[ignore] // This test is expensive; use `cargo test -- --ignored` to run it!
+#[test]
+fn simple_test_bp_sign_error() -> Result<()> {
+    let env = cli_test::Environment::init();
+    CliTest::cargo_binary(&env, "rsp2")
+        .arg("-c").arg(resource("defaults.yaml"))
+        .arg("-c").arg(resource("simple-rust.yaml"))
+        .arg("-c").arg(resource("simple-bp-sign-error.yaml"))
+        .arg(resource("simple.vasp").as_path())
+        .arg("-o").arg("out")
+        .check_file::<filetypes::RamanJson>(
+            "out/raman.json".as_ref(),
+            resource("simple-out/raman-with-sign-error.json").as_ref(),
+            PRECISE_RAMAN_TOL,
+        )
+        .run()
+}
+
 fn read_poscar(path: impl AsRef<Path>) -> Result<Poscar> {
     Ok(Poscar::from_reader(FileRead::open(path)?)?)
 }
