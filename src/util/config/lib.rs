@@ -19,4 +19,10 @@ mod monomorphize;
 
 pub mod merge;
 
+#[doc(hidden)] // used by macro
+pub mod reexports {
+    pub use serde_ignored;
+    pub use serde_yaml;
+}
+
 pub type FailResult<T> = Result<T, failure::Error>;

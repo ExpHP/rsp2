@@ -532,7 +532,7 @@ pub fn bond_test(bin_name: &str, version: VersionInfo) -> ! {
             clap::App::new(bin_name)
                 .args(&[
                     arg!( input=STRUCTURE ""),
-                    arg!( cart [--cart] "output CartBonds instead of FracBonds")
+                    arg!( cart [--cart] "output CartBonds instead of FracBonds"),
                 ])
         });
         let matches = app.get_matches();
@@ -766,7 +766,7 @@ pub fn layer_mode_frequencies(bin_name: &str, version: VersionInfo) -> ! {
                 .args(&[
                     arg!( input=STRUCTURE "Input structure, in rsp2 structure directory format."),
                     arg!( step [--step]=STEP "Finite difference step-size (angstrom)"),
-                    arg!( lattice_vec [--lattice-vector]=INDEX "do it along a lattice vector (indexed from zero) instead of the cartesian axes, and output a single float")
+                    arg!( lattice_vec [--lattice-vector]=INDEX "do it along a lattice vector (indexed from zero) instead of the cartesian axes, and output a single float"),
                 ])
         });
         let matches = app.get_matches();

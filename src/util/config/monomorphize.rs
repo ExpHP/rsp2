@@ -58,8 +58,8 @@ macro_rules! derive_yaml_read {
         const _: () = {
             use std::result::Result;
             use std::convert::Into;
-            use serde_yaml;
-            use serde_ignored;
+            use $crate::reexports::serde_yaml;
+            use $crate::reexports::serde_ignored;
             use failure::Error;
             use log::warn;
 

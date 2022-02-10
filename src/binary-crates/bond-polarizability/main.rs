@@ -9,9 +9,11 @@
 ** and that the project as a whole is licensed under the GPL 3.0.           **
 ** ************************************************************************ */
 
+#[macro_use] extern crate serde;
 #[macro_use] extern crate rsp2_clap;
 #[macro_use] extern crate log;
 #[macro_use] extern crate failure;
+#[macro_use] extern crate rsp2_config_utils;
 
 use failure::ResultExt;
 
@@ -41,7 +43,7 @@ pub fn _main() -> FailResult<()> {
                 arg!(*dynmat [--dynmat]=DYNMAT "Dynamical matrix at gamma. (.json.gz)"), // TODO DOCUMENT FORMAT
                 arg!( bond_radius [--bond-radius]=RADIUS "Bond radius (A)"),
                 arg!( temperature [--temperature]=TEMPERATURE "Temperature (K)"),
-                arg!( settings [--config][-c]=SETTINGS... "Settings yaml file")
+                arg!( settings [--config][-c]=SETTINGS... "Settings yaml file"),
                 arg!(*out_path [--output][-o]=OUTPATH "Output JSON path"),
             ])
     };
@@ -50,7 +52,7 @@ pub fn _main() -> FailResult<()> {
     let dynmat_path = matches.value_of("dynmat").unwrap();
     let out_path = matches.value_of("out_path").unwrap();
     let bond_radius = matches.value_of("bond_radius").unwrap_or("1.8").parse::<f64>().with_context(|e| format!("in bond-radius: {}", e))?;
-    let configs = ConfigSources::resolve_from_args(matches.values("settings"))?;
+    let configs = ConfigSources::resolve_from_args(matches.values_of_lossy("settings").unwrap_or(vec![]))?;
     let settings = configs.deserialize::<Settings>()?;
     let temperature = matches.value_of("temperature").unwrap_or("0").parse::<f64>().with_context(|e| format!("in temperature: {}", e))?;
     let temperatures = vec![temperature];  // TODO: way of specifying multiple temperatures
@@ -94,10 +96,10 @@ pub fn _main() -> FailResult<()> {
 #[serde(rename_all = "kebab-case")]
 struct Settings {
     #[serde(default)]
-    bond_polarizability: Option<rsp2_bond_polarizability::Settings>,
+    bond_polarizability: rsp2_bond_polarizability::Settings,
 }
 
-impl_yaml_read! { Settings }
+derive_yaml_read! { Settings }
 
 fn read_dynmat(path: &str) -> FailResult<DynamicalMatrix> {
     let lower_path = path.to_ascii_lowercase();
