@@ -34,7 +34,7 @@ If you don't have of these files, but you have a dynamical matrix, you can creat
 
 If you are not working in python, but are able to generate JSON, then here is what the JSON is expected to contain.  This is essentially a BSR format:
 
-```json
+```
 {
   "dim": [<natom>, <natom>],
   "col": <col_index>,
