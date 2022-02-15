@@ -31,8 +31,6 @@ pub struct Input<'a, Evs>
 where
     Evs: IntoIterator<Item=&'a [V3]>,
 {
-    /// Kelvin.
-    pub temperature: f64,
     /// Normal mode frequencies, in cm^-1.
     pub ev_frequencies: &'a [f64],
     /// Normal mode eigenvectors, normalized.
@@ -52,7 +50,7 @@ where
     pub fn compute_ev_raman_tensors(self) -> Result<Vec<RamanTensor>, BondPolError> {
         let Input {
             ev_frequencies, ev_eigenvectors, settings,
-            temperature, site_elements, site_masses, bonds,
+            site_elements, site_masses, bonds,
         } = self;
         let mut ev_eigenvectors = ev_eigenvectors.into_iter();
 
@@ -60,7 +58,6 @@ where
 
         let out = ev_frequencies.into_iter().zip(ev_eigenvectors.by_ref())
             .map(|(&frequency, eigs)| {
-                let prefactor = raman_prefactor(frequency, temperature);
                 let tensor = raman_tensor(
                     eigs,
                     site_masses,
@@ -69,7 +66,7 @@ where
                     &pol_constants,
                     settings,
                 )?;
-                Ok(RamanTensor { prefactor, tensor })
+                Ok(RamanTensor { tensor, frequency })
             }).collect::<Result<Vec<_>, BondPolError>>()?;
 
         assert!(ev_eigenvectors.next().is_none(), "more eigenvectors than frequencies!");
@@ -120,8 +117,14 @@ const fn default_form() -> Form { Form::Standard }
 
 // NOTE: there are also constant factors out front based on input light frequency
 //       and stuff, so this only gives proportional intensities
-fn raman_prefactor(
+/// The prefactor that should be mulitiplied together with `|unit_in * tensor * unit_out|**2` when computing
+/// raman intensity, to give it the correct frequency dependence.
+///
+/// `mode_frequency` in `cm-1`, `temperature` in `K`.
+pub fn raman_intensity_prefactor(
+    // cm-1
     mode_frequency: f64,
+    // Kelvin
     temperature: f64,
 ) -> f64 {
     // (hbar / k_b) in [K] per [cm-1]
@@ -189,18 +192,31 @@ pub fn nanotube_CC_pol_constants() -> PolConstants {
     }
 }
 
+/// Represents the derivative of the polarizability tensor with respect to a single normal mode coordinate.
 pub struct RamanTensor {
-    prefactor: f64,
+    frequency: f64,
     tensor: M33,
 }
 
 impl RamanTensor {
-    pub fn tensor(&self) -> M33 { self.tensor * f64::sqrt(self.prefactor) }
+    /// Compute the [`raman_intensity_prefactor`] for this mode.
+    ///
+    /// Temperature in `K`.
+    pub fn intensity_prefactor(&self, temperature: f64) -> f64 {
+        raman_intensity_prefactor(self.frequency, temperature)
+    }
+
+    /// The derivative of the polarizability tensor with respect to this normal mode coordinate.
+    pub fn tensor(&self) -> M33 { self.tensor }
+    /// Compute the first-order off-resonance Stokes Raman scattering.
+    ///
+    /// Temperature in `K`.
     pub fn integrate_intensity(
         &self,
         light_polarization: &LightPolarization,
+        temperature: f64,
     ) -> f64 {
-        let RamanTensor { ref tensor, prefactor } = *self;
+        let RamanTensor { ref tensor, frequency } = *self;
 
         // there was probably an easier way to do this, or a simple proof, given
         // the extremely simple answer
@@ -272,7 +288,7 @@ impl RamanTensor {
             LightPolarization::BackscatterZ => sq_sum_submatrix(0..2) / 4.0,
         };
 
-        prefactor * value
+        raman_intensity_prefactor(frequency, temperature) * value
     }
 }
 
@@ -285,9 +301,6 @@ fn raman_tensor(
     pol_constants: &PolConstants,
     settings: &Settings,
 ) -> Result<M33, BondPolError> {
-    // kronecker delta value
-    let kdelta = <M33>::eye();
-
     // are we replicating old buggy behavior?
     let term_2_sign = match settings.form {
         Form::Standard => -1.0,
@@ -325,19 +338,7 @@ fn raman_tensor(
             continue;
         }
 
-        let const_one  = pc.c1; // `a_par  -   a_perp`
-        let dconst_one = pc.c2; // `a'_par -   a'_perp`
-        let dconst_two = pc.c3; // `a'_par + 2 a'_perp`
-
-        tensor += &M33::from_fn(|r, c| {
-            dot(&rhat, &eig) * (
-                (dconst_two / 3.0) * kdelta[r][c]
-                    + dconst_one * (rhat[r] * rhat[c] - kdelta[r][c] / 3.0)
-            ) + (const_one / distance) * (
-                (rhat[r] * eig[c] + term_2_sign * rhat[c] * eig[r])
-                    - 2.0 * rhat[r] * rhat[c] * dot(&rhat, &eig)
-            )
-        });
+        tensor += &raman_tensor_for_one_bond(rhat, distance, eig, pc, term_2_sign);
     } // for Bond { ... } in bonds
 
     if ignored_by_distance > 0 {
@@ -356,6 +357,30 @@ fn raman_tensor(
     }
 
     Ok(tensor)
+}
+
+#[inline]  // try to let it pull out kdelta?
+fn raman_tensor_for_one_bond(
+    rhat: V3,
+    distance: f64,
+    eig: V3,  // includes 1/sqrt(mass) factor
+    pc: &PolConstant,
+    term_2_sign: f64,
+) -> M33 {
+    let kdelta = <M33>::eye();
+
+    let const_one  = pc.c1; // `a_par  -   a_perp`
+    let dconst_one = pc.c2; // `a'_par -   a'_perp`
+    let dconst_two = pc.c3; // `a'_par + 2 a'_perp`
+    M33::from_fn(|r, c| {
+        dot(&rhat, &eig) * (
+            (dconst_two / 3.0) * kdelta[r][c]
+                + dconst_one * (rhat[r] * rhat[c] - kdelta[r][c] / 3.0)
+        ) + (const_one / distance) * (
+            (rhat[r] * eig[c] + term_2_sign * rhat[c] * eig[r])
+                - 2.0 * rhat[r] * rhat[c] * dot(&rhat, &eig)
+        )
+    })
 }
 
 pub enum LightPolarization {

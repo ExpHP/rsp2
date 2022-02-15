@@ -398,7 +398,6 @@ fn _ev_raman_tensors(
     use crate::math::bond_polarizability::{Input};
 
     Input {
-        temperature: 0.0,
         site_masses: &site_masses,
         site_elements: &site_elements,
         ev_eigenvectors: &ev_eigenvectors.0,
@@ -514,13 +513,14 @@ impl GammaSystemAnalysis {
             };
 
             use crate::math::bond_polarizability::LightPolarization::*;
+            let temperature = 0.0;
             columns.push(raman_column(
                 "RamnA",
-                &tensors.iter().map(|t| t.integrate_intensity(&Average)).collect_vec(),
+                &tensors.iter().map(|t| t.integrate_intensity(&Average, temperature)).collect_vec(),
             ));
             columns.push(raman_column(
                 "RamnB",
-                &tensors.iter().map(|t| t.integrate_intensity(&BackscatterZ)).collect_vec(),
+                &tensors.iter().map(|t| t.integrate_intensity(&BackscatterZ, temperature)).collect_vec(),
             ));
         };
 

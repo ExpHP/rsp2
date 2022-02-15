@@ -67,28 +67,30 @@ pub fn _main() -> FailResult<()> {
 
     let frequencies: Vec<f64> = eigenvalues.eigenvalues.into_iter().map(eigenvalue_to_frequency).collect::<Vec<_>>();
 
-    let data = temperatures.into_iter().map(|temperature| {
-        let tensors = rsp2_bond_polarizability::Input {
-            /// Kelvin.
-            temperature,
-            /// Normal mode frequencies, in cm^-1.
-            ev_frequencies: &frequencies,
-            /// Normal mode eigenvectors, normalized.
-            ev_eigenvectors: eigenvectors.iter().map(|v| &v[..]),
-            /// Element of each site.  Used to determine bond polarizability coefficients.
-            site_elements: &poscar.elements,
-            /// Masses of each site, in AMU.
-            site_masses: &poscar.elements.iter().map(|&elem| element_mass(elem)).collect::<FailResult<Vec<_>>>()?,
-            bonds: &cart_bonds,
-            settings: &settings.bond_polarizability,
-        }.compute_ev_raman_tensors()?;
-        let tensors = tensors.into_iter().map(|tensor| tensor.tensor().clone()).collect::<Vec<_>>();
-
-        Ok(OutputDataItem { temperature, raman_tensors: tensors })
-    }).collect::<FailResult<Vec<_>>>()?;
+    let tensor_objects = rsp2_bond_polarizability::Input {
+        /// Normal mode frequencies, in cm^-1.
+        ev_frequencies: &frequencies,
+        /// Normal mode eigenvectors, normalized.
+        ev_eigenvectors: eigenvectors.iter().map(|v| &v[..]),
+        /// Element of each site.  Used to determine bond polarizability coefficients.
+        site_elements: &poscar.elements,
+        /// Masses of each site, in AMU.
+        site_masses: &poscar.elements.iter().map(|&elem| element_mass(elem)).collect::<FailResult<Vec<_>>>()?,
+        bonds: &cart_bonds,
+        settings: &settings.bond_polarizability,
+    }.compute_ev_raman_tensors()?;
+    let raman_tensors = tensor_objects.iter().map(|tensor| tensor.tensor().clone()).collect();
+    let raman_intensity_prefactors = temperatures.iter().map(|&temperature| {
+        tensor_objects.iter().map(|tensor| tensor.intensity_prefactor(temperature)).collect()
+    }).collect();
 
     let out_file = fsx::create(out_path)?;
-    serde_json::to_writer(out_file, &Output { data, frequencies })?;
+    serde_json::to_writer(out_file, &Output {
+        frequencies,
+        temperatures,
+        raman_intensity_prefactors,
+        raman_tensors,
+    })?;
     Ok(())
 }
 
@@ -129,20 +131,25 @@ fn element_mass(elem: Element) -> FailResult<f64>
     }
 })}
 
+// ================================================
+
 /// All output data.
 #[derive(serde::Serialize)]
 struct Output {
+    /// [eigensol] -> frequency
     frequencies: Vec<f64>,
-    data: Vec<OutputDataItem>,
-}
-
-/// Data at a single temperature.
-#[derive(serde::Serialize)]
-struct OutputDataItem {
-    temperature: f64,
-    #[serde(rename = "raman")]
+    /// [temperature] -> temperature
+    temperatures: Vec<f64>,
+    /// [temperature][eigensol] -> (bose_occupation / frequency) for each phonon.
+    ///
+    /// Multiply this against `abs(unit_in * tensor * unit_out)**2` when computing intensity
+    /// to ensure you have the correct frequency dependence.
+    raman_intensity_prefactors: Vec<Vec<f64>>,
+    /// [eigensol][ax_1][ax_2] -> derivative of polarizability
     raman_tensors: Vec<M33>,
 }
+
+// ================================================
 
 // Conversion factor phonopy uses to scale the eigenvalues to THz angular momentum.
 //    = sqrt(eV/amu)/angstrom/(2*pi)/THz

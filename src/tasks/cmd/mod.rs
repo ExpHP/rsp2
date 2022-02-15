@@ -223,11 +223,13 @@ pub(crate) fn write_ev_analysis_output_files(
             backscatter: Vec<f64>,
         }
         use crate::math::bond_polarizability::LightPolarization::*;
+
+        let temperature = 0.0;
         serde_json::to_writer(FileWrite::create(dir.join("raman.json"))?, &Output {
             frequency: frequency.0.to_vec(),
             raman_tensor: raman.0.iter().map(|t| t.tensor().clone()).collect(),
-            average_3d: raman.0.iter().map(|t| t.integrate_intensity(&Average)).collect(),
-            backscatter: raman.0.iter().map(|t| t.integrate_intensity(&BackscatterZ)).collect(),
+            average_3d: raman.0.iter().map(|t| t.integrate_intensity(&Average, temperature)).collect(),
+            backscatter: raman.0.iter().map(|t| t.integrate_intensity(&BackscatterZ, temperature)).collect(),
         })?;
     }
 
