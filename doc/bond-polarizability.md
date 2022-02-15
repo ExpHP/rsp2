@@ -58,20 +58,23 @@ The output is JSON and looks like the following:
 ```
 {
   "frequencies": <frequencies>,
-  "data": [
-    {
-      "temperature": 0,
-      "raman": <raman_tensors>
-    }
-  ]
+  "raman_tensors": <raman_tensors>,
+  "raman_intensity_prefactors": <prefactors>,
+  "temperatures": <temperatures>,
 }
 ```
 
 `<frequencies>` gives the frequencies of each mode (using negative numbers for imaginary frequencies), in cm^-1.
 
-`<raman_tensors>` is an array of 3x3 raman tensors for each mode.  The units are arbitrary and lack some uniform prefactors (in particular, dependence on light frequency).
+`<raman_tensors>` is an array of 3x3 raman tensors for each mode.  These are each the derivatives of the polarizability with respect to a normal coordinate.  The units are arbitrary.
 
-Please be aware that the modes listed in the output **might not be in direct 1-1 correspondence with modes you have computed through different means**, especially for degenerate or nearly-degenerate subspaces.
+`<temperatures>` are the temperatures at which intensity prefactors were evaluated.
+
+`<prefactors>` is a 2D array indexed by temperature and eigenvector.  This contains `bose_occupation / mode_frequency`.
+
+**The raman intensity of the `w`-th mode at the `T`-th temperature is `abs(in_pol * tensor[w] * out_pol)^2 * prefactor[T][w]` (where `in_pol` and `out_pol` are unit vectors indicating polarization).**  The units of this are arbitrary and lack some uniform prefactors (in particular, dependence on light frequency).
+
+Please be aware that not all eigensolver codes produce the same result, so the modes listed in the output **might not be in direct 1-1 correspondence with modes you have computed through different means**, especially for degenerate or nearly-degenerate subspaces.
 
 ## Wishlist features
 
