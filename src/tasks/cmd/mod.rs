@@ -1998,7 +1998,7 @@ pub(crate) fn read_optimizable_structure(
             });
 
             out_layers = Some(layer_builder.atom_layers().into_iter().map(Layer).collect::<Vec<_>>().into());
-            out_elements = vec![CARBON; layer_builder.num_atoms()].into();
+            out_elements = layer_builder.elements.clone().into();
             out_masses = masses_by_config(mass_cfg, out_elements.clone())?;
             out_coords = ScalableCoords::KnownLayers { layer_builder };
             out_bonds = None; // Determine bonds AFTER parameter optimization.

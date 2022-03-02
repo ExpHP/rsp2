@@ -634,6 +634,11 @@ impl dyn PotentialBuilder {
                     let pot = self::lammps::Builder::new(trial_dir, on_demand, threading, lammps, lammps_pot)?;
                     Ok(Box::new(pot))
                 },
+                cfg::LammpsPotentialKind::ReaxFF(cfg) => {
+                    let lammps_pot = self::lammps::ReaxFF::from(cfg);
+                    let pot = self::lammps::Builder::new(trial_dir, on_demand, threading, lammps, lammps_pot)?;
+                    Ok(Box::new(pot))
+                },
             },
             cfg::PotentialKind::KolmogorovCrespi(cfg) => {
                 let cfg = cfg.clone();

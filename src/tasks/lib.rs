@@ -143,6 +143,8 @@ mod common {
         match elem {
             consts::HYDROGEN => 1.00794,
             consts::CARBON => 12.0107,
+            consts::MOLYBDENUM => 95.56,
+            consts::SULFUR => 32.06,
             _ => bail!("No default mass for element {}.", elem.symbol()),
         }
     }))}

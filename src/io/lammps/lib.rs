@@ -621,6 +621,8 @@ impl<P: Potential> Lammps<P>
             )?;
         }
 
+        let InitInfo { masses, pair_style, pair_coeffs } = init_info;
+
         lmp.command(format!("package omp {}", builder.openmp_threads.unwrap_or(0)))?;
         lmp.command(format!("processors {}", {
             builder.processors.iter()
@@ -631,14 +633,27 @@ impl<P: Potential> Lammps<P>
                 .collect::<Vec<_>>().join(" ")
         }))?;
 
-        lmp.commands(&[
-            "units metal",                  // Angstroms, picoseconds, eV
-            "neigh_modify delay 0",         // disable delay for a safer `run pre no`
-            "atom_style atomic",            // attributes to store per-atom
-            "thermo_modify lost error",     // don't let atoms disappear without telling us
-            "atom_modify map array",        // store all positions in an array
-            "atom_modify sort 0 0.0",       // don't reorder atoms during simulation
-        ])?;
+        if &(pair_style.to_string())[..17] == "pair_style reax/c"{
+            lmp.commands(&[
+                "units real",                   // Angstroms, picoseconds, Kcal/mol
+                "neigh_modify delay 0",         // disable delay for a safer `run pre no`
+                "atom_style charge",            // attributes to store per-atom and required q value
+                "thermo_modify lost error",     // don't let atoms disappear without telling us
+                "atom_modify map array",        // store all positions in an array
+                "atom_modify sort 0 0.0",       // don't reorder atoms during simulation
+                "neighbor 6 bin"                // give more room to the neighbor lists for dynamic charge equalibriations
+            ])?;
+        }
+        else{
+            lmp.commands(&[
+                "units metal",                   // Angstroms, picoseconds, eV
+                "neigh_modify delay 0",         // disable delay for a safer `run pre no`
+                "atom_style atomic",            // attributes to store per-atom
+                "thermo_modify lost error",     // don't let atoms disappear without telling us
+                "atom_modify map array",        // store all positions in an array
+                "atom_modify sort 0 0.0",       // don't reorder atoms during simulation
+            ])?;
+        }
 
         if let Some(_) = molecule_ids {
             lmp.commands(&["fix RSP2_HasMolIds all property/atom mol ghost yes"])?;
@@ -652,7 +667,6 @@ impl<P: Potential> Lammps<P>
         ])?;
 
         {
-            let InitInfo { masses, pair_style, pair_coeffs } = init_info;
 
             lmp.command(format!("create_box {} sim", masses.len()))?;
             for (i, mass) in (1..).zip(masses) {
@@ -661,6 +675,9 @@ impl<P: Potential> Lammps<P>
 
             lmp.command(pair_style.to_string())?;
             lmp.commands(pair_coeffs)?;
+            if &(pair_style.to_string())[..17] == "pair_style reax/c"{
+                lmp.command("compute reax all pair reax/c".to_string())?;
+            }
         }
 
         // HACK:
@@ -699,12 +716,20 @@ impl<P: Potential> Lammps<P>
             }
         }
 
+        // FIXME: the charges of 4 and -2 are only valid for TMD's. 
+        // If other ReaxFF approaches are used in the future, these will need to be read element-wise.
+        if &(pair_style.to_string())[..17] == "pair_style reax/c"{
+            lmp.command("set type 1 charge 4".to_string())?;
+            lmp.command("set type 2 charge -2".to_string())?;
+            lmp.command("fix 1 all qeq/reax 1 0 10 1.0e-6 reax/c".to_string())?;
+        }
+
         // set up computes
         lmp.commands(&[
             &format!("compute RSP2_PE all pe"),
             &format!("compute RSP2_Pressure all pressure NULL virial"),
         ])?;
-
+        
         lmp
     })}
 }

@@ -15,7 +15,7 @@
 use crate::{FailResult, FailOk};
 use crate::assemble::{RawAssemble, Assemble};
 
-use rsp2_structure::{CoordsKind, Lattice, Coords};
+use rsp2_structure::{CoordsKind, Lattice, Coords, Element};
 use std::io::Read;
 
 use rsp2_array_types::{M22, M33, mat, V2, V3, inv, Unvee};
@@ -79,6 +79,7 @@ mod cereal {
         // Number of unique images to generate along each layer lattice vector
         #[serde(default = "defaults::layer::repeat")]
         pub repeat: [u32; 2],
+        pub elements: Vec<String>,
         // Common translation for all positions in layer.
         // NOTE: units of layer lattice
         #[serde(default = "defaults::layer::shift")]
@@ -90,7 +91,7 @@ mod cereal {
 
         pub fn a() -> f64 { 1.0 }
         pub fn vacuum_sep() -> f64 { 10.0 }
-        pub fn layer_sep() -> Either<f64, Vec<f64>> { Either::A(1.0) }
+        pub fn layer_sep() -> Either<f64, Vec<f64>> { Either::A(1.5) }
 
         pub mod layer {
             use super::*;
@@ -123,6 +124,7 @@ mod middle {
         pub transform: M33,
         pub repeat: [u32; 3],
         pub shift: V3,
+        pub elements: Vec<Element>,
     }
 }
 
@@ -148,7 +150,7 @@ fn interpret_cereal(cereal: self::cereal::Root) -> FailResult<middle::Layers>
         let self::cereal::Layer {
             frac_lattice, frac_sites,
             cart_lattice, cart_sites,
-            transform, repeat, shift,
+            transform, repeat, shift, elements
         } = layer;
 
         #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -181,11 +183,15 @@ fn interpret_cereal(cereal: self::cereal::Root) -> FailResult<middle::Layers>
                 }
             }
         };
-
+        let mut els = vec![];
+        for atom in elements{
+            els.push(Element::from_symbol(&atom).unwrap());
+        }
+        let elements = els;
         let transform = m22_to_m33(&transform);
         let shift = V3([shift[0], shift[1], 0.0]);
         let repeat = [repeat[0], repeat[1], 1];
-        middle::Layer { cart_lattice, frac_lattice, cart_sites, transform, repeat, shift }
+        middle::Layer { cart_lattice, frac_lattice, cart_sites, transform, repeat, elements, shift }
     })}).collect::<FailResult<Vec<_>>>()?;
 
     middle::Layers { lattice_a, full_lattice, layers, layer_seps, vacuum_sep }
@@ -199,9 +205,12 @@ fn assemble_from_cereal(cereal: self::cereal::Root) -> FailResult<Assemble>
     } = interpret_cereal(cereal)?;
 
     let mut fracs_in_plane = vec![];
+    let mut elements = vec![];
+
     for layer in layers.into_iter() {
         let lattice = layer.cart_lattice.clone();
         let sites = layer.cart_sites.clone();
+        let atoms = layer.elements.clone();
 
         let mut structure = Coords::new(lattice, CoordsKind::Carts(sites));
         structure.translate_frac(&layer.shift);
@@ -217,18 +226,21 @@ fn assemble_from_cereal(cereal: self::cereal::Root) -> FailResult<Assemble>
         //       to get the integer sc matrices, and somehow verify that the 'repeat' field
         //       is correct.  Or just ignore the 'repeat' field and do HNF reduction to find
         //       a set of periods (but that feels wasteful).
-        let (superstructure, _) = rsp2_structure::supercell::diagonal(layer.repeat).build(&structure);
+        let (superstructure, sc) = rsp2_structure::supercell::diagonal(layer.repeat).build(&structure);
 
         // put them in frac coords for the full lattice
         let mut superstructure = Coords::new(
             Lattice::new(&full_lattice),
             CoordsKind::Carts(superstructure.to_carts()),
         );
+
         // FIXME this reduction is just a bandaid for the above-mentioned issue.
         //       (taking unique positions in the diagonal layer supercells and mapping
         //        them into the cell that we generally use for the structure)
         superstructure.reduce_positions();
         fracs_in_plane.push(superstructure.to_fracs());
+        elements.extend(sc.replicate(&atoms));
+       
     }
 
     let carts_along_normal = {
@@ -247,6 +259,7 @@ fn assemble_from_cereal(cereal: self::cereal::Root) -> FailResult<Assemble>
         initial_vacuum_sep: vacuum_sep,
         check_intralayer_distance: None,
         part: None,
+        elements: elements,
     };
 
     // FIXME: some of the possible errors produced by `from_raw` here are

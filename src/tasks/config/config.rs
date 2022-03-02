@@ -631,6 +631,7 @@ pub enum PotentialKind {
 
     /// Arranges atoms into a chain along the first lattice vector.
     #[serde(rename = "test-func-chainify")] TestChainify,
+
 }
 
 #[derive(Serialize, Deserialize)]
@@ -647,6 +648,7 @@ pub enum LammpsPotentialKind {
     #[serde(rename = "kc-z")] KolmogorovCrespiZ(LammpsPotentialKolmogorovCrespiZ),
     /// `pair_style hybrid rebo kolmogorov/crespi/full`
     #[serde(rename = "kc-full")] KolmogorovCrespiFull(LammpsPotentialKolmogorovCrespiFull),
+    #[serde(rename = "reaxff")] ReaxFF(LammpsPotentialReaxFF),
 }
 
 #[derive(Serialize, Deserialize)]
@@ -669,6 +671,12 @@ pub struct LammpsPotentialAirebo {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub omp: OrDefault<bool>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub struct LammpsPotentialReaxFF {
 }
 
 #[derive(Serialize, Deserialize)]

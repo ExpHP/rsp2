@@ -322,6 +322,7 @@ impl ScalableCoords {
             initial_scale: Some([1.0; 3]),
             part: Some(layers.get_part()),
             check_intralayer_distance: Some(cfg.threshold),
+            elements: vec![],
         }).unwrap();
         ScalableCoords::KnownLayers { layer_builder }
     }

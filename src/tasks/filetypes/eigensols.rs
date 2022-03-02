@@ -16,7 +16,9 @@ use crate::traits::{Load, AsPath, save::Json};
 
 // Conversion factor phonopy uses to scale the eigenvalues to THz angular momentum.
 //    = sqrt(eV/amu)/angstrom/(2*pi)/THz
-const SQRT_EIGENVALUE_TO_THZ: f64 = 15.6333043006705;
+// 1 ev = 23.061 Kcal/mol (NIST)
+// 4.80218700177 sqrt((Kcal/mol)/ev) ~= sqrt(23.061)
+const SQRT_EIGENVALUE_TO_THZ: f64 = 15.6333043006705 * 4.80218700177;
 //    = THz / (c / cm)
 const THZ_TO_WAVENUMBER: f64 = 33.3564095198152;
 const SQRT_EIGENVALUE_TO_WAVENUMBER: f64 = SQRT_EIGENVALUE_TO_THZ * THZ_TO_WAVENUMBER;
