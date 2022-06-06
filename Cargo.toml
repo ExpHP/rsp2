@@ -126,7 +126,7 @@ rsp2-config-utils = { path = "src/util/config" }
 #  none of them are due to rust-lang-nursery/rls#169
 rand = "0.3"
 serde_json = "1"
-serde_yaml = "0.7"
+serde_yaml = "0.8"
 log = "0.4"
 fern = { version = "0.5", features = ["colored"] }
 env_logger = "0.6.1"
