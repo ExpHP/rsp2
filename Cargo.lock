@@ -1886,9 +1886,9 @@ checksum = "8fffe93cb1051a724788529b504be2a1016498582545e50d76de4ffca1906367"
 
 [[package]]
 name = "stack"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7f3ed2856d65d6ab4875666dab1f2a9c65d1cb8b1ac389c0a38042a84861795"
+checksum = "b0514de4e50c8f9244e006169adc7f4933b88ad3eb81fcbf4e33c6a739b0aa48"
 dependencies = [
  "coalesce",
  "unreachable",
