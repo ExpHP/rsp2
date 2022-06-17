@@ -18,7 +18,7 @@ rsp2-array-types = { path = "../../util/array-types" }
 rsp2-structure = { path = "../../structure" }
 rsp2-util-macros = { path = "../../util/macros" }
 
-enum-map = "0.4.1"
+enum-map = "2.0.2"
 thiserror = "1.0.0"
 log = "0.4"
 serde = { version = "1.0.91", features = ["derive", "rc"], optional = true }
