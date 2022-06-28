@@ -4,6 +4,8 @@
 **/.idea
 **/cmake-build-debug
 **/__pycache__
+**/build
+**/*.egg-info
 perf.data*
 log.lammps
 
