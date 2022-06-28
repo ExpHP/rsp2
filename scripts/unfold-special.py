@@ -20,6 +20,7 @@ except ImportError:
     info('Please add the following to your PYTHONPATH:')
     info('  (rsp2 source root)/scripts')
     info('  (rsp2 source root)/src/python')
+    info("Or alternatively, create a conda environment from rsp2's environment.yml")
     sys.exit(1)
 
 def main():

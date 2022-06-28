@@ -23,20 +23,22 @@ It also has a large number of rust dependencies, but these are automatically man
 
 ## Python
 
-To facilitate running the code, there is a `requirements.txt` suitable for use with `venv`.  To install all required python dependencies:
+Python dependencies and modules are most easily installed by using conda to create a virtual environment from the provided `environment.yml` file:
 
 ```
-# First time usage
-python3 -m venv venv
-. venv/bin/activate
-python3 -m pip install wheel  # can speed up other installs
-python3 -m pip install -r requirements.txt
-
-# Future usage
-. venv/bin/activate
+conda env create --file environment.yml
+conda activate rsp2
 ```
 
-If you want to run scripts in `scripts/` (e.g. most notably for band unfolding), there are additional requirements in `scripts/requirements.txt`.
+If you do not want to use conda, you may alternatively do the following:  (mind, some required versions of dependencies may be **oooold** so it is best to do this on an isolated python environment! e.g. a virtualenv)
+
+```
+# for modules required by rust code
+python3 -m pip install -e src/python
+
+# for the unfold script, do this as well
+python3 -m pip install -e ./scripts
+```
 
 ## Optional features
 

@@ -1,0 +1,11 @@
+name: rsp2
+channels:
+  - defaults
+  - anaconda
+  - conda-forge
+dependencies:
+  - python=3.8
+  - pip=22.1
+  - pip:
+    - -e src/python
+    - -e ./scripts
