@@ -71,7 +71,7 @@ frunk = "0.2.0"
 shlex = "0.1.1"
 indoc = "1"
 lapacke = "0.2"
-openblas-src = { version = "0.10", features = ["static"] }
+openblas-src = { git = "https://github.com/blas-lapack-rs/openblas-src", rev = "addd8acc6a20f9e", features = ["static"] }
 num-traits = "0.2.3"
 num-complex = "0.2.1"
 num_cpus = "1.8"

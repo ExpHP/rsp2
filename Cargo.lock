@@ -969,8 +969,7 @@ checksum = "7d32585b38ed56d6f37af8d99bca1025bced540f9b8926b1ed4953e00a2d39f4"
 [[package]]
 name = "openblas-build"
 version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59ecb601fc56534b17316cec4a4d8c848840f2c6744538a4e0fd3833d24f2e8f"
+source = "git+https://github.com/blas-lapack-rs/openblas-src?rev=addd8acc6a20f9e#addd8acc6a20f9e4493814eb57f7a03d7eb0ab24"
 dependencies = [
  "thiserror",
  "walkdir",
@@ -979,8 +978,7 @@ dependencies = [
 [[package]]
 name = "openblas-src"
 version = "0.10.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35a0967b308cab5942eb908b4737385719bef9e1b4953614a0e9d26ad5d41c69"
+source = "git+https://github.com/blas-lapack-rs/openblas-src?rev=addd8acc6a20f9e#addd8acc6a20f9e4493814eb57f7a03d7eb0ab24"
 dependencies = [
  "dirs",
  "openblas-build",

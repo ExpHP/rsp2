@@ -107,7 +107,10 @@ frunk = "0.2.0"
 shlex = "0.1.1"
 indoc = "1"
 lapacke = "0.2"
-openblas-src = { version = "0.10", features = ["static"] }
+# openblas-src is in maintenance hell.  Old OpenBLAS version. "system" feature and OPENBLAS_TARGET don't work on linux.
+# There no way to use this on alder lake on linux in the current 0.10.4 release;
+# We have to use this unpublished commit on master which at least lets the user do `export OPENBLAS_TARGET=HASWELL`
+openblas-src = { git = "https://github.com/blas-lapack-rs/openblas-src", rev = "addd8acc6a20f9e", features = ["static"] }
 ndarray = "0.11.2"
 rustc-test = "0.3.0"
 pretty_assertions = "0.5.1"

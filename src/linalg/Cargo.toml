@@ -21,7 +21,7 @@ failure = "0.1.2"
 slice-of-array = "0.2.1"
 #!!frunk
 lapacke = "0.2"
-openblas-src = { version = "0.10", features = ["static"] }
+openblas-src = { git = "https://github.com/blas-lapack-rs/openblas-src", rev = "addd8acc6a20f9e", features = ["static"] }
 ndarray = "0.11.2"
 rand = "0.3"
 num-traits = "0.2.3"
