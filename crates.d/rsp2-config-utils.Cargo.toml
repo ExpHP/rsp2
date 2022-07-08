@@ -1,0 +1,20 @@
+[package]
+!!CRATE-NAME-LINE
+version = "0.1.0"
+authors = ["Michael Lamparski <diagonaldevice@gmail.com>"]
+!!LICENSE-PERMISSIVE
+!!DEFAULT-EDITION
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+!!failure
+!!serde-yaml
+!!serde-ignored
+!!path-abs
+!!log
+!!serde { features = ["derive"] }
+
+[features]
+!!NIGHTLY-FEATURE-LINE
