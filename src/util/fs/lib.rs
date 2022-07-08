@@ -173,7 +173,7 @@ pub fn rm_rf(path: impl AsRef<Path>) -> FsResult<()>
         Err(e) => {
             match (e.kind(), path.is_dir()) {
                 (ErrorKind::NotFound, _) => { return Ok(()); },
-                (ErrorKind::Other, true) => {},
+                (_, true) => {},  // continue to directory code
                 _ => return Err(FsError::for_path(path, "could not delete", e)),
             }
         }
