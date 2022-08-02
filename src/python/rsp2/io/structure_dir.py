@@ -7,14 +7,14 @@ def from_path(path):
     return StructureDir.from_dir(path)
 
 class StructureDir:
-    def __init__(self, *, layers, masses, layer_sc_matrices, layer_sc_repeats, structure):
+    def __init__(self, *, layers, masses, layer_sc_matrices, layer_sc_periods, structure):
         from pymatgen.core import Structure
 
         # (the np.array().tolist() is to so that both arrays and lists are accepted, but lists are stored)
         self.layers = np.array(layers).tolist()
         self.masses = np.array(masses).tolist()
         self.layer_sc_matrices = np.array(layer_sc_matrices).tolist()
-        self.layer_sc_repeats = np.array(layer_sc_repeats).tolist()
+        self.layer_sc_periods = np.array(layer_sc_periods).tolist()
         assert isinstance(structure, Structure)
         self.structure = structure
 
@@ -34,18 +34,18 @@ class StructureDir:
         with open(cls.meta_path(path)) as f:
             meta = json.load(f)
 
-        layer_sc_repeats = None
+        layer_sc_periods = None
         layer_sc_matrices = None
         layer_sc_matrix_dicts = meta.pop('layer_sc_matrices', None) or meta.pop('layer-sc-matrices', None)
         if layer_sc_matrix_dicts is not None:
-            layer_sc_repeats = [x['repeats'] for x in layer_sc_matrix_dicts]
+            layer_sc_periods = [x['periods'] for x in layer_sc_matrix_dicts]
             layer_sc_matrices = [x['matrix'] for x in layer_sc_matrix_dicts]
 
         return cls(
             layers=meta.pop('layers', None),
             masses=meta.pop('masses', None),
             layer_sc_matrices=layer_sc_matrices,
-            layer_sc_repeats=layer_sc_repeats,
+            layer_sc_periods=layer_sc_periods,
             structure=structure,
         )
 
@@ -61,8 +61,8 @@ class StructureDir:
         }
         if self.layer_sc_matrices is not None:
             meta['layer-sc-matrices'] = [
-                {'matrix': m, 'repeats': r}
-                for (m, r) in zip(self.layer_sc_matrices, self.layer_sc_repeats)
+                {'matrix': m, 'periods': r}
+                for (m, r) in zip(self.layer_sc_matrices, self.layer_sc_periods)
             ]
         with open(self.meta_path(path), 'w') as f:
             json.dump(meta, f)
