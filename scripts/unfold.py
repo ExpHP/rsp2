@@ -1267,12 +1267,6 @@ def get_translation_deperm(
         axis_mask = np.array([1, 1, 1]),
         tol: float = DEFAULT_TOL,
 ):
-    # NOTE: Heavily-optimized function for identifying permuted structures.
-    #       Despite the name, it works just as well for translations as it does
-    #       for rotations.
-    # FIXME: Shouldn't be relying on this
-    from phonopy.structure.cells import compute_permutation_for_rotation
-
     lattice = structure.lattice.matrix
     fracs_original = structure.frac_coords
     fracs_translated = (structure.cart_coords + translation_cart) @ np.linalg.inv(lattice)
@@ -1281,12 +1275,8 @@ def get_translation_deperm(
     fracs_original *= axis_mask
     fracs_translated *= axis_mask
 
-    # Compute the inverse permutation on coordinates, which is the
-    # forward permutation on metadata ("deperm").
-    #
-    # I.e. ``fracs_translated[deperm] ~~ fracs_original``
-    return compute_permutation_for_rotation(
-        fracs_translated, fracs_original, lattice, tol,
+    return unfold_lib.compute_depermutation(
+        fracs_original, fracs_translated, lattice, tol,
     )
 
 # Here we encounter a big problem:

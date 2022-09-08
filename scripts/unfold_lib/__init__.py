@@ -212,6 +212,37 @@ def shortest_image_norm_fast(cart, lattice):
     images = __CELLS_AROUND_ORIGIN @ lattice + cart
     return np.linalg.norm(images, axis=1).min()
 
+def compute_depermutation(
+    fracs_from: np.ndarray,
+    fracs_to: np.ndarray,
+    lattice: np.ndarray,
+    tol: float = 1e-2,  # units Angstrom^2
+):
+    """
+    Compute the permutation which rearranges metadata ordered by the positions in
+    ``fracs_from`` to instead be ordered like the positions in ``fracs_to``.
+
+    That is to say, if ``metadata_from`` is a numpy array, then:
+
+        metadata_to  =  metadata_from[perm]
+
+    The positions in the two arrays must be equivalent under the provided lattice,
+    up to the provided tolerance (checked against the square cartesian displacement).
+    (since fracs are taken as input, this means that coordinates near 0 will
+    correctly be able to match against coordinates near 1 if within tolerance)
+    """
+    # NOTE: Heavily-optimized function for identifying permuted structures.
+    #       Despite the name, it works just as well for translations as it does
+    #       for rotations.
+    # FIXME: Shouldn't be relying on this
+    from phonopy.structure.cells import compute_permutation_for_rotation
+
+    # We swap 'to' & 'from' here to compute the inverse permutation on coordinates,
+    # which is the forward permutation on metadata ("deperm").
+    #
+    # I.e. ``fracs_to[deperm] ~~ fracs_from``
+    return compute_permutation_for_rotation(fracs_to, fracs_from, lattice, tol)
+
 class Supercell:
     def __init__(self, matrix):
         """
