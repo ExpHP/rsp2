@@ -13,6 +13,11 @@ use rsp2_array_types::{V3};
 
 //--------------------------------------------------------
 
+#[cfg(test)]
+pub(crate) fn uniform(a: f64, b: f64) -> f64 { rand::random::<f64>() * (b - a) + a }
+
+//--------------------------------------------------------
+
 pub(crate) fn transpose_iter_to_vec<Tss, Ts, T>(input: Tss) -> Vec<Vec<T>>
 where
     Tss: IntoIterator<Item=Ts>,

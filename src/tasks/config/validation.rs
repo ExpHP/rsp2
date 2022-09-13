@@ -91,12 +91,14 @@ impl Potential {
                     })
                 },
 
-                pot@PotentialKind::ReboNonreactive(..) |
-                pot@PotentialKind::KolmogorovCrespi(..) |
-                pot@PotentialKind::DftbPlus(..) |
-                pot@PotentialKind::Lammps(..) |
-                pot@PotentialKind::TestZero |
-                pot@PotentialKind::TestChainify => pot,
+                | pot@PotentialKind::ReboNonreactive { .. }
+                | pot@PotentialKind::KolmogorovCrespi { .. }
+                | pot@PotentialKind::DftbPlus { .. }
+                | pot@PotentialKind::Lammps { .. }
+                | pot@PotentialKind::GibbonsProduct { .. }
+                | pot@PotentialKind::TestZero { .. }
+                | pot@PotentialKind::TestChainify { .. }
+                => pot,
             }).collect()
         };
 

@@ -730,8 +730,8 @@ mod rebo {
         let bonds: meta::FracBonds = std::rc::Rc::new(FracBonds::compute(&coords, 2.0)?);
         let meta = hlist![elements, masses, Some(bonds)];
 
-    //    let pot_lmp = PotentialBuilder::from_config_parts(None, None, &cfg::Threading::Serial, &cfg::LammpsUpdateStyle::Safe, &[true; 3], &cfg_lmp).allow_blocking(true);
-        let pot_rsp2 = PotentialBuilder::from_config_parts(None, None, &cfg::Threading::Serial, &cfg::LammpsUpdateStyle::Safe, &[true; 3], &cfg_rsp2).allow_blocking(true);
+    //    let pot_lmp = <dyn PotentialBuilder>::from_config_parts(None, None, &cfg::Threading::Serial, &cfg::LammpsUpdateStyle::Safe, &[true; 3], &cfg_lmp).allow_blocking(true);
+        let pot_rsp2 = <dyn PotentialBuilder>::from_config_parts(None, None, &cfg::Threading::Serial, &cfg::LammpsUpdateStyle::Safe, &[true; 3], &cfg_rsp2).allow_blocking(true);
 
         //let diff_lmp = pot_lmp.initialize_diff_fn(&coords, meta.sift())?.compute(&coords, meta.sift())?;
         let diff_rsp2 = pot_rsp2.initialize_diff_fn(&coords, meta.sift())?.compute(&coords, meta.sift())?;
@@ -784,8 +784,8 @@ mod rebo {
         println!("{:?}", bonds);
         let meta = hlist![elements, masses, Some(bonds)];
 
-        let pot_lmp = PotentialBuilder::from_config_parts(None, None, &cfg::Threading::Serial, &cfg::LammpsUpdateStyle::Safe, &[true; 3], &cfg_lmp).allow_blocking(true);
-        let pot_rsp2 = PotentialBuilder::from_config_parts(None, None, &cfg::Threading::Serial, &cfg::LammpsUpdateStyle::Safe, &[true; 3], &cfg_rsp2).allow_blocking(true);
+        let pot_lmp = <dyn PotentialBuilder>::from_config_parts(None, None, &cfg::Threading::Serial, &cfg::LammpsUpdateStyle::Safe, &[true; 3], &cfg_lmp).allow_blocking(true);
+        let pot_rsp2 = <dyn PotentialBuilder>::from_config_parts(None, None, &cfg::Threading::Serial, &cfg::LammpsUpdateStyle::Safe, &[true; 3], &cfg_rsp2).allow_blocking(true);
 
         let diff_lmp = pot_lmp.initialize_diff_fn(&coords, meta.sift())?.compute(&coords, meta.sift())?;
         let diff_rsp2 = pot_rsp2.initialize_diff_fn(&coords, meta.sift())?.compute(&coords, meta.sift())?;

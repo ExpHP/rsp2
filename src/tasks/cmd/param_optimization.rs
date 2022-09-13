@@ -750,7 +750,7 @@ mod tests {
     }
 
     fn test_helper(helper: RelaxationOptimizationHelper, coords: Coords, meta: CommonMeta) {
-        let pot = PotentialBuilder::from_config_parts(
+        let pot = <dyn PotentialBuilder>::from_config_parts(
             None,
             None,
             &cfg::Threading::Serial,

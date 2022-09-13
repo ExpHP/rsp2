@@ -626,6 +626,9 @@ pub enum PotentialKind {
     /// This potential cannot be listed multiple times.
     #[serde(rename = "dftb+")] DftbPlus(PotentialDftbPlus),
 
+    /// Wyatt Gibbon's product-of-cosines external potential for hexagonal systems.
+    #[serde(rename = "gibbons-product")] GibbonsProduct(PotentialGibbonsProduct),
+
     /// V = 0
     #[serde(rename = "test-func-zero")] TestZero,
 
@@ -931,6 +934,18 @@ pub struct PotentialDftbPlus {
     /// absolute paths.
     pub hsd: String,
 }
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub struct PotentialGibbonsProduct {
+    /// The number of maxima in the potential along each direction.  Must be `>= 1`.
+    #[serde(default = "potential_gibbons_product__num_maxima")]
+    pub num_maxima: u32,
+    /// The amplitude of the potential.
+    pub amplitude: f64,
+}
+fn potential_gibbons_product__num_maxima() -> u32 { 1 }
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, Clone, PartialEq)]

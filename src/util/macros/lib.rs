@@ -18,7 +18,7 @@ macro_rules! collect {
     ($($e:tt)*) => { vec![$($e)*].into_iter().collect() };
 }
 
-/// Does `::serde_json::from _value(json!($($arg)*)).unwrap()`
+/// Does `::serde_json::from_value(json!($($arg)*)).unwrap()`
 ///
 /// Why? Because if you're writing a json literal, then you're probably
 /// already quite certain that it is valid!

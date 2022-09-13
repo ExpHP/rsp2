@@ -655,6 +655,7 @@ impl dyn PotentialBuilder {
                     Ok(Box::new(self::dftbplus::Builder::new(trial_dir, cfg)?))
                 }
             },
+            cfg::PotentialKind::GibbonsProduct(cfg) => Ok(Box::new(self::gibbons::GibbonsProduct::new(cfg)?)),
             cfg::PotentialKind::TestZero => Ok(Box::new(self::test_functions::Zero)),
             cfg::PotentialKind::TestChainify => Ok(Box::new(self::test_functions::Chainify)),
         }
@@ -687,6 +688,8 @@ pub mod test_functions;
 mod helper;
 
 mod homestyle;
+
+mod gibbons;
 
 pub(crate) mod lammps;
 
