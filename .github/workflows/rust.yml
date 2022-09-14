@@ -33,7 +33,6 @@ jobs:
       with:
         activate-environment: rsp2
         environment-file: environment.yml
-        python-version: 3.7
 
     - name: Build
       run: cargo build --verbose
